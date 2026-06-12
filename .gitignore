@@ -1,0 +1,10 @@
+dev_inbox/
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+*.world
+
+# Runtime/built worlds (regenerable from examples/ source) + local agent state
+worlds/
+.claude/
