@@ -1,0 +1,38 @@
+# construct
+
+> The Construct — an interactive-fiction engine that loads a stored world
+> into a played, remembered holonovel. A host over pattern-buffer: it
+> narrates scenes, voices characters, and drives a hidden story arc while
+> the engine beneath it keeps the world coherent — object permanence,
+> per-character knowledge frames, as-of queries. Put a thing down, walk
+> away, come back: it's still there. Pre-1.0, first-playable.
+
+Vocabulary: pattern-buffer holds a world's pattern -> the Construct loads
+it into a played -> holonovel (one played world, ingested from a book or
+built live).
+
+## Docs
+
+- [README.md](README.md): what it is, the live-play acceptance results,
+  architecture, how to play. Start here.
+- [docs/CONCEPT.md](docs/CONCEPT.md): founding brief — vision, session-zero,
+  host architecture, the arc layer, model-provider interface.
+- [docs/design/ARC-LAYER.md](docs/design/ARC-LAYER.md): pacing as
+  navigation toward a hidden authored destination; anti-railroading by
+  construction. The project's design contribution.
+- [docs/design/TURN-LOOP.md](docs/design/TURN-LOOP.md): the per-turn DAG
+  (serial mutation spine + parallel assembly fan-out) and model tiers.
+- [docs/design/SESSION-ZERO.md](docs/design/SESSION-ZERO.md): the unified
+  creation interview (ingest a book OR build live) and the
+  scenario/playthrough model.
+- [docs/design/PROVIDER-INTERFACE.md](docs/design/PROVIDER-INTERFACE.md):
+  bring-any-LLM provider boundary; zero-credit subscription default.
+- [docs/LEXICON.md](docs/LEXICON.md): naming discipline.
+
+## Built on
+
+- pattern-buffer (https://github.com/5000Stadia/pattern-buffer): the
+  append-only world-state engine. The Construct is a host over it; it
+  never reimplements engine concepts.
+- Kernos (https://github.com/5000Stadia/Kernos): the cohort architecture
+  the turn loop borrows.
