@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from holodeck.arc.conditions import EventRow
+from construct.arc.conditions import EventRow
 
 logger = logging.getLogger(__name__)
 

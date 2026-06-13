@@ -17,9 +17,9 @@ from typing import Any
 
 from patternbuffer import World
 
-from holodeck.adapter import PorcelainWorldReads
-from holodeck.arc import io as arc_io
-from holodeck.arc.conditions import (
+from construct.adapter import PorcelainWorldReads
+from construct.arc import io as arc_io
+from construct.arc.conditions import (
     AtLeast,
     BeatAchieved,
     InFrame,
@@ -27,9 +27,9 @@ from holodeck.arc.conditions import (
     StateIs,
     TurnsQuiet,
 )
-from holodeck.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
-from holodeck.arc.lint import lint_arc
-from holodeck.provider import Provider, complete_sync, engine_tier_dispatch
+from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
+from construct.arc.lint import lint_arc
+from construct.provider import Provider, complete_sync, engine_tier_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         last_findings: list = []
         for attempt in range(3):
             proposal = complete_sync(provider, 
-                "You are authoring the hidden arc for a text-holodeck scenario "
+                "You are authoring the hidden arc for a text-construct scenario "
                 "(novel-arc mode: the mystery IS the arc). Below is the ingested "
                 "world's people digest. Choose the protagonist (the natural "
                 "point-of-view character), the thematic conclusion shape, and "
@@ -191,13 +191,13 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         player_frame = f"knows:{arc.protagonist}"
         world.porcelain.ingest_structured(
             arc_io.arc_to_items(arc) + arc_io.index_items(arc))
-        from holodeck.arc.executor import turn_time
+        from construct.arc.executor import turn_time
         world.porcelain.ingest_structured([
             {"entity": "event:turn_0", "attribute": "kind", "value": "turn",
              "valid_from": turn_time(0)},
         ], frame="session:main")
 
-        from holodeck.arc.executor import arc_entities
+        from construct.arc.executor import arc_entities
         meta = {"title": title, "protagonist": arc.protagonist,
                 "theme": proposal["theme"], "stance": "fiction",
                 # canon-strict by default for ingested/determined worlds
@@ -293,7 +293,7 @@ def open_playthrough(name: str, provider: Provider) -> tuple[Any, Arc, dict]:
     slot = slot_path(name)
     if not slot.exists():
         raise FileNotFoundError(
-            f"no playthrough slot for {name!r} — run `holodeck play {name} --fresh`")
+            f"no playthrough slot for {name!r} — run `construct play {name} --fresh`")
     world = World(slot, world_id=f"w:{name}", model=engine_tier_dispatch(provider))
     meta_path = scenario_path(name).with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}

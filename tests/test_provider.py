@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from holodeck.provider import (
+from construct.provider import (
     CODEX_PAYLOAD_CAP_BYTES,
     CodexProvider,
     ProviderAuthError,

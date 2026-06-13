@@ -1,6 +1,6 @@
 import pytest
 
-from holodeck.cli import build_parser, main
+from construct.cli import build_parser, main
 
 
 def test_scenarios_parses():

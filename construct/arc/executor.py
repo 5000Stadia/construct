@@ -15,8 +15,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from holodeck.arc.conditions import PacingCounters, Truth, evaluate
-from holodeck.arc.grammar import Arc, Rung, Weight
+from construct.arc.conditions import PacingCounters, Truth, evaluate
+from construct.arc.grammar import Arc, Rung, Weight
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +151,8 @@ def navigate(counters: PacingCounters, delta_size: int,
 def arc_entities(arc: Arc) -> set[str]:
     """Entity ids the arc references (for arc_touch detection and the
     irony-delta scope)."""
-    from holodeck.arc.conditions import atoms_of
-    from holodeck.arc.lint import _entity_referents
+    from construct.arc.conditions import atoms_of
+    from construct.arc.lint import _entity_referents
 
     out: set[str] = set()
     exprs = [b.achievable_via for b in arc.beats]

@@ -1,4 +1,4 @@
-from holodeck.arc.truth import Truth, t_all, t_any, t_at_least, t_not
+from construct.arc.truth import Truth, t_all, t_any, t_at_least, t_not
 
 T, F, I = Truth.TRUE, Truth.FALSE, Truth.INDETERMINATE
 

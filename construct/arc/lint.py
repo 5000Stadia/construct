@@ -12,7 +12,7 @@ import itertools
 import logging
 from dataclasses import dataclass
 
-from holodeck.arc.conditions import (
+from construct.arc.conditions import (
     COUNTER_ATOMS,
     BeatAchieved,
     ClockFired,
@@ -25,7 +25,7 @@ from holodeck.arc.conditions import (
     atoms_of,
     evaluate,
 )
-from holodeck.arc.grammar import Arc, Beat, Rung, Weight
+from construct.arc.grammar import Arc, Beat, Rung, Weight
 
 logger = logging.getLogger(__name__)
 

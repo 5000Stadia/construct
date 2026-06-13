@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, Union, runtime_checkable
 
-from holodeck.arc.truth import Truth, t_all, t_any, t_at_least, t_not
+from construct.arc.truth import Truth, t_all, t_any, t_at_least, t_not
 
 
 class _Unresolved:

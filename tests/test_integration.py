@@ -8,12 +8,12 @@ import pytest
 from patternbuffer import World
 from patternbuffer.testing import StubModel, rule_classifier_fallback
 
-from holodeck.adapter import PorcelainWorldReads
-from holodeck.arc import io as arc_io
-from holodeck.arc.conditions import InFrame, TurnsQuiet
-from holodeck.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
-from holodeck.provider import StubProvider
-from holodeck.turnloop import run_turn
+from construct.adapter import PorcelainWorldReads
+from construct.arc import io as arc_io
+from construct.arc.conditions import InFrame, TurnsQuiet
+from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
+from construct.provider import StubProvider
+from construct.turnloop import run_turn
 
 PLAYER = "person:player"
 PLAYER_FRAME = f"knows:{PLAYER}"
@@ -91,7 +91,7 @@ def make_arc() -> Arc:
 def seed_arc(world, arc: Arc) -> None:
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc) + arc_io.index_items(arc))
-    from holodeck.arc.executor import turn_time
+    from construct.arc.executor import turn_time
     world.porcelain.ingest_structured([
         {"entity": "event:turn_0", "attribute": "kind", "value": "turn",
          "valid_from": turn_time(0)},
@@ -213,7 +213,7 @@ class TestFullTurn:
 
 
 def test_names_protagonist_guard():
-    from holodeck.turnloop import names_protagonist
+    from construct.turnloop import names_protagonist
     assert names_protagonist("Allocation Officer Marn straightens.", "person:marn")
     assert names_protagonist("Marn's stare hardens", "person:marn")
     assert not names_protagonist("you set the slip down and walk off", "person:marn")
@@ -239,7 +239,7 @@ def test_movement_relocates_player(world):
 
 
 def test_normalize_question():
-    from holodeck.turnloop import normalize_question
+    from construct.turnloop import normalize_question
     assert normalize_question("Where is my brass measuring spoon?") == \
         "Where is brass measuring spoon?"
     assert normalize_question("Is the door locked?") == "Is door locked?"

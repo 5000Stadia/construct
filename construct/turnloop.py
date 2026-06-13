@@ -22,9 +22,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from holodeck import cohorts
-from holodeck.adapter import PorcelainWorldReads
-from holodeck.arc.executor import (
+from construct import cohorts
+from construct.adapter import PorcelainWorldReads
+from construct.arc.executor import (
     PLOT,
     SESSION,
     arc_entities,
@@ -34,9 +34,9 @@ from holodeck.arc.executor import (
     navigate,
     turn_time,
 )
-from holodeck.arc.grammar import Arc
-from holodeck.provider import Provider, ProviderError
-from holodeck.snapreads import SnapshotReads
+from construct.arc.grammar import Arc
+from construct.provider import Provider, ProviderError
+from construct.snapreads import SnapshotReads
 
 logger = logging.getLogger(__name__)
 

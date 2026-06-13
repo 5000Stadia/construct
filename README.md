@@ -62,8 +62,8 @@ The hardest problems each got solved by the same move — **structural absence o
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e .
-holodeck play anchor --fresh                 # step into The Last Honest Meter as Officer Marn
-holodeck turn anchor "I look around." --debug # one turn; --debug shows the turn's receipts
+construct play anchor --fresh                 # step into The Last Honest Meter as Officer Marn
+construct turn anchor "I look around." --debug # one turn; --debug shows the turn's receipts
 ```
 
 The shipped example world, *The Last Honest Meter*, is a complete original noir mystery — a drought-stricken settlement, a master water-meter that died the night an honest technician did. Play it. Put something down and come back for it.

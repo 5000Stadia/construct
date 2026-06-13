@@ -249,7 +249,7 @@ class CodexProvider(Provider):
             "HOLODECK_CODEX_BASE_URL", "https://chatgpt.com/backend-api")).rstrip("/")
         self._timeouts = dict(DEFAULT_TIMEOUTS, **(timeouts or {}))
         import uuid
-        self._session_id = f"holodeck-{uuid.uuid4()}"
+        self._session_id = f"construct-{uuid.uuid4()}"
 
     # -- plumbing ---------------------------------------------------------
 

@@ -15,7 +15,7 @@ cleanly.
 ## Commands
 
 ```
-holodeck scenarios
+construct scenarios
     List the scenario library — charter self-ID: title / stance /
     description (the ship in a bottle, labeled on the glass).
 
@@ -23,11 +23,11 @@ holodeck new --ingest <path>
     Session-zero via fiction ingest → a new pristine scenario.
     (--interview follows post-first-playable.)
 
-holodeck play <scenario> --fresh | --resume
+construct play <scenario> --fresh | --resume
     Establish or resume the single playthrough slot (letter 013);
     prints the opening render.
 
-holodeck turn <playthrough> "<player input>"
+construct turn <playthrough> "<player input>"
     THE LOAD-BEARING ONE: process exactly one player turn against the
     saved playthrough — the full TURN-LOOP DAG — print the rendered
     prose to stdout, save. One call = one turn.

@@ -13,7 +13,7 @@ scope answers None/unknown — callers keep three-valued honesty.
 
 from __future__ import annotations
 
-from holodeck.arc.conditions import EventRow
+from construct.arc.conditions import EventRow
 
 
 class SnapshotReads:

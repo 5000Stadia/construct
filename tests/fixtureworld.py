@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from holodeck.arc.conditions import EventRow
+from construct.arc.conditions import EventRow
 
 
 @dataclass

@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass, field
 
-from holodeck.arc.conditions import Expr
+from construct.arc.conditions import Expr
 
 
 class Phase(enum.Enum):

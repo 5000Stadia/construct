@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from holodeck.provider import Provider, complete_sync
+from construct.provider import Provider, complete_sync
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ def nudge_pick(provider: Provider, rung: str, threads: list[str], scene: str,
 
 def narrate(provider: Provider, briefing: str, protagonist: str) -> str:
     result = complete_sync(provider,
-        f"You are the narrator of a text holodeck.\n\nBRIEFING (everything "
+        f"You are the narrator of a text construct.\n\nBRIEFING (everything "
         f"you know — there is nothing else):\n{briefing}\n\n{RENDER_LEASH}\n\n"
         f"{player_constraint(protagonist)}\n\n"
         f"A pacing directive, if present, describes what the WORLD does; if "

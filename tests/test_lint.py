@@ -3,7 +3,7 @@ case plus one violation per check."""
 
 import dataclasses
 
-from holodeck.arc.conditions import (
+from construct.arc.conditions import (
     BeatAchieved,
     InFrame,
     Located,
@@ -12,8 +12,8 @@ from holodeck.arc.conditions import (
     TurnsQuiet,
     AllOf,
 )
-from holodeck.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
-from holodeck.arc.lint import lint_arc, lint_post_repair
+from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
+from construct.arc.lint import lint_arc, lint_post_repair
 
 from tests.fixtureworld import FixtureWorld
 

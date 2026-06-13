@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="holodeck",
-        description="A text holodeck: persistent interactive fiction, played turn by turn.",
+        prog="construct",
+        description="A text construct: persistent interactive fiction, played turn by turn.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -51,15 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _provider():
-    from holodeck.provider import CodexProvider
+    from construct.provider import CodexProvider
     return CodexProvider()
 
 
 def _cmd_scenarios() -> int:
-    from holodeck.game import list_scenarios
+    from construct.game import list_scenarios
     rows = list_scenarios()
     if not rows:
-        print("No scenarios yet. Create one: holodeck new --ingest <prose.md>")
+        print("No scenarios yet. Create one: construct new --ingest <prose.md>")
         return 0
     for row in rows:
         print(f"{row['name']:24s} {row.get('stance', '?'):8s} "
@@ -68,9 +68,9 @@ def _cmd_scenarios() -> int:
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    from holodeck.game import create_scenario_from_ingest
+    from construct.game import create_scenario_from_ingest
     if args.interview:
-        print("holodeck new --interview: post-first-playable (letter 017)", file=sys.stderr)
+        print("construct new --interview: post-first-playable (letter 017)", file=sys.stderr)
         return 2
     prose = Path(args.ingest)
     name = args.name or prose.stem.replace(" ", "_")
@@ -78,12 +78,12 @@ def _cmd_new(args: argparse.Namespace) -> int:
     print(f"Scenario {name!r} created: {meta['title']}")
     print(f"  protagonist: {meta['protagonist']}")
     print(f"  theme: {meta['theme']}")
-    print(f"Start playing: holodeck play {name} --fresh")
+    print(f"Start playing: construct play {name} --fresh")
     return 0
 
 
 def _cmd_play(args: argparse.Namespace) -> int:
-    from holodeck.game import open_playthrough, start_playthrough
+    from construct.game import open_playthrough, start_playthrough
     start_playthrough(args.scenario, fresh=args.fresh)
     world, arc, _meta = open_playthrough(args.scenario, _provider())
     try:
@@ -94,7 +94,7 @@ def _cmd_play(args: argparse.Namespace) -> int:
         if chain:
             opening.append(f"You are at {chain[0]}.")
         opening.append('The world holds. Take your first turn: '
-                       f'holodeck turn {args.scenario} "<what you do>"')
+                       f'construct turn {args.scenario} "<what you do>"')
         print("\n".join(opening))
     finally:
         world.close()
@@ -102,8 +102,8 @@ def _cmd_play(args: argparse.Namespace) -> int:
 
 
 def _cmd_turn(args: argparse.Namespace) -> int:
-    from holodeck.game import next_turn_number, open_playthrough
-    from holodeck.turnloop import run_turn
+    from construct.game import next_turn_number, open_playthrough
+    from construct.turnloop import run_turn
 
     world, arc, meta = open_playthrough(args.playthrough, _provider())
     try:

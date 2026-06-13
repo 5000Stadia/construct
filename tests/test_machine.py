@@ -1,6 +1,6 @@
 import pytest
 
-from holodeck.session_zero import Path, SessionZeroMachine, Stage, StageError
+from construct.session_zero import Path, SessionZeroMachine, Stage, StageError
 
 
 def run_through(machine: SessionZeroMachine, upto: Stage) -> None:

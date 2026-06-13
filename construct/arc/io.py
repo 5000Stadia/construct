@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 from dataclasses import fields
 
-from holodeck.arc import conditions as C
-from holodeck.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
+from construct.arc import conditions as C
+from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
 
 _ATOM_TYPES = {
     "state_is": C.StateIs, "located": C.Located, "in_frame": C.InFrame,

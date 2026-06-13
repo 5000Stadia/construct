@@ -2,7 +2,7 @@
 the three-valued rules (Codex r1 finding 2) and frame-fold membership
 (finding 3)."""
 
-from holodeck.arc.conditions import (
+from construct.arc.conditions import (
     UNRESOLVED,
     AllOf,
     AnyOf,
@@ -20,7 +20,7 @@ from holodeck.arc.conditions import (
     TurnsQuiet,
     evaluate,
 )
-from holodeck.arc.truth import Truth
+from construct.arc.truth import Truth
 
 from tests.fixtureworld import FixtureWorld
 
