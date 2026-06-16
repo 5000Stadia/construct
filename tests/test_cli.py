@@ -79,7 +79,14 @@ def test_scenarios_empty_library(tmp_path, monkeypatch, capsys):
     assert "No scenarios yet" in capsys.readouterr().out
 
 
-def test_new_interview_not_yet(capsys):
+def test_new_interview_parses_inline_brief():
+    args = build_parser().parse_args(["new", "--interview", "a drowned harbor town"])
+    assert args.interview == "a drowned harbor town"
+
+
+def test_new_interview_empty_brief_is_loud(capsys, monkeypatch):
+    # --interview with no inline brief and no input → loud no-op (rc 2).
+    monkeypatch.setattr("builtins.input", lambda _p="": "")
     rc = main(["new", "--interview"])
     assert rc == 2
-    assert "post-first-playable" in capsys.readouterr().err
+    assert "nothing to build" in capsys.readouterr().err

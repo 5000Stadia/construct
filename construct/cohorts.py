@@ -84,6 +84,56 @@ KNOWS_SCHEMA = {
 }
 
 
+INTERVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "description": {"type": "string", "description": "one paragraph"},
+        "genre_era": {"type": "string"},
+        "items": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string",
+                           "description": "id like place:harbor, person:mara, obj:lantern"},
+                "attribute": {"type": "string",
+                              "description": "kind | in | connects_to | drive | fear | "
+                                             "role | a domain attribute"},
+                "value": {"type": "string"},
+            },
+            "required": ["entity", "attribute", "value"],
+        }},
+    },
+    "required": ["title", "description", "genre_era", "items"],
+}
+
+
+def interview_world(provider: Provider, brief: str) -> dict:
+    """Session-zero Path B (SESSION-ZERO WORLD-B): expand a human brief
+    into a world's constitutive spine — the charter, the place(s) and
+    their lateral connections, 2-4 key NPCs EACH with a dispositional
+    spine (two ranked drives + one fear/breaks_if — the spine invariant),
+    and the opening situation. Author at coarse, honest precision (the
+    lidar discipline). Understanding work → good tier."""
+    return complete_sync(provider,
+        f"You are the session-zero interviewer for a text construct, building "
+        f"a brand-new world LIVE from the player's brief (no source text). "
+        f"Expand it into a constitutive spine as entity/attribute/value "
+        f"triples:\n"
+        f"- the place(s): `place:<id> · kind · <room/place>`, and "
+        f"`place:a · connects_to · place:b` for the lateral map (coarse is "
+        f"fine — anchor only what the brief implies);\n"
+        f"- 2-4 key characters: `person:<id> · kind · person`, a `role`, and "
+        f"EACH a dispositional spine — at least `drive` (twice, the second "
+        f"weaker), and a `fear` or `breaks_if` (the minimum spine a "
+        f"conclusion needs);\n"
+        f"- a few objects and the opening situation as plain STATE.\n"
+        f"Use exact lowercase ids (place:/person:/obj:/fact:). Be concrete "
+        f"and consistent; invent what the brief leaves open, at honest "
+        f"precision. Also give a title, a one-paragraph description, and the "
+        f"genre/era.\n\nPLAYER BRIEF:\n{brief}",
+        INTERVIEW_SCHEMA, tier="main", deliberate=True)
+
+
 def seed_knows(provider: Provider, character: str, digest: str) -> dict:
     """Author a character's private knowledge frame at story start —
     frame-scoped secrecy (P4): each character knows ONLY what's in their

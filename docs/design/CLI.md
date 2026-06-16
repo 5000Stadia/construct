@@ -18,9 +18,12 @@ construct scenarios
     List the scenario library — charter self-ID: title / stance /
     description (the ship in a bottle, labeled on the glass).
 
-construct new --ingest <path> [--name <name>]
-    Session-zero via fiction ingest → a new pristine scenario.
-    (--interview follows post-first-playable.)
+construct new (--ingest <path> | --interview [BRIEF]) [--name <name>] [--endless]
+    Session-zero → a new pristine scenario. --ingest reads a work of
+    fiction (Path A); --interview builds a world LIVE from a brief
+    (Path B — genre/setting/characters/situation, passed inline or
+    prompted). --endless makes a world with no terminal arc. Both paths
+    converge on the same arc-authoring + knowledge-seeding tail.
 
 construct play <scenario> [--fresh] [--debug] [--at COORD]
     THE PLAY INTERFACE. Load/resume the single playthrough slot, print

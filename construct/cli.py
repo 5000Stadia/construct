@@ -46,9 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     new = sub.add_parser("new", help="session zero: create a pristine scenario")
     source = new.add_mutually_exclusive_group(required=True)
     source.add_argument("--ingest", metavar="PATH", help="ingest a work of fiction")
-    source.add_argument("--interview", action="store_true",
-                        help="live interview (post-first-playable)")
-    new.add_argument("--name", help="scenario name (default: prose filename stem)")
+    source.add_argument("--interview", nargs="?", const="", metavar="BRIEF",
+                        help="build a world LIVE from a brief (genre/setting/"
+                             "characters/situation). Pass the brief inline, or "
+                             "omit it to be prompted.")
+    new.add_argument("--name", help="scenario name (default: prose stem, or 'world')")
     new.add_argument("--endless", action="store_true",
                      help="no terminal arc: the world carries on past the arc's "
                           "destination instead of settling into aftermath")
@@ -145,14 +147,26 @@ def _cmd_scenarios() -> int:
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    from construct.game import create_scenario_from_ingest
-    if args.interview:
-        print("construct new --interview: post-first-playable (letter 017)", file=sys.stderr)
-        return 2
-    prose = Path(args.ingest)
-    name = args.name or prose.stem.replace(" ", "_")
-    meta = create_scenario_from_ingest(name, prose, _provider(),
-                                       endless=getattr(args, "endless", False))
+    from construct.game import create_scenario_from_ingest, create_scenario_from_interview
+    endless = getattr(args, "endless", False)
+    if args.interview is not None:
+        brief = args.interview.strip()
+        if not brief:
+            print("Describe the world you want — genre, setting, key characters, "
+                  "the opening situation. (One paragraph is plenty.)")
+            try:
+                brief = input("brief> ").strip()
+            except (EOFError, KeyboardInterrupt):
+                brief = ""
+        if not brief:
+            print("No brief given; nothing to build.", file=sys.stderr)
+            return 2
+        name = args.name or "world"
+        meta = create_scenario_from_interview(name, brief, _provider(), endless=endless)
+    else:
+        prose = Path(args.ingest)
+        name = args.name or prose.stem.replace(" ", "_")
+        meta = create_scenario_from_ingest(name, prose, _provider(), endless=endless)
     print(f"Scenario {name!r} created: {meta['title']}")
     print(f"  protagonist: {meta['protagonist']}")
     print(f"  theme: {meta['theme']}")

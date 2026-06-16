@@ -147,10 +147,69 @@ def _beat_expr(beat: dict, player_frame: str):
     return Occurred(beat["entity"])
 
 
+def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
+                       spath: Path, endless: bool) -> dict:
+    """Shared session-zero tail (both creation paths): once canon is
+    established, author the hidden arc over it (lint-gated), seed
+    knowledge frames, and write the scenario meta. ENTRY + DESTINATION."""
+    from construct.arc.executor import arc_entities, turn_time
+
+    reads = PorcelainWorldReads(world)
+    people = _known_people(world)
+    digest = _world_digest(world)
+
+    arc = None
+    last_findings: list = []
+    for attempt in range(3):
+        proposal = complete_sync(provider,
+            "You are authoring the hidden arc for a text-construct scenario "
+            "(novel-arc mode: the mystery IS the arc). Below is the world's "
+            "people+entity digest. Choose the protagonist (the natural "
+            "point-of-view character), the thematic conclusion shape, and "
+            "4-6 path-independent beats. player_learns beats must reference "
+            "entity/attribute/value triples PRESENT in the digest; "
+            "event_occurs beats name a plausible event kind.\n\n"
+            f"WORLD DIGEST:\n{digest}\n\n"
+            + (f"PRIOR ATTEMPT FAILED LINT: {last_findings}; fix those.\n"
+               if last_findings else ""),
+            ARC_SCHEMA, tier="main", deliberate=True)
+        arc = _build_arc(proposal)
+        findings = lint_arc(arc, reads)
+        blocking = [f for f in findings if f.check != "2-paths"]
+        if not blocking:
+            if findings:
+                logger.warning("arc lints with soft findings: %s", findings)
+            break
+        last_findings = [f"{f.check}: {f.message}" for f in blocking]
+        logger.warning("arc lint failed (attempt %d): %s", attempt + 1, last_findings)
+        arc = None
+    if arc is None:
+        raise RuntimeError(f"arc failed lint after 3 attempts: {last_findings}")
+
+    world.porcelain.ingest_structured(
+        arc_io.arc_to_items(arc) + arc_io.index_items(arc))
+    world.porcelain.ingest_structured([
+        {"entity": "event:turn_0", "attribute": "kind", "value": "turn",
+         "valid_from": turn_time(0)},
+    ], frame="session:main")
+
+    # NPC-knows seeding (P4 frame-scoped secrecy); reversible (knows:
+    # frames only).
+    cast = _seed_cast(arc.protagonist, people)
+    seeded = seed_character_frames(world, provider, cast, digest)
+
+    meta = {"title": title, "protagonist": arc.protagonist,
+            "theme": proposal["theme"], "stance": "fiction", "mode": "pure",
+            "arc_scope": sorted(e for e in arc_entities(arc) if reads.has_entity(e)),
+            "seeded_frames": seeded, "endless": bool(endless)}
+    spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
+    return meta
+
+
 def create_scenario_from_ingest(name: str, prose_path: Path,
-                                      provider: Provider, endless: bool = False) -> dict:
-    """Session-zero Path A: fresh ingest through OUR pipeline → pristine
-    scenario. Stages per SESSION-ZERO.md; checkpoints to session:main."""
+                                provider: Provider, endless: bool = False) -> dict:
+    """Session-zero Path A: fresh ingest of a work through OUR pipeline
+    → pristine scenario."""
     WORLDS_DIR.mkdir(exist_ok=True)
     spath = scenario_path(name)
     if spath.exists():
@@ -160,103 +219,55 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
     title = text.splitlines()[0].lstrip("# ").strip() or name
     world = World(spath, world_id=f"w:{name}", model=engine_tier_dispatch(provider),
                   stance="fiction", title=title,
-                  description=f"Ingested from {prose_path.name} via Holodeck session-zero")
+                  description=f"Ingested from {prose_path.name} via Construct session-zero")
     try:
         # WORLD-A: chunked ingest, scene cursor advancing per chunk.
         chunks = _chunk_chapters(text)
         logger.info("ingesting %d chunks from %s", len(chunks), prose_path)
-        seen_entities: set[str] = set()
         for i, chunk in enumerate(chunks, start=1):
-            receipt = world.porcelain.ingest(
-                chunk, source=f"doc:{prose_path.stem}", at=float(i))
-            rows = receipt.to_dict()["rows"] if hasattr(receipt, "to_dict") else receipt["rows"]
-            seen_entities.update(row["entity"] for row in rows)
-            logger.info("chunk %d/%d ingested (%d rows)", i, len(chunks), len(rows))
-
-        # ENTRY + DESTINATION: one arc-author call over the ingested world,
-        # then deterministic construction + lint (bounded retries).
-        reads = PorcelainWorldReads(world)
-        people = sorted({e for e in seen_entities if e.startswith("person:")}
-                        | set(_known_people(world)))
-        scope = people + sorted({e for e in seen_entities
-                                 if e.startswith(("fact:", "obj:", "place:"))})[:40]
-        digest = (json.dumps(world.porcelain.snapshot(scope))[:6000]
-                  if scope else "(nothing ingested)")
-
-        arc = None
-        last_findings: list = []
-        for attempt in range(3):
-            proposal = complete_sync(provider, 
-                "You are authoring the hidden arc for a text-construct scenario "
-                "(novel-arc mode: the mystery IS the arc). Below is the ingested "
-                "world's people digest. Choose the protagonist (the natural "
-                "point-of-view character), the thematic conclusion shape, and "
-                "4-6 path-independent beats. player_learns beats must reference "
-                "entity/attribute/value triples PRESENT in the digest; "
-                "event_occurs beats name a plausible event kind.\n\n"
-                f"WORLD DIGEST:\n{digest}\n\n"
-                + (f"PRIOR ATTEMPT FAILED LINT: {last_findings}; fix those.\n"
-                   if last_findings else ""),
-                ARC_SCHEMA, tier="main", deliberate=True)  # planning-class: pays for reasoning
-            arc = _build_arc(proposal)
-            findings = lint_arc(arc, reads)
-            blocking = [f for f in findings if f.check != "2-paths"]  # see note below
-            if not blocking:
-                if findings:
-                    logger.warning("arc lints with soft findings: %s", findings)
-                break
-            last_findings = [f"{f.check}: {f.message}" for f in blocking]
-            logger.warning("arc lint failed (attempt %d): %s", attempt + 1, last_findings)
-            arc = None
-        if arc is None:
-            raise RuntimeError(f"arc failed lint after 3 attempts: {last_findings}")
-
-        player_frame = f"knows:{arc.protagonist}"
-        world.porcelain.ingest_structured(
-            arc_io.arc_to_items(arc) + arc_io.index_items(arc))
-        from construct.arc.executor import turn_time
-        world.porcelain.ingest_structured([
-            {"entity": "event:turn_0", "attribute": "kind", "value": "turn",
-             "valid_from": turn_time(0)},
-        ], frame="session:main")
-
-        from construct.arc.executor import arc_entities
-
-        # NPC-knows seeding (letter 041 feature wave): author each key
-        # character's private knows:<id> frame. Frame-scoped secrecy (P4):
-        # NPC engines are handed ONLY their frame, so they cannot leak
-        # what they never learned; the player inherits their character's
-        # frame. Reversible by construction — knows: frames are separate
-        # from canon and plot:, so re-seeding never touches the world or
-        # the arc (see reseed_character_frames).
-        cast = _seed_cast(arc.protagonist, people)
-        seeded = seed_character_frames(world, provider, cast, digest)
-
-        meta = {"title": title, "protagonist": arc.protagonist,
-                "theme": proposal["theme"], "stance": "fiction",
-                # canon-strict by default for ingested/determined worlds
-                # (letter 028): players act in the world, never author it.
-                "mode": "pure",
-                # arc_scope: the lint-verified entity ids the arc touches
-                # — a trivial, hazard-free list cached so the turn loop
-                # needn't re-derive it. (The heavier arc_cache of the full
-                # arc structure was retired: post-engine-037 reconstructing
-                # the arc from the plot: frame is ~21ms, so the cache and
-                # its sync surface no longer earn their keep — PB catch-up.)
-                "arc_scope": sorted(e for e in arc_entities(arc)
-                                    if reads.has_entity(e)),
-                # which characters have an authored knowledge frame (the
-                # protagonist + key NPCs); inspect/contrast via `knows`.
-                "seeded_frames": seeded,
-                # endless: no terminal arc — the world carries on past the
-                # arc's destination (clocks/NPCs keep running) rather than
-                # settling into aftermath.
-                "endless": bool(endless)}
-        spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
-        return meta
+            world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}", at=float(i))
+            logger.info("chunk %d/%d ingested", i, len(chunks))
+        return _finalize_scenario(world, name, title, provider, spath, endless)
     except BaseException:
-        # No half-scenarios: a failed session zero leaves nothing behind
-        # (loud-fail; the exception carries the diagnostic).
+        world.close()
+        spath.unlink(missing_ok=True)
+        spath.with_suffix(".meta.json").unlink(missing_ok=True)
+        raise
+    finally:
+        world.close()
+
+
+def create_scenario_from_interview(name: str, brief: str, provider: Provider,
+                                   endless: bool = False) -> dict:
+    """Session-zero Path B: build a world LIVE from a brief (no source
+    text). An interviewer cohort expands the brief into the constitutive
+    spine — charter, places + lateral graph, key NPCs with dispositional
+    spines, the opening situation — committed as `stated` canon, then the
+    shared tail authors the arc and seeds frames. The brief is the human's
+    input (genre/setting/characters/situation, however much they give)."""
+    from construct import cohorts
+
+    WORLDS_DIR.mkdir(exist_ok=True)
+    spath = scenario_path(name)
+    if spath.exists():
+        raise FileExistsError(f"scenario {name!r} already exists at {spath}")
+
+    spine = cohorts.interview_world(provider, brief)
+    title = (spine.get("title") or name).strip()
+    world = World(spath, world_id=f"w:{name}", model=engine_tier_dispatch(provider),
+                  stance="fiction", title=title,
+                  description=spine.get("description", "Built live via Construct interview"))
+    try:
+        items = spine.get("items", [])
+        if not items:
+            raise RuntimeError("interview produced no world spine")
+        # Authoring time: the interviewer is the author → `stated` canon
+        # (the gate's default for structured items). Cursor at the opening.
+        world.ingestor.cursor.advance(1.0)
+        world.porcelain.ingest_structured(items)
+        logger.info("interview authored %d spine items", len(items))
+        return _finalize_scenario(world, name, title, provider, spath, endless)
+    except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
         spath.with_suffix(".meta.json").unlink(missing_ok=True)
