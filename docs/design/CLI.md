@@ -1,16 +1,15 @@
-# The Player CLI — agent-drivable, one-shot per turn (design)
+# The Player CLI — interactive REPL + one-shot turn
 
-**Status:** Surface settled pre-freeze (Kernos letter 017,
-founder-directed); built at first-playable. Kernos CC is the assigned
-live tester, driving from the player's seat — so the CLI is
-agent-drivable by construction, and it is also the real product
-surface, not a test harness.
+**Status:** Shipped. Two surfaces over one turn function
+(`construct.turnloop.run_turn`): an interactive **REPL** for humans
+(letter 032) and the **one-shot `turn`** for scripting, tests, and the
+live-tester (letters 017/019). The REPL is a loop around the same
+machinery — zero change to the turn loop, cohorts, or engine.
 
 **One sentence:** the `.world` file IS the state and a turn is
-load → ingest → render → save, so turns are discrete one-shot
-invocations — stateless per call, stateful via the playthrough slot —
-which is exactly what both a human shell and a testing agent drive
-cleanly.
+load → ingest → render → save; the REPL opens the world once and loops
+read→turn→print, while `turn` does exactly one of those per process —
+same function, two transports.
 
 ## Commands
 
@@ -19,52 +18,89 @@ construct scenarios
     List the scenario library — charter self-ID: title / stance /
     description (the ship in a bottle, labeled on the glass).
 
-holodeck new --ingest <path>
+construct new --ingest <path> [--name <name>]
     Session-zero via fiction ingest → a new pristine scenario.
     (--interview follows post-first-playable.)
 
-construct play <scenario> --fresh | --resume
-    Establish or resume the single playthrough slot (letter 013);
-    prints the opening render.
+construct play <scenario> [--fresh] [--debug]
+    THE PLAY INTERFACE. Load/resume the single playthrough slot, print
+    the opening, then loop: read a line → run one turn → print the
+    prose → repeat, until you exit. Bare `play <scenario>` RESUMES
+    (progress saved every turn); `--fresh` recopies the pristine
+    scenario over the slot first; `--debug` starts with the trace on.
 
-construct turn <playthrough> "<player input>"
-    THE LOAD-BEARING ONE: process exactly one player turn against the
-    saved playthrough — the full TURN-LOOP DAG — print the rendered
-    prose to stdout, save. One call = one turn.
+construct turn <scenario> "<player input>" [--debug]
+    One-shot: process exactly one turn against the saved slot — the
+    full TURN-LOOP DAG — print the prose, save, exit. Retained for
+    scripting, automated tests, and the agent live-tester. One call =
+    one turn.
 ```
+
+## The REPL session (letter 032)
+
+```
+$ construct play anchor
+  The Last Honest Meter
+You are person:marn, at place:council_tier.
+
+Type what you do. (:help for commands, :quit to leave.)
+
+> I look around the council tier
+  (the world turns… / 12s)
+[narration]
+> :quit
+The world holds. (saved)
+```
+
+- **In-session commands:** `:help`, `:debug on|off` (toggle the trace
+  mid-session), `:quit` / `:exit` / `Ctrl-D`. Empty lines are ignored;
+  an unknown `:command` is reported, not run as a turn.
+- **Meta/chat is already handled** — the classifier cohort routes
+  action / question / out-of-character, so "what can I do?" or a
+  question resolves through the existing turn path. The REPL prints
+  whatever comes back; there is no separate chat mode.
+- **The spinner** ("the world turns… N s") shows only on a TTY, so
+  piped/captured runs stay clean; turns take ~50s on the good-tier
+  narrator.
+- **Save is free:** each turn persists to the slot, so exiting and
+  re-entering resumes mid-scene. The opening banner is deterministic
+  (no model call) — launch is instant; type "look around" for a
+  furnished render.
+- **Loud-but-survivable:** a turn that raises is reported on stderr and
+  the loop continues; the world is closed cleanly on exit.
 
 ## `--debug`: the turn trace
 
-`turn --debug` emits, alongside the prose, the turn's receipts:
+`--debug` (on `turn`, or toggled in the REPL) emits, alongside the
+prose, the turn's receipts:
 
-- the assembled briefing's **frame list** — to verify zero `plot:`
-  rows, grep-able (TURN-LOOP criterion (b));
-- the **cohort trace** — which cohorts fired, at which tier (criterion
-  (e)'s two-good-call audit);
-- the **concealment-audit** result (post-hoc, letter 006 note 2);
-- any beat / clock / nudge that triggered this turn.
+- the assembled briefing's **frame list** — verifies zero `plot:` rows
+  (TURN-LOOP criterion (b));
+- the **cohort trace** — which cohorts fired, at which tier;
+- the **concealment-audit** and **player_boundary** results (post-hoc);
+- any beat / clock / nudge that triggered, and the **adjudication**
+  verdict.
 
-The prose tells the tester it's *good*; the trace tells them it's
-*correct* — receipts culture applied to live testing. The trace is a
-formatting of `session:main` + audit rows, never a second bookkeeping.
+The prose tells you it's *good*; the trace tells you it's *correct* —
+the trace is a formatting of `session:main` + audit rows, never a
+second bookkeeping.
 
-## The live-test probes (expected; design must survive them)
+## The five-probe set (verified live, all PASS)
 
-1. **Drawer test, live** — put an object down, wander, return.
-2. **Non-leak** — play a canon character; the briefing must never
-   contain a fact only another frame holds (criterion (g)).
-3. **Loop closure** — return to a described place: same place, no
-   duplicate.
-4. **Refusal probe** — refuse the arc's direction for several turns:
-   adapt, never rail (the §5 ladder + §8 limit under live fire).
-5. **Adjudication** — attempt the impossible (a key not held):
-   `locate()` adjudicates; the world refuses diegetically.
+1. **Object permanence** — put an object down, wander, return.
+2. **Non-leak** — the briefing never holds a fact only another frame
+   knows (criterion (g)).
+3. **Loop closure** — a described place is the same place on return.
+4. **Player agency** — refuse the arc; it pushes the world at you,
+   never your character (two refusal modes).
+5. **Adjudication** — attempt the impossible (a key not held);
+   `locate()` is the rules lawyer, the world refuses diegetically.
 
-Findings arrive as [STATUS]/[BLOCKED] letters.
+## Standalone, not host-shaped (letter 032)
 
-## Pre-staged now (engine-free)
-
-`holodeck/cli.py` parses all four commands and `--debug` today; every
-command exits 2 with a named "waiting on the porcelain freeze" message
-until integration wires it. The parser is tested; first-playable wiring
-replaces the exits, not the surface.
+Construct ships this *minimal* CLI/REPL so a holonovel is playable and
+demoable with no host — the REPL is transport (text in, text out), not
+a cohort; the six cohorts already do the turn processing. The rich,
+ambient, multi-user chat experience is the adopting host's job (Kernos,
+via the adapter) wrapping the same engine; Construct never builds the
+heavy chat in or duplicates it.

@@ -62,8 +62,33 @@ The hardest problems each got solved by the same move — **structural absence o
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e .
-construct play anchor --fresh                 # step into The Last Honest Meter as Officer Marn
-construct turn anchor "I look around." --debug # one turn; --debug shows the turn's receipts
+
+construct play anchor          # step into The Last Honest Meter as Officer Marn
+```
+
+That drops you into an interactive prompt — just type what you do, line after line:
+
+```
+  The Last Honest Meter
+You are person:marn, at place:council_tier.
+
+Type what you do. (:help for commands, :quit to leave.)
+
+> I look around the council tier
+[narration]
+> I set my brass spoon on the table and head for the wellhead
+[narration]
+> :quit
+The world holds. (saved)
+```
+
+Bare `construct play anchor` **resumes** where you left off (every turn is saved); add `--fresh` to start over, or `--debug` to see each turn's receipts. In-session commands: `:debug on|off`, `:help`, and `:quit` / `:exit` / `Ctrl-D`.
+
+For scripting or automated testing there's also a one-shot form — one turn per invocation, the same machinery:
+
+```bash
+construct turn anchor "I look around." --debug   # one turn; --debug shows the turn's receipts
+construct scenarios                              # list the scenario library
 ```
 
 The shipped example world, *The Last Honest Meter*, is a complete original noir mystery — a drought-stricken settlement, a master water-meter that died the night an honest technician did. Play it. Put something down and come back for it.

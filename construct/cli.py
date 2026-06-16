@@ -1,19 +1,37 @@
-"""The player CLI (docs/design/CLI.md, Kernos letters 017/019).
+"""The player CLI (docs/design/CLI.md, Kernos letters 017/019/032).
 
-One-shot per turn: stateless per call, stateful via the playthrough
-slot. Wired to the frozen porcelain (porcelain-v0.1).
+Two surfaces over ONE turn function (`construct.turnloop.run_turn`):
+
+- `construct play <scenario>` — the interactive REPL: load/resume once,
+  then read → turn → print, line after line, until you exit. This is
+  the standalone play interface (letter 032).
+- `construct turn <scenario> "<input>"` — the one-shot command, intact
+  for scripting, tests, and the live-tester. The REPL is a loop around
+  this same machinery, never a reimplementation.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import logging
 import sys
+import threading
+import time
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+EXIT_WORDS = {":quit", ":exit", ":q"}
+HELP_TEXT = (
+    "Just type what you do, in plain language, and press Enter.\n"
+    "  :debug on|off   show/hide the per-turn trace\n"
+    "  :help           this message\n"
+    "  :quit / :exit   leave (your progress is saved every turn)\n"
+    "  Ctrl-D          same as :quit"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,15 +50,19 @@ def build_parser() -> argparse.ArgumentParser:
                         help="live interview (post-first-playable)")
     new.add_argument("--name", help="scenario name (default: prose filename stem)")
 
-    play = sub.add_parser("play", help="establish or resume the playthrough slot")
+    play = sub.add_parser(
+        "play", help="play interactively: load/resume the scenario, then a prompt loop")
     play.add_argument("scenario")
-    mode = play.add_mutually_exclusive_group(required=True)
+    # Not required: bare `play <scenario>` RESUMES the slot, then loops.
+    mode = play.add_mutually_exclusive_group()
     mode.add_argument("--fresh", action="store_true",
                       help="start from the beginning (recopy pristine scenario over the slot)")
     mode.add_argument("--resume", action="store_true",
-                      help="open the playthrough slot at its head")
+                      help="resume the playthrough slot (the default)")
+    play.add_argument("--debug", action="store_true",
+                      help="start with the per-turn trace on (toggle in-session with :debug)")
 
-    turn = sub.add_parser("turn", help="process exactly one player turn")
+    turn = sub.add_parser("turn", help="process exactly one player turn (one-shot; scripting/tests)")
     turn.add_argument("playthrough", help="scenario name (its single slot is the save)")
     turn.add_argument("player_input", metavar="INPUT")
     turn.add_argument("--debug", action="store_true",
@@ -53,6 +75,47 @@ def build_parser() -> argparse.ArgumentParser:
 def _provider():
     from construct.provider import CodexProvider
     return CodexProvider()
+
+
+class _Spinner:
+    """A quiet, honest 'the world turns…' indicator on stderr while a
+    ~50s good-tier turn runs. No-op when stderr isn't a TTY (scripts,
+    pipes) so captured output stays clean."""
+
+    def __init__(self, label: str = "the world turns") -> None:
+        self._label = label
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._active = sys.stderr.isatty()
+
+    def __enter__(self) -> "_Spinner":
+        if self._active:
+            self._thread = threading.Thread(target=self._spin, daemon=True)
+            self._thread.start()
+        return self
+
+    def _spin(self) -> None:
+        start = time.monotonic()
+        for frame in itertools.cycle("|/-\\"):
+            if self._stop.is_set():
+                break
+            elapsed = int(time.monotonic() - start)
+            sys.stderr.write(f"\r  ({self._label}… {frame} {elapsed}s)")
+            sys.stderr.flush()
+            self._stop.wait(0.5)
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+        if self._active:
+            sys.stderr.write("\r" + " " * 40 + "\r")
+            sys.stderr.flush()
+
+
+def _print_trace(trace) -> None:
+    print("\n--- TURN TRACE ---", file=sys.stderr)
+    print(json.dumps(trace.to_dict(), indent=2), file=sys.stderr)
 
 
 def _cmd_scenarios() -> int:
@@ -78,24 +141,75 @@ def _cmd_new(args: argparse.Namespace) -> int:
     print(f"Scenario {name!r} created: {meta['title']}")
     print(f"  protagonist: {meta['protagonist']}")
     print(f"  theme: {meta['theme']}")
-    print(f"Start playing: construct play {name} --fresh")
+    print(f"Play it: construct play {name}")
     return 0
 
 
+def _opening(world, arc, meta) -> str:
+    """Deterministic entry banner — no model call, so launching is
+    instant. The player types 'look around' for a furnished render."""
+    lines = [f"  {meta.get('title', arc.protagonist)}"]
+    chain = world.porcelain.locate(arc.protagonist)
+    where = chain[0] if chain else None
+    lines.append(f"You are {arc.protagonist}"
+                 + (f", at {where}." if where else "."))
+    lines.append("")
+    lines.append("Type what you do. (:help for commands, :quit to leave.)")
+    return "\n".join(lines)
+
+
 def _cmd_play(args: argparse.Namespace) -> int:
-    from construct.game import open_playthrough, start_playthrough
+    """The interactive REPL (letter 032): one open world, a loop around
+    run_turn, progress saved every turn."""
+    from construct.game import next_turn_number, open_playthrough, start_playthrough
+    from construct.turnloop import run_turn
+
     start_playthrough(args.scenario, fresh=args.fresh)
-    world, arc, _meta = open_playthrough(args.scenario, _provider())
+    provider = _provider()
+    world, arc, meta = open_playthrough(args.scenario, provider)
+    debug = args.debug
+    scope = meta.get("arc_scope") or None
+    mode = meta.get("mode", "pure")
+
+    print(_opening(world, arc, meta))
     try:
-        snap = world.porcelain.snapshot(arc.protagonist, frame=f"knows:{arc.protagonist}",
-                                        lens="establishing_set")
-        opening = [f"You are {arc.protagonist}."]
-        chain = world.porcelain.locate(arc.protagonist)
-        if chain:
-            opening.append(f"You are at {chain[0]}.")
-        opening.append('The world holds. Take your first turn: '
-                       f'construct turn {args.scenario} "<what you do>"')
-        print("\n".join(opening))
+        while True:
+            try:
+                raw = input("\n> ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nThe world holds. (saved)")
+                break
+
+            line = raw.strip()
+            if not line:
+                continue
+            if line in EXIT_WORDS:
+                print("The world holds. (saved)")
+                break
+            if line in (":help", ":h", ":?"):
+                print(HELP_TEXT)
+                continue
+            if line.startswith(":debug"):
+                arg = line.split(maxsplit=1)
+                debug = (len(arg) == 2 and arg[1].lower() in ("on", "true", "1"))
+                print(f"(debug {'on' if debug else 'off'})")
+                continue
+            if line.startswith(":"):
+                print(f"(unknown command {line!r}; :help for the list)")
+                continue
+
+            turn = next_turn_number(world)
+            try:
+                with _Spinner():
+                    result = run_turn(world, arc, provider, line, turn,
+                                      scope=scope, mode=mode)
+            except Exception as exc:  # loud, but the session survives
+                logger.exception("turn failed")
+                print(f"(the turn could not complete: {exc})", file=sys.stderr)
+                continue
+            print(result.prose)
+            if debug:
+                _print_trace(result.trace)
     finally:
         world.close()
     return 0
@@ -113,8 +227,7 @@ def _cmd_turn(args: argparse.Namespace) -> int:
                           mode=meta.get("mode", "pure"))
         print(result.prose)
         if args.debug:
-            print("\n--- TURN TRACE ---", file=sys.stderr)
-            print(json.dumps(result.trace.to_dict(), indent=2), file=sys.stderr)
+            _print_trace(result.trace)
     finally:
         world.close()
     return 0
