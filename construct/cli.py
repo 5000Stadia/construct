@@ -62,6 +62,13 @@ def build_parser() -> argparse.ArgumentParser:
     play.add_argument("--debug", action="store_true",
                       help="start with the per-turn trace on (toggle in-session with :debug)")
 
+    knows = sub.add_parser(
+        "knows", help="inspect a character's knowledge frame; --contrast shows two diverge")
+    knows.add_argument("scenario")
+    knows.add_argument("character", help="entity id or bare name (e.g. marn or person:marn)")
+    knows.add_argument("--contrast", metavar="OTHER",
+                       help="another character: show what each knows that the other doesn't")
+
     turn = sub.add_parser("turn", help="process exactly one player turn (one-shot; scripting/tests)")
     turn.add_argument("playthrough", help="scenario name (its single slot is the save)")
     turn.add_argument("player_input", metavar="INPUT")
@@ -193,6 +200,28 @@ def _cmd_play(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt_facts(facts: dict) -> str:
+    if not facts:
+        return "    (nothing)"
+    return "\n".join(f"    {e} · {a} · {v}" for (e, a), v in sorted(facts.items()))
+
+
+def _cmd_knows(args: argparse.Namespace) -> int:
+    from construct.game import knows_inspect
+    r = knows_inspect(args.scenario, args.character, contrast=args.contrast)
+    if args.contrast:
+        print(f"Only {r['character']} knows (hidden from {r['contrast']}):")
+        print(_fmt_facts(r["only_character"]))
+        print(f"\nOnly {r['contrast']} knows (hidden from {r['character']}):")
+        print(_fmt_facts(r["only_contrast"]))
+        if not r["only_character"] and not r["only_contrast"]:
+            print("\n(the two frames are identical over the arc scope)")
+    else:
+        print(f"{r['character']} knows ({len(r['knows'])} facts over the arc scope):")
+        print(_fmt_facts(r["knows"]))
+    return 0
+
+
 def _cmd_turn(args: argparse.Namespace) -> int:
     from construct import Session
 
@@ -212,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_new(args)
     if args.command == "play":
         return _cmd_play(args)
+    if args.command == "knows":
+        return _cmd_knows(args)
     if args.command == "turn":
         return _cmd_turn(args)
     raise AssertionError("unreachable")

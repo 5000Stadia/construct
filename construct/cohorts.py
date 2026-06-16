@@ -67,6 +67,45 @@ NARRATE_SCHEMA = {
     "required": ["prose"],
 }
 
+KNOWS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "facts": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string"},
+                "attribute": {"type": "string"},
+                "value": {"type": "string"},
+            },
+            "required": ["entity", "attribute", "value"],
+        }},
+    },
+    "required": ["facts"],
+}
+
+
+def seed_knows(provider: Provider, character: str, digest: str) -> dict:
+    """Author a character's private knowledge frame at story start —
+    frame-scoped secrecy (P4): each character knows ONLY what's in their
+    frame, so the engine they're handed cannot leak what they never
+    learned. Character understanding → good tier."""
+    return complete_sync(provider,
+        f"You are authoring the private knowledge frame of {character} at the "
+        f"start of the story. A person knows a GREAT DEAL about their own "
+        f"world — be generous within plausibility. INCLUDE: everything about "
+        f"{character} themselves (role, history, relationships, what they "
+        f"carry); the people, places, and objects they'd know through their "
+        f"role and daily life; events they took part in or witnessed; and any "
+        f"secret THEY THEMSELVES hold. EXCLUDE only what this character "
+        f"genuinely could not know: other characters' private secrets, events "
+        f"they were absent for, and mysteries not yet solved (a guilty party "
+        f"knows their own guilt; an investigator does NOT yet know whodunit). "
+        f"Aim for as many true facts as the digest plausibly supports — a thin "
+        f"frame makes a lifeless character. Draw entity/attribute/value "
+        f"triples from the world digest, using the EXACT entity ids shown.\n\n"
+        f"WORLD DIGEST:\n{digest}\n\nCHARACTER: {character}",
+        KNOWS_SCHEMA, tier="main")
+
 RENDER_LEASH = (
     "THE RENDER LEASH (binding): describe only what the briefing supports. "
     "Introduce NO new named entities, NO new events, NO facts beyond the "

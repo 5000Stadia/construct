@@ -34,6 +34,13 @@ construct turn <scenario> "<player input>" [--debug]
     full TURN-LOOP DAG — print the prose, save, exit. Retained for
     scripting, automated tests, and the agent live-tester. One call =
     one turn.
+
+construct knows <scenario> <character> [--contrast <other>]
+    Inspect a character's authored knowledge frame (knows:<id>), or with
+    --contrast show how two characters' knowledge DIVERGES over the same
+    world — the structural-non-leak demo (play the detective vs the clerk
+    who hid the core: provably different information states). Read-only,
+    deterministic, no model call.
 ```
 
 ## The REPL session (letter 032)

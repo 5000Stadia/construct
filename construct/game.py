@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -220,6 +221,17 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         ], frame="session:main")
 
         from construct.arc.executor import arc_entities
+
+        # NPC-knows seeding (letter 041 feature wave): author each key
+        # character's private knows:<id> frame. Frame-scoped secrecy (P4):
+        # NPC engines are handed ONLY their frame, so they cannot leak
+        # what they never learned; the player inherits their character's
+        # frame. Reversible by construction — knows: frames are separate
+        # from canon and plot:, so re-seeding never touches the world or
+        # the arc (see reseed_character_frames).
+        cast = _seed_cast(arc.protagonist, people)
+        seeded = seed_character_frames(world, provider, cast, digest)
+
         meta = {"title": title, "protagonist": arc.protagonist,
                 "theme": proposal["theme"], "stance": "fiction",
                 # canon-strict by default for ingested/determined worlds
@@ -232,7 +244,10 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                 # the arc from the plot: frame is ~21ms, so the cache and
                 # its sync surface no longer earn their keep — PB catch-up.)
                 "arc_scope": sorted(e for e in arc_entities(arc)
-                                    if reads.has_entity(e))}
+                                    if reads.has_entity(e)),
+                # which characters have an authored knowledge frame (the
+                # protagonist + key NPCs); inspect/contrast via `knows`.
+                "seeded_frames": seeded}
         spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
         return meta
     except BaseException:
@@ -246,15 +261,136 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         world.close()
 
 
+def _canon_entity_ids(world: Any) -> set[str]:
+    """All entity ids that appear in canon — a session-zero/world-build
+    scan (not the hot turn path), so reading rows directly is fine and
+    far more robust than relying on event participation."""
+    ids: set[str] = set()
+    for row in world.buffer.all_rows():
+        if getattr(row, "frame", "canon") == "canon":
+            ids.add(row.entity)
+    return ids
+
+
 def _known_people(world: Any) -> list[str]:
-    """Person entities known to the world (registry scan via events +
-    state probes is engine-internal; we read the identity registry the
-    porcelain way: people appear as event agents/patients and kind rows)."""
-    people = set()
-    for ev in world.porcelain.events():
-        people.update(a for a in ev.get("agents", []) if str(a).startswith("person:"))
-        people.update(p for p in ev.get("patients", []) if str(p).startswith("person:"))
-    return sorted(people)
+    """Person entities in canon."""
+    return sorted(e for e in _canon_entity_ids(world) if e.startswith("person:"))
+
+
+#: Cap on characters seeded with a knowledge frame — the protagonist
+#: plus the most-present NPCs. Each is one good-tier call, so bound it.
+SEED_CAST_CAP = int(os.getenv("CONSTRUCT_SEED_CAST_CAP", "5"))
+
+
+def _seed_cast(protagonist: str, people: list[str]) -> list[str]:
+    """The protagonist first (the player inherits this frame), then the
+    other key characters, capped."""
+    others = [p for p in people if p != protagonist]
+    return [protagonist, *others][:SEED_CAST_CAP]
+
+
+def seed_character_frames(world: Any, provider: Provider,
+                          characters: list[str], digest: str) -> list[str]:
+    """Author each character's private `knows:<id>` frame from canon
+    (frame-scoped secrecy, P4). Returns the ids actually seeded. Writes
+    ONLY to knows: frames — never canon or plot: — so it is fully
+    reversible (see reseed_character_frames). Fail-open per character: a
+    failed authoring call skips that character, never the scenario."""
+    from construct import cohorts
+    seeded: list[str] = []
+    for char in characters:
+        try:
+            out = cohorts.seed_knows(provider, char, digest)
+        except ProviderError as exc:
+            logger.warning("knowledge seeding failed for %s: %s", char, exc)
+            continue
+        items = [{"entity": f["entity"], "attribute": f["attribute"], "value": f["value"]}
+                 for f in out.get("facts", []) if f.get("entity") and f.get("attribute")]
+        if items:
+            world.porcelain.ingest_structured(items, frame=f"knows:{char}")
+            seeded.append(char)
+            logger.info("seeded knows:%s with %d facts", char, len(items))
+    return seeded
+
+
+def reseed_character_frames(name: str, provider: Provider,
+                            characters: list[str] | None = None) -> list[str]:
+    """Re-author knowledge frames on the PRISTINE scenario without
+    touching canon or the arc — the reversibility hook (founder letter
+    041): if a seeded frame is wrong at play time, regenerate it in
+    isolation. Retracts the prior knows: rows for each character, then
+    re-seeds. Returns the ids reseeded."""
+    spath = scenario_path(name)
+    if not spath.exists():
+        raise FileNotFoundError(f"no scenario {name!r}")
+    meta_path = spath.with_suffix(".meta.json")
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    targets = characters or meta.get("seeded_frames", [])
+    world = World(spath, world_id=f"w:{name}", model=engine_tier_dispatch(provider))
+    try:
+        digest = _world_digest(world)
+        for char in targets:                       # clear the old frame first
+            for row in world.buffer.visible(frame=f"knows:{char}"):
+                world.porcelain.retract(row.id, "reseed: re-authoring knowledge frame")
+        seeded = seed_character_frames(world, provider, targets, digest)
+    finally:
+        world.close()
+    meta["seeded_frames"] = sorted(set(meta.get("seeded_frames", [])) | set(seeded))
+    meta_path.write_text(json.dumps(meta, indent=2))
+    return seeded
+
+
+def knows_inspect(name: str, character: str, contrast: str | None = None) -> dict:
+    """Inspect a character's authored knowledge frame on the pristine
+    scenario (read-only; no model). With `contrast`, return the
+    divergence between two characters' frames over the same world — the
+    criterion-(g) headline: provably different information states (play
+    the detective vs the clerk who hid the core). All deterministic."""
+    spath = scenario_path(name)
+    if not spath.exists():
+        raise FileNotFoundError(f"no scenario {name!r}")
+    if ":" not in character:
+        character = f"person:{character}"
+    if contrast and ":" not in contrast:
+        contrast = f"person:{contrast}"
+    meta_path = spath.with_suffix(".meta.json")
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    world = World(spath, world_id=f"w:{name}")          # model=None: reads are LLM-free
+    try:
+        # Inspect over the whole canon cast + key entities (not just the
+        # arc scope) so a seeded secret on any entity shows in the diff.
+        ids = _canon_entity_ids(world)
+        scope = sorted(
+            {e for e in ids if e.startswith(("person:", "obj:", "fact:", "place:"))}
+            | set(meta.get("arc_scope", [])))
+
+        def facts(frame: str) -> dict[tuple[str, str], object]:
+            if not scope:
+                return {}
+            snap = world.porcelain.snapshot(scope, frame=frame)
+            return {(f["entity"], f["attribute"]): f["value"]
+                    for f in snap.get("facts", [])}
+
+        cf = facts(f"knows:{character}")
+        result: dict = {"character": character, "scope_size": len(scope),
+                        "knows": cf, "seeded": meta.get("seeded_frames", [])}
+        if contrast:
+            of = facts(f"knows:{contrast}")
+            result["contrast"] = contrast
+            result["only_character"] = {k: v for k, v in cf.items() if k not in of}
+            result["only_contrast"] = {k: v for k, v in of.items() if k not in cf}
+        return result
+    finally:
+        world.close()
+
+
+def _world_digest(world: Any, limit: int = 6000) -> str:
+    """A people+key-entity snapshot digest for authoring calls."""
+    ids = _canon_entity_ids(world)
+    people = sorted(e for e in ids if e.startswith("person:"))
+    others = sorted(e for e in ids if e.startswith(("obj:", "fact:", "place:")))[:40]
+    scope = people + others
+    return json.dumps(world.porcelain.snapshot(scope))[:limit] if scope else "(empty)"
 
 
 def _build_arc(proposal: dict) -> Arc:
