@@ -49,6 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--interview", action="store_true",
                         help="live interview (post-first-playable)")
     new.add_argument("--name", help="scenario name (default: prose filename stem)")
+    new.add_argument("--endless", action="store_true",
+                     help="no terminal arc: the world carries on past the arc's "
+                          "destination instead of settling into aftermath")
 
     play = sub.add_parser(
         "play", help="play interactively: load/resume the scenario, then a prompt loop")
@@ -148,7 +151,8 @@ def _cmd_new(args: argparse.Namespace) -> int:
         return 2
     prose = Path(args.ingest)
     name = args.name or prose.stem.replace(" ", "_")
-    meta = create_scenario_from_ingest(name, prose, _provider())
+    meta = create_scenario_from_ingest(name, prose, _provider(),
+                                       endless=getattr(args, "endless", False))
     print(f"Scenario {name!r} created: {meta['title']}")
     print(f"  protagonist: {meta['protagonist']}")
     print(f"  theme: {meta['theme']}")

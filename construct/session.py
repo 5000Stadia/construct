@@ -56,6 +56,7 @@ class Session:
         self._provider = provider
         self._scope = meta.get("arc_scope") or None
         self._mode = meta.get("mode", "pure")
+        self._endless = bool(meta.get("endless", False))
         self._meta = meta
         self._closed = False
 
@@ -131,7 +132,7 @@ class Session:
         n = next_turn_number(self._world)
         try:
             result = run_turn(self._world, self._arc, self._provider, text, n,
-                              scope=self._scope, mode=self._mode)
+                              scope=self._scope, mode=self._mode, endless=self._endless)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
             return Reply(prose=f"(the turn could not complete: {exc})",

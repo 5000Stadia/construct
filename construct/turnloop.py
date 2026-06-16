@@ -27,6 +27,7 @@ from construct import cohorts
 from construct.adapter import PorcelainWorldReads
 from construct.arc.executor import (
     SESSION,
+    arc_concluded,
     arc_entities,
     beat_pass,
     clock_pass,
@@ -60,6 +61,7 @@ class TurnTrace:
     concealment_audit: str = "not-run"
     player_boundary: str = "clean"
     adjudication: str = "allowed"
+    concluded: bool = False
     dropped_cohorts: list[str] = field(default_factory=list)
     furnished: list[str] = field(default_factory=list)
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
@@ -186,12 +188,19 @@ def names_protagonist(text: str, protagonist: str) -> bool:
                for tok in _protagonist_tokens(protagonist))
 
 
+def _conclusion_recorded(reads: Any) -> bool:
+    return bool(reads.events(kind="conclusion", frame=SESSION))
+
+
 def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              turn: int, scope: list[str] | None = None,
-             mode: str = "pure") -> TurnResult:
+             mode: str = "pure", endless: bool = False) -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
-    'coauthor' (the player may declare facts into the world)."""
+    'coauthor' (the player may declare facts into the world).
+    endless: when False (default) the arc concludes and the world settles
+    into aftermath at its destination; when True the world has no terminal
+    arc and carries on indefinitely (clocks/NPCs keep running)."""
     p = world.porcelain
     live_reads = PorcelainWorldReads(world)
     trace = TurnTrace(turn=turn)
@@ -359,9 +368,24 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     threads = [f"{f['entity']} · {f['attribute']} · {f['value']}" for f in diff][:12]
     trace.irony_delta_size = len(diff)
 
+    # Conclusion detection (endless mode). Bounded worlds settle into
+    # aftermath once the arc reaches its destination — the navigator
+    # stops pushing toward an end already reached. Endless worlds note
+    # the milestone but keep their pressure/clocks running indefinitely.
+    concluded = arc_concluded(live_reads, arc)
+    trace.concluded = concluded
+    if concluded and not _conclusion_recorded(live_reads):
+        p.ingest_structured([
+            {"entity": f"event:conclusion_{turn}", "attribute": "kind",
+             "value": "conclusion", "valid_from": turn_time(turn)},
+        ], frame=SESSION)
+
     counters = counters_from_session(live_reads, arc)
     rung = navigate(counters, len(diff), bool(achieved))
-    trace.pacing = rung.value if rung else "hold"
+    if concluded and not endless:
+        rung = None  # the arc has resolved; do not escalate toward a reached end
+    trace.pacing = ("concluded" if (concluded and not endless)
+                    else (rung.value if rung else "hold"))
 
     nudge_directive = None
     if rung and threads:
@@ -404,6 +428,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         f"SCENE ({player_frame}):",
         "\n".join(scene_lines) or "(nothing established here yet — the grid shows through)",
     ]
+    if concluded and not endless:
+        briefing_parts.append("\nTHE ARC HAS RESOLVED — render this turn as "
+                              "aftermath/denouement: the world responds to the "
+                              "player in the settled wake of the story's end, "
+                              "applying no new dramatic pressure.")
     if you_lines:
         briefing_parts.append("\nYOU (the player character; never a third party):\n"
                               + "\n".join(you_lines))

@@ -148,7 +148,7 @@ def _beat_expr(beat: dict, player_frame: str):
 
 
 def create_scenario_from_ingest(name: str, prose_path: Path,
-                                      provider: Provider) -> dict:
+                                      provider: Provider, endless: bool = False) -> dict:
     """Session-zero Path A: fresh ingest through OUR pipeline → pristine
     scenario. Stages per SESSION-ZERO.md; checkpoints to session:main."""
     WORLDS_DIR.mkdir(exist_ok=True)
@@ -247,7 +247,11 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                                     if reads.has_entity(e)),
                 # which characters have an authored knowledge frame (the
                 # protagonist + key NPCs); inspect/contrast via `knows`.
-                "seeded_frames": seeded}
+                "seeded_frames": seeded,
+                # endless: no terminal arc — the world carries on past the
+                # arc's destination (clocks/NPCs keep running) rather than
+                # settling into aftermath.
+                "endless": bool(endless)}
         spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
         return meta
     except BaseException:

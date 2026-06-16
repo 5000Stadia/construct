@@ -328,3 +328,41 @@ class TestEntryAsOf:
         assert s.entry_as_of is None
         assert "(entering as of" not in s.opening()
         s.close()
+
+
+class TestEndlessMode:
+    def _force_concluded(self, scenario, player_id):
+        # Drive the demo arc's world_condition TRUE: the player learns the
+        # culprit (it's an InFrame(knows:player, fact:secret, culprit, rival)).
+        from construct.game import open_playthrough, slot_path
+        import shutil
+        from construct.game import scenario_path
+        shutil.copyfile(scenario_path(scenario), slot_path(scenario, player_id))
+        w, _arc, _meta = open_playthrough(scenario, _provider(), player_id=player_id)
+        w.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            frame=PLAYER_FRAME)
+        w.close()
+
+    def test_bounded_settles_at_conclusion(self, scenario):
+        self._force_concluded(scenario, "b")
+        s = Session.open(scenario, player_id="b", provider=_provider())  # bounded (default)
+        r = s.turn("I look around.")
+        assert r.ok and r.trace.concluded is True
+        assert r.trace.pacing == "concluded"      # navigator holds at a reached end
+        s.close()
+
+    def test_endless_carries_on(self, scenario, monkeypatch):
+        # Mark the scenario endless, then conclude the arc: it must NOT
+        # settle — pacing is never "concluded" even though concluded=True.
+        import json
+        from construct.game import scenario_path
+        mp = scenario_path(scenario).with_suffix(".meta.json")
+        meta = json.loads(mp.read_text()); meta["endless"] = True
+        mp.write_text(json.dumps(meta))
+        self._force_concluded(scenario, "e")
+        s = Session.open(scenario, player_id="e", provider=_provider())
+        r = s.turn("I look around.")
+        assert r.trace.concluded is True
+        assert r.trace.pacing != "concluded"       # world carries on
+        s.close()

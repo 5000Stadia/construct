@@ -125,6 +125,20 @@ def beat_pass(world: Any, arc: Arc, reads: Any, turn: int) -> tuple[list[str], l
     return achieved, closed
 
 
+def arc_concluded(reads: Any, arc: Arc) -> bool:
+    """Has the arc reached its destination? True iff the conclusion
+    shape's `world_condition` is satisfied (the climax sufficiency set
+    achieved) OR the refusal clock has fired (the tragedy-of-absence
+    ending). Deterministic. Drives the bounded/endless distinction:
+    bounded worlds settle into aftermath here; endless worlds carry on."""
+    from construct.arc.conditions import ClockFired
+
+    if evaluate(arc.shape.world_condition, reads) is Truth.TRUE:
+        return True
+    refusal = arc.refusal_clock.clock_id
+    return evaluate(ClockFired(refusal), reads) is Truth.TRUE
+
+
 # --- the navigator (deterministic policy table, ARC-LAYER §5) -----------
 
 _RUNG_THRESHOLDS = (
