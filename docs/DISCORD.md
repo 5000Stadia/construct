@@ -138,6 +138,13 @@ Each Discord user gets their own private playthrough (keyed by your
 Discord id), so multiple people can play the same world without
 colliding.
 
+> **How isolation works** (pattern-buffer's ruling, whitepaper A5): a
+> `world_id` identifies the *world's identity/lineage* — which scenario
+> a playthrough descends from — **not** a buffer instance. **Instance
+> identity is the file.** Player forks share a `world_id` and never
+> collide because each is a complete, never-joined world in its own
+> `.world` file; the engine keys nothing process-wide on `world_id`.
+
 ---
 
 ## Scope (v1)

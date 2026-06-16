@@ -81,7 +81,15 @@ def slot_path(name: str, player_id: str | None = None) -> Path:
     solo CLI are unchanged; a player_id (e.g. a Discord user id) keys a
     private slot (`<scenario>.<player_id>.play.world`) so two players
     never collide — a small extension of the single-slot model
-    (letter 034)."""
+    (letter 034).
+
+    Each slot is a complete, never-joined world fork; forks share the
+    scenario's `world_id` and isolation is the FILE boundary, not id
+    uniqueness (pattern-buffer whitepaper A5, blessed letter 040). The
+    file path is therefore the instance key. CAVEAT for any future
+    multi-player roster/dashboard: key it on the file/slot, NEVER on the
+    bare `world_id` string — that would collapse all forks into one (a
+    host-layer mistake, not an engine bug)."""
     if player_id:
         return WORLDS_DIR / f"{name}.{_safe_player_id(player_id)}.play.world"
     return WORLDS_DIR / f"{name}.play.world"
