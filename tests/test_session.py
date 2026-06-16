@@ -13,7 +13,7 @@ from patternbuffer.testing import StubModel, rule_classifier_fallback
 from construct import Session
 from construct.arc import io as arc_io
 from construct.arc.executor import turn_time
-from construct.discord_bot import _handle_command, _Pipe
+from construct.discord_bot import _handle_command, _Pipe, chunk
 from construct.game import WORLDS_DIR, slot_path
 from construct.provider import StubProvider
 
@@ -168,3 +168,28 @@ class TestDiscordRouting:
         pipe = _Pipe(scenario)
         assert "No scenario" in _handle_command(pipe, 1, "!play nope")
         pipe.close_all()
+
+
+class TestChunking:
+    def test_short_text_one_chunk(self):
+        assert chunk("a short scene.") == ["a short scene."]
+
+    def test_empty_is_never_silent(self):
+        assert chunk("") == ["(the world is quiet)"]
+
+    def test_long_text_chunks_under_limit_no_loss(self):
+        para = "x" * 1500
+        text = f"{para}\n{para}\n{para}"   # ~4500 chars, 3 paragraphs
+        parts = chunk(text)
+        assert len(parts) >= 3
+        assert all(len(p) <= 2000 for p in parts)
+        # newline-boundary split + nothing dropped (modulo the split newlines)
+        assert "".join(parts).replace("x", "") == ""
+        assert sum(p.count("x") for p in parts) == 4500
+
+    def test_no_newline_falls_back_to_space_then_hard_cut(self):
+        parts = chunk("word " * 600)       # 3000 chars, spaces only
+        assert all(len(p) <= 2000 for p in parts)
+        parts2 = chunk("y" * 5000)         # no break at all → hard cut
+        assert all(len(p) <= 2000 for p in parts2)
+        assert sum(p.count("y") for p in parts2) == 5000

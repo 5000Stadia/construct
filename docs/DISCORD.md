@@ -76,6 +76,13 @@ You'll see `Construct Discord bot online as <name>`. Leave it running
 (it holds your playthroughs open and saves every turn). A missing token
 fails loud and tells you this; a bad token fails loud from Discord.
 
+**If the bot goes quiet after a network blip,** restart the process
+(`Ctrl-C`, run it again). discord.py usually auto-reconnects, but a
+server-side gateway close can occasionally wedge it; a restart forces a
+fresh connection. Nothing is lost — every turn is already saved to the
+slot. (Optional knob: `CONSTRUCT_DISCORD_MAX_RETRY_SLEEP_SEC`, default
+10, caps how long a rate-limit retry waits.)
+
 > Keep the token out of git. Put it in your shell profile or a local
 > `.env` you never commit — the repo gitignores world/state files and
 > never stores secrets.

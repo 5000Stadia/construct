@@ -31,6 +31,29 @@ SCENARIO_ENV = "CONSTRUCT_DISCORD_SCENARIO"          # default scenario for a ne
 DEFAULT_SCENARIO = "anchor"
 TURNING = "*the world turns…*"
 PREFIX = "!"
+DISCORD_MAX_LEN = 2000                               # Discord's hard per-message limit
+
+
+def chunk(text: str, limit: int = DISCORD_MAX_LEN) -> list[str]:
+    """Split prose to fit Discord's per-message limit, preferring newline
+    boundaries — narration can exceed 2000 chars and must never be
+    truncated (the Kernos-bot lesson). Always returns ≥1 chunk."""
+    text = text or "(the world is quiet)"
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    while text:
+        if len(text) <= limit:
+            chunks.append(text)
+            break
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = text.rfind(" ", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip("\n ")
+    return chunks
 
 HELP = (
     "**Construct — play by DM.** Just type what you do, line after line.\n"
@@ -120,6 +143,14 @@ def build_client(default_scenario: str | None = None):
     intents.message_content = True       # required to read DM text
     intents.dm_messages = True
     client = discord.Client(intents=intents)
+    # Cap discord.py's retry-on-429 sleep so a rate-limit can't compound
+    # into a long backoff (the Kernos-bot lesson). The constructor clamps
+    # to 30s, so set it directly after construction.
+    try:
+        client.http.max_ratelimit_timeout = float(
+            os.getenv("CONSTRUCT_DISCORD_MAX_RETRY_SLEEP_SEC", "10"))
+    except Exception:  # never let a resilience knob block startup
+        logger.warning("could not set max_ratelimit_timeout; using discord.py default")
     pipe = _Pipe(default_scenario or os.getenv(SCENARIO_ENV, DEFAULT_SCENARIO))
 
     @client.event
@@ -142,13 +173,18 @@ def build_client(default_scenario: str | None = None):
             await message.channel.send(reply)
             return
 
-        # An in-world turn. Post a placeholder, run the blocking turn off
-        # the event loop, then replace the placeholder with the prose.
+        # An in-world turn. Post a placeholder, show the native typing
+        # indicator, run the blocking turn OFF the event loop, then
+        # replace the placeholder with the (chunked) prose.
         placeholder = await message.channel.send(TURNING)
         try:
             session = pipe.session_for(message.author.id)
-            result = await asyncio.to_thread(session.turn, body)
-            await placeholder.edit(content=result.prose[:1990] or "(the world is quiet)")
+            async with message.channel.typing():
+                result = await asyncio.to_thread(session.turn, body)
+            parts = chunk(result.prose)
+            await placeholder.edit(content=parts[0])
+            for extra in parts[1:]:          # long narration: never truncate
+                await message.channel.send(extra)
         except Exception as exc:  # bot stays up
             logger.exception("turn failed in discord transport")
             await placeholder.edit(content=f"(the turn could not complete: {exc})")
