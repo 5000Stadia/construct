@@ -72,6 +72,15 @@ ARC_SCHEMA = {
 }
 
 
+def _world(path: Path, name: str, *, model=None, **kw) -> "World":
+    """Single World-construction seam: injects Construct's attribute-
+    semantics rule (RFC-001 / PB 042) so model-minted set-valued domain
+    relations (contains/has_part/…) accumulate instead of last-write."""
+    from construct.semantics import attribute_default
+    return World(path, world_id=f"w:{name}", model=model,
+                 attribute_default=attribute_default, **kw)
+
+
 def scenario_path(name: str) -> Path:
     return WORLDS_DIR / f"{name}.world"
 
@@ -217,9 +226,9 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
 
     text = prose_path.read_text()
     title = text.splitlines()[0].lstrip("# ").strip() or name
-    world = World(spath, world_id=f"w:{name}", model=engine_tier_dispatch(provider),
-                  stance="fiction", title=title,
-                  description=f"Ingested from {prose_path.name} via Construct session-zero")
+    world = _world(spath, name, model=engine_tier_dispatch(provider),
+                   stance="fiction", title=title,
+                   description=f"Ingested from {prose_path.name} via Construct session-zero")
     try:
         # WORLD-A: chunked ingest, scene cursor advancing per chunk.
         chunks = _chunk_chapters(text)
@@ -254,9 +263,9 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
 
     spine = cohorts.interview_world(provider, brief)
     title = (spine.get("title") or name).strip()
-    world = World(spath, world_id=f"w:{name}", model=engine_tier_dispatch(provider),
-                  stance="fiction", title=title,
-                  description=spine.get("description", "Built live via Construct interview"))
+    world = _world(spath, name, model=engine_tier_dispatch(provider),
+                   stance="fiction", title=title,
+                   description=spine.get("description", "Built live via Construct interview"))
     try:
         items = spine.get("items", [])
         if not items:
@@ -341,7 +350,7 @@ def reseed_character_frames(name: str, provider: Provider,
     meta_path = spath.with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     targets = characters or meta.get("seeded_frames", [])
-    world = World(spath, world_id=f"w:{name}", model=engine_tier_dispatch(provider))
+    world = _world(spath, name, model=engine_tier_dispatch(provider))
     try:
         digest = _world_digest(world)
         for char in targets:                       # clear the old frame first
@@ -370,7 +379,7 @@ def knows_inspect(name: str, character: str, contrast: str | None = None) -> dic
         contrast = f"person:{contrast}"
     meta_path = spath.with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-    world = World(spath, world_id=f"w:{name}")          # model=None: reads are LLM-free
+    world = _world(spath, name)                          # model=None: reads are LLM-free
     try:
         # Inspect over the whole canon cast + key entities (not just the
         # arc scope) so a seeded secret on any entity shows in the diff.
@@ -475,7 +484,7 @@ def open_playthrough(name: str, provider: Provider,
     # separate FILE (a fork), not a distinct world_id — same as the
     # original single-slot model. Passing a different id would trip the
     # engine's stored-world_id check.
-    world = World(slot, world_id=f"w:{name}", model=engine_tier_dispatch(provider))
+    world = _world(slot, name, model=engine_tier_dispatch(provider))
     meta_path = scenario_path(name).with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
     # Reconstruct the arc from the plot: frame (~21ms post-037). A stamped
