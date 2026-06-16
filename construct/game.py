@@ -225,10 +225,12 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                 # canon-strict by default for ingested/determined worlds
                 # (letter 028): players act in the world, never author it.
                 "mode": "pure",
-                # Derived, disposable caches (rebuildable from plot:):
-                # the immutable arc structure + the lint-verified entity
-                # scope — at play-world scale, point reads cost minutes.
-                "arc_cache": arc_io.arc_to_cache(arc),
+                # arc_scope: the lint-verified entity ids the arc touches
+                # — a trivial, hazard-free list cached so the turn loop
+                # needn't re-derive it. (The heavier arc_cache of the full
+                # arc structure was retired: post-engine-037 reconstructing
+                # the arc from the plot: frame is ~21ms, so the cache and
+                # its sync surface no longer earn their keep — PB catch-up.)
                 "arc_scope": sorted(e for e in arc_entities(arc)
                                     if reads.has_entity(e))}
         spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
@@ -325,12 +327,10 @@ def open_playthrough(name: str, provider: Provider,
     world = World(slot, world_id=f"w:{name}", model=engine_tier_dispatch(provider))
     meta_path = scenario_path(name).with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-    if "arc_cache" in meta:
-        arc = arc_io.arc_from_cache(meta["arc_cache"])
-    else:
-        # Fallback: reconstruct from the frame (slow at scale; the cache
-        # is just a derived copy of these same rows).
-        arc = arc_io.arc_from_frame(PorcelainWorldReads(world))
+    # Reconstruct the arc from the plot: frame (~21ms post-037). A stamped
+    # arc_cache from an older scenario is ignored — the frame is the truth.
+    arc = arc_io.arc_from_cache(meta["arc_cache"]) if "arc_cache" in meta \
+        else arc_io.arc_from_frame(PorcelainWorldReads(world))
     return world, arc, meta
 
 

@@ -238,14 +238,6 @@ def test_movement_relocates_player(world):
     assert world.porcelain.locate(PLAYER)[0] == "place:flat"  # superseded move
 
 
-def test_normalize_question():
-    from construct.turnloop import normalize_question
-    assert normalize_question("Where is my brass measuring spoon?") == \
-        "Where is brass measuring spoon?"
-    assert normalize_question("Is the door locked?") == "Is door locked?"
-    assert normalize_question("where did Voss go?") == "where did Voss go?"
-
-
 def test_adjudication_denies_phantom_key(world):
     arc = make_arc()
     seed_arc(world, arc)

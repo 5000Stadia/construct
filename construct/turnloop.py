@@ -4,11 +4,12 @@ Serial mutation spine → assembly fan-out → narrator render → post
 (render ingested as canon + concealment audit). One call = one turn;
 state lives in the playthrough world file.
 
-Read pattern (letter 022 / read-path scaling finding): the turn takes a
-FEW materializations (canon scope, player frame, plot statuses) and
-evaluates its many per-atom reads against them via SnapshotReads — one
-rendered view, not N point reads. Point reads remain only for values
-outside the cached scope (new entities), counted in the trace.
+Read pattern: atoms read live canon directly (per-key folds are ~0.2ms
+after pattern-buffer 037 made folds closure-scoped). Snapshots are taken
+only where a materialized fact LIST is genuinely needed — the player-
+frame briefing and the canon mirror. The earlier SnapshotReads batching
+existed only for the pre-037 per-read cost (seconds per fold) and was
+retired once that cost vanished (PB catch-up, re-measured 2026-06-16).
 
 Failure policy (TURN-LOOP §5): spine steps loud-fail; fan-out cohorts
 fail open with the drop logged; the narrator failing is the turn
@@ -25,7 +26,6 @@ from typing import Any
 from construct import cohorts
 from construct.adapter import PorcelainWorldReads
 from construct.arc.executor import (
-    PLOT,
     SESSION,
     arc_entities,
     beat_pass,
@@ -36,7 +36,6 @@ from construct.arc.executor import (
 )
 from construct.arc.grammar import Arc
 from construct.provider import Provider, ProviderError
-from construct.snapreads import SnapshotReads
 
 logger = logging.getLogger(__name__)
 
@@ -91,24 +90,6 @@ def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon") -> dict:
         logger.warning("snapshot error for %s on %s: %s", frame, scope, snap["error"])
         return {"facts": []}
     return snap
-
-
-def _plot_status_table(p: Any, arc: Arc, trace: TurnTrace) -> dict:
-    """Beat/clock statuses from one plot-frame snapshot; per-key fallback
-    when ids predate the slugify rule (snapshot rejects them)."""
-    ids = [b.beat_id for b in arc.beats] + \
-          [c.clock_id for c in arc.clocks] + [arc.refusal_clock.clock_id]
-    snap = p.snapshot(ids, frame=PLOT) if ids else {"facts": []}
-    if "error" not in snap and snap.get("facts"):
-        return {"facts": [f for f in snap["facts"] if f["attribute"] == "status"]}
-    facts = []
-    for entity in ids:
-        st = p.state(entity, "status", frame=PLOT)
-        trace.point_reads += 1
-        if st["status"] in ("known", "conflicted"):
-            facts.append({"entity": entity, "attribute": "status",
-                          "value": st["fact"]["value"]})
-    return {"facts": facts}
 
 
 def _mirror_rows(p: Any, rows: list[dict], frame: str,
@@ -191,15 +172,6 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
     return None
 
 
-def normalize_question(question: str) -> str:
-    """Possessive/article stripping for the ask() retry (letter 027
-    finding D, host half): 'my brass measuring spoon' → 'brass measuring
-    spoon'. The engine half (ask-path refer parity) is PB's."""
-    import re
-    return re.sub(r"\b(my|our|the|that|this|his|her|their)\s+", "", question,
-                  flags=re.IGNORECASE)
-
-
 def _protagonist_tokens(protagonist: str) -> list[str]:
     """Name fragments that mark third-person rendering of the player
     ('person:marn' -> 'marn'). Deterministic guard input (letter 025)."""
@@ -241,18 +213,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     trace.classified = kind
 
     if kind == "question":
-        def _ask(q: str):
-            a = p.ask(q, frame=player_frame)
-            pr = a.get("prose") if isinstance(a, dict) else getattr(a, "prose", None)
-            fx = a.get("facts") if isinstance(a, dict) else getattr(a, "facts", [])
-            answered = a.get("answered") if isinstance(a, dict) else getattr(a, "answered", bool(fx))
-            return answered, pr, fx
-
-        answered, prose, facts = _ask(player_input)
-        if not answered and not facts:
-            normalized = normalize_question(player_input)
-            if normalized != player_input:  # bounded retry (finding D, host half)
-                answered, prose, facts = _ask(normalized)
+        # The engine's refer (HD 003 fix) strips determiners and resolves
+        # against a knows:-derived scope, so "where is my brass spoon?"
+        # binds engine-side — the old host-side normalize-and-retry is
+        # retired (PB catch-up).
+        a = p.ask(player_input, frame=player_frame)
+        prose = a.get("prose") if isinstance(a, dict) else getattr(a, "prose", None)
+        facts = a.get("facts") if isinstance(a, dict) else getattr(a, "facts", [])
         if not prose:
             prose = "; ".join(
                 f"{f['entity']} {f['attribute']}: {f['value']}" for f in facts
@@ -339,13 +306,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              "value": "arc_touch", "valid_from": turn_time(turn)},
         ], frame=SESSION)
 
-    # 4. World tick (strict order; beats LAST). Reads served from the
-    #    materializations; writes go through the gate as ever.
-    plot_snap = _plot_status_table(p, arc, trace)
-    snap_reads = SnapshotReads(
-        {"canon": canon_snap, PLOT: plot_snap}, events_fn=live_reads.events)
-    counters = counters_from_session(snap_reads, arc)
-    trace.clocks_fired = clock_pass(world, arc, snap_reads, counters, turn)
+    # 4. World tick (strict order; beats LAST). Atoms read LIVE canon
+    #    directly: per-key folds are ~0.2ms post-engine-037 (were seconds
+    #    pre-fix), so the SnapshotReads batching that existed only for the
+    #    old cost is retired — and reading live is more correct (clocks
+    #    and beats see this turn's own commits). Snapshots below are kept
+    #    only where a materialized fact LIST is needed (briefing, mirror).
+    counters = counters_from_session(live_reads, arc)
+    trace.clocks_fired = clock_pass(world, arc, live_reads, counters, turn)
 
     furnish_scene(p, scene, player_frame, canon_table, trace)
 
@@ -368,10 +336,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             trace.dropped_cohorts.append(f"npc_action:{npc} ({exc})")
 
     player_snap = _snap_or_empty(p, snap_scope, frame=player_frame)
-    snap_reads = SnapshotReads(
-        {"canon": canon_snap, player_frame: player_snap, PLOT: plot_snap},
-        events_fn=live_reads.events)
-    achieved, closed = beat_pass(world, arc, snap_reads, turn)
+    achieved, closed = beat_pass(world, arc, live_reads, turn)
     trace.beats_achieved, trace.beats_closed = achieved, closed
 
     # ---- ASSEMBLY FAN-OUT (reuses the tick's materializations) -----------
@@ -394,7 +359,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     threads = [f"{f['entity']} · {f['attribute']} · {f['value']}" for f in diff][:12]
     trace.irony_delta_size = len(diff)
 
-    counters = counters_from_session(snap_reads, arc)
+    counters = counters_from_session(live_reads, arc)
     rung = navigate(counters, len(diff), bool(achieved))
     trace.pacing = rung.value if rung else "hold"
 
