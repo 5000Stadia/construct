@@ -61,6 +61,10 @@ def build_parser() -> argparse.ArgumentParser:
                       help="resume the playthrough slot (the default)")
     play.add_argument("--debug", action="store_true",
                       help="start with the per-turn trace on (toggle in-session with :debug)")
+    play.add_argument("--at", metavar="COORD", type=float, default=None,
+                      help="ENTER at a timeline coordinate: the establishing view is "
+                           "taken as-of it (e.g. --at 2 to enter as of chapter 2). "
+                           "Recorded on a fresh start; default is the timeline head.")
 
     knows = sub.add_parser(
         "knows", help="inspect a character's knowledge frame; --contrast shows two diverge")
@@ -157,7 +161,8 @@ def _cmd_play(args: argparse.Namespace) -> int:
     API (letter 034) — open once, loop turn→print, saved every turn."""
     from construct import Session
 
-    session = Session.open(args.scenario, fresh=args.fresh, provider=_provider())
+    session = Session.open(args.scenario, fresh=args.fresh, provider=_provider(),
+                           as_of=getattr(args, "at", None))
     debug = args.debug
     print(f"  {session.opening()}\n")
     print("Type what you do. (:help for commands, :quit to leave.)")

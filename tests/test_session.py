@@ -307,3 +307,24 @@ class TestHardening:
         assert heartbeat_unhealthy(None) is True
         assert heartbeat_unhealthy(120.0, threshold=60) is True
         assert heartbeat_unhealthy(0.05, threshold=60) is False
+
+
+class TestEntryAsOf:
+    def test_entry_coordinate_persists_and_governs_establishing(self, scenario):
+        # Fresh entry at coordinate 1 is recorded and read back on resume.
+        s = Session.open(scenario, player_id="t", fresh=True, as_of=1.0,
+                         provider=_provider())
+        assert s.entry_as_of == 1.0
+        s.close()
+        # Resume (not fresh): the recorded entry coordinate is restored.
+        s2 = Session.open(scenario, player_id="t", provider=_provider())
+        assert s2.entry_as_of == 1.0
+        # Establishing lines are deterministic and exclude the protagonist.
+        assert all(not l.startswith(PLAYER) for l in s2.establishing_lines())
+        s2.close()
+
+    def test_default_entry_is_head(self, scenario):
+        s = Session.open(scenario, player_id="h", fresh=True, provider=_provider())
+        assert s.entry_as_of is None
+        assert "(entering as of" not in s.opening()
+        s.close()

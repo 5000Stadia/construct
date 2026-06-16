@@ -22,12 +22,18 @@ construct new --ingest <path> [--name <name>]
     Session-zero via fiction ingest → a new pristine scenario.
     (--interview follows post-first-playable.)
 
-construct play <scenario> [--fresh] [--debug]
+construct play <scenario> [--fresh] [--debug] [--at COORD]
     THE PLAY INTERFACE. Load/resume the single playthrough slot, print
     the opening, then loop: read a line → run one turn → print the
     prose → repeat, until you exit. Bare `play <scenario>` RESUMES
     (progress saved every turn); `--fresh` recopies the pristine
     scenario over the slot first; `--debug` starts with the trace on.
+    `--at COORD` ENTERS at a timeline coordinate (ENTRY:WHERE): the
+    establishing view is materialized as-of it ("the world at rest" at
+    that point), recorded on a fresh playthrough and restored on resume.
+    Default entry is the timeline head. (v1: the entry coordinate governs
+    the establishing entry view; turns still run forward at TURN_EPOCH —
+    rewinding ongoing play below entry is a documented future deepening.)
 
 construct turn <scenario> "<player input>" [--debug]
     One-shot: process exactly one turn against the saved slot — the
