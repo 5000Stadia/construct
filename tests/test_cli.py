@@ -27,8 +27,9 @@ def test_play_bare_resumes_then_loops():
 
 
 def test_play_repl_loop(monkeypatch, capsys):
-    # The REPL loops run_turn and exits cleanly on :quit — verified
-    # without engine or model: stub game/turnloop seams.
+    # The REPL is a thin client of Session — verified without engine or
+    # model by stubbing Session.open (letter 034).
+    import construct
     import construct.cli as cli
 
     inputs = iter(["", "I look around the council tier", ":debug on", ":quit"])
@@ -36,42 +37,31 @@ def test_play_repl_loop(monkeypatch, capsys):
 
     calls = []
 
-    class _World:
-        class porcelain:
-            @staticmethod
-            def locate(_e):
-                return ["place:council_tier"]
+    class _Reply:
+        def __init__(self):
+            self.prose = "The tier curves around you."
+            self.ok = True
+            self.trace = type("T", (), {"to_dict": staticmethod(lambda: {"turn": 1})})()
+
+    class _FakeSession:
+        def opening(self):
+            return "Anchor\nYou are person:marn, at place:council_tier."
+        def turn(self, line):
+            calls.append(("turn", line))
+            return _Reply()
         def close(self):
             calls.append("closed")
 
-    class _Arc:
-        protagonist = "person:marn"
-
-    class _Result:
-        prose = "The tier curves around you."
-        class trace:
-            @staticmethod
-            def to_dict():
-                return {"turn": 1}
-
     monkeypatch.setattr(cli, "_provider", lambda: object())
-    monkeypatch.setattr("construct.game.start_playthrough", lambda *a, **k: None)
-    monkeypatch.setattr("construct.game.open_playthrough",
-                        lambda *a, **k: (_World(), _Arc(), {"title": "Anchor"}))
-    monkeypatch.setattr("construct.game.next_turn_number", lambda _w: 1)
-
-    def fake_turn(world, arc, provider, line, turn, scope=None, mode="pure"):
-        calls.append(("turn", line))
-        return _Result()
-    monkeypatch.setattr("construct.turnloop.run_turn", fake_turn)
+    monkeypatch.setattr(construct.Session, "open",
+                        classmethod(lambda cls, *a, **k: _FakeSession()))
 
     rc = cli.main(["play", "anchor"])
     assert rc == 0
     # exactly one real turn ran (empty line skipped, :debug/:quit are meta)
     assert calls.count(("turn", "I look around the council tier")) == 1
-    assert "closed" in calls          # world closed on exit
-    out = capsys.readouterr()
-    assert "The tier curves around you." in out.out
+    assert "closed" in calls          # session closed on exit
+    assert "The tier curves around you." in capsys.readouterr().out
 
 
 def test_turn_shape():

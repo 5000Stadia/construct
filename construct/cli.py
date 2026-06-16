@@ -145,33 +145,15 @@ def _cmd_new(args: argparse.Namespace) -> int:
     return 0
 
 
-def _opening(world, arc, meta) -> str:
-    """Deterministic entry banner — no model call, so launching is
-    instant. The player types 'look around' for a furnished render."""
-    lines = [f"  {meta.get('title', arc.protagonist)}"]
-    chain = world.porcelain.locate(arc.protagonist)
-    where = chain[0] if chain else None
-    lines.append(f"You are {arc.protagonist}"
-                 + (f", at {where}." if where else "."))
-    lines.append("")
-    lines.append("Type what you do. (:help for commands, :quit to leave.)")
-    return "\n".join(lines)
-
-
 def _cmd_play(args: argparse.Namespace) -> int:
-    """The interactive REPL (letter 032): one open world, a loop around
-    run_turn, progress saved every turn."""
-    from construct.game import next_turn_number, open_playthrough, start_playthrough
-    from construct.turnloop import run_turn
+    """The interactive REPL (letter 032): a thin client of the session
+    API (letter 034) — open once, loop turn→print, saved every turn."""
+    from construct import Session
 
-    start_playthrough(args.scenario, fresh=args.fresh)
-    provider = _provider()
-    world, arc, meta = open_playthrough(args.scenario, provider)
+    session = Session.open(args.scenario, fresh=args.fresh, provider=_provider())
     debug = args.debug
-    scope = meta.get("arc_scope") or None
-    mode = meta.get("mode", "pure")
-
-    print(_opening(world, arc, meta))
+    print(f"  {session.opening()}\n")
+    print("Type what you do. (:help for commands, :quit to leave.)")
     try:
         while True:
             try:
@@ -198,38 +180,27 @@ def _cmd_play(args: argparse.Namespace) -> int:
                 print(f"(unknown command {line!r}; :help for the list)")
                 continue
 
-            turn = next_turn_number(world)
-            try:
-                with _Spinner():
-                    result = run_turn(world, arc, provider, line, turn,
-                                      scope=scope, mode=mode)
-            except Exception as exc:  # loud, but the session survives
-                logger.exception("turn failed")
-                print(f"(the turn could not complete: {exc})", file=sys.stderr)
+            with _Spinner():
+                reply = session.turn(line)
+            if not reply.ok:
+                print(reply.prose, file=sys.stderr)
                 continue
-            print(result.prose)
-            if debug:
-                _print_trace(result.trace)
+            print(reply.prose)
+            if debug and reply.trace is not None:
+                _print_trace(reply.trace)
     finally:
-        world.close()
+        session.close()
     return 0
 
 
 def _cmd_turn(args: argparse.Namespace) -> int:
-    from construct.game import next_turn_number, open_playthrough
-    from construct.turnloop import run_turn
+    from construct import Session
 
-    world, arc, meta = open_playthrough(args.playthrough, _provider())
-    try:
-        turn = next_turn_number(world)
-        result = run_turn(world, arc, _provider(), args.player_input, turn,
-                          scope=meta.get("arc_scope") or None,
-                          mode=meta.get("mode", "pure"))
-        print(result.prose)
-        if args.debug:
-            _print_trace(result.trace)
-    finally:
-        world.close()
+    with Session.open(args.playthrough, provider=_provider()) as session:
+        reply = session.turn(args.player_input)
+        print(reply.prose)
+        if args.debug and reply.trace is not None:
+            _print_trace(reply.trace)
     return 0
 
 

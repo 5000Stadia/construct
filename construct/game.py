@@ -75,8 +75,22 @@ def scenario_path(name: str) -> Path:
     return WORLDS_DIR / f"{name}.world"
 
 
-def slot_path(name: str) -> Path:
+def slot_path(name: str, player_id: str | None = None) -> Path:
+    """Per-player playthrough slot. player_id=None keeps the original
+    single-slot name (`<scenario>.play.world`) so existing slots and the
+    solo CLI are unchanged; a player_id (e.g. a Discord user id) keys a
+    private slot (`<scenario>.<player_id>.play.world`) so two players
+    never collide — a small extension of the single-slot model
+    (letter 034)."""
+    if player_id:
+        return WORLDS_DIR / f"{name}.{_safe_player_id(player_id)}.play.world"
     return WORLDS_DIR / f"{name}.play.world"
+
+
+def _safe_player_id(player_id: str) -> str:
+    """Filesystem-safe slot segment; never empty."""
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", player_id).strip("_")
+    return safe or "player"
 
 
 def list_scenarios() -> list[dict]:
@@ -279,8 +293,8 @@ def _build_arc(proposal: dict) -> Arc:
     )
 
 
-def start_playthrough(name: str, fresh: bool) -> Path:
-    spath, slot = scenario_path(name), slot_path(name)
+def start_playthrough(name: str, fresh: bool, player_id: str | None = None) -> Path:
+    spath, slot = scenario_path(name), slot_path(name, player_id)
     if not spath.exists():
         raise FileNotFoundError(f"no scenario {name!r} (looked at {spath})")
     if fresh or not slot.exists():
@@ -289,11 +303,17 @@ def start_playthrough(name: str, fresh: bool) -> Path:
     return slot
 
 
-def open_playthrough(name: str, provider: Provider) -> tuple[Any, Arc, dict]:
-    slot = slot_path(name)
+def open_playthrough(name: str, provider: Provider,
+                     player_id: str | None = None) -> tuple[Any, Arc, dict]:
+    slot = slot_path(name, player_id)
     if not slot.exists():
         raise FileNotFoundError(
             f"no playthrough slot for {name!r} — run `construct play {name} --fresh`")
+    # A slot is a COPY of the pristine scenario buffer, so it carries the
+    # scenario's world_id (`w:<name>`). Per-player isolation is the
+    # separate FILE (a fork), not a distinct world_id — same as the
+    # original single-slot model. Passing a different id would trip the
+    # engine's stored-world_id check.
     world = World(slot, world_id=f"w:{name}", model=engine_tier_dispatch(provider))
     meta_path = scenario_path(name).with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}

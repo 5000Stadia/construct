@@ -55,6 +55,7 @@ The hardest problems each got solved by the same move — **structural absence o
 - **[docs/CONCEPT.md](docs/CONCEPT.md)** — the founding brief: vision, session-zero, host architecture, the arc layer.
 - **[docs/design/ARC-LAYER.md](docs/design/ARC-LAYER.md)** — pacing-as-navigation: the hidden-arc design and its anti-railroading guards.
 - **[docs/design/TURN-LOOP.md](docs/design/TURN-LOOP.md)** · **[SESSION-ZERO.md](docs/design/SESSION-ZERO.md)** · **[PROVIDER-INTERFACE.md](docs/design/PROVIDER-INTERFACE.md)** · **[CLI.md](docs/design/CLI.md)**
+- **[docs/DISCORD.md](docs/DISCORD.md)** — play from your phone over an outbound-only Discord bot (setup guide).
 - **[docs/LEXICON.md](docs/LEXICON.md)** — the working vocabulary.
 
 ## Play it
@@ -92,6 +93,27 @@ construct scenarios                              # list the scenario library
 ```
 
 The shipped example world, *The Last Honest Meter*, is a complete original noir mystery — a drought-stricken settlement, a master water-meter that died the night an honest technician did. Play it. Put something down and come back for it.
+
+### Play from your phone (Discord)
+
+You can also play by DMing a Discord bot — an **outbound-only** transport, so nothing on your machine is exposed to the inbound internet (no port, no tunnel, no public URL). It's a dumb pipe over the same engine: your message in, the rendered scene back. Setup is a copy-pasteable five minutes — see **[docs/DISCORD.md](docs/DISCORD.md)**.
+
+```bash
+pip install -e '.[discord]'
+export CONSTRUCT_DISCORD_TOKEN="your-bot-token"   # never committed
+python -m construct.discord_bot                   # then DM the bot
+```
+
+### One play surface, many front ends
+
+The REPL, the one-shot CLI, and the Discord bot are all thin clients of one small **session API** — bring a fourth (web, MCP) the same way:
+
+```python
+from construct import Session
+s = Session.open("anchor", player_id="me")   # load/resume that player's slot
+print(s.turn("I look around.").prose)         # the same machinery every front end uses
+s.close()
+```
 
 ## Family
 
