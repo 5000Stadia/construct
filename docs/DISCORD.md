@@ -76,12 +76,27 @@ You'll see `Construct Discord bot online as <name>`. Leave it running
 (it holds your playthroughs open and saves every turn). A missing token
 fails loud and tells you this; a bad token fails loud from Discord.
 
-**If the bot goes quiet after a network blip,** restart the process
-(`Ctrl-C`, run it again). discord.py usually auto-reconnects, but a
-server-side gateway close can occasionally wedge it; a restart forces a
-fresh connection. Nothing is lost — every turn is already saved to the
-slot. (Optional knob: `CONSTRUCT_DISCORD_MAX_RETRY_SLEEP_SEC`, default
-10, caps how long a rate-limit retry waits.)
+**Resilience.** A built-in watchdog auto-recovers a wedged gateway: if
+the heartbeat stays broken for a few checks (discord.py's auto-reconnect
+doesn't always recover a server-side close), the bot restarts itself
+cleanly — nothing is lost, since every turn is already saved to the
+slot. If it ever does seem stuck, a manual restart (`Ctrl-C`, run again)
+is always safe. Re-delivered messages (which Discord can send on
+reconnect) are de-duplicated so a turn never runs twice, and other bots'
+messages are ignored.
+
+Optional tuning knobs (all have sensible defaults):
+
+| Env var | Default | Effect |
+|---|---|---|
+| `CONSTRUCT_DISCORD_SCENARIO` | `anchor` | world a new player starts in |
+| `CONSTRUCT_DISCORD_MERGE_WINDOW_SEC` | `2` | burst-coalescing window |
+| `CONSTRUCT_DISCORD_INTERCHUNK_DELAY_SEC` | `1` | pause between chunks of a long reply (avoids rate-limits) |
+| `CONSTRUCT_DISCORD_MAX_RETRY_SLEEP_SEC` | `10` | cap on a rate-limit retry wait |
+| `CONSTRUCT_DISCORD_WATCHDOG_INTERVAL_SEC` | `60` | heartbeat-check cadence (`0` disables the watchdog) |
+
+A missing/invalid token, or a disabled Message Content intent, fails
+loud at startup with the exact fix to apply.
 
 > Keep the token out of git. Put it in your shell profile or a local
 > `.env` you never commit — the repo gitignores world/state files and

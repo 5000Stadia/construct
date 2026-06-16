@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
+import sys
 from collections import deque
 
 from construct import Session
@@ -33,6 +35,45 @@ TURNING = "*the world turns…*"
 PREFIX = "!"
 DISCORD_MAX_LEN = 2000                               # Discord's hard per-message limit
 MERGE_WINDOW_SEC = float(os.getenv("CONSTRUCT_DISCORD_MERGE_WINDOW_SEC", "2.0"))
+INTERCHUNK_DELAY_SEC = float(os.getenv("CONSTRUCT_DISCORD_INTERCHUNK_DELAY_SEC", "1.0"))
+# Gateway watchdog: Discord can close the gateway server-side and
+# discord.py's auto-reconnect doesn't always recover it — the bot then
+# goes deaf with healthy-looking process state (the Kernos 2026-05-19
+# failure). A broken heartbeat for this many consecutive checks forces a
+# clean os.execv restart (fresh IDENTIFY). Generous, to never false-fire
+# on a quiet bot; env-tunable; set interval=0 to disable.
+WATCHDOG_INTERVAL_SEC = float(os.getenv("CONSTRUCT_DISCORD_WATCHDOG_INTERVAL_SEC", "60"))
+WATCHDOG_LATENCY_MAX_SEC = float(os.getenv("CONSTRUCT_DISCORD_WATCHDOG_LATENCY_MAX_SEC", "60"))
+WATCHDOG_STRIKES = int(os.getenv("CONSTRUCT_DISCORD_WATCHDOG_STRIKES", "3"))
+
+
+def heartbeat_unhealthy(latency: float, threshold: float = WATCHDOG_LATENCY_MAX_SEC) -> bool:
+    """True when discord.py's heartbeat RTT signals a dead gateway:
+    NaN/inf (never connected or lost), or implausibly large (Kernos
+    watches `client.latency` exactly this way)."""
+    if latency is None or math.isnan(latency) or math.isinf(latency):
+        return True
+    return latency > threshold
+
+
+class _SeenIds:
+    """Bounded set of recently-seen message ids — Discord re-delivers
+    events on gateway reconnect / missed ACKs, and a re-delivered DM
+    must not run the turn twice (the Kernos dedup lesson). Drops the
+    oldest half when full so memory stays bounded."""
+
+    def __init__(self, maxlen: int = 256) -> None:
+        self._ids: dict[int, None] = {}
+        self._maxlen = maxlen
+
+    def seen(self, message_id: int) -> bool:
+        if message_id in self._ids:
+            return True
+        if len(self._ids) >= self._maxlen:
+            for old in list(self._ids)[: self._maxlen // 2]:
+                del self._ids[old]
+        self._ids[message_id] = None
+        return False
 
 
 def coalesce_leading_turns(buf: deque) -> tuple[str, str, object]:
@@ -160,11 +201,12 @@ class _Pipe:
         placeholder = await channel.send(TURNING)
         try:
             session = self.session_for(user_id)
-            async with channel.typing():
+            async with _best_effort_typing(channel):    # typing 429 must not kill the turn
                 result = await asyncio.to_thread(session.turn, text)
             parts = chunk(result.prose)
             await placeholder.edit(content=parts[0])
             for extra in parts[1:]:          # long narration: never truncate
+                await asyncio.sleep(INTERCHUNK_DELAY_SEC)   # don't shotgun → 429
                 await channel.send(extra)
         except Exception as exc:  # bot stays up
             logger.exception("turn failed in discord transport")
@@ -216,6 +258,31 @@ def _handle_command(pipe: _Pipe, user_id: int, body: str) -> str | None:
     return f"Unknown command `{body}`. `!help` for the list."
 
 
+import contextlib
+
+
+@contextlib.asynccontextmanager
+async def _best_effort_typing(channel):
+    """Show the native typing indicator if we can; never let a typing
+    failure (e.g. a 429 on the typing route) abort the turn that follows
+    (the Kernos per-call-degradation lesson)."""
+    cm = None
+    try:
+        cm = channel.typing()
+        await cm.__aenter__()
+    except Exception:
+        cm = None
+        logger.debug("typing indicator unavailable; proceeding")
+    try:
+        yield
+    finally:
+        if cm is not None:
+            try:
+                await cm.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+
 def build_client(default_scenario: str | None = None):
     """Construct the discord client. discord.py is imported HERE so the
     core engine never depends on it (gated like the Codex live smoke)."""
@@ -230,7 +297,13 @@ def build_client(default_scenario: str | None = None):
     intents = discord.Intents.default()
     intents.message_content = True       # required to read DM text
     intents.dm_messages = True
-    client = discord.Client(intents=intents)
+    client = discord.Client(
+        intents=intents,
+        # Narration is model-generated text posted to Discord — never let
+        # it ping @everyone/@here/roles/users (general hardening, not a
+        # Kernos note, but the same defensive instinct).
+        allowed_mentions=discord.AllowedMentions.none(),
+    )
     # Cap discord.py's retry-on-429 sleep so a rate-limit can't compound
     # into a long backoff (the Kernos-bot lesson). The constructor clamps
     # to 30s, so set it directly after construction.
@@ -240,17 +313,45 @@ def build_client(default_scenario: str | None = None):
     except Exception:  # never let a resilience knob block startup
         logger.warning("could not set max_ratelimit_timeout; using discord.py default")
     pipe = _Pipe(default_scenario or os.getenv(SCENARIO_ENV, DEFAULT_SCENARIO))
+    seen = _SeenIds()
+
+    async def _gateway_watchdog() -> None:
+        """Auto-recover a wedged gateway: a broken heartbeat for
+        WATCHDOG_STRIKES consecutive checks forces a clean restart (fresh
+        IDENTIFY), since discord.py's auto-reconnect doesn't always
+        recover a server-side close."""
+        strikes = 0
+        while True:
+            await asyncio.sleep(WATCHDOG_INTERVAL_SEC)
+            if heartbeat_unhealthy(client.latency):
+                strikes += 1
+                logger.warning("gateway heartbeat unhealthy (latency=%s) strike %d/%d",
+                               client.latency, strikes, WATCHDOG_STRIKES)
+                if strikes >= WATCHDOG_STRIKES:
+                    logger.error("gateway wedged %d checks — restarting via execv", strikes)
+                    if getattr(client, "_construct_pipe", None):
+                        client._construct_pipe.close_all()
+                    os.execv(sys.executable, [sys.executable, *sys.argv])
+            else:
+                strikes = 0
 
     @client.event
     async def on_ready() -> None:
         logger.info("Construct Discord bot online as %s", client.user)
+        if WATCHDOG_INTERVAL_SEC > 0 and getattr(client, "_watchdog_task", None) is None:
+            client._watchdog_task = asyncio.ensure_future(_gateway_watchdog())
 
     @client.event
     async def on_message(message) -> None:
         if message.author == client.user:
             return
+        if getattr(message.author, "bot", False):    # ignore other bots (loop/pollution guard)
+            return
         # DM-based single-player only in v1 (founder's scope).
         if message.guild is not None:
+            return
+        if seen.seen(message.id):                     # Discord re-delivers on reconnect
+            logger.debug("dropping duplicate message id %s", message.id)
             return
         body = (message.content or "").strip()
         if not body:
@@ -274,6 +375,18 @@ def main() -> int:
     client = build_client()
     try:
         client.run(token)
+    except Exception as exc:  # friendly, specific fixes for the common setup misconfigs
+        import discord
+        if isinstance(exc, discord.PrivilegedIntentsRequired):
+            raise SystemExit(
+                "Discord refused the connection: the MESSAGE CONTENT INTENT is off.\n"
+                "Enable it: Developer Portal → your app → Bot → Privileged Gateway "
+                "Intents → MESSAGE CONTENT INTENT (see docs/DISCORD.md step B3).") from exc
+        if isinstance(exc, discord.LoginFailure):
+            raise SystemExit(
+                f"Discord rejected the token in ${TOKEN_ENV}. Re-copy it from the "
+                "Bot tab (Reset Token) and re-export it (docs/DISCORD.md step B2).") from exc
+        raise
     finally:
         getattr(client, "_construct_pipe", None) and client._construct_pipe.close_all()
     return 0

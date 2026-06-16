@@ -17,7 +17,14 @@ import asyncio as _asyncio
 from collections import deque
 
 import construct.discord_bot as discord_bot
-from construct.discord_bot import _handle_command, _Pipe, chunk, coalesce_leading_turns
+from construct.discord_bot import (
+    _handle_command,
+    _Pipe,
+    _SeenIds,
+    chunk,
+    coalesce_leading_turns,
+    heartbeat_unhealthy,
+)
 from construct.game import WORLDS_DIR, slot_path
 from construct.provider import StubProvider
 
@@ -283,3 +290,20 @@ def test_barrage_serializes_into_one_merged_turn(monkeypatch):
     assert calls == ["I draw the bolt\n\nand ease the door open\n\nand step through"]
     # the placeholder was posted then edited to the prose
     assert any(getattr(m, "content", "").startswith("ok:") for m in ch.sent)
+
+
+class TestHardening:
+    def test_seen_ids_dedup_and_bound(self):
+        seen = _SeenIds(maxlen=4)
+        assert seen.seen(1) is False        # first sight
+        assert seen.seen(1) is True         # re-delivery caught
+        for i in range(2, 7):               # overflow → oldest half dropped
+            seen.seen(i)
+        assert len(seen._ids) <= 4          # stays bounded
+
+    def test_heartbeat_unhealthy_predicate(self):
+        assert heartbeat_unhealthy(float("nan")) is True
+        assert heartbeat_unhealthy(float("inf")) is True
+        assert heartbeat_unhealthy(None) is True
+        assert heartbeat_unhealthy(120.0, threshold=60) is True
+        assert heartbeat_unhealthy(0.05, threshold=60) is False
