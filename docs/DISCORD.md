@@ -110,6 +110,15 @@ Everything else you type is an in-world turn. Asking the world a
 question, "what can I do?", and meta-asides all route correctly on their
 own — there is no separate chat mode.
 
+**Fire several lines at once and they're handled gracefully.** Your DMs
+are processed one turn at a time, in order — never concurrently (that
+would corrupt the world). And a quick burst of lines sent within a
+couple of seconds is *coalesced into one turn* (in order), so three
+rapid sentences become one coherent move rather than three separate
+~minute turns. Lines you send while a turn is already running queue up
+and fold into the next one. (Tune the burst window with
+`CONSTRUCT_DISCORD_MERGE_WINDOW_SEC`, default 2.)
+
 Each Discord user gets their own private playthrough (keyed by your
 Discord id), so multiple people can play the same world without
 colliding.

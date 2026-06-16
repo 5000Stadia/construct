@@ -19,10 +19,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections import deque
 
 from construct import Session
 from construct.game import list_scenarios, scenario_path
-from construct.session import slot_exists
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,23 @@ DEFAULT_SCENARIO = "anchor"
 TURNING = "*the world turns…*"
 PREFIX = "!"
 DISCORD_MAX_LEN = 2000                               # Discord's hard per-message limit
+MERGE_WINDOW_SEC = float(os.getenv("CONSTRUCT_DISCORD_MERGE_WINDOW_SEC", "2.0"))
+
+
+def coalesce_leading_turns(buf: deque) -> tuple[str, str, object]:
+    """Pop the next unit of work off a player's mailbox. A command is
+    one unit. A run of contiguous in-world turns merges into ONE turn
+    (the Kernos merge-window lesson: a barrage of rapid lines becomes a
+    single coherent turn, in order — never N concurrent turns), stopping
+    at the next command so command ordering is preserved. Returns
+    (text, kind, channel) where kind is 'cmd' or 'turn'."""
+    kind, body, channel = buf.popleft()
+    if kind == "cmd":
+        return body, "cmd", channel
+    parts = [body]
+    while buf and buf[0][0] == "turn":
+        parts.append(buf.popleft()[1])
+    return "\n\n".join(p for p in parts if p), "turn", channel
 
 
 def chunk(text: str, limit: int = DISCORD_MAX_LEN) -> list[str]:
@@ -63,13 +80,30 @@ HELP = (
 )
 
 
-class _Pipe:
-    """Holds one open Session per Discord user. No engine logic lives
-    here — only routing text in and out."""
+class _Mailbox:
+    """One player's serialized inbox: a deque of (kind, body, channel)
+    plus a wake event and a single worker task. One worker per player
+    means turns for a player NEVER run concurrently (concurrent
+    `session.turn` on one .world would interleave SQLite writes)."""
 
-    def __init__(self, default_scenario: str) -> None:
+    def __init__(self) -> None:
+        self.buf: deque = deque()
+        self.wake = asyncio.Event()
+        self.task: asyncio.Task | None = None
+
+
+class _Pipe:
+    """Routes text in and out, one serialized mailbox per Discord user.
+    No engine logic lives here — only transport."""
+
+    def __init__(self, default_scenario: str,
+                 merge_window: float = MERGE_WINDOW_SEC) -> None:
         self._default = default_scenario
+        self._merge_window = merge_window
         self._sessions: dict[int, Session] = {}
+        self._mailboxes: dict[int, _Mailbox] = {}
+
+    # -- sessions ---------------------------------------------------------
 
     def _open(self, user_id: int, scenario: str, *, fresh: bool) -> Session:
         old = self._sessions.pop(user_id, None)
@@ -89,7 +123,61 @@ class _Pipe:
             raise FileNotFoundError(scenario)
         return self._open(user_id, scenario, fresh=fresh)
 
+    # -- per-player serialized mailbox ------------------------------------
+
+    def submit(self, user_id: int, channel, body: str) -> None:
+        """Enqueue an inbound DM and ensure the player's worker is
+        running. Returns immediately — `on_message` never blocks, and a
+        barrage just stacks in the deque to be coalesced."""
+        kind = "cmd" if body.startswith(PREFIX) else "turn"
+        mb = self._mailboxes.setdefault(user_id, _Mailbox())
+        mb.buf.append((kind, body, channel))
+        mb.wake.set()
+        if mb.task is None or mb.task.done():
+            mb.task = asyncio.ensure_future(self._run_player(user_id, mb))
+
+    async def _run_player(self, user_id: int, mb: _Mailbox) -> None:
+        while True:
+            if not mb.buf:
+                mb.wake.clear()
+                await mb.wake.wait()
+                continue
+            kind = mb.buf[0][0]
+            if kind == "turn":
+                # Merge window: let a barrage land, then coalesce the
+                # leading run of turns into ONE turn.
+                await asyncio.sleep(self._merge_window)
+            text, kind, channel = coalesce_leading_turns(mb.buf)
+            try:
+                if kind == "cmd":
+                    await channel.send(self.handle_command(user_id, text))
+                else:
+                    await self._play_turn(user_id, channel, text)
+            except Exception:  # one bad unit never kills the worker
+                logger.exception("mailbox unit failed for user %s", user_id)
+
+    async def _play_turn(self, user_id: int, channel, text: str) -> None:
+        placeholder = await channel.send(TURNING)
+        try:
+            session = self.session_for(user_id)
+            async with channel.typing():
+                result = await asyncio.to_thread(session.turn, text)
+            parts = chunk(result.prose)
+            await placeholder.edit(content=parts[0])
+            for extra in parts[1:]:          # long narration: never truncate
+                await channel.send(extra)
+        except Exception as exc:  # bot stays up
+            logger.exception("turn failed in discord transport")
+            await placeholder.edit(content=f"(the turn could not complete: {exc})")
+
+    def handle_command(self, user_id: int, body: str) -> str:
+        return _handle_command(self, user_id, body) or HELP
+
     def close_all(self) -> None:
+        for mb in self._mailboxes.values():
+            if mb.task is not None:
+                mb.task.cancel()
+        self._mailboxes.clear()
         for s in self._sessions.values():
             s.close()
         self._sessions.clear()
@@ -167,27 +255,10 @@ def build_client(default_scenario: str | None = None):
         body = (message.content or "").strip()
         if not body:
             return
-
-        reply = _handle_command(pipe, message.author.id, body)
-        if reply is not None:
-            await message.channel.send(reply)
-            return
-
-        # An in-world turn. Post a placeholder, show the native typing
-        # indicator, run the blocking turn OFF the event loop, then
-        # replace the placeholder with the (chunked) prose.
-        placeholder = await message.channel.send(TURNING)
-        try:
-            session = pipe.session_for(message.author.id)
-            async with message.channel.typing():
-                result = await asyncio.to_thread(session.turn, body)
-            parts = chunk(result.prose)
-            await placeholder.edit(content=parts[0])
-            for extra in parts[1:]:          # long narration: never truncate
-                await message.channel.send(extra)
-        except Exception as exc:  # bot stays up
-            logger.exception("turn failed in discord transport")
-            await placeholder.edit(content=f"(the turn could not complete: {exc})")
+        # Enqueue and return immediately — the per-player worker
+        # serializes turns and coalesces a barrage. on_message never
+        # blocks and never runs a turn concurrently with another.
+        pipe.submit(message.author.id, message.channel, body)
 
     client._construct_pipe = pipe  # for clean shutdown / tests
     return client

@@ -13,7 +13,11 @@ from patternbuffer.testing import StubModel, rule_classifier_fallback
 from construct import Session
 from construct.arc import io as arc_io
 from construct.arc.executor import turn_time
-from construct.discord_bot import _handle_command, _Pipe, chunk
+import asyncio as _asyncio
+from collections import deque
+
+import construct.discord_bot as discord_bot
+from construct.discord_bot import _handle_command, _Pipe, chunk, coalesce_leading_turns
 from construct.game import WORLDS_DIR, slot_path
 from construct.provider import StubProvider
 
@@ -193,3 +197,89 @@ class TestChunking:
         parts2 = chunk("y" * 5000)         # no break at all → hard cut
         assert all(len(p) <= 2000 for p in parts2)
         assert sum(p.count("y") for p in parts2) == 5000
+
+
+class TestBarrageCoalescing:
+    def test_leading_turns_merge_in_order(self):
+        buf = deque([("turn", "a", "ch"), ("turn", "b", "ch"), ("turn", "c", "ch")])
+        text, kind, _ = coalesce_leading_turns(buf)
+        assert kind == "turn" and text == "a\n\nb\n\nc"
+        assert not buf  # all consumed
+
+    def test_merge_stops_at_command_boundary(self):
+        buf = deque([("turn", "a", "ch"), ("turn", "b", "ch"),
+                     ("cmd", "!fresh", "ch"), ("turn", "d", "ch")])
+        text, kind, _ = coalesce_leading_turns(buf)
+        assert kind == "turn" and text == "a\n\nb"          # stops before !fresh
+        text, kind, _ = coalesce_leading_turns(buf)
+        assert kind == "cmd" and text == "!fresh"           # command handled alone
+        text, kind, _ = coalesce_leading_turns(buf)
+        assert kind == "turn" and text == "d"
+
+
+class _FakeMsg:
+    def __init__(self, content):
+        self.content = content
+    async def edit(self, content=None):
+        self.content = content
+
+
+class _FakeChannel:
+    def __init__(self):
+        self.sent = []
+    async def send(self, content):
+        m = _FakeMsg(content)
+        self.sent.append(m)
+        return m
+    def typing(self):
+        class _T:
+            async def __aenter__(s):
+                return s
+            async def __aexit__(s, *a):
+                return False
+        return _T()
+
+
+class _FakeSession:
+    def __init__(self):
+        self.calls = []
+    @classmethod
+    def open(cls, scenario, player_id=None, *, fresh=False, provider=None):
+        inst = cls()
+        inst.scenario = scenario
+        return inst
+    def opening(self):
+        return "World\nYou are X."
+    def turn(self, text):
+        self.calls.append(text)
+        return type("R", (), {"prose": f"ok:{text}", "ok": True, "trace": None})()
+    def close(self):
+        pass
+
+
+def test_barrage_serializes_into_one_merged_turn(monkeypatch):
+    """A burst of DMs becomes ONE turn (never concurrent turns on one
+    world) — the Kernos merge-window lesson, verified through the
+    worker."""
+    monkeypatch.setattr(discord_bot, "Session", _FakeSession)
+
+    async def scenario():
+        pipe = _Pipe("demo", merge_window=0.02)
+        ch = _FakeChannel()
+        # three lines fired faster than a turn — a barrage
+        pipe.submit(7, ch, "I draw the bolt")
+        pipe.submit(7, ch, "and ease the door open")
+        pipe.submit(7, ch, "and step through")
+        for _ in range(200):                       # let the worker drain
+            await _asyncio.sleep(0.01)
+            if 7 in pipe._sessions and pipe._sessions[7].calls:
+                break
+        await _asyncio.sleep(0.05)
+        calls = pipe._sessions[7].calls
+        pipe.close_all()
+        return calls, ch
+
+    calls, ch = _asyncio.run(scenario())
+    assert calls == ["I draw the bolt\n\nand ease the door open\n\nand step through"]
+    # the placeholder was posted then edited to the prose
+    assert any(getattr(m, "content", "").startswith("ok:") for m in ch.sent)
