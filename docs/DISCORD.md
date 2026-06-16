@@ -90,7 +90,7 @@ Optional tuning knobs (all have sensible defaults):
 | Env var | Default | Effect |
 |---|---|---|
 | `CONSTRUCT_DISCORD_SCENARIO` | `anchor` | world a new player starts in |
-| `CONSTRUCT_DISCORD_MERGE_WINDOW_SEC` | `2` | burst-coalescing window |
+| `CONSTRUCT_DISCORD_MERGE_WINDOW_SEC` | `0.5` | burst-coalescing window (one breath of lines → one turn) |
 | `CONSTRUCT_DISCORD_INTERCHUNK_DELAY_SEC` | `1` | pause between chunks of a long reply (avoids rate-limits) |
 | `CONSTRUCT_DISCORD_MAX_RETRY_SLEEP_SEC` | `10` | cap on a rate-limit retry wait |
 | `CONSTRUCT_DISCORD_WATCHDOG_INTERVAL_SEC` | `60` | heartbeat-check cadence (`0` disables the watchdog) |
@@ -127,10 +127,10 @@ own — there is no separate chat mode.
 
 **Fire several lines at once and they're handled gracefully.** Your DMs
 are processed one turn at a time, in order — never concurrently (that
-would corrupt the world). And a quick burst of lines sent within a
-couple of seconds is *coalesced into one turn* (in order), so three
-rapid sentences become one coherent move rather than three separate
-~minute turns. Lines you send while a turn is already running queue up
+would corrupt the world). And a quick burst of lines sent in
+one breath (within ~half a second) is *coalesced into one turn* (in
+order), so a single thought split across a few rapid messages becomes
+one coherent move rather than separate ~minute turns. Lines you send while a turn is already running queue up
 and fold into the next one. (Tune the burst window with
 `CONSTRUCT_DISCORD_MERGE_WINDOW_SEC`, default 2.)
 

@@ -34,7 +34,11 @@ DEFAULT_SCENARIO = "anchor"
 TURNING = "*the world turns…*"
 PREFIX = "!"
 DISCORD_MAX_LEN = 2000                               # Discord's hard per-message limit
-MERGE_WINDOW_SEC = float(os.getenv("CONSTRUCT_DISCORD_MERGE_WINDOW_SEC", "2.0"))
+# 0.5s catches one thought split across messages sent in a single breath
+# without over-merging two genuinely separate intents — Kernos runs 300ms
+# (MERGE_WINDOW_MS); a hair more generous here for human DM cadence
+# (audit letter 039 Q3).
+MERGE_WINDOW_SEC = float(os.getenv("CONSTRUCT_DISCORD_MERGE_WINDOW_SEC", "0.5"))
 INTERCHUNK_DELAY_SEC = float(os.getenv("CONSTRUCT_DISCORD_INTERCHUNK_DELAY_SEC", "1.0"))
 # Gateway watchdog: Discord can close the gateway server-side and
 # discord.py's auto-reconnect doesn't always recover it — the bot then
@@ -44,7 +48,11 @@ INTERCHUNK_DELAY_SEC = float(os.getenv("CONSTRUCT_DISCORD_INTERCHUNK_DELAY_SEC",
 # on a quiet bot; env-tunable; set interval=0 to disable.
 WATCHDOG_INTERVAL_SEC = float(os.getenv("CONSTRUCT_DISCORD_WATCHDOG_INTERVAL_SEC", "60"))
 WATCHDOG_LATENCY_MAX_SEC = float(os.getenv("CONSTRUCT_DISCORD_WATCHDOG_LATENCY_MAX_SEC", "60"))
-WATCHDOG_STRIKES = int(os.getenv("CONSTRUCT_DISCORD_WATCHDOG_STRIKES", "3"))
+# 5 strikes (~5 min of broken heartbeat) before a restart — the
+# conservative value Kernos paid for via its GATEWAY-OBSERVER-FALSE-
+# POSITIVE finding: a false execv mid-session kills the in-flight turn,
+# and 3-vs-5 makes no difference for recovering a genuine wedge (039 Q1).
+WATCHDOG_STRIKES = int(os.getenv("CONSTRUCT_DISCORD_WATCHDOG_STRIKES", "5"))
 
 
 def heartbeat_unhealthy(latency: float, threshold: float = WATCHDOG_LATENCY_MAX_SEC) -> bool:
