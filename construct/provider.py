@@ -398,8 +398,10 @@ class CodexProvider(Provider):
             async with asyncio.timeout(bound):
                 # Fresh client per call: each sync-bridge invocation runs
                 # its own event loop, and an AsyncClient must not outlive
-                # the loop it was created on.
-                async with httpx.AsyncClient(timeout=120.0) as http:
+                # the loop it was created on. The per-request read timeout
+                # is generous (good-tier turns are long); the asyncio bound
+                # above is the hard ceiling.
+                async with httpx.AsyncClient(timeout=httpx.Timeout(bound, connect=30.0)) as http:
                     async with http.stream(
                         "POST", url, headers=self._headers(auth), json=body
                     ) as resp:
@@ -416,6 +418,13 @@ class CodexProvider(Provider):
         except TimeoutError as exc:
             raise ProviderTimeout(
                 f"Codex call exceeded {bound:.0f}s bound (tier={tier})") from exc
+        except httpx.TimeoutException as exc:
+            # Network read/connect timeout — surface as a typed ProviderTimeout
+            # so callers' fail-open (except ProviderError) catches it: a
+            # network blip skips one cohort/frame, never crashes the build.
+            raise ProviderTimeout(f"Codex network timeout (tier={tier}): {exc}") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderTransportError(f"Codex transport error (tier={tier}): {exc}") from exc
 
     def describe(self) -> str:
         return f"codex/{self._main_model}+{self._cheap_model}"

@@ -166,6 +166,12 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     reads = PorcelainWorldReads(world)
     people = _known_people(world)
     digest = _world_digest(world)
+    # The allowlist of real entity ids a player_learns beat may gate on
+    # (lint check 1-referents rejects any other). Given explicitly — the
+    # arc author otherwise invents thematic fact:/obj: ids absent from
+    # canon, which fails lint (live finding, interview-built worlds).
+    known_ids = sorted(e for e in _canon_entity_ids(world)
+                       if e.startswith(("person:", "fact:", "obj:", "place:")))
 
     arc = None
     last_findings: list = []
@@ -175,11 +181,16 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             "(novel-arc mode: the mystery IS the arc). Below is the world's "
             "people+entity digest. Choose the protagonist (the natural "
             "point-of-view character), the thematic conclusion shape, and "
-            "4-6 path-independent beats. player_learns beats must reference "
-            "entity/attribute/value triples PRESENT in the digest; "
-            "event_occurs beats name a plausible event kind.\n\n"
+            "4-6 path-independent beats.\n"
+            "HARD RULE: a `player_learns` beat's `entity` MUST be one of the "
+            "AVAILABLE IDS below verbatim (do NOT invent new fact:/obj: ids); "
+            "its attribute/value should match a triple in the digest. For a "
+            "thematic beat with no matching entity, use `event_occurs` with a "
+            "plausible event kind instead.\n\n"
+            f"AVAILABLE IDS (use these exact strings):\n{known_ids}\n\n"
             f"WORLD DIGEST:\n{digest}\n\n"
-            + (f"PRIOR ATTEMPT FAILED LINT: {last_findings}; fix those.\n"
+            + (f"PRIOR ATTEMPT FAILED LINT: {last_findings}; fix those — the "
+               f"named entities are not in AVAILABLE IDS.\n"
                if last_findings else ""),
             ARC_SCHEMA, tier="main", deliberate=True)
         arc = _build_arc(proposal)
