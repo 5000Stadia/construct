@@ -163,6 +163,19 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION."""
     from construct.arc.executor import arc_entities, turn_time
 
+    # Global coreference finalize pass (PB IDENTITY-RECALL-V1, letter 050):
+    # collapse cross-chunk coreferents the per-pass resolver couldn't see
+    # (e.g. "the master meter's memory core" / "the memory core") and record
+    # the ambiguous residue as adjudicable proposals. Run BEFORE arc authoring
+    # and frame seeding so both bind to reconciled identities. Idempotent;
+    # the containment veto keeps it from fusing a container with its contents.
+    try:
+        merged = world.registry.reconcile()
+        if merged:
+            logger.info("identity reconcile: %d cross-chunk merge(s)", merged)
+    except Exception as exc:  # a finalize-pass failure must never sink a build
+        logger.warning("identity reconcile skipped: %s", exc)
+
     reads = PorcelainWorldReads(world)
     people = _known_people(world)
     digest = _world_digest(world)
