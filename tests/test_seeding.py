@@ -104,6 +104,46 @@ def test_criterion_g_contrast(scenario):
     assert (SECRET[0], SECRET[1]) in solo["knows"]
 
 
+def test_concurrent_seeding_matches_sequential(scenario, monkeypatch):
+    # CONSTRUCT_SEED_CONCURRENCY > 1 fans the independent seed calls over a
+    # thread pool (Kernos 044); the projected frames must be identical to the
+    # sequential path — disjoint knows:<id> frames, appends still serialized.
+    import construct.game as game
+    monkeypatch.setattr(game, "SEED_CONCURRENCY", 3)
+    w = _open(scenario)
+    try:
+        seeded = seed_character_frames(w, _KnowsStub(), [DETECTIVE, CLERK], digest="{}")
+        assert set(seeded) == {DETECTIVE, CLERK}
+        clerk_secret = w.porcelain.state(SECRET[0], SECRET[1], frame=f"knows:{CLERK}")
+        det_secret = w.porcelain.state(SECRET[0], SECRET[1], frame=f"knows:{DETECTIVE}")
+        assert clerk_secret["status"] == "known" and clerk_secret["fact"]["value"] == SECRET[2]
+        assert det_secret["status"] == "unknown"
+    finally:
+        w.close()
+
+
+def test_concurrent_seeding_is_fail_open_per_frame(scenario, monkeypatch):
+    # One character's provider blip skips that frame, never the batch — the
+    # fail-open contract must survive the concurrent path.
+    from construct.provider import ProviderError
+    import construct.game as game
+    monkeypatch.setattr(game, "SEED_CONCURRENCY", 3)
+
+    class _OneFails(_KnowsStub):
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            if f"CHARACTER: {DETECTIVE}" in prompt:
+                raise ProviderError("simulated blip")
+            return await super().complete(prompt, schema, tier=tier, deliberate=deliberate)
+
+    w = _open(scenario)
+    try:
+        seeded = seed_character_frames(w, _OneFails(), [DETECTIVE, CLERK], digest="{}")
+        assert seeded == [CLERK]                                  # detective skipped, clerk kept
+        assert w.porcelain.state(SECRET[0], SECRET[1], frame=f"knows:{CLERK}")["status"] == "known"
+    finally:
+        w.close()
+
+
 def test_seeding_is_reversible(scenario):
     # Reseeding clears and re-authors knows: frames without touching canon
     # or plot: (founder reversibility condition).

@@ -30,7 +30,7 @@ from construct.arc.conditions import (
 )
 from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
 from construct.arc.lint import lint_arc
-from construct.provider import Provider, complete_sync, engine_tier_dispatch
+from construct.provider import Provider, ProviderError, complete_sync, engine_tier_dispatch
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +316,13 @@ def _known_people(world: Any) -> list[str]:
 #: plus the most-present NPCs. Each is one good-tier call, so bound it.
 SEED_CAST_CAP = int(os.getenv("CONSTRUCT_SEED_CAST_CAP", "5"))
 
+#: Concurrency for per-character knowledge seeding (Kernos letter 044). The
+#: seed calls are independent, so >1 fans the slow good-tier model calls out
+#: over a bounded thread pool (~15-min from-scratch interview build → ~the
+#: slowest single seed). Bounded to respect provider rate limits. Default
+#: 1 = sequential, the prior behavior unchanged. A safe, reversible opt-in.
+SEED_CONCURRENCY = max(1, int(os.getenv("CONSTRUCT_SEED_CONCURRENCY", "1")))
+
 
 def _seed_cast(protagonist: str, people: list[str]) -> list[str]:
     """The protagonist first (the player inherits this frame), then the
@@ -330,17 +337,38 @@ def seed_character_frames(world: Any, provider: Provider,
     (frame-scoped secrecy, P4). Returns the ids actually seeded. Writes
     ONLY to knows: frames — never canon or plot: — so it is fully
     reversible (see reseed_character_frames). Fail-open per character: a
-    failed authoring call skips that character, never the scenario."""
+    failed authoring call skips that character, never the scenario.
+
+    The per-character seed calls are independent (each authors one frame
+    from the already-fixed `digest`; no call reads another's output), so
+    with `CONSTRUCT_SEED_CONCURRENCY` > 1 the slow good-tier model calls
+    fan out over a bounded thread pool (Kernos letter 044). Appends stay
+    sequential and in cast order — PB's buffer is single-writer, so we
+    never issue concurrent writes; only the model calls run concurrently.
+    Default 1 = the prior sequential behavior, byte-for-byte."""
     from construct import cohorts
-    seeded: list[str] = []
-    for char in characters:
+
+    def _author(char: str) -> tuple[str, list[dict] | None]:
+        """One character's seed call. Returns (char, items), or (char, None)
+        on a provider failure — the fail-open-per-frame contract."""
         try:
             out = cohorts.seed_knows(provider, char, digest)
         except ProviderError as exc:
             logger.warning("knowledge seeding failed for %s: %s", char, exc)
-            continue
+            return char, None
         items = [{"entity": f["entity"], "attribute": f["attribute"], "value": f["value"]}
                  for f in out.get("facts", []) if f.get("entity") and f.get("attribute")]
+        return char, items
+
+    if SEED_CONCURRENCY > 1 and len(characters) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=SEED_CONCURRENCY) as pool:
+            results = list(pool.map(_author, characters))   # order-preserving
+    else:
+        results = [_author(char) for char in characters]
+
+    seeded: list[str] = []
+    for char, items in results:
         if items:
             world.porcelain.ingest_structured(items, frame=f"knows:{char}")
             seeded.append(char)
