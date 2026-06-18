@@ -29,6 +29,7 @@ from construct.arc.executor import (
     SESSION,
     arc_concluded,
     arc_entities,
+    arc_outcome,
     beat_pass,
     clock_pass,
     counters_from_session,
@@ -68,6 +69,8 @@ class TurnTrace:
     movement_status: str = ""  # route() passability: clear|blocked|obscured
     movement_obstruction: dict | None = None  # the blocking facts, for narration
     reveals: list = field(default_factory=list)  # (a,b) pairs correlated this turn (AKA reveal beats)
+    outcome: str | None = None  # arc_outcome this turn: won|lost|None
+    terminal: bool = False  # this turn ended the scenario (win_loss mode + outcome)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -213,9 +216,23 @@ def _conclusion_recorded(reads: Any) -> bool:
     return bool(reads.events(kind="conclusion", frame=SESSION))
 
 
+def terminal_outcome(reads: Any) -> str | None:
+    """The recorded win/loss terminal of a `win_loss` scenario, or None if it
+    hasn't ended (WIN-LOSS §10). Reads the SESSION receipt via `events()` (the
+    same pattern as `_conclusion_recorded` — SESSION event rows are read by kind,
+    not folded by `state()`); the outcome is encoded in the kind. Lets a
+    transport stop ticking an ended story instead of re-rendering aftermath."""
+    if reads.events(kind="arc_won", frame=SESSION):
+        return "won"
+    if reads.events(kind="arc_lost", frame=SESSION):
+        return "lost"
+    return None
+
+
 def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              turn: int, scope: list[str] | None = None,
-             mode: str = "pure", endless: bool = False) -> TurnResult:
+             mode: str = "pure", endless: bool = False,
+             scenario_mode: str = "endless") -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
     'coauthor' (the player may declare facts into the world).
@@ -419,6 +436,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              "value": "conclusion", "valid_from": turn_time(turn)},
         ], frame=SESSION)
 
+    # Win/loss termination (WIN-LOSS §10): STRICTLY in `win_loss` mode (founder
+    # ruling) — endless/freeplay never terminate. On the first won/lost, write
+    # the one-time SESSION receipt; this turn renders the flavored aftermath, and
+    # the transport stops ticking thereafter (Session reads terminal_outcome).
+    outcome = arc_outcome(live_reads, arc)
+    trace.outcome = outcome
+    terminal = scenario_mode == "win_loss" and outcome is not None
+    trace.terminal = terminal
+    if terminal and terminal_outcome(live_reads) is None:
+        p.ingest_structured([
+            {"entity": f"event:arc_outcome_{turn}", "attribute": "kind",
+             "value": f"arc_{outcome}", "valid_from": turn_time(turn)},
+        ], frame=SESSION)
+
     counters = counters_from_session(live_reads, arc)
     rung = navigate(counters, len(diff), bool(achieved))
     if concluded and not endless:
@@ -467,7 +498,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         f"SCENE ({player_frame}):",
         "\n".join(scene_lines) or "(nothing established here yet — the grid shows through)",
     ]
-    if concluded and not endless:
+    if terminal:
+        flavor = ("triumphant but earned — the goal is reached"
+                  if outcome == "won" else
+                  "somber — the goal is lost, the chance gone")
+        briefing_parts.append(
+            f"\nTHE STORY ENDS HERE ({outcome}). Render a final, buttoned-up "
+            f"aftermath: {flavor}. Close the world's threads in the settled wake; "
+            f"apply NO new pressure and open NO new hooks — this is the last beat.")
+    elif concluded and not endless:
         briefing_parts.append("\nTHE ARC HAS RESOLVED — render this turn as "
                               "aftermath/denouement: the world responds to the "
                               "player in the settled wake of the story's end, "

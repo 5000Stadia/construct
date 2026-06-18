@@ -25,7 +25,8 @@ from construct.game import (
     start_playthrough,
 )
 from construct.provider import Provider
-from construct.turnloop import TurnTrace, run_turn
+from construct.adapter import PorcelainWorldReads
+from construct.turnloop import TurnTrace, run_turn, terminal_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class Reply:
     prose: str
     trace: TurnTrace | None
     ok: bool = True
+    ended: bool = False  # the scenario reached its win/loss terminal (win_loss mode)
 
 
 class Session:
@@ -57,6 +59,7 @@ class Session:
         self._scope = meta.get("arc_scope") or None
         self._mode = meta.get("mode", "pure")
         self._endless = bool(meta.get("endless", False))
+        self._scenario_mode = meta.get("scenario_mode", "endless")  # win_loss terminates
         self._meta = meta
         self._closed = False
 
@@ -160,15 +163,23 @@ class Session:
         a long-lived transport (REPL/bot) survives the turn."""
         if self._closed:
             raise RuntimeError("session is closed")
+        # A win_loss scenario that already reached its terminal doesn't tick
+        # again — the story is over. Don't re-render aftermath on every input.
+        ended = terminal_outcome(PorcelainWorldReads(self._world))
+        if ended:
+            return Reply(prose=f"(The story has ended — you {ended}. "
+                               f"Start fresh to play again.)", trace=None, ended=True)
         n = next_turn_number(self._world)
         try:
             result = run_turn(self._world, self._arc, self._provider, text, n,
-                              scope=self._scope, mode=self._mode, endless=self._endless)
+                              scope=self._scope, mode=self._mode, endless=self._endless,
+                              scenario_mode=self._scenario_mode)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
             return Reply(prose=f"(the turn could not complete: {exc})",
                          trace=None, ok=False)
-        return Reply(prose=result.prose, trace=result.trace)
+        return Reply(prose=result.prose, trace=result.trace,
+                     ended=bool(result.trace and result.trace.terminal))
 
     def close(self) -> None:
         if not self._closed:

@@ -332,6 +332,45 @@ def test_reveal_field_round_trips_through_arc_store(world):
     assert rebuilt.beats[0].correlates == ("person:rival", "person:masked")
 
 
+def _drive_winning_turn(world, scenario_mode):
+    """Run the culprit-discovery turn (satisfies world_condition → won) under a
+    given scenario_mode; returns the TurnResult."""
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": [
+        {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+    ]})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": []},
+        {"prose": "You name the rival; the meter's truth is out and the settlement breathes."},
+    ])
+    return run_turn(world, arc, provider, "I examine the ledger.", turn=1,
+                    scenario_mode=scenario_mode)
+
+
+def test_win_loss_terminates_strictly(world):
+    """WIN-LOSS §10 / founder ruling: in win_loss the outcome ends the scenario —
+    trace.terminal + a one-time SESSION receipt readable by the transport."""
+    from construct.turnloop import terminal_outcome
+
+    result = _drive_winning_turn(world, scenario_mode="win_loss")
+    assert result.trace.outcome == "won"
+    assert result.trace.terminal is True
+    assert terminal_outcome(PorcelainWorldReads(world)) == "won"
+
+
+def test_endless_never_terminates(world):
+    """Strictly win_loss: endless (and freeplay) reach the outcome but DON'T
+    terminate — endless live fiction carries on."""
+    from construct.turnloop import terminal_outcome
+
+    result = _drive_winning_turn(world, scenario_mode="endless")
+    assert result.trace.outcome == "won"          # classified
+    assert result.trace.terminal is False          # but not terminal
+    assert terminal_outcome(PorcelainWorldReads(world)) is None
+
+
 def test_arc_outcome_won_lost_none_and_tiebreak(world):
     """WIN-LOSS §10 / Cx 063: arc_outcome is total, won-first. None when neither;
     lost when the refusal clock fired; won when the destination holds — even on
