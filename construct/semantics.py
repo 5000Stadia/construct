@@ -31,13 +31,26 @@ SET_VALUED_DOMAIN = frozenset({
     "knows", "allied_with", "met", "employs", "trusts", "serves_under",
 })
 
+#: Traversal-policy attributes (RFC-003 route()) — declared STRUCTURAL (no
+#: model classification) + set-valued (a portal kind blocks on several states).
+POLICY_STRUCTURAL_SET_VALUED = frozenset({"blocks_when_state", "blocks_when_relation"})
+
 
 def attribute_default(attribute: str) -> dict | None:
     """The engine consults this for an attribute with no explicit
     declaration. Return set-valued arity for inherently many-valued
     domain relations; None (engine default: functional/last-write) for
     everything else. Engine-structural attributes (`in`, `connects_to`,
-    `kind`, …) are never in our set, so the built-in semantics stand."""
+    `kind`, …) are never in our set, so the built-in semantics stand.
+
+    The traversal-policy attributes are declared STRUCTURAL + set-valued: a
+    portal kind blocks on several states (route() must see them all), and
+    structural-ness keeps `_declare_traversal_policy`'s rows from triggering a
+    per-row classifier MODEL call at build time — which on a flaky provider can
+    hang the whole build (the traversal-policy wedge, 2026-06). No model = no
+    hang; the classifier treats a structural attribute as constitutive."""
+    if attribute in POLICY_STRUCTURAL_SET_VALUED:
+        return {"structural": True, "arity": "set_valued"}
     if attribute in SET_VALUED_DOMAIN:
         return {"arity": "set_valued"}
     return None

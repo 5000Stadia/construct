@@ -15,6 +15,29 @@ def test_rule_is_conservative():
     assert attribute_default("role") is None
 
 
+def test_traversal_policy_attrs_are_structural_set_valued():
+    # RFC-003 route() policy attributes: structural (no model classification)
+    # + set-valued (route() needs all block-states). Structural is the bit that
+    # keeps _declare_traversal_policy from calling the model at build time.
+    for attr in ("blocks_when_state", "blocks_when_relation"):
+        assert attribute_default(attr) == {"structural": True, "arity": "set_valued"}
+
+
+def test_declare_traversal_policy_makes_no_model_call(tmp_path):
+    # Regression for the build wedge (2026-06): declaring the policy on a world
+    # with NO model must not raise / hang — structural attrs skip the classifier
+    # model call. And the policy must be readable set-valued for route().
+    from construct.game import (TRAVERSAL_BLOCK_STATES, _declare_traversal_policy)
+    w = _world(tmp_path / "trav.world", "trav", model=None)  # None: a model call would raise
+    try:
+        _declare_traversal_policy(w)                          # must not raise
+        states = {r.value for r in w.buffer.visible()
+                  if r.entity == "traversal:door" and r.attribute == "blocks_when_state"}
+        assert len(states) == len(TRAVERSAL_BLOCK_STATES)     # all coexist (set-valued)
+    finally:
+        w.close()
+
+
 def test_set_valued_relation_keeps_all_members(tmp_path):
     # The five-cigarette tin: under last-write it kept one; with the rule
     # declaring `contains` set-valued, all five survive.
