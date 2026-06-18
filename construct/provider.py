@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import platform
+import socket
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
@@ -381,6 +382,23 @@ class CodexProvider(Provider):
             raise SchemaViolation(f"after re-ask: {exc_msg[:300]}")
         raise AssertionError("unreachable")
 
+    @staticmethod
+    def _keepalive_socket_options() -> list[tuple[int, int, int]]:
+        """Kernel-level dead-peer detection — the SOURCE fix for the wedge that
+        `asyncio.timeout`/`httpx` read-timeout couldn't catch (letters 059/060,
+        founder's "resolve the source, don't recover" call). When a Codex
+        connection goes silent in a bad socket/TLS state, async cancellation can
+        strand in httpcore's shielded close (the `ep_poll`/0-CPU hang). TCP
+        keepalive makes the *kernel* probe the peer; a dead one surfaces as a
+        socket error in ~60s (30s idle + 3×10s probes) → a normal exception the
+        existing fail-open/retry handles, instead of an indefinite hang.
+        SO_KEEPALIVE is portable; the TCP_KEEP* tuning is Linux-only (guarded)."""
+        opts: list[tuple[int, int, int]] = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
+        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+            if hasattr(socket, name):
+                opts.append((socket.IPPROTO_TCP, getattr(socket, name), value))
+        return opts
+
     async def _call_once(self, prompt: str, schema: dict, tier: Tier,
                          deliberate: bool = False) -> str:
         body = self._body(prompt, schema, tier, deliberate)
@@ -401,7 +419,11 @@ class CodexProvider(Provider):
                 # the loop it was created on. The per-request read timeout
                 # is generous (good-tier turns are long); the asyncio bound
                 # above is the hard ceiling.
-                async with httpx.AsyncClient(timeout=httpx.Timeout(bound, connect=30.0)) as http:
+                transport = httpx.AsyncHTTPTransport(
+                    socket_options=self._keepalive_socket_options())
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(bound, connect=30.0), transport=transport
+                ) as http:
                     async with http.stream(
                         "POST", url, headers=self._headers(auth), json=body
                     ) as resp:

@@ -117,6 +117,20 @@ def test_codex_describe_names_no_secret():
     assert "codex/" in provider.describe()
 
 
+def test_keepalive_socket_options_for_dead_peer_detection():
+    # The SOURCE fix for the hung-call wedge (letters 059/060): TCP keepalive so
+    # a dead/wedged peer surfaces as a socket error (~60s) instead of hanging,
+    # rather than a process-killer recovery. SO_KEEPALIVE always; TCP_KEEP* tuning
+    # on Linux. Must wire into httpx's public transport API (non-fiddly).
+    import socket as _s
+    import httpx
+    opts = CodexProvider._keepalive_socket_options()
+    assert (_s.SOL_SOCKET, _s.SO_KEEPALIVE, 1) in opts
+    if hasattr(_s, "TCP_KEEPIDLE"):                     # Linux deploy target
+        assert any(o[1] == _s.TCP_KEEPIDLE for o in opts)
+    httpx.AsyncHTTPTransport(socket_options=opts)       # public API, must not raise
+
+
 @pytest.mark.skipif(
     not (Path.home() / ".codex" / "auth.json").exists()
     or os.getenv("HOLODECK_LIVE_SMOKE") != "1",
