@@ -273,3 +273,60 @@ def test_adjudication_allows_held_item(world):
                       turn=1)
     assert result.trace.adjudication == "allowed"
     assert "lock gives" in result.prose
+
+
+def test_reveal_beat_correlates_at_achievement(world):
+    """AKA-CORRELATION-V1 host consumption (element 3): a beat with `correlates`
+    fires the reveal on achievement — the two entities become facets of one
+    identity AS-OF that turn, without merging; before the reveal they read
+    separate (the mystery holds)."""
+    from dataclasses import replace
+
+    from construct.arc.executor import beat_pass, turn_time
+
+    p = world.porcelain
+    # The figure the rival turns out to be — its own facts, separately tracked.
+    world.ingest_structured([
+        {"entity": "person:masked", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:masked", "attribute": "seen_at", "value": "place:flat"},
+    ])
+    # Make the reveal beat achievable: the trigger sits in the player frame.
+    world.ingest_structured([
+        {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+    ], frame=PLAYER_FRAME)
+    reveal = Beat("beat:reveal", Phase.CLIMAX, Weight.REQUIRED,
+                  achievable_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"),
+                  correlates=("person:rival", "person:masked"))
+    arc = replace(make_arc(), beats=(reveal,), climax_ready_beats=("beat:reveal",))
+    seed_arc(world, arc)
+    reads = PorcelainWorldReads(world)
+    T = 3
+    # Before the reveal fires: not correlated.
+    assert p.correlations("person:rival", as_of=turn_time(T)) == []
+
+    achieved, closed, revealed = beat_pass(world, arc, reads, turn=T)
+    assert "beat:reveal" in achieved
+    assert ("person:rival", "person:masked") in revealed
+
+    # After (as-of the reveal): correlated, and the union reaches the facet's fact.
+    assert "person:masked" in p.correlations("person:rival", as_of=turn_time(T))
+    assert p.state_union("person:rival", "seen_at", as_of=turn_time(T))["status"] == "known"
+    # As-of BEFORE the reveal's valid_from: no leak — the mystery stays intact.
+    assert p.correlations("person:rival", as_of=turn_time(T) - 1) == []
+
+
+def test_reveal_field_round_trips_through_arc_store(world):
+    # The `correlates` field survives both arc persistence paths.
+    from dataclasses import replace
+
+    reveal = Beat("beat:reveal", Phase.CLIMAX, Weight.REQUIRED,
+                  achievable_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"),
+                  correlates=("person:rival", "person:masked"))
+    arc = replace(make_arc(), beats=(reveal,), climax_ready_beats=("beat:reveal",))
+    # cache path
+    assert arc_io.arc_from_cache(arc_io.arc_to_cache(arc)).beats[0].correlates == \
+        ("person:rival", "person:masked")
+    # frame path
+    seed_arc(world, arc)
+    rebuilt = arc_io.arc_from_frame(PorcelainWorldReads(world))
+    assert rebuilt.beats[0].correlates == ("person:rival", "person:masked")

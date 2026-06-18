@@ -95,11 +95,16 @@ def clock_pass(world: Any, arc: Arc, reads: Any, counters: PacingCounters,
     return fired
 
 
-def beat_pass(world: Any, arc: Arc, reads: Any, turn: int) -> tuple[list[str], list[str]]:
+def beat_pass(world: Any, arc: Arc, reads: Any,
+              turn: int) -> tuple[list[str], list[str], list[tuple[str, str]]]:
     """Re-evaluate ALL pending beats (letter 006 default), LAST in the
     tick. Achievements committed as status+justified_by; flagged
-    unreachable beats closed (repair is post-v1 — logged loudly)."""
-    achieved, closed = [], []
+    unreachable beats closed (repair is post-v1 — logged loudly). A `correlates`
+    beat additionally fires the reveal: on achievement, the two entities are
+    `correlate`d as-of this turn (PB AKA-CORRELATION-V1) — facets of one
+    identity, not merged. Returns (achieved, closed, revealed) where revealed is
+    the list of correlated (a, b) pairs this tick."""
+    achieved, closed, revealed = [], [], []
     for beat in arc.beats:
         status = reads.state(beat.beat_id, "status", frame=PLOT)
         if status not in (None, "pending"):
@@ -128,7 +133,21 @@ def beat_pass(world: Any, arc: Arc, reads: Any, turn: int) -> tuple[list[str], l
             ], frame=SESSION)
             achieved.append(beat.beat_id)
             logger.info("beat achieved: %s", beat.beat_id)
-    return achieved, closed
+            if beat.correlates is not None:
+                a, b = beat.correlates
+                try:
+                    rcpt = world.porcelain.correlate(
+                        a, b, evidence=f"reveal: {beat.beat_id}", at=turn_time(turn))
+                    outcome = rcpt.get("outcome") if isinstance(rcpt, dict) else rcpt
+                    if outcome == "vetoed_distinct":
+                        logger.warning("reveal %s vetoed: %s ≠ %s are asserted distinct",
+                                       beat.beat_id, a, b)
+                    else:
+                        revealed.append((a, b))
+                        logger.info("reveal: correlated %s ~ %s (%s)", a, b, outcome)
+                except Exception as exc:  # a reveal must never sink the tick
+                    logger.warning("reveal correlate %s~%s failed: %s", a, b, exc)
+    return achieved, closed, revealed
 
 
 def arc_concluded(reads: Any, arc: Arc) -> bool:

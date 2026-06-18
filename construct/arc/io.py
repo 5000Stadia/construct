@@ -110,6 +110,9 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
             items.append({"entity": beat.beat_id, "attribute": "unreachable_if",
                           "value": json.dumps(expr_to_obj(beat.unreachable_if)),
                           "timeless": True})
+        if beat.correlates is not None:
+            items.append({"entity": beat.beat_id, "attribute": "correlates",
+                          "value": json.dumps(list(beat.correlates)), "timeless": True})
     for clock in tuple(arc.clocks) + (arc.refusal_clock,):
         items += clock_to_items(clock, arc.arc_id)
     return [dict(item, frame=frame) for item in items]
@@ -155,12 +158,14 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
     beats = []
     for bid in beat_ids:
         unreachable = get(bid, "unreachable_if")
+        correlates = get(bid, "correlates")
         beats.append(Beat(
             beat_id=bid,
             phase=Phase(get(bid, "beat_phase")),
             weight=Weight(get(bid, "weight")),
             achievable_via=expr_from_obj(json.loads(get(bid, "achievable_via"))),
             unreachable_if=expr_from_obj(json.loads(unreachable)) if unreachable else None,
+            correlates=tuple(json.loads(correlates)) if correlates else None,
         ))
     clock_ids = json.loads(get(arc_id, "clock_index") or "[]")
     clocks, refusal = [], None
@@ -227,6 +232,7 @@ def arc_to_cache(arc: Arc) -> dict:
             "beat_id": b.beat_id, "phase": b.phase.value, "weight": b.weight.value,
             "achievable_via": expr_to_obj(b.achievable_via),
             "unreachable_if": expr_to_obj(b.unreachable_if) if b.unreachable_if else None,
+            "correlates": list(b.correlates) if b.correlates else None,
         } for b in arc.beats],
         "clocks": [_clock_to_cache(c) for c in arc.clocks],
         "refusal_clock": _clock_to_cache(arc.refusal_clock),
@@ -268,6 +274,7 @@ def arc_from_cache(d: dict) -> Arc:
             beat_id=b["beat_id"], phase=Phase(b["phase"]), weight=Weight(b["weight"]),
             achievable_via=expr_from_obj(b["achievable_via"]),
             unreachable_if=expr_from_obj(b["unreachable_if"]) if b.get("unreachable_if") else None,
+            correlates=tuple(b["correlates"]) if b.get("correlates") else None,
         ) for b in d["beats"]),
         clocks=tuple(_clock_from_cache(c) for c in d["clocks"]),
         refusal_clock=_clock_from_cache(d["refusal_clock"]),

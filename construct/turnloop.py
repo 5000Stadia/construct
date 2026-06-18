@@ -67,6 +67,7 @@ class TurnTrace:
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
     movement_status: str = ""  # route() passability: clear|blocked|obscured
     movement_obstruction: dict | None = None  # the blocking facts, for narration
+    reveals: list = field(default_factory=list)  # (a,b) pairs correlated this turn (AKA reveal beats)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -382,8 +383,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             trace.dropped_cohorts.append(f"npc_action:{npc} ({exc})")
 
     player_snap = _snap_or_empty(p, snap_scope, frame=player_frame)
-    achieved, closed = beat_pass(world, arc, live_reads, turn)
+    achieved, closed, revealed = beat_pass(world, arc, live_reads, turn)
     trace.beats_achieved, trace.beats_closed = achieved, closed
+    trace.reveals = revealed
 
     # ---- ASSEMBLY FAN-OUT (reuses the tick's materializations) -----------
     # The protagonist's facts are recast as "you" and segregated — the
@@ -490,6 +492,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             briefing_parts.append(
                 "\nMOVEMENT UNCERTAIN (render diegetically): the state of the way can't be "
                 "confirmed — render the passage as ambiguous; do NOT assert it is clearly open.")
+    if trace.reveals:
+        pairs = "; ".join(f"{a} is {b}" for a, b in trace.reveals)
+        briefing_parts.append(
+            f"\nREVEAL (render as the player's dawning recognition this turn): {pairs}. "
+            f"Two figures the player took for separate are one. Dramatize the realization; "
+            f"don't state it as a flat fact.")
     if npc_intents:
         briefing_parts.append("\nPRESENT CHARACTERS (play them by their wants):\n"
                               + "\n".join(npc_intents))

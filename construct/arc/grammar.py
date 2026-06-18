@@ -46,6 +46,11 @@ class Beat:
     weight: Weight
     achievable_via: Expr
     unreachable_if: Expr | None = None
+    #: A reveal beat (PB AKA-CORRELATION-V1, element 3): when achieved, the two
+    #: entities are `correlate`d — declared facets of one identity, as-of this
+    #: turn — WITHOUT merging. Before the beat they read separate (mystery holds);
+    #: after, the explicit correlated/union read links them. None = ordinary beat.
+    correlates: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
