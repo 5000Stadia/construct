@@ -1,0 +1,78 @@
+# Startup Entry — play / generate / provide (host spec, DRAFT, under group review)
+
+**Status:** initial draft, circulated to K / Cx / PB for full draft-then-review
+before build. Construct-owned (session-zero + CLI). Founder side-spec 1.
+**No engine dependency** — reuses the shipped ingestion pipeline; the only new
+build path is "generate the fiction, then ingest it."
+
+## 1. The three startup paths
+On startup the player chooses one of:
+1. **Play an established world** — pick from the library (`scenarios` →
+   `play <name>`). *Exists.*
+2. **Generate a new world** — the model writes a complete **hidden fiction
+   (prose)** from an optional seed, that prose is **ingested through the existing
+   pipeline** (`create_scenario_from_ingest`), then play. *New.*
+3. **Provide the fiction** — ingest a `.txt`/`.md` the player supplies
+   (`new --ingest` / the `import` command). *Exists.*
+
+The new piece is path 2; paths 1 and 3 are surfaced by a **guided entry menu**
+(vs today's flags-only CLI).
+
+## 2. Why generate-prose-then-ingest (and how it differs from `--interview`)
+There's already an `--interview` path: it expands a brief into the **constitutive
+spine directly** (structured items, *no prose*). Generate-then-ingest is
+different and complementary:
+- It writes a **full story** (real prose, a hidden source-of-truth), then runs it
+  through the **same extraction** a provided document gets.
+- So it exercises the rich projection (coreference, events, the whole shape) and
+  produces a more naturalistic, coherent world than a hand-minted spine — and it's
+  consistent with the provided-fiction path (one ingestion).
+- *Proposed:* keep `--interview` as the fast/lightweight path; generate-then-ingest
+  is the "build a rich new world" path. (Open question §6.)
+
+## 3. The new build path: `create_scenario_from_generated`
+A thin new function alongside the existing creation paths:
+1. **Author the fiction** — a new "story-author" cohort writes a complete short
+   work from an optional seed (genre / premise / length; else "surprise me").
+   Good-tier; the prose is the hidden bible.
+2. **Save the prose** — write it to disk (proposed: `generated/<name>.md` + a
+   stamp), so it is auditable and re-ingestable, exactly like the frozen example
+   fixture. *(The whole point of the showcase is fiction → projection; a saved
+   source keeps that contract.)*
+3. **Ingest it** — call `create_scenario_from_ingest(name, <saved prose>, ...)`
+   unchanged — the same six-stage pipeline (extraction → reconcile → traversal
+   policy → arc → seeding → seal), with the same per-stage status narration.
+4. **Play.**
+
+Reuses everything; the only net-new code is the story-author cohort + the menu +
+this orchestrator.
+
+## 4. The guided entry menu
+A startup surface (REPL `play` with no arg, or a `construct start`) that presents
+the three paths and routes to the existing commands. Each path can still be
+reached by flag for scripting. This pairs naturally with the win/loss mode choice
+([WIN-LOSS-CONDITIONS.md](WIN-LOSS-CONDITIONS.md) §2) — both are session-zero
+questions: *which world* and *which mode*.
+
+## 5. Explicitly out of scope
+- No engine change — extraction is PB's `ingest`, unchanged; this orchestrates it.
+- Generation quality / prompt-craft for the story-author cohort is its own tuning
+  track (like the extraction prompts); the spec defines the *path*, not the prose
+  recipe.
+
+## 6. Open questions for the reviewers
+- **K (host discipline / SESSION-ZERO):** does generate-then-ingest belong beside
+  `--interview`, or should it *replace* it (one "build new" path, prose-first)?
+  Is the guided menu the right session-zero entry, and does saving generated prose
+  to `generated/` fit the project's fixture/firewall conventions?
+- **Cx (shape / adversarial):** any failure mode in "generate → save → ingest"
+  (e.g. the author cohort produces prose that extracts poorly / too thin to make a
+  playable arc — should there be a post-ingest viability check before declaring
+  the scenario built)? Seed-injection edge cases?
+- **PB (engine truth):** confirm this is purely host orchestration over the
+  shipped `ingest` pipeline — no new engine surface.
+
+## 7. Not built yet
+Draft for review. On integration: add the story-author cohort, the
+`create_scenario_from_generated` orchestrator (save prose → reuse the ingest
+pipeline), and the guided entry menu. Nothing ships before the review lands.
