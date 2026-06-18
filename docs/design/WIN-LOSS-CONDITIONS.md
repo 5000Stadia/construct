@@ -106,3 +106,43 @@ Draft for review. On integrating the markup: add the mode choice to session-zero
 the `goal_statement` (+ leak lint) and optional `failure_when` to the arc author,
 `arc_outcome` to the executor, and the outcome-flavored terminal aftermath to the
 turn loop. Nothing ships before the review lands.
+
+---
+
+## 10. Integrated review decisions (build target) — K 063 / Cx 063 / PB 064
+
+All three legs GREEN-on-architecture / zero-engine-dependency. Folded decisions
+(this is what gets built):
+
+- **`meta.scenario_mode`, NOT `meta.mode`** (Cx #1, load-bearing). `meta.mode`
+  already drives turn-loop input authority (`pure` = declaration-denial guard) —
+  overloading it would silently disable that. New field `scenario_mode ∈
+  {win_loss, endless, freeplay}`; `mode` keeps pure/coauthor.
+- **Modes are expression dials; never structurally omit the arc** (Kernos).
+  Always author the arc; modes differ by *goal-shown* / *terminates* /
+  *nudge-strength*. `freeplay` = no player-facing destination **and** `arc_outcome`
+  is not a terminator (Cx) + nudge dialable toward zero (Kernos).
+- **`arc_outcome(reads, arc) → won|lost|None`** evaluated once after the full tick,
+  **total priority, won-first** (Cx #2 / Kernos / PB): `won` if `world_condition`;
+  else `lost` if a failure terminal; else `None`. Won-wins-ties (destination
+  reached the same tick the refusal clock fires → `won`; protects agency).
+- **Loss terminals NARROWED** (Cx #3, load-bearing): `lost` = refusal clock fired
+  **or** an authored `failure_when` Expr. **NOT** "any required beat unreachable" —
+  that stays the repair trigger (refusal backstops), not an immediate loss.
+  (First slice: `lost` = refusal-fired; `failure_when` added with the arc-author.)
+- **`goal_statement` = player-frame derivative, structurally non-leaking**
+  (Kernos + Cx #5 + PB): derive a sanitized aspiration from the hidden destination
+  into a PLAYER-facing frame (keeps `plot:` hermetic — Kernos), with a
+  **forbidden-token check** over hidden entities/values + **fail-closed** retry
+  (Cx) — not lint-hope. PB confirms it's an opaque stored fact either way.
+- **Terminal state = real transport, not just aftermath flavor** (Cx #4): on
+  `arc_outcome != None` in `win_loss`, write a terminal receipt
+  (`session:main` `event:arc_outcome` outcome=won|lost + terminal marker); after
+  terminal, `Session.turn()` does NOT run a new tick / re-render aftermath — it
+  returns the ended state. Replay = a fresh fork, not a re-open (Kernos). Define
+  CLI + Discord post-terminal behavior.
+
+Build order (slices): (1) `arc_outcome` + `scenario_mode` [safe/additive] →
+(2) terminal transport in Session/turn-loop → (3) arc-author `goal_statement`
+(+ forbidden-token/fail-closed) + `failure_when` → (4) the mode wiring
+(session-zero choice, freeplay nudge dial, opening() goal display).

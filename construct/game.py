@@ -321,6 +321,11 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     _emit(on_stage, "Stage 6 · Sealing the scenario")
     meta = {"title": title, "protagonist": arc.protagonist,
             "theme": proposal["theme"], "stance": "fiction", "mode": "pure",
+            # `mode` (pure/coauthor) is turn-loop input authority — never
+            # overloaded. `scenario_mode` is the win/loss-vs-freeplay axis
+            # (WIN-LOSS §10, Cx 063): separate field so the declaration-denial
+            # guard can't be silently disabled. Inert until termination is wired.
+            "scenario_mode": "endless" if endless else "win_loss",
             "arc_scope": sorted(e for e in arc_entities(arc) if reads.has_entity(e)),
             "seeded_frames": seeded, "endless": bool(endless)}
     spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))

@@ -330,3 +330,27 @@ def test_reveal_field_round_trips_through_arc_store(world):
     seed_arc(world, arc)
     rebuilt = arc_io.arc_from_frame(PorcelainWorldReads(world))
     assert rebuilt.beats[0].correlates == ("person:rival", "person:masked")
+
+
+def test_arc_outcome_won_lost_none_and_tiebreak(world):
+    """WIN-LOSS §10 / Cx 063: arc_outcome is total, won-first. None when neither;
+    lost when the refusal clock fired; won when the destination holds — even on
+    the same tick the refusal fired (won wins the tie, protecting agency)."""
+    from construct.arc.executor import arc_outcome
+
+    arc = make_arc()
+    reads = PorcelainWorldReads(world)
+    # Neither destination nor failure terminal.
+    assert arc_outcome(reads, arc) is None
+    # Refusal clock fired → lost.
+    world.ingest_structured([
+        {"entity": "event:refusal_fired", "attribute": "kind", "value": "clock_fired"},
+        {"entity": "event:refusal_fired", "attribute": "agent", "value": "clock:refusal",
+         "value_type": "entity"},
+    ], frame="plot:main")
+    assert arc_outcome(reads, arc) == "lost"
+    # Destination reached even with refusal fired → won (won wins the tie).
+    world.ingest_structured([
+        {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+    ], frame=PLAYER_FRAME)
+    assert arc_outcome(reads, arc) == "won"

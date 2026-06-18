@@ -164,6 +164,28 @@ def arc_concluded(reads: Any, arc: Arc) -> bool:
     return evaluate(ClockFired(refusal), reads) is Truth.TRUE
 
 
+def arc_outcome(reads: Any, arc: Arc) -> str | None:
+    """Win/loss classification (WIN-LOSS-CONDITIONS §10), evaluated after the
+    full tick. **Total priority, won-first:** `"won"` if the destination's
+    `world_condition` holds — reaching the climax is the stronger, more specific
+    signal, so it WINS a same-tick tie with the refusal clock (protecting player
+    agency); else `"lost"` if a failure terminal holds — the refusal clock fired,
+    or the arc's optional `failure_when` Expr; else `None`. Deliberately NOT
+    triggered by an unreachable REQUIRED beat — that is the repair trigger with
+    the refusal clock as backstop (Cx 063), never an immediate loss. The host
+    decides whether to terminate on this; the engine only supplies the atoms."""
+    from construct.arc.conditions import ClockFired
+
+    if evaluate(arc.shape.world_condition, reads) is Truth.TRUE:
+        return "won"
+    if evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE:
+        return "lost"
+    failure_when = getattr(arc, "failure_when", None)
+    if failure_when is not None and evaluate(failure_when, reads) is Truth.TRUE:
+        return "lost"
+    return None
+
+
 # --- the navigator (deterministic policy table, ARC-LAYER §5) -----------
 
 _RUNG_THRESHOLDS = (
