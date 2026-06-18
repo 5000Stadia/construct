@@ -156,6 +156,33 @@ def _beat_expr(beat: dict, player_frame: str):
     return Occurred(beat["entity"])
 
 
+def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
+    """Triage the coreference residue PB's reconcile() declined (letters
+    056/058, validated on anchor in 018). The SAFE automated half only:
+    a proposal with a relating edge between the two closures (`code` in
+    containment/relating_edge, or any `related_rows`) is *not identity* —
+    `reject()` it (sticky `distinct_from`, so it never re-proposes/merges).
+    Everything else (same-kind-no-edge true coreferents AND ambiguous
+    cross-kind) is LEFT as a proposal: auto-confirm carries homonym risk
+    (two people named Cray), so genuine merges stay a deliberate call, not
+    a build-time gamble. Engine surfaces structure; the host decides."""
+    rejected = deferred = 0
+    for pr in proposals:
+        ad = pr.get("auto_decline") or {}
+        relating = ad.get("code") in ("containment", "relating_edge") or ad.get("related_rows")
+        if relating:
+            try:
+                world.porcelain.reject(pr["a"], pr["b"])
+                rejected += 1
+            except Exception as exc:
+                logger.warning("residue reject %s~%s skipped: %s", pr.get("a"), pr.get("b"), exc)
+        else:
+            deferred += 1
+    if rejected or deferred:
+        logger.info("residue triage: %d rejected (relating edge), %d deferred "
+                    "(adjudicable)", rejected, deferred)
+
+
 def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                        spath: Path, endless: bool) -> dict:
     """Shared session-zero tail (both creation paths): once canon is
@@ -163,16 +190,17 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION."""
     from construct.arc.executor import arc_entities, turn_time
 
-    # Global coreference finalize pass (PB IDENTITY-RECALL-V1, letter 050):
-    # collapse cross-chunk coreferents the per-pass resolver couldn't see
-    # (e.g. "the master meter's memory core" / "the memory core") and record
-    # the ambiguous residue as adjudicable proposals. Run BEFORE arc authoring
-    # and frame seeding so both bind to reconciled identities. Idempotent;
-    # the containment veto keeps it from fusing a container with its contents.
+    # Global coreference finalize pass (PB IDENTITY-RECALL-V1/V2, letters
+    # 050-058): collapse cross-chunk coreferents the per-pass resolver couldn't
+    # see, then triage the declined residue. Run BEFORE arc authoring and frame
+    # seeding so both bind to reconciled identities. Idempotent; the containment
+    # veto keeps it from fusing a container with its contents.
     try:
-        merged = world.registry.reconcile()
-        if merged:
-            logger.info("identity reconcile: %d cross-chunk merge(s)", merged)
+        result = world.porcelain.reconcile()
+        proposals = result.get("proposals", [])
+        if result.get("merges"):
+            logger.info("identity reconcile: %d cross-chunk merge(s)", result["merges"])
+        _adjudicate_residue(world, proposals)
     except Exception as exc:  # a finalize-pass failure must never sink a build
         logger.warning("identity reconcile skipped: %s", exc)
 
