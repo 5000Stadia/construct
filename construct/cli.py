@@ -50,10 +50,17 @@ def build_parser() -> argparse.ArgumentParser:
                         help="build a world LIVE from a brief (genre/setting/"
                              "characters/situation). Pass the brief inline, or "
                              "omit it to be prompted.")
+    source.add_argument("--generate", nargs="?", const="", metavar="SEED",
+                        help="prose-first: author a complete hidden story from "
+                             "an optional seed, then ingest it (the showcase "
+                             "loop). Pass a seed inline, or omit for 'surprise me'.")
     new.add_argument("--name", help="scenario name (default: prose stem, or 'world')")
     new.add_argument("--endless", action="store_true",
                      help="no terminal arc: the world carries on past the arc's "
                           "destination instead of settling into aftermath")
+
+    sub.add_parser("start", help="guided session-zero menu: pick a world "
+                                 "(play / generate / provide) and a mode")
 
     play = sub.add_parser(
         "play", help="play interactively: load/resume the scenario, then a prompt loop")
@@ -158,11 +165,23 @@ def _cmd_scenarios() -> int:
 
 
 def _cmd_new(args: argparse.Namespace) -> int:
-    from construct.game import create_scenario_from_ingest, create_scenario_from_interview
+    from construct.game import (ViabilityError, create_scenario_from_generated,
+                                create_scenario_from_ingest,
+                                create_scenario_from_interview)
     endless = getattr(args, "endless", False)
     def _stage(msg: str) -> None:  # live progress + PB-layer showcase on stdout
         print(msg, flush=True)
-    if args.interview is not None:
+    if getattr(args, "generate", None) is not None:
+        name = args.name or "world"
+        try:
+            meta = create_scenario_from_generated(name, _provider(), seed=args.generate,
+                                                  endless=endless, on_stage=_stage)
+        except ViabilityError as exc:
+            print(f"Generated world was not playable: {'; '.join(exc.problems)}.\n"
+                  f"The source story is kept for inspection at {exc.source_path}.",
+                  file=sys.stderr)
+            return 1
+    elif args.interview is not None:
         brief = args.interview.strip()
         if not brief:
             print("Describe the world you want — genre, setting, key characters, "
@@ -187,6 +206,64 @@ def _cmd_new(args: argparse.Namespace) -> int:
     print(f"  theme: {meta['theme']}")
     print(f"Play it: construct play {name}")
     return 0
+
+
+def _ask(prompt: str) -> str:
+    try:
+        return input(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def _cmd_start(args: argparse.Namespace) -> int:
+    """The guided session-zero menu (STARTUP-ENTRY §4): two questions —
+    WHICH world (play existing / generate new / provide fiction) and WHICH
+    mode (win/loss or freeplay). A surface OVER the flags: it builds the
+    same Namespaces and delegates to `_cmd_play`/`_cmd_new`, so every path
+    stays independently reachable by flag for scripting/headless play
+    (Kernos 063 B: surface, not gate)."""
+    from construct.game import list_scenarios
+
+    print("Construct — session zero.")
+    print("  1) play an existing world")
+    print("  2) generate a new world (prose-first: author a hidden story, then ingest)")
+    print("  3) provide your own fiction to ingest")
+    choice = _ask("choose 1-3> ")
+
+    if choice == "1":
+        rows = list_scenarios()
+        if not rows:
+            print("No worlds yet — build one with option 2 or 3.", file=sys.stderr)
+            return 2
+        for i, r in enumerate(rows, 1):
+            print(f"  {i}) {r['name']} — {r.get('title', '')}")
+        try:
+            name = rows[int(_ask('world #> ')) - 1]["name"]
+        except (ValueError, IndexError):
+            print("No such world.", file=sys.stderr)
+            return 2
+        return _cmd_play(argparse.Namespace(
+            scenario=name, fresh=False, resume=False, debug=False, at=None))
+
+    if choice not in ("2", "3"):
+        print("Nothing chosen.", file=sys.stderr)
+        return 2
+
+    # Both build paths share the win/loss-vs-freeplay question (freeplay maps
+    # to the endless/no-terminal arc; win/loss is the terminating mode).
+    endless = _ask("mode — [w]in/loss or [f]reeplay? ").lower().startswith("f")
+    name = _ask("name for the new world> ") or "world"
+    ns = argparse.Namespace(name=name, endless=endless,
+                            generate=None, interview=None, ingest=None)
+    if choice == "2":
+        ns.generate = _ask("optional seed (genre/premise, or blank to surprise me)> ")
+    else:
+        path = _ask("path to your .txt/.md fiction> ")
+        if not path:
+            print("No file given.", file=sys.stderr)
+            return 2
+        ns.ingest = path
+    return _cmd_new(ns)
 
 
 def _cmd_play(args: argparse.Namespace) -> int:
@@ -301,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_scenarios()
     if args.command == "new":
         return _cmd_new(args)
+    if args.command == "start":
+        return _cmd_start(args)
     if args.command == "play":
         return _cmd_play(args)
     if args.command == "knows":

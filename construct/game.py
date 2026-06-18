@@ -35,6 +35,11 @@ from construct.provider import Provider, ProviderError, complete_sync, engine_ti
 logger = logging.getLogger(__name__)
 
 WORLDS_DIR = Path("worlds")
+#: The authoring side of the firewall: generated source bibles (the hidden
+#: full story) live here — readable by the ingest pipeline and operator/audit,
+#: NEVER surfaced in a play session. A runtime artifact (gitignored, per-user),
+#: distinct from the committed `examples/` fixture (Kernos 063 B; Cx 063 #7).
+GENERATED_DIR = Path("generated")
 
 ARC_SCHEMA = {
     "type": "object",
@@ -455,6 +460,127 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
         raise
     finally:
         world.close()
+
+
+class ViabilityError(RuntimeError):
+    """A generated scenario was ingested but failed the post-ingest
+    viability gate (STARTUP-ENTRY / Cx 063 #6). The published `.world`/
+    `.meta.json` are removed; the generated source is preserved for audit
+    at `source_path`. Raised so the caller surfaces an actionable failure
+    instead of a playable-but-broken scenario."""
+
+    def __init__(self, name: str, source_path: Path, problems: list[str]) -> None:
+        self.name = name
+        self.source_path = source_path
+        self.problems = problems
+        super().__init__(
+            f"generated scenario {name!r} failed the viability gate "
+            f"({'; '.join(problems)}); source preserved at {source_path}")
+
+
+def _save_generated_prose(name: str, work: dict) -> Path:
+    """Persist the authored bible to the authoring side of the firewall,
+    collision-proof (never clobber an existing world's source). Ensures a
+    leading `# Title` line so the ingest pipeline reads the title."""
+    GENERATED_DIR.mkdir(exist_ok=True)
+    title = (work.get("title") or name).strip()
+    prose = (work.get("prose") or "").strip()
+    if not prose:
+        raise RuntimeError("story-author produced no prose")
+    # Ensure an h1 title line (the ingest pipeline reads the title from line 1).
+    # A leading h2 ('## chapter') is NOT a title — prepend one above it.
+    if not prose.lstrip().startswith("# "):
+        prose = f"# {title}\n\n{prose}"
+    path, n = GENERATED_DIR / f"{name}.md", 2
+    while path.exists():
+        path, n = GENERATED_DIR / f"{name}_{n}.md", n + 1
+    path.write_text(prose)
+    return path
+
+
+def _unpublish_scenario(name: str) -> None:
+    """Remove a published scenario's `.world`/`.meta.json` (+ any play
+    slot). Used when the viability gate rejects a generated world; the
+    generated source is deliberately NOT touched (kept for audit)."""
+    spath = scenario_path(name)
+    spath.unlink(missing_ok=True)
+    spath.with_suffix(".meta.json").unlink(missing_ok=True)
+    slot_path(name).unlink(missing_ok=True)
+
+
+def _assess_viability(name: str, meta: dict) -> list[str]:
+    """Post-ingest viability gate (Cx 063 #6, PB 064: expressible on shipped
+    reads). Returns a list of problems — empty means playable. Checks entry
+    material (title, a resolvable protagonist, ≥2 people, ≥1 place), that the
+    arc seeded (arc_scope + a knowledge frame), and a cold establishing-set
+    read renders a non-empty 'world at rest'. Arc lint already passed (it is
+    fatal in `_finalize_scenario`), so it is not re-checked here."""
+    problems: list[str] = []
+    if not meta.get("title"):
+        problems.append("no title")
+    protagonist = meta.get("protagonist")
+    if not protagonist:
+        problems.append("no protagonist")
+    if not meta.get("arc_scope"):
+        problems.append("empty arc_scope")
+    if not meta.get("seeded_frames"):
+        problems.append("no character knowledge seeded")
+
+    world = _world(scenario_path(name), name)
+    try:
+        reads = PorcelainWorldReads(world)
+        ids = _canon_entity_ids(world)
+        people = [e for e in ids if e.startswith("person:")]
+        places = [e for e in ids if e.startswith("place:")]
+        if len(people) < 2:
+            problems.append(f"too few people for entry ({len(people)})")
+        if not places:
+            problems.append("no places for entry")
+        if protagonist and not reads.has_entity(protagonist):
+            problems.append(f"protagonist {protagonist} absent from canon")
+        scope = meta.get("arc_scope") or []
+        if scope:
+            snap = world.porcelain.snapshot(sorted(scope), lens="establishing_set")
+            if not snap.get("facts"):
+                problems.append("establishing set is empty (no coherent cold-open)")
+    finally:
+        world.close()
+    return problems
+
+
+def create_scenario_from_generated(name: str, provider: Provider, *, seed: str = "",
+                                   endless: bool = False, on_stage=None) -> dict:
+    """Session-zero Path 2 (STARTUP-ENTRY §3): author a complete HIDDEN story
+    from an optional seed, save it on the authoring side of the firewall,
+    ingest it through the UNCHANGED six-stage pipeline, then GATE on
+    post-ingest viability before declaring the scenario built. Prose-first is
+    Construct's showcase loop (fiction → projection). On gate failure the
+    generated source is preserved for audit and the published world is removed
+    (ViabilityError) — never a playable-but-broken scenario (Cx 063 #6)."""
+    from construct import cohorts
+
+    WORLDS_DIR.mkdir(exist_ok=True)
+    if scenario_path(name).exists():
+        raise FileExistsError(f"scenario {name!r} already exists")
+
+    _emit(on_stage, "Stage 0 · Authoring the hidden source story · prose-first "
+                    "(the showcase loop: fiction → projection)")
+    work = cohorts.author_story(provider, seed=seed)
+    prose_path = _save_generated_prose(name, work)
+    _emit(on_stage, f"   …hidden bible saved (authoring side of the firewall) "
+                    f"→ {prose_path}")
+
+    meta = create_scenario_from_ingest(name, prose_path, provider,
+                                       endless=endless, on_stage=on_stage)
+
+    _emit(on_stage, "Stage 7 · Viability gate · entry material + cold-open smoke "
+                    "over shipped reads")
+    problems = _assess_viability(name, meta)
+    if problems:
+        _unpublish_scenario(name)
+        raise ViabilityError(name, prose_path, problems)
+    _emit(on_stage, "   …viable — scenario published")
+    return meta
 
 
 def _canon_entity_ids(world: Any) -> set[str]:

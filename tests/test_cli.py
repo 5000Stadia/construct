@@ -90,3 +90,43 @@ def test_new_interview_empty_brief_is_loud(capsys, monkeypatch):
     rc = main(["new", "--interview"])
     assert rc == 2
     assert "nothing to build" in capsys.readouterr().err
+
+
+def test_new_generate_parses_seed_and_is_mutually_exclusive():
+    args = build_parser().parse_args(["new", "--generate", "a noir harbor"])
+    assert args.generate == "a noir harbor"
+    # bare --generate is the 'surprise me' const
+    assert build_parser().parse_args(["new", "--generate"]).generate == ""
+    # generate/ingest/interview are mutually exclusive sources
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["new", "--generate", "x", "--ingest", "y.md"])
+
+
+def test_start_menu_routes_to_generate(monkeypatch, capsys):
+    # The guided menu is a surface over the flags: choosing "generate" must
+    # delegate to the same build path with the chosen mode + seed.
+    from construct import cli
+    answers = iter(["2", "f", "myworld", "a noir harbor"])  # generate, freeplay, name, seed
+    monkeypatch.setattr("builtins.input", lambda _p="": next(answers))
+    captured = {}
+
+    def _fake_new(ns):
+        captured["ns"] = ns
+        return 0
+
+    monkeypatch.setattr(cli, "_cmd_new", _fake_new)
+    rc = main(["start"])
+    assert rc == 0
+    ns = captured["ns"]
+    assert ns.generate == "a noir harbor" and ns.name == "myworld"
+    assert ns.endless is True  # freeplay → endless/no-terminal
+    assert ns.ingest is None and ns.interview is None
+
+
+def test_start_menu_play_with_empty_library_is_loud(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "worlds").mkdir()
+    monkeypatch.setattr("builtins.input", lambda _p="": "1")  # play, but nothing exists
+    rc = main(["start"])
+    assert rc == 2
+    assert "No worlds yet" in capsys.readouterr().err

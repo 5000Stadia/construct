@@ -72,7 +72,31 @@ questions: *which world* and *which mode*.
 - **PB (engine truth):** confirm this is purely host orchestration over the
   shipped `ingest` pipeline — no new engine surface.
 
-## 7. Not built yet
-Draft for review. On integration: add the story-author cohort, the
-`create_scenario_from_generated` orchestrator (save prose → reuse the ingest
-pipeline), and the guided entry menu. Nothing ships before the review lands.
+## 7. Built (review integrated — Kernos 063 B, Cx 063 #6/#7, PB 064)
+Shipped host-side; no engine surface (PB 064 confirmed). What landed and the
+review decisions baked in:
+- **`cohorts.author_story(provider, seed)`** — prose-first story-author (good
+  tier). The seed is **untrusted player text**: bounded (`_SEED_MAX_CHARS`) and
+  quoted strictly as premise DATA inside `<<<SEED … SEED>>>` markers, never as
+  instructions (Cx #7 injection hardening; fixture-tested with an "ignore
+  previous instructions" seed).
+- **`game.create_scenario_from_generated(...)`** — author → `_save_generated_prose`
+  → `create_scenario_from_ingest` (UNCHANGED pipeline) → **viability gate**.
+- **`generated/`** — the authoring side of the firewall (the hidden bible);
+  **gitignored** runtime artifact, distinct from committed `examples/`
+  (Kernos B.2); collision-proof stamped names (B.3); never read in a play
+  session (B.1).
+- **Viability gate `_assess_viability`** (Cx #6, PB 064): entry material (title,
+  a resolvable protagonist, ≥2 people, ≥1 place), arc seeded (`arc_scope` +
+  ≥1 knowledge frame), and a cold establishing-set read renders a non-empty
+  world-at-rest. On failure: `ViabilityError` — the published `.world`/`.meta`
+  are removed (`_unpublish_scenario`), the generated **source is preserved for
+  audit**, and the caller surfaces an actionable failure (never a
+  playable-but-broken scenario).
+- **Entry menu** — `construct start` (Cx: cleaner than overloading `play`); a
+  **surface over the flags** (`new --generate [SEED]` / `--ingest` / `--interview`),
+  every path still reachable by flag for headless/scripted play (Kernos B). The
+  menu asks the two session-zero questions: which world + which mode (freeplay →
+  endless/no-terminal; win/loss → terminating).
+- **`--interview` kept beside** generate-then-ingest: spine-first (sketch) vs
+  prose-first (the showcase loop, the primary "build a rich new world" path).
