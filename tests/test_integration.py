@@ -131,6 +131,28 @@ class TestArcRoundTrip:
         assert all(not f["entity"].startswith(("beat:", "clock:", "arc:", "shape:"))
                    for f in snap["facts"])
 
+    def test_pins_round_trip_frame_and_cache(self, world):
+        from construct.arc.grammar import Pin
+        pins = (
+            Pin("pin:law", "region", "place:study", "gravity is half here",
+                subject_attribute="gravity", anchor="place:study", severity=0.5),
+            Pin("pin:bomb", "temporal", "fact:secret", "a device counts down",
+                valid_from=1.0, valid_to=9.0, severity=1.0),
+        )
+        arc = replace(make_arc(), pins=pins)
+        seed_arc(world, arc)
+        rebuilt = arc_io.arc_from_frame(PorcelainWorldReads(world))
+        assert {p.pin_id for p in rebuilt.pins} == {"pin:law", "pin:bomb"}
+        law = next(p for p in rebuilt.pins if p.pin_id == "pin:law")
+        assert law.anchor == "place:study" and law.severity == 0.5
+        bomb = next(p for p in rebuilt.pins if p.pin_id == "pin:bomb")
+        assert bomb.valid_from == 1.0 and bomb.valid_to == 9.0
+        # cache path preserves them too
+        cached = arc_io.arc_from_cache(arc_io.arc_to_cache(arc))
+        assert {p.pin_id for p in cached.pins} == {"pin:law", "pin:bomb"}
+        # no pins → empty tuple through both
+        assert arc_io.arc_from_cache(arc_io.arc_to_cache(make_arc())).pins == ()
+
     def test_failure_when_round_trips_frame_and_cache(self, world):
         from construct.arc.conditions import Occurred
         arc = make_arc()
@@ -192,6 +214,41 @@ class TestFullTurn:
         # beat status persisted in plot:
         st = world.porcelain.state("beat:discover", "status", frame="plot:main")
         assert st["status"] == "known" and st["fact"]["value"] == "achieved"
+
+    def test_region_pin_surfaces_in_briefing_without_leaking_metadata(self, world):
+        from construct.arc.grammar import Pin
+        # player is in place:study; a region pin anchored there is in scope
+        arc = replace(make_arc(), pins=(
+            Pin("pin:law", "region", "place:study", "the air here is thin and cold",
+                subject_attribute="atmosphere", anchor="place:study", severity=0.5),))
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": []},
+            {"prose": "You take in the cold study."},
+        ])
+        result = run_turn(world, arc, provider, "I look around.", turn=1)
+        narrate_prompt = provider.calls[-1][0]
+        # the directive is woven into the briefing as a PINS block...
+        assert "PINNED AWARENESS" in narrate_prompt
+        assert "the air here is thin and cold" in narrate_prompt
+        # ...but the raw pin metadata (a plot:-frame entity) never leaks as a row
+        assert "pin:law ·" not in narrate_prompt
+        assert "pin:law" in [pid for pid, _kind, _sal in result.trace.pins]
+
+    def test_no_pins_means_no_pins_block(self, world):
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": []},
+            {"prose": "Quiet."},
+        ])
+        result = run_turn(world, arc, provider, "I wait.", turn=1)
+        assert "PINNED AWARENESS" not in provider.calls[-1][0]
+        assert result.trace.pins == []
 
     def test_furnish_is_memoized(self, world):
         arc = make_arc()

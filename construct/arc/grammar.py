@@ -85,6 +85,36 @@ class ConclusionShape:
 
 
 @dataclass(frozen=True)
+class Pin:
+    """A pinned-awareness channel entry (PINNED-AWARENESS spec): an existing
+    canon fact/condition marked awareness-bearing — foregrounded every turn
+    its scope is active, ranked by salience. The base abstraction of which a
+    clock is the temporal-spending specialization (Kernos 060 #1). Stored in
+    a host-owned frame, NEVER canon; the engine never reads pins; minting is
+    host-only (never an agent tool, Kernos 060 #7).
+
+    Scope (first build: region / temporal / social-entity-presence only —
+    group presence deferred, Cx 062 #4):
+    - region   → active while `anchor` is in the protagonist's containment
+      ancestry (computed once/turn; O(1) membership per pin).
+    - temporal → active while `awareness_as_of ∈ [valid_from, valid_to)`.
+    - social   → active while `anchor` (a single entity) is present in scene.
+    `directive` is the host-facing phrasing the narrator weaves in (the
+    meaning layer); the subject is read in the player frame for dedupe and
+    salience, never briefed raw (no leak, Cx 062 #3)."""
+
+    pin_id: str
+    scope_kind: str  # "region" | "temporal" | "social"
+    subject_entity: str
+    directive: str
+    subject_attribute: str | None = None
+    anchor: str | None = None  # region ancestor / social entity
+    valid_from: float | None = None
+    valid_to: float | None = None
+    severity: float = 1.0  # [0,1] base weight, modulates salience
+
+
+@dataclass(frozen=True)
 class Arc:
     """The hidden authored destination, complete (§2.1)."""
 
@@ -103,6 +133,9 @@ class Arc:
     #: refusal clock, which always backstops. None = loss only by refusal
     #: timeout. Never a player-facing row; evaluated host-side over reads.
     failure_when: Expr | None = None
+    #: The pinned-awareness channel (PINNED-AWARENESS): host-owned, briefed
+    #: every turn a pin's scope is active. Empty = no pins.
+    pins: tuple[Pin, ...] = ()
 
     def beat(self, beat_id: str) -> Beat:
         for b in self.beats:

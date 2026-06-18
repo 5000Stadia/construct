@@ -98,7 +98,39 @@ render their directives. Clocks feed temporal pins. No engine write-path change.
   with no new primitive — and flag if the region-pin inheritance read wants the
   same affordance as the frame-inheritance question you've been circling.
 
-## 9. Not built yet
-This is a draft for review. On integration of the group's markup, Construct
-implements the pin channel in the turn loop; nothing ships before the review
-lands.
+## 9. ~~Not built yet~~ → v1 SHIPPED (see §10)
+
+## 10. Built — v1 (reviews 060 Kernos / 062 Cx / 063 PB integrated)
+Host-side, no engine primitive (PB 063 held). What landed:
+- **`grammar.Pin`** + IO round-trip (`pin_to_items` → `plot:main`, the
+  host-owned hidden frame; `pin_index` on `arc:main` for O(1) discovery —
+  Cx #1, never a log scan) + cache. `Arc.pins` (empty by default; inert).
+- **`construct/pins.py` `resolve_active_pins`** — the pure recipe: region
+  (anchor ∈ precomputed ancestry, O(1) — Kernos #2), temporal (window gated),
+  social (single-entity presence). One **`awareness_as_of = turn_time(turn)`**
+  drives every scope test (Kernos #2 / Cx #2). Normalized salience [0,1] per
+  kind with deterministic cross-kind bands **temporal > social > region**
+  (Kernos #4); degenerate windows clamped (Cx). `spent` set excludes
+  permanently — distinct from out-of-scope, which returns (Kernos #6). Salience
+  is disposable ranking, never written as truth (RFC-002).
+- **Turn-loop integration** — a `PINNED AWARENESS` briefing block from active
+  pins (capped `_PIN_CAP=6`, stable order); a pinned subject is **suppressed
+  from the plain SCENE list** and surfaced only via its directive (dedupe,
+  Kernos #5). Only the host-authored **directive** is briefed (never raw `pin:`
+  rows), so no plot:-frame metadata leaks (Cx #3). `trace.pins` for the debug
+  surface. Minting is host-only — no agent tool (Kernos #7).
+
+### Deferred (noted, not in v1)
+- **Authoring path** — pins are host/test-minted in v1; an arc-author/charter-law
+  pass that *emits* pins from a world is a thin follow-up (no new engine surface).
+- **Group social presence** — v1 is single-entity presence only; group membership
+  needs a declared+indexed shape (Cx #4), deferred until a real group-pin need.
+- **Social spike-on-entry** — v1 presence salience is steady (deterministic);
+  the enter-spike needs prior-turn scene membership (a `session:main` host
+  receipt), deferred.
+- **Auto-`spent` on condition resolve / clock-fire** — the exclusion mechanism +
+  `pin_spent` receipt read are wired; the host act that *writes* spent when a
+  bomb fires/defuses is deferred with the authoring pass.
+- **Broader turn-read as-of** — Cx #2's wider point (existing scene/NPC reads
+  mostly omit `as_of`) is scoped out of this slice; the pin assembly uses one
+  `awareness_as_of`, the rest of the turn read path is unchanged for now.

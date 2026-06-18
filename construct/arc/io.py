@@ -11,7 +11,11 @@ import json
 from dataclasses import fields
 
 from construct.arc import conditions as C
-from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
+from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Pin, Rung, Weight
+
+#: The pin fields persisted as plot rows / cache keys (one row per field).
+_PIN_FIELDS = ("scope_kind", "subject_entity", "directive", "subject_attribute",
+               "anchor", "valid_from", "valid_to", "severity")
 
 _ATOM_TYPES = {
     "state_is": C.StateIs, "located": C.Located, "in_frame": C.InFrame,
@@ -119,7 +123,41 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
                           "value": json.dumps(list(beat.correlates)), "timeless": True})
     for clock in tuple(arc.clocks) + (arc.refusal_clock,):
         items += clock_to_items(clock, arc.arc_id)
+    for pin in arc.pins:
+        items += pin_to_items(pin, arc.arc_id)
     return [dict(item, frame=frame) for item in items]
+
+
+def pin_to_items(pin: Pin, arc_id: str) -> list[dict]:
+    """A pin as plot rows (host-owned frame; never canon). One row per
+    field that is set — absent optional fields simply aren't written."""
+    items = [{"entity": pin.pin_id, "attribute": "kind", "value": "pin", "timeless": True},
+             {"entity": pin.pin_id, "attribute": "part_of", "value": arc_id, "timeless": True}]
+    for field_name in _PIN_FIELDS:
+        val = getattr(pin, field_name)
+        if val is not None:
+            items.append({"entity": pin.pin_id, "attribute": field_name,
+                          "value": val, "timeless": True})
+    return items
+
+
+def _pin_from_reads(get, pin_id: str) -> Pin:
+    """Reconstruct one Pin from its plot rows."""
+    return Pin(
+        pin_id=pin_id,
+        scope_kind=get(pin_id, "scope_kind"),
+        subject_entity=get(pin_id, "subject_entity"),
+        directive=get(pin_id, "directive"),
+        subject_attribute=get(pin_id, "subject_attribute"),
+        anchor=get(pin_id, "anchor"),
+        valid_from=_as_float(get(pin_id, "valid_from")),
+        valid_to=_as_float(get(pin_id, "valid_to")),
+        severity=_as_float(get(pin_id, "severity")) or 1.0,
+    )
+
+
+def _as_float(v) -> float | None:
+    return None if v is None else float(v)
 
 
 def clock_to_items(clock: Clock, arc_id: str) -> list[dict]:
@@ -201,6 +239,8 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
     if refusal is None:
         raise ValueError(f"{arc_id}: no refusal clock in {frame} — arc is corrupt")
     failure_raw = get(arc_id, "failure_when")
+    pin_ids = json.loads(get(arc_id, "pin_index") or "[]")
+    pins = tuple(_pin_from_reads(get, pid) for pid in pin_ids)
     return Arc(
         arc_id=arc_id,
         protagonist=get(arc_id, "protagonist"),
@@ -213,6 +253,7 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
         phase_budget={Phase(k): v for k, v in
                       json.loads(get(arc_id, "phase_budget") or "{}").items()},
         failure_when=expr_from_obj(json.loads(failure_raw)) if failure_raw else None,
+        pins=pins,
     )
 
 
@@ -246,6 +287,7 @@ def arc_to_cache(arc: Arc) -> dict:
         "climax_ready_beats": list(arc.climax_ready_beats),
         "phase_budget": {p.value: n for p, n in arc.phase_budget.items()},
         "failure_when": expr_to_obj(arc.failure_when) if arc.failure_when else None,
+        "pins": [{f: getattr(p, f) for f in ("pin_id", *_PIN_FIELDS)} for p in arc.pins],
     }
 
 
@@ -289,6 +331,7 @@ def arc_from_cache(d: dict) -> Arc:
         climax_ready_beats=tuple(d["climax_ready_beats"]),
         phase_budget={Phase(k): v for k, v in d.get("phase_budget", {}).items()},
         failure_when=expr_from_obj(d["failure_when"]) if d.get("failure_when") else None,
+        pins=tuple(Pin(**p) for p in d.get("pins", [])),
     )
 
 
@@ -300,5 +343,10 @@ def index_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
          "timeless": True, "frame": frame},
         {"entity": arc.arc_id, "attribute": "clock_index",
          "value": json.dumps([c.clock_id for c in arc.clocks] + [arc.refusal_clock.clock_id]),
+         "timeless": True, "frame": frame},
+        # The pin discovery index (Cx 062 #1): the turn loop reads candidate
+        # pin ids from here, never a host-side log scan.
+        {"entity": arc.arc_id, "attribute": "pin_index",
+         "value": json.dumps([p.pin_id for p in arc.pins]),
          "timeless": True, "frame": frame},
     ]

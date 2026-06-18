@@ -37,11 +37,13 @@ from construct.arc.executor import (
     turn_time,
 )
 from construct.arc.grammar import Arc
+from construct.pins import resolve_active_pins
 from construct.provider import Provider, ProviderError
 
 logger = logging.getLogger(__name__)
 
 _ABSENT = object()
+_PIN_CAP = 6  # max pins surfaced per turn (Cx 062: cap + stable order)
 
 
 @dataclass
@@ -71,6 +73,7 @@ class TurnTrace:
     reveals: list = field(default_factory=list)  # (a,b) pairs correlated this turn (AKA reveal beats)
     outcome: str | None = None  # arc_outcome this turn: won|lost|None
     terminal: bool = False  # this turn ended the scenario (win_loss mode + outcome)
+    pins: list = field(default_factory=list)  # (pin_id, scope_kind, salience) surfaced this turn
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -404,14 +407,42 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     trace.beats_achieved, trace.beats_closed = achieved, closed
     trace.reveals = revealed
 
+    # ---- PINNED AWARENESS (PINNED-AWARENESS spec; reviews 060/062/063) ---
+    # One awareness coordinate for the WHOLE assembly (Kernos 060 #2 / Cx #2):
+    # region ancestry (the turn's current chain), the scene's present entities,
+    # and the temporal window all resolve as-of the same `now`. Candidates come
+    # from the arc's pin set (the host index, never a log scan).
+    awareness_as_of = turn_time(turn)
+    pin_subjects: set[tuple] = set()
+    active_pins: list = []
+    if arc.pins:
+        present_entities = {e for (e, a), v in canon_table.items()
+                            if a == "in" and v == scene}
+        present_entities.add(arc.protagonist)
+        try:  # `spent` pins recede permanently (Kernos 060 #6); none normally
+            spent = {a for ev in live_reads.events(kind="pin_spent", frame=SESSION)
+                     for a in ev.agents}
+        except Exception:
+            spent = set()
+        active_pins = resolve_active_pins(
+            arc.pins, ancestry=set(chain), present_entities=present_entities,
+            as_of=awareness_as_of, spent=spent)
+        pin_subjects = {ap.subject_key for ap in active_pins}
+        trace.pins = [(ap.pin.pin_id, ap.pin.scope_kind, round(ap.salience, 3))
+                      for ap in active_pins]
+
     # ---- ASSEMBLY FAN-OUT (reuses the tick's materializations) -----------
     # The protagonist's facts are recast as "you" and segregated — the
     # narrator must never see the player listed as a scene entity
     # (letter 025: the briefing itself was inviting third-person Marn).
+    # A pinned subject is suppressed from the plain scene list and surfaced
+    # ONLY in the PINS block, with its directive (dedupe, Kernos 060 #5).
     scene_lines, you_lines = [], []
     for f in player_snap.get("facts", []):
         if f["entity"] == arc.protagonist:
             you_lines.append(f"you · {f['attribute']} · {f['value']}")
+        elif (f["entity"], f["attribute"]) in pin_subjects:
+            continue
         else:
             scene_lines.append(f"{f['entity']} · {f['attribute']} · {f['value']}")
     trace.briefing_frames = [player_frame]
@@ -498,6 +529,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         f"SCENE ({player_frame}):",
         "\n".join(scene_lines) or "(nothing established here yet — the grid shows through)",
     ]
+    if active_pins:
+        pin_lines = [f"[{ap.pin.scope_kind}] {ap.pin.directive}"
+                     for ap in active_pins[:_PIN_CAP]]
+        briefing_parts.append(
+            "\nPINNED AWARENESS (foreground these — what is true and pressing "
+            "here, ordered by urgency; weave in diegetically, do not list):\n"
+            + "\n".join(pin_lines))
     if terminal:
         flavor = ("triumphant but earned — the goal is reached"
                   if outcome == "won" else
