@@ -393,3 +393,47 @@ def test_arc_outcome_won_lost_none_and_tiebreak(world):
         {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
     ], frame=PLAYER_FRAME)
     assert arc_outcome(reads, arc) == "won"
+
+
+class TestGoalStatement:
+    """WIN-LOSS §10: the player-facing aim is leak-checked (fail-closed) and
+    derived from the hidden destination — never a plot:/canon row."""
+
+    def _proposal(self, goal):
+        return {
+            "goal_statement": goal,
+            "beats": [
+                {"kind": "player_learns", "entity": "fact:secret",
+                 "attribute": "culprit", "value": "person:rival"},
+            ],
+        }
+
+    def test_hidden_terms_cover_canon_and_beat_answers(self, world):
+        from construct.game import _hidden_terms
+        terms = _hidden_terms(world, self._proposal("anything"))
+        # local-part tokens of canon ids + beat answer entity/value tokens
+        assert {"rival", "secret", "study", "flat"} <= terms
+        # the beat ATTRIBUTE ('culprit') is a legitimate genre word for the
+        # aim ('name the culprit'), not a spoiler — only who/what is hidden
+        assert "culprit" not in terms
+        # short tokens dropped as noise
+        assert "in" not in terms
+
+    def test_safe_check_is_a_whole_word_disjoint(self):
+        from construct.game import _goal_statement_safe
+        forbidden = {"rival", "secret"}
+        assert _goal_statement_safe("name the one who did it", forbidden)
+        assert not _goal_statement_safe("expose the rival", forbidden)
+        assert not _goal_statement_safe("", forbidden)
+        # substring is NOT a match — whole-word tokens only
+        assert _goal_statement_safe("rivalry is not the word", {"rival"})
+
+    def test_player_goal_keeps_clean_and_drops_leaky(self, world):
+        from construct.game import _player_goal, _DEFAULT_GOAL
+        clean = "solve the mystery and name who is responsible"
+        assert _player_goal(self._proposal(clean), world) == clean
+        # leaks the culprit's id local-part → fail-closed to the default
+        leaky = "prove that person:rival did it"
+        assert _player_goal(self._proposal(leaky), world) == _DEFAULT_GOAL
+        # empty/absent → default, never crashes
+        assert _player_goal(self._proposal(""), world) == _DEFAULT_GOAL

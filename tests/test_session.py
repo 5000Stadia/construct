@@ -157,6 +157,26 @@ class TestSession:
         assert reply.ok is False and "could not complete" in reply.prose
         s.close()  # session still usable/closeable
 
+    def test_win_loss_goal_shown_at_opening(self, scenario, tmp_path):
+        # Re-seal the scenario as win_loss with a player-facing aim.
+        meta_path = tmp_path / "worlds" / "demo.world"
+        meta_path = meta_path.with_suffix(".meta.json")
+        meta = json.loads(meta_path.read_text())
+        meta["scenario_mode"] = "win_loss"
+        meta["goal_statement"] = "name who is responsible"
+        meta_path.write_text(json.dumps(meta))
+        s = Session.open(scenario, player_id="u1", provider=_provider())
+        assert s.goal_statement() == "name who is responsible"
+        assert "Your aim: name who is responsible" in s.opening()
+        s.close()
+
+    def test_endless_has_no_aim(self, scenario):
+        # The default fixture meta has no scenario_mode → endless → no aim.
+        s = Session.open(scenario, player_id="u1", provider=_provider())
+        assert s.goal_statement() is None
+        assert "Your aim:" not in s.opening()
+        s.close()
+
 
 class TestDiscordRouting:
     def test_help_and_scenarios_are_commands(self, scenario):

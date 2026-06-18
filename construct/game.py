@@ -41,6 +41,13 @@ ARC_SCHEMA = {
     "properties": {
         "protagonist": {"type": "string", "description": "entity id, e.g. person:joel"},
         "theme": {"type": "string", "description": "the pitchable theme, one line"},
+        "goal_statement": {"type": "string",
+                           "description": "ONE non-spoiling line of player-facing "
+                           "aspiration for win_loss mode — the AIM, never the "
+                           "mechanism/culprit/solution. E.g. 'solve the mystery and "
+                           "name the culprit', 'survive the journey to safer ground'. "
+                           "Must NOT contain any entity id, character name, or the "
+                           "hidden answer."},
         "delta_type": {"type": "string",
                        "enum": ["drive_inverted", "desire_at_cost", "desire_renounced",
                                 "identity_accepted", "homecoming_changed"]},
@@ -280,6 +287,11 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             "people+entity digest. Choose the protagonist (the natural "
             "point-of-view character), the thematic conclusion shape, and "
             "4-6 path-independent beats.\n"
+            "Also emit `goal_statement`: ONE non-spoiling player-facing line of "
+            "aspiration — the AIM only (e.g. 'solve the mystery and name the "
+            "culprit', 'survive the journey to safer ground'). It must NEVER "
+            "contain a character name, an entity id, the mechanism, or the "
+            "hidden answer; it is shown to the player at the start.\n"
             "HARD RULE: a `player_learns` beat's `entity` MUST be one of the "
             "AVAILABLE IDS below verbatim (do NOT invent new fact:/obj: ids); "
             "its attribute/value should match a triple in the digest. For a "
@@ -328,6 +340,11 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             "scenario_mode": "endless" if endless else "win_loss",
             "arc_scope": sorted(e for e in arc_entities(arc) if reads.has_entity(e)),
             "seeded_frames": seeded, "endless": bool(endless)}
+    # The player-facing aim is a derivative of the hidden destination, NOT a
+    # plot:/canon row (Kernos ruling): a leak-checked line on the scenario
+    # seal, shown only in win_loss mode. Freeplay/endless has no fixed aim.
+    if not endless:
+        meta["goal_statement"] = _player_goal(proposal, world)
     spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
     return meta
 
@@ -420,6 +437,56 @@ def _canon_entity_ids(world: Any) -> set[str]:
 def _known_people(world: Any) -> list[str]:
     """Person entities in canon."""
     return sorted(e for e in _canon_entity_ids(world) if e.startswith("person:"))
+
+
+#: Fallback shown when the authored goal leaks a hidden term (fail-closed):
+#: win_loss always gets an aim line, never a spoiling one.
+_DEFAULT_GOAL = "Uncover the truth and see the story through to its end."
+
+
+def _hidden_terms(world: Any, proposal: dict) -> set[str]:
+    """The tokens a player-facing goal must NOT contain — the names and
+    answers the arc keeps hidden. Drawn from every canon entity id (its
+    local-part word tokens) plus each beat's answer entity/value. Short
+    tokens (<3 chars) are dropped as noise. This is the forbidden set the
+    leak-check tests the goal against; over-inclusion only costs a fall
+    back to the generic goal, never a leak (WIN-LOSS §10, Cx fail-closed)."""
+    terms: set[str] = set()
+
+    def _add(raw: str) -> None:
+        local = str(raw).split(":", 1)[-1]
+        for tok in re.split(r"[^a-z0-9]+", local.lower()):
+            if len(tok) >= 3:
+                terms.add(tok)
+
+    for eid in _canon_entity_ids(world):
+        _add(eid)
+    for b in proposal.get("beats", []):
+        _add(b.get("entity", ""))
+        _add(b.get("value", ""))
+    return terms
+
+
+def _goal_statement_safe(goal: str, forbidden: set[str]) -> bool:
+    """True iff `goal` is non-empty and shares no whole word with the
+    forbidden set — a structural token check, not a lint we hope holds."""
+    if not goal or not goal.strip():
+        return False
+    words = {w for w in re.split(r"[^a-z0-9]+", goal.lower()) if w}
+    return words.isdisjoint(forbidden)
+
+
+def _player_goal(proposal: dict, world: Any) -> str:
+    """The non-spoiling player-facing aim for win_loss mode: the authored
+    `goal_statement` if it passes the leak-check, else the generic default.
+    Fail-closed — a leaky goal is dropped, never shown (WIN-LOSS §10)."""
+    goal = (proposal.get("goal_statement") or "").strip()
+    if goal and _goal_statement_safe(goal, _hidden_terms(world, proposal)):
+        return goal
+    if goal:
+        logger.warning("goal_statement rejected (leaks a hidden term); "
+                       "using the generic default")
+    return _DEFAULT_GOAL
 
 
 #: Cap on characters seeded with a knowledge frame — the protagonist

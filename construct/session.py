@@ -98,6 +98,16 @@ class Session:
         chain = self._world.porcelain.locate(self._arc.protagonist)
         return chain[0] if chain else None
 
+    def goal_statement(self) -> str | None:
+        """The non-spoiling player-facing aim, shown only in win_loss mode.
+        Freeplay/endless has no fixed aim, so this returns None there. The
+        line is a leak-checked derivative authored at session-zero and
+        sealed on the scenario meta (never a plot:/canon row)."""
+        if self._scenario_mode != "win_loss":
+            return None
+        goal = self._meta.get("goal_statement")
+        return str(goal) if goal else None
+
     def opening(self) -> str:
         """A deterministic entry banner — instant, no model call. When an
         entry coordinate is set, the establishing view is taken as-of it
@@ -105,6 +115,9 @@ class Session:
         where = self.location()
         line = f"You are {self.protagonist}" + (f", at {where}." if where else ".")
         head = f"{self.title}\n{line}"
+        goal = self.goal_statement()
+        if goal:
+            head += f"\nYour aim: {goal}"
         est = self.establishing_lines()
         if self.entry_as_of is not None:
             head += f"\n(entering as of {self.entry_as_of:g})"
