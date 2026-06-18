@@ -123,6 +123,51 @@ def test_start_menu_routes_to_generate(monkeypatch, capsys):
     assert ns.ingest is None and ns.interview is None
 
 
+def test_shell_is_the_default_command():
+    assert build_parser().parse_args(["shell"]).command == "shell"
+    assert build_parser().parse_args([]).command is None  # bare `construct` → shell
+
+
+def test_entry_agent_sees_options_and_routes():
+    from construct.cohorts import entry_agent
+    from construct.provider import StubProvider
+    prov = StubProvider([{"action": "load", "target": "anchor", "seed": "",
+                          "path": "", "reply": "Loading anchor."}])
+    out = entry_agent(prov, "play the honest meter one", ["anchor"], ["anchor"])
+    assert out["action"] == "load" and out["target"] == "anchor"
+    prompt = prov.calls[0][0]
+    assert "INGESTED SETTINGS" in prompt and "anchor" in prompt
+    assert prov.calls[0][2] == "cheap"  # router, not the narrator
+
+
+def test_shell_open_load_known_and_unknown(monkeypatch, capsys):
+    import construct
+    from construct.cli import _shell_open
+    opened = {}
+    monkeypatch.setattr(construct.Session, "open",
+                        classmethod(lambda cls, name, provider=None: opened.setdefault("n", name)))
+    assert _shell_open(None, {"action": "load", "target": "anchor"}, ["anchor"]) is not None
+    assert opened["n"] == "anchor"
+    # an unknown setting is refused, not invented
+    assert _shell_open(None, {"action": "load", "target": "ghost"}, ["anchor"]) is None
+    assert "don't have a setting" in capsys.readouterr().err
+
+
+def test_shell_open_create_routes_to_generate(monkeypatch, tmp_path):
+    import construct
+    import construct.game as game
+    from construct.cli import _shell_open
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "worlds").mkdir()
+    seen = {}
+    monkeypatch.setattr(game, "create_scenario_from_generated",
+                        lambda name, prov, seed="", on_stage=None: seen.update(name=name, seed=seed))
+    monkeypatch.setattr(construct.Session, "open",
+                        classmethod(lambda cls, name, provider=None: "SESSION"))
+    out = _shell_open(None, {"action": "create", "seed": "a noir harbor"}, [])
+    assert out == "SESSION" and seen["seed"] == "a noir harbor"
+
+
 def test_start_menu_play_with_empty_library_is_loud(monkeypatch, capsys, tmp_path):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "worlds").mkdir()

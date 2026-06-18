@@ -39,7 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="construct",
         description="A text construct: persistent interactive fiction, played turn by turn.",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    # Not required: bare `construct` enters the holodeck shell (the default door).
+    sub = parser.add_subparsers(dest="command", required=False)
 
     sub.add_parser("scenarios", help="list the scenario library (charter self-ID)")
 
@@ -58,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--endless", action="store_true",
                      help="no terminal arc: the world carries on past the arc's "
                           "destination instead of settling into aftermath")
+
+    shell = sub.add_parser("shell", help="the holodeck entry: converse with "
+                                         "Construct to load/create/import a setting")
+    shell.add_argument("--debug", action="store_true")
 
     sub.add_parser("start", help="guided session-zero menu: pick a world "
                                  "(play / generate / provide) and a mode")
@@ -298,9 +303,18 @@ def _cmd_play(args: argparse.Namespace) -> int:
 
     session = Session.open(args.scenario, fresh=args.fresh, provider=_provider(),
                            as_of=getattr(args, "at", None))
-    debug = args.debug
+    _world_loop(session, args.debug)
+    return 0
+
+
+def _world_loop(session, debug: bool) -> str:
+    """The in-WORLD REPL: no `construct:` prefix — the LLM's output is solely
+    the live narrative (the felt difference from the agent shell). Auto-saves
+    every turn (Session persists each turn). Returns 'menu' if the player asked
+    to step back out to the holodeck shell, else 'quit'."""
     print(f"  {session.opening()}\n")
-    print("Type what you do. (:help for commands, :quit to leave.)")
+    print("Type what you do. (:help for commands, :menu to step out, :quit to leave.)")
+    outcome = "quit"
     try:
         while True:
             try:
@@ -308,10 +322,13 @@ def _cmd_play(args: argparse.Namespace) -> int:
             except (EOFError, KeyboardInterrupt):
                 print("\nThe world holds. (saved)")
                 break
-
             line = raw.strip()
             if not line:
                 continue
+            if line in (":menu", ":exit"):
+                print("(stepping out — the world holds, saved.)")
+                outcome = "menu"
+                break
             if line in EXIT_WORDS:
                 print("The world holds. (saved)")
                 break
@@ -337,7 +354,111 @@ def _cmd_play(args: argparse.Namespace) -> int:
                 _print_trace(reply.trace)
     finally:
         session.close()
-    return 0
+    return outcome
+
+
+def _saved_sessions() -> list[str]:
+    """Scenario names that have an auto-saved (default-slot) playthrough to
+    resume — distinct from pristine, never-played settings."""
+    from construct.game import list_scenarios, slot_path
+    return [s["name"] for s in list_scenarios() if slot_path(s["name"]).exists()]
+
+
+def _cmd_shell(args: argparse.Namespace) -> int:
+    """The holodeck entry — a conversational host. While no setting is loaded
+    the console shows a `construct:` prefix and you talk TO the agent in natural
+    language; it has the tools to load an ingested setting, resume a saved
+    session, create a new world, or import a fiction. On load the prefix
+    disappears and you're talking to the WORLD (the felt mode switch)."""
+    from construct import Session
+    from construct import cohorts
+    from construct.game import list_scenarios
+
+    provider = _provider()
+    print("construct: The holodeck is empty. What setting would you like to load?\n")
+    while True:
+        scenarios = [s["name"] for s in list_scenarios()]
+        sessions = _saved_sessions()
+        # The first-screen visual options (also reachable by just talking).
+        print("  Ingested settings: " + (", ".join(scenarios) or "(none yet)"))
+        print("  Resume a saved session: " + (", ".join(sessions) or "(none yet)"))
+        print("  · create a new setting (a fresh fiction, then ingested)")
+        print("  · import a setting from a fiction file")
+        try:
+            raw = input("\nconstruct> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nconstruct: Until next time.")
+            return 0
+        if not raw:
+            continue
+        if raw in EXIT_WORDS:
+            print("construct: Until next time.")
+            return 0
+        try:
+            with _Spinner("construct is considering"):
+                decision = cohorts.entry_agent(provider, raw, scenarios, sessions)
+        except Exception as exc:
+            print(f"construct: (I couldn't parse that — {exc})", file=sys.stderr)
+            continue
+        print(f"\nconstruct: {decision.get('reply', '').strip()}\n")
+        action = decision.get("action", "chat")
+        if action == "chat":
+            continue
+        session = _shell_open(provider, decision, scenarios)
+        if session is None:
+            continue
+        # Loaded: the prefix disappears — hand off to the world.
+        if _world_loop(session, args.debug) == "quit":
+            return 0
+        print()  # back at the holodeck shell
+
+
+def _shell_open(provider, decision: dict, scenarios: list[str]):
+    """Carry out the entry agent's chosen tool; return an open Session or None
+    (on a failure the shell reports and keeps talking)."""
+    from construct import Session
+    from construct.game import (ViabilityError, create_scenario_from_generated,
+                                create_scenario_from_ingest)
+    action = decision.get("action")
+    def _stage(m): print(m, flush=True)
+    try:
+        if action == "load":
+            target = decision.get("target", "")
+            if target not in scenarios and target not in _saved_sessions():
+                print(f"construct: I don't have a setting called {target!r}.",
+                      file=sys.stderr)
+                return None
+            return Session.open(target, provider=provider)  # resumes if saved, else fresh
+        if action == "create":
+            name = _unique_setting_name("world")
+            create_scenario_from_generated(name, provider, seed=decision.get("seed", ""),
+                                           on_stage=_stage)
+            return Session.open(name, provider=provider)
+        if action == "import":
+            path = decision.get("path", "")
+            if not path:
+                print("construct: Which file? Give me a path to a .txt/.md fiction.",
+                      file=sys.stderr)
+                return None
+            from pathlib import Path as _P
+            name = _unique_setting_name(_P(path).stem.replace(" ", "_") or "world")
+            create_scenario_from_ingest(name, _P(path), provider, on_stage=_stage)
+            return Session.open(name, provider=provider)
+    except ViabilityError as exc:
+        print(f"construct: That world didn't come together ({'; '.join(exc.problems)}). "
+              f"The draft is kept at {exc.source_path}.", file=sys.stderr)
+    except (FileNotFoundError, ValueError, FileExistsError) as exc:
+        print(f"construct: ({exc})", file=sys.stderr)
+    return None
+
+
+def _unique_setting_name(stem: str) -> str:
+    from construct.game import scenario_path, _slug
+    base = _slug(stem) or "world"
+    name, n = base, 2
+    while scenario_path(name).exists():
+        name, n = f"{base}_{n}", n + 1
+    return name
 
 
 def _fmt_facts(facts: dict) -> str:
@@ -461,6 +582,10 @@ def _cmd_loopback(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command is None or args.command == "shell":
+        if args.command is None:
+            args.debug = False
+        return _cmd_shell(args)
     if args.command == "scenarios":
         return _cmd_scenarios()
     if args.command == "new":

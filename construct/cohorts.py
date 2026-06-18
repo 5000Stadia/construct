@@ -124,6 +124,60 @@ STORY_AUTHOR_SCHEMA = {
 _SEED_MAX_CHARS = 2000
 
 
+ENTRY_AGENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string",
+                   "enum": ["load", "create", "import", "chat"],
+                   "description": "load = open an existing setting/saved session "
+                   "by name; create = build a NEW setting from a fresh fiction; "
+                   "import = build a setting from a provided fiction file; chat = "
+                   "just reply/clarify (intent not yet a clear choice)"},
+        "target": {"type": "string",
+                   "description": "load: the EXACT setting/session name from the "
+                   "lists; else empty"},
+        "seed": {"type": "string",
+                 "description": "create: an optional premise/genre seed the user "
+                 "gave ('a noir harbor'); else empty"},
+        "path": {"type": "string",
+                 "description": "import: the file path the user named; else empty"},
+        "reply": {"type": "string",
+                  "description": "Construct's spoken line back to the user, in the "
+                  "voice of a calm holodeck host — always present"},
+    },
+    "required": ["action", "target", "seed", "path", "reply"],
+}
+
+
+def entry_agent(provider: Provider, user_text: str, scenarios: list[str],
+                sessions: list[str]) -> dict:
+    """The holodeck-host entry agent (STARTUP-ENTRY §conversational): interpret
+    the user's natural language and CHOOSE a tool — load an existing setting/
+    saved session, create a new one, import a fiction, or just chat to clarify.
+    Always speaks a short line in Construct's voice. Routing only — opening the
+    world is the caller's job. Cheap tier (a router, not the narrator)."""
+    return complete_sync(provider,
+        "You are Construct — a calm, spare holodeck-like host. The user has just "
+        "arrived and no setting is loaded; help them choose what to load, in "
+        "natural language. Decide ONE action and always speak a short reply.\n"
+        "- load: they want an existing setting or a saved session — set `target` "
+        "to the EXACT name from the lists below.\n"
+        "- create: they want a NEW world from a fresh story — capture any premise "
+        "they gave as `seed`.\n"
+        "- import: they named a fiction FILE to ingest — set `path`.\n"
+        "- chat: their intent isn't a clear choice yet — reply to guide them "
+        "(e.g. list what's available, ask what they're in the mood for).\n"
+        "Only choose load/create/import when the intent is unambiguous; otherwise "
+        "chat. Staying in conversation is cheap; loading the WRONG setting is "
+        "costly — when in doubt, chat to clarify rather than guess (Kernos "
+        "cost-asymmetry). Never invent a setting name that isn't listed; if the "
+        "user names one you don't have, say so and offer what you do.\n\n"
+        f"INGESTED SETTINGS: {scenarios or '(none yet)'}\n"
+        f"SAVED SESSIONS (resumable): {sessions or '(none yet)'}\n\n"
+        f"USER: {user_text}",
+        ENTRY_AGENT_SCHEMA, tier="cheap")
+
+
 def author_story(provider: Provider, seed: str = "") -> dict:
     """Session-zero Path 2 (STARTUP-ENTRY §3): write a COMPLETE short work
     from an optional seed — the hidden source-of-truth bible that the
