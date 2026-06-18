@@ -97,6 +97,12 @@ class Arc:
     climax_ready_k: int
     climax_ready_beats: tuple[str, ...]
     phase_budget: dict[Phase, int] = field(default_factory=dict)
+    #: An optional explicit LOSS terminal for win_loss mode (WIN-LOSS §4/§10):
+    #: the event/state that ends the story in defeat (detection, capture,
+    #: death). When it holds, `arc_outcome` reads `"lost"` — alongside the
+    #: refusal clock, which always backstops. None = loss only by refusal
+    #: timeout. Never a player-facing row; evaluated host-side over reads.
+    failure_when: Expr | None = None
 
     def beat(self, beat_id: str) -> Beat:
         for b in self.beats:

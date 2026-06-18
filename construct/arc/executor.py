@@ -180,8 +180,7 @@ def arc_outcome(reads: Any, arc: Arc) -> str | None:
         return "won"
     if evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE:
         return "lost"
-    failure_when = getattr(arc, "failure_when", None)
-    if failure_when is not None and evaluate(failure_when, reads) is Truth.TRUE:
+    if arc.failure_when is not None and evaluate(arc.failure_when, reads) is Truth.TRUE:
         return "lost"
     return None
 

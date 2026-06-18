@@ -48,6 +48,22 @@ ARC_SCHEMA = {
                            "name the culprit', 'survive the journey to safer ground'. "
                            "Must NOT contain any entity id, character name, or the "
                            "hidden answer."},
+        "failure_when": {
+            "type": "object",
+            "description": "OPTIONAL loss terminal for win_loss mode — the ONE "
+            "event that ends the story in defeat (e.g. the player is detected, "
+            "captured, killed). Prefer kind 'event_occurs' with a plausible "
+            "event kind (e.g. 'alarm_raised', 'player_unmasked'); omit entirely "
+            "for survive-the-timeout scenarios (the refusal clock backstops).",
+            "properties": {
+                "kind": {"type": "string", "enum": ["player_learns", "event_occurs"]},
+                "entity": {"type": "string",
+                           "description": "event_occurs: the event kind; "
+                                          "player_learns: the fact/entity id"},
+                "attribute": {"type": "string", "description": "player_learns only"},
+                "value": {"type": "string", "description": "player_learns only"},
+            },
+        },
         "delta_type": {"type": "string",
                        "enum": ["drive_inverted", "desire_at_cost", "desire_renounced",
                                 "identity_accepted", "homecoming_changed"]},
@@ -161,6 +177,20 @@ def _beat_expr(beat: dict, player_frame: str):
     if beat["kind"] == "player_learns":
         return InFrame(player_frame, beat["entity"], beat["attribute"], beat["value"])
     return Occurred(beat["entity"])
+
+
+def _failure_expr(spec: dict | None, player_frame: str):
+    """Convert the optional authored loss terminal into an Expr, tolerantly.
+    event_occurs needs only an event kind; player_learns needs the full
+    triple. A malformed/partial spec yields None (loss falls back to the
+    refusal clock) — never a build-time crash."""
+    if not spec or not spec.get("entity"):
+        return None
+    if spec.get("kind") == "player_learns":
+        if not (spec.get("attribute") and spec.get("value")):
+            return None
+        return InFrame(player_frame, spec["entity"], spec["attribute"], spec["value"])
+    return Occurred(spec["entity"])
 
 
 def _emit(on_stage, msg: str) -> None:
@@ -292,6 +322,10 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             "culprit', 'survive the journey to safer ground'). It must NEVER "
             "contain a character name, an entity id, the mechanism, or the "
             "hidden answer; it is shown to the player at the start.\n"
+            "OPTIONALLY emit `failure_when`: the ONE event that ends the story "
+            "in defeat (detection, capture, death). Prefer kind `event_occurs` "
+            "with a plausible event kind (e.g. 'alarm_raised', 'player_unmasked'); "
+            "omit it for survive-the-timeout scenarios.\n"
             "HARD RULE: a `player_learns` beat's `entity` MUST be one of the "
             "AVAILABLE IDS below verbatim (do NOT invent new fact:/obj: ids); "
             "its attribute/value should match a triple in the digest. For a "
@@ -670,12 +704,14 @@ def _build_arc(proposal: dict) -> Arc:
                     effects=({"entity": "event:world_concludes", "attribute": "kind",
                               "value": "refusal_conclusion"},),
                     bound_to="arc:main", rung=Rung.REFUSAL)
+    failure_when = _failure_expr(proposal.get("failure_when"), player_frame)
     return Arc(
         arc_id="arc:main", protagonist=protagonist, shape=shape,
         beats=tuple(beats), clocks=clocks, refusal_clock=refusal,
         climax_ready_k=k, climax_ready_beats=tuple(climax),
         phase_budget={Phase.SETUP: 5, Phase.RISING: 6, Phase.CRISIS: 3,
                       Phase.CLIMAX: 2, Phase.FALLING: 2},
+        failure_when=failure_when,
     )
 
 

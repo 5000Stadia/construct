@@ -3,6 +3,8 @@ arc round-trip, and one full turn through the DAG. Zero live model
 calls: engine extraction via patternbuffer's StubModel, host cohorts
 via StubProvider."""
 
+from dataclasses import replace
+
 import pytest
 
 from patternbuffer import World
@@ -128,6 +130,21 @@ class TestArcRoundTrip:
         snap = world.porcelain.snapshot([PLAYER, "fact:secret"])
         assert all(not f["entity"].startswith(("beat:", "clock:", "arc:", "shape:"))
                    for f in snap["facts"])
+
+    def test_failure_when_round_trips_frame_and_cache(self, world):
+        from construct.arc.conditions import Occurred
+        arc = make_arc()
+        arc = replace(arc, failure_when=Occurred("alarm_raised"))
+        # frame
+        seed_arc(world, arc)
+        rebuilt = arc_io.arc_from_frame(PorcelainWorldReads(world))
+        assert rebuilt.failure_when == Occurred("alarm_raised")
+        # cache
+        cached = arc_io.arc_from_cache(arc_io.arc_to_cache(arc))
+        assert cached.failure_when == Occurred("alarm_raised")
+        # absent failure_when stays None through both paths
+        plain = arc_io.arc_from_cache(arc_io.arc_to_cache(make_arc()))
+        assert plain.failure_when is None
 
 
 class TestFullTurn:
@@ -389,6 +406,27 @@ def test_arc_outcome_won_lost_none_and_tiebreak(world):
     ], frame="plot:main")
     assert arc_outcome(reads, arc) == "lost"
     # Destination reached even with refusal fired → won (won wins the tie).
+    world.ingest_structured([
+        {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+    ], frame=PLAYER_FRAME)
+    assert arc_outcome(reads, arc) == "won"
+
+
+def test_arc_outcome_lost_via_failure_when(world):
+    """WIN-LOSS §10: an authored `failure_when` event ends the story in defeat
+    even before the refusal clock — but loses the tie to a reached destination."""
+    from construct.arc.conditions import Occurred
+    from construct.arc.executor import arc_outcome
+
+    arc = replace(make_arc(), failure_when=Occurred("alarm_raised"))
+    reads = PorcelainWorldReads(world)
+    assert arc_outcome(reads, arc) is None
+    # The detection event enters canon (as the narrator would extract it) → lost.
+    world.ingest_structured([
+        {"entity": "event:caught", "attribute": "kind", "value": "alarm_raised"},
+    ])
+    assert arc_outcome(reads, arc) == "lost"
+    # …but reaching the destination on the same reads still wins (agency).
     world.ingest_structured([
         {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
     ], frame=PLAYER_FRAME)

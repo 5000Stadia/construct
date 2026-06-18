@@ -76,6 +76,10 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
          "timeless": True},
         {"entity": arc.arc_id, "attribute": "phase", "value": Phase.SETUP.value},
     ]
+    if arc.failure_when is not None:
+        items.append({"entity": arc.arc_id, "attribute": "failure_when",
+                      "value": json.dumps(expr_to_obj(arc.failure_when)),
+                      "timeless": True})
     shape = arc.shape
     items += [
         {"entity": shape.shape_id, "attribute": "kind", "value": "conclusion_shape",
@@ -196,6 +200,7 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
             clocks.append(clock)
     if refusal is None:
         raise ValueError(f"{arc_id}: no refusal clock in {frame} — arc is corrupt")
+    failure_raw = get(arc_id, "failure_when")
     return Arc(
         arc_id=arc_id,
         protagonist=get(arc_id, "protagonist"),
@@ -207,6 +212,7 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
         climax_ready_beats=tuple(json.loads(get(arc_id, "climax_ready_beats"))),
         phase_budget={Phase(k): v for k, v in
                       json.loads(get(arc_id, "phase_budget") or "{}").items()},
+        failure_when=expr_from_obj(json.loads(failure_raw)) if failure_raw else None,
     )
 
 
@@ -239,6 +245,7 @@ def arc_to_cache(arc: Arc) -> dict:
         "climax_ready_k": arc.climax_ready_k,
         "climax_ready_beats": list(arc.climax_ready_beats),
         "phase_budget": {p.value: n for p, n in arc.phase_budget.items()},
+        "failure_when": expr_to_obj(arc.failure_when) if arc.failure_when else None,
     }
 
 
@@ -281,6 +288,7 @@ def arc_from_cache(d: dict) -> Arc:
         climax_ready_k=d["climax_ready_k"],
         climax_ready_beats=tuple(d["climax_ready_beats"]),
         phase_budget={Phase(k): v for k, v in d.get("phase_budget", {}).items()},
+        failure_when=expr_from_obj(d["failure_when"]) if d.get("failure_when") else None,
     )
 
 
