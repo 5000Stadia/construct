@@ -156,6 +156,40 @@ def _beat_expr(beat: dict, player_frame: str):
     return Occurred(beat["entity"])
 
 
+#: Kind-scoped traversal policy (PB RFC-003 / letter 058): which portal `kind`s
+#: gate a passage, and on what. route() derives clear|blocked|obscured from a
+#: portal entity's facts under this policy; an undeclared kind never gates
+#: (fail-open → clear), and a declared-but-unstated portal reads `obscured`
+#: (fail-safe → never a false-clear). The host declares vocabulary; the engine
+#: derives. Keyed on the portal's folded `kind` VALUE (door/hatch/…), so it only
+#: bites where extraction gave a portal-specific kind — reliable-capture work is
+#: ongoing, but missing capture degrades safe.
+TRAVERSAL_BLOCK_STATES = ("shut", "closed", "locked", "sealed", "rusted",
+                          "barred", "jammed", "dead", "decommissioned",
+                          "defunct", "failed", "broken", "collapsed", "welded")
+TRAVERSAL_BLOCK_RELATIONS = ("guarded_by", "sealed_by", "barred_by", "locked_by")
+TRAVERSAL_PORTAL_KINDS = ("door", "gate", "hatch", "portal", "lock", "elevator",
+                          "lift", "shaft", "stairs", "stairway", "passage", "airlock")
+
+
+def _declare_traversal_policy(world: Any) -> None:
+    """Persist the kind-scoped traversal policy as `traversal:<kind>` rows so
+    route() can derive passability. Opt-in by kind; safe-degrading."""
+    items = []
+    for kind in TRAVERSAL_PORTAL_KINDS:
+        for st in TRAVERSAL_BLOCK_STATES:
+            items.append({"entity": f"traversal:{kind}", "attribute": "blocks_when_state",
+                          "value": st, "timeless": True})
+        for rel in TRAVERSAL_BLOCK_RELATIONS:
+            items.append({"entity": f"traversal:{kind}", "attribute": "blocks_when_relation",
+                          "value": rel, "timeless": True})
+    try:
+        world.porcelain.ingest_structured(items)
+        logger.info("declared traversal policy for %d portal kinds", len(TRAVERSAL_PORTAL_KINDS))
+    except Exception as exc:
+        logger.warning("traversal policy declaration skipped: %s", exc)
+
+
 def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
     """Triage the coreference residue PB's reconcile() declined (letters
     056/058, validated on anchor in 018). The SAFE automated half only:
@@ -203,6 +237,10 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
         _adjudicate_residue(world, proposals)
     except Exception as exc:  # a finalize-pass failure must never sink a build
         logger.warning("identity reconcile skipped: %s", exc)
+
+    # Passability policy (PB RFC-003): declare which portal kinds gate, so
+    # route() can derive blocked/obscured/clear from portal facts at play time.
+    _declare_traversal_policy(world)
 
     reads = PorcelainWorldReads(world)
     people = _known_people(world)

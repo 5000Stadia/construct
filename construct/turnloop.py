@@ -65,6 +65,8 @@ class TurnTrace:
     dropped_cohorts: list[str] = field(default_factory=list)
     furnished: list[str] = field(default_factory=list)
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
+    movement_status: str = ""  # route() passability: clear|blocked|obscured
+    movement_obstruction: dict | None = None  # the blocking facts, for narration
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -92,6 +94,24 @@ def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon") -> dict:
         logger.warning("snapshot error for %s on %s: %s", frame, scope, snap["error"])
         return {"facts": []}
     return snap
+
+
+def _route_obstruction(p: Any, origin: str | None, target: str | None) -> dict | None:
+    """First non-clear segment on origin->target via PB route() (RFC-003), or
+    None. Fail-open: any route error => None => move proceeds unchecked. A
+    `blocked` segment carries `evidence` (the portal's blocking fact); an
+    `obscured` one a computed `unknown_basis`."""
+    if not origin or not target or origin == target:
+        return None
+    try:
+        r = p.route(origin, target)
+    except Exception as exc:
+        logger.warning("route() unavailable, movement unchecked: %s", exc)
+        return None
+    for seg in r.get("segments", []):
+        if seg.get("status") in ("blocked", "obscured"):
+            return seg
+    return None
 
 
 def _mirror_rows(p: Any, rows: list[dict], frame: str,
@@ -288,11 +308,28 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         status = getattr(res, "status", None)
         target = getattr(res, "entity_id", None)
         if status == "resolved" and target:
-            p.ingest_structured([{
-                "entity": arc.protagonist, "attribute": "in", "value": target,
-                "value_type": "entity", "valid_from": turn_time(turn),
-            }])
-            logger.info("player moved: %s -> %s", arc.protagonist, target)
+            # Passability (PB route(), RFC-003): a `blocked` way (a portal with a
+            # blocking state/relation under the declared traversal policy) is not
+            # walked — the narrator explains why. `obscured` (state unknown) is
+            # allowed but flagged so the prose can hedge; missing capture degrades
+            # to obscured/clear, never a false hard-block.
+            origin = pre_chain[0] if pre_chain else None
+            seg = _route_obstruction(p, origin, target)
+            if seg and seg.get("status") == "blocked":
+                trace.movement_status = "blocked"
+                trace.movement_obstruction = seg
+                logger.info("movement blocked: %s -> %s (%s)", arc.protagonist,
+                            target, seg.get("evidence"))
+            else:
+                p.ingest_structured([{
+                    "entity": arc.protagonist, "attribute": "in", "value": target,
+                    "value_type": "entity", "valid_from": turn_time(turn),
+                }])
+                trace.movement_status = seg.get("status") if seg else "clear"
+                if seg:
+                    trace.movement_obstruction = seg
+                logger.info("player moved: %s -> %s (%s)", arc.protagonist, target,
+                            trace.movement_status)
         else:
             logger.warning("movement destination %r did not resolve (%s); "
                            "relying on extraction", moves_to, status)
@@ -438,6 +475,21 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                               + "\n".join(you_lines))
     briefing_parts.append(f"\nTHE PLAYER JUST DID (render exactly this, no more): "
                           f"{player_input}")
+    if trace.movement_obstruction:
+        seg = trace.movement_obstruction
+        if trace.movement_status == "blocked":
+            ev = seg.get("evidence") or []
+            facts = "; ".join(
+                f"{e.get('entity')} · {e.get('attribute')} · {e.get('value')}" for e in ev
+            ) or "the way is obstructed"
+            briefing_parts.append(
+                f"\nMOVEMENT BLOCKED (render diegetically): the player tried to go there "
+                f"but the way is barred — {facts}. Show the attempt and why it fails; "
+                f"the player does NOT arrive.")
+        else:  # obscured
+            briefing_parts.append(
+                "\nMOVEMENT UNCERTAIN (render diegetically): the state of the way can't be "
+                "confirmed — render the passage as ambiguous; do NOT assert it is clearly open.")
     if npc_intents:
         briefing_parts.append("\nPRESENT CHARACTERS (play them by their wants):\n"
                               + "\n".join(npc_intents))
