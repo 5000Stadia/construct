@@ -68,11 +68,17 @@ def clock_pass(world: Any, arc: Arc, reads: Any, counters: PacingCounters,
         verdict = evaluate(clock.fires_when, reads, counters)
         if verdict is not Truth.TRUE:
             continue
+        firing_id = f"event:{clock.clock_id.split(':', 1)[1]}_fired_{turn}"
         effects = [dict(item) for item in clock.effects]
         for item in effects:
             item.setdefault("valid_from", turn_time(turn))
-        world.porcelain.ingest_structured(effects)  # canon — world consequences
-        firing_id = f"event:{clock.clock_id.split(':', 1)[1]}_fired_{turn}"
+            item.setdefault("caused_by", firing_id)  # link consequence -> cause
+        # The firing event in canon too (kind row) so the situation lens can
+        # walk back from a served effect and surface this as a LIVE thread on
+        # re-entry (PB SITUATION-LENS-V1, letter 058). plot: keeps the status.
+        canon_event = [{"entity": firing_id, "attribute": "kind",
+                        "value": "clock_fired", "valid_from": turn_time(turn)}]
+        world.porcelain.ingest_structured(canon_event + effects)  # canon — world consequences
         plot_items = [
             {"entity": firing_id, "attribute": "kind", "value": "clock_fired",
              "valid_from": turn_time(turn)},

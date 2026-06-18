@@ -107,7 +107,38 @@ class Session:
             head += f"\n(entering as of {self.entry_as_of:g})"
         if est:
             head += "\nThe world at rest:\n" + "\n".join(f"  {l}" for l in est)
+        threads = self.live_threads()
+        if threads:
+            head += "\nThreads still live:\n" + "\n".join(f"  {t}" for t in threads)
         return head
+
+    def live_threads(self, limit: int = 6) -> list[str]:
+        """Re-entry awareness: the LIVE threads anchored to scope, via the
+        `situation` lens (standing-truth ∪ live events, dead history dropped —
+        PB SITUATION-LENS-V1, letter 058). Additive to the establishing set,
+        which stays the tuned 'world at rest' cold-open. Fail-safe: with no
+        `caused_by`-linked live events it returns empty, so a fresh/quiet world
+        shows no section. Renders each live event by its alias or kind."""
+        scope = self._scope
+        if not scope:
+            return []
+        try:
+            snap = self._world.porcelain.snapshot(
+                sorted(scope), lens="situation", as_of=self.entry_as_of)
+        except Exception:  # lens unsupported / read error — never break the open
+            return []
+        # The lens adds live EVENT rows on top of standing truth; surface those
+        # as threads (alias preferred, else kind), one line per distinct event.
+        threads: dict[str, str] = {}
+        for f in snap.get("facts", []):
+            e = f["entity"]
+            if not e.startswith("event:"):
+                continue
+            if f["attribute"] == "alias":
+                threads[e] = str(f["value"])
+            elif f["attribute"] == "kind" and e not in threads:
+                threads[e] = str(f["value"])
+        return list(threads.values())[:limit]
 
     def establishing_lines(self, limit: int = 8) -> list[str]:
         """The establishing-set facts in scope, as of the entry
