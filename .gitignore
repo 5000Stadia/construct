@@ -8,6 +8,9 @@ __pycache__/
 # Runtime/built worlds (regenerable from examples/ source) + local agent state
 worlds/
 .claude/
+# Transport state + chat logs live under worlds/.construct/ (covered by worlds/
+# above); listed explicitly so it's clear secrets/transcripts never get committed.
+worlds/.construct/
 
 # Generated hidden bibles — runtime artifacts (per-user, the authoring side of
 # the firewall), distinct from the committed examples/ fixture (Kernos 063 B.2)

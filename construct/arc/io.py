@@ -160,6 +160,33 @@ def _as_float(v) -> float | None:
     return None if v is None else float(v)
 
 
+def _safe_phase(value, bid: str) -> Phase:
+    """A beat's phase, tolerant of a missing/invalid stored row. Phase only
+    affects pacing/ordering (climax sufficiency is read from a separate index),
+    so a bad row must degrade gracefully — fail OPEN loudly to a neutral phase,
+    never crash the whole scenario load (the clock-loading discipline applied to
+    beats; a real defect surfaced by the loopback self-test against `anchor`)."""
+    try:
+        return Phase(value)
+    except ValueError:
+        import logging
+        logging.getLogger(__name__).error(
+            "beat %s has no valid phase (%r) — defaulting to RISING", bid, value)
+        return Phase.RISING
+
+
+def _safe_weight(value, bid: str) -> Weight:
+    """A beat's weight, tolerant of a missing/invalid row — defaults to
+    REQUIRED (the safe choice: a beat the arc still expects), loudly."""
+    try:
+        return Weight(value)
+    except ValueError:
+        import logging
+        logging.getLogger(__name__).error(
+            "beat %s has no valid weight (%r) — defaulting to REQUIRED", bid, value)
+        return Weight.REQUIRED
+
+
 def clock_to_items(clock: Clock, arc_id: str) -> list[dict]:
     items = [
         {"entity": clock.clock_id, "attribute": "kind", "value": "clock", "timeless": True},
@@ -199,13 +226,25 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
     beat_ids = json.loads(get(arc_id, "beat_index") or "[]")
     beats = []
     for bid in beat_ids:
+        achievable = get(bid, "achievable_via")
+        if not achievable:
+            # A beat with no condition can never be achieved and can't be
+            # reconstructed — SKIP it loudly rather than crash the whole load
+            # (clock fail-open discipline; surfaced by the loopback self-test
+            # against a partially-corrupt `anchor` frame). The refusal clock
+            # still backstops; a BeatAchieved ref to a dropped beat stays
+            # evaluable (just never true).
+            import logging
+            logging.getLogger(__name__).error(
+                "beat %s has no achievable_via — dropping from the arc", bid)
+            continue
         unreachable = get(bid, "unreachable_if")
         correlates = get(bid, "correlates")
         beats.append(Beat(
             beat_id=bid,
-            phase=Phase(get(bid, "beat_phase")),
-            weight=Weight(get(bid, "weight")),
-            achievable_via=expr_from_obj(json.loads(get(bid, "achievable_via"))),
+            phase=_safe_phase(get(bid, "beat_phase"), bid),
+            weight=_safe_weight(get(bid, "weight"), bid),
+            achievable_via=expr_from_obj(json.loads(achievable)),
             unreachable_if=expr_from_obj(json.loads(unreachable)) if unreachable else None,
             correlates=tuple(json.loads(correlates)) if correlates else None,
         ))

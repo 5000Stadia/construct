@@ -131,6 +131,39 @@ class TestArcRoundTrip:
         assert all(not f["entity"].startswith(("beat:", "clock:", "arc:", "shape:"))
                    for f in snap["facts"])
 
+    def test_missing_beat_phase_loads_tolerantly(self, world):
+        # A real defect surfaced by the loopback self-test: the sealed `anchor`
+        # world had a beat with a None phase, and Phase(None) crashed the whole
+        # load. arc_from_frame must fail OPEN (default + log), not brick the world.
+        from construct.arc.io import _safe_phase, _safe_weight
+        from construct.arc.grammar import Phase, Weight
+        assert _safe_phase(None, "beat:x") is Phase.RISING
+        assert _safe_phase("garbage", "beat:x") is Phase.RISING
+        assert _safe_weight(None, "beat:x") is Weight.REQUIRED
+        # end-to-end: a frame whose beat lost its phase row still reconstructs
+        seed_arc(world, make_arc())
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "beat_phase", "value": None}],
+            frame="plot:main")
+        rebuilt = arc_io.arc_from_frame(PorcelainWorldReads(world))
+        assert rebuilt.beats[0].phase is Phase.RISING  # defaulted, no crash
+
+    def test_beat_without_condition_is_dropped_not_fatal(self, world):
+        # The second anchor defect: a beat with no achievable_via row. It can't
+        # be reconstructed, so it is dropped loudly — the load still succeeds.
+        arc = make_arc()  # single beat:discover
+        seed_arc(world, arc)
+        # add a second beat to the index whose achievable_via never got written
+        world.porcelain.ingest_structured([
+            {"entity": "arc:main", "attribute": "beat_index",
+             "value": '["beat:discover", "beat:ghost"]', "timeless": True},
+            {"entity": "beat:ghost", "attribute": "beat_phase", "value": "rising"},
+            {"entity": "beat:ghost", "attribute": "weight", "value": "required"},
+        ], frame="plot:main")
+        rebuilt = arc_io.arc_from_frame(PorcelainWorldReads(world))
+        ids = [b.beat_id for b in rebuilt.beats]
+        assert ids == ["beat:discover"]  # ghost dropped, discover survives
+
     def test_pins_round_trip_frame_and_cache(self, world):
         from construct.arc.grammar import Pin
         pins = (

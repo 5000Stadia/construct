@@ -103,6 +103,20 @@ def build_parser() -> argparse.ArgumentParser:
                       help="emit the turn trace: briefing frame list, cohort "
                            "trace, concealment audit, beats/clocks/nudges")
 
+    setup = sub.add_parser("setup", help="optional: set up Telegram for phone continuity")
+    setup.add_argument("target", nargs="?", choices=["telegram"],
+                       help="'telegram' runs the bot-token wizard")
+
+    sub.add_parser("telegram", help="run the Telegram transport (needs `setup telegram` first)")
+
+    inv = sub.add_parser("invite", help="mint a one-time invite code for a transport")
+    inv.add_argument("platform", choices=["telegram", "loopback"])
+    inv.add_argument("--scenario", default="anchor", help="scenario the invite grants")
+
+    lb = sub.add_parser("loopback", help="run the offline self-test channel (file-driven transport)")
+    lb.add_argument("--in", dest="inbound", default=None, help="inbound JSONL path")
+    lb.add_argument("--out", dest="outbox", default=None, help="outbox JSONL path")
+
     return parser
 
 
@@ -271,6 +285,17 @@ def _cmd_play(args: argparse.Namespace) -> int:
     API (letter 034) — open once, loop turn→print, saved every turn."""
     from construct import Session
 
+    # First-load menu (Cx 065): offered only on an interactive terminal when
+    # Telegram is neither configured nor dismissed. Default (Enter) is
+    # zero-friction CLI play; never gates headless/scripted runs.
+    if sys.stdin.isatty():
+        from construct import setup as _setup
+        if _setup.first_load_menu() == "telegram":
+            try:
+                _setup.setup_telegram()
+            except Exception as exc:
+                print(f"(Telegram setup skipped: {exc})", file=sys.stderr)
+
     session = Session.open(args.scenario, fresh=args.fresh, provider=_provider(),
                            as_of=getattr(args, "at", None))
     debug = args.debug
@@ -372,6 +397,68 @@ def _cmd_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _registry_path():
+    from construct.setup import CONSTRUCT_DIR
+    return CONSTRUCT_DIR / "registry.sqlite"
+
+
+def _cmd_setup(args: argparse.Namespace) -> int:
+    from construct import setup
+    if args.target == "telegram":
+        try:
+            setup.setup_telegram()
+            return 0
+        except Exception as exc:
+            print(f"setup failed: {exc}", file=sys.stderr)
+            return 1
+    # bare `construct setup` → the same first-load offer, explicitly invoked
+    choice = setup.first_load_menu()
+    if choice == "telegram":
+        try:
+            setup.setup_telegram()
+        except Exception as exc:
+            print(f"setup failed: {exc}", file=sys.stderr)
+            return 1
+    return 0
+
+
+def _cmd_telegram(args: argparse.Namespace) -> int:
+    from construct import setup, telegram_bot
+    token = setup.read_token()
+    if not token:
+        print("Telegram is not set up. Run: construct setup telegram", file=sys.stderr)
+        return 2
+    print("Telegram transport running (Ctrl-C to stop).")
+    try:
+        telegram_bot.serve(_registry_path(), token)
+    except KeyboardInterrupt:
+        print("\nstopped.")
+    return 0
+
+
+def _cmd_invite(args: argparse.Namespace) -> int:
+    import time
+    from construct import registry
+    conn = registry.connect(_registry_path())
+    code = registry.mint_invite(conn, args.platform, args.scenario, now=time.time())
+    print(f"Invite code: {code}")
+    print(f"  platform: {args.platform}   scenario: {args.scenario}   (single-use, 72h)")
+    return 0
+
+
+def _cmd_loopback(args: argparse.Namespace) -> int:
+    from construct import loopback
+    from construct.setup import CONSTRUCT_DIR
+    inbound = args.inbound or str(CONSTRUCT_DIR / "loopback.in.jsonl")
+    outbox = args.outbox or str(CONSTRUCT_DIR / "loopback.out.jsonl")
+    print(f"Loopback self-test channel: in={inbound} out={outbox} (Ctrl-C to stop).")
+    try:
+        loopback.serve(inbound, outbox, _registry_path())
+    except KeyboardInterrupt:
+        print("\nstopped.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "scenarios":
@@ -388,6 +475,14 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_turn(args)
     if args.command == "import":
         return _cmd_import(args)
+    if args.command == "setup":
+        return _cmd_setup(args)
+    if args.command == "telegram":
+        return _cmd_telegram(args)
+    if args.command == "invite":
+        return _cmd_invite(args)
+    if args.command == "loopback":
+        return _cmd_loopback(args)
     raise AssertionError("unreachable")
 
 
