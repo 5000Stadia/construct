@@ -94,6 +94,27 @@ construct scenarios                              # list the scenario library
 
 The shipped example world, *The Last Honest Meter*, is a complete original noir mystery — a drought-stricken settlement, a master water-meter that died the night an honest technician did. Play it. Put something down and come back for it.
 
+### Build a world from your own document
+
+Drop in any prose (`.txt`/`.md`) and it becomes a playable world in the library, alongside the example:
+
+```bash
+construct import path/to/your-story.md     # ingest one document into the library
+construct import --watch                    # watch the import/ folder; ingest drops as they land
+construct new --interview "a drowned harbor town with a harbor-master's secret"  # build LIVE from a brief
+```
+
+You can also just **DM a `.txt`/`.md` to the Discord bot** and it ingests into the library the same way. Either path narrates its progress as six stages, each naming the pattern-buffer layer being exercised — both a progress bar and a live window into how the engine projects prose into a world:
+
+```
+Stage 1 · Ingesting prose → pattern-buffer · model extraction → assertions, provenance-tracked (9 chunks)
+Stage 2 · Reconciling identity · cross-chunk coreference recall + structured-triage residue
+Stage 3 · Declaring passability · RFC-003 traversal policy for route()
+Stage 4 · Authoring the hidden arc over canon
+Stage 5 · Seeding character knowledge · frame-scoped secrecy (knows:<id>, P4)
+Stage 6 · Sealing the scenario
+```
+
 ### Play from your phone (Discord)
 
 You can also play by DMing a Discord bot — an **outbound-only** transport, so nothing on your machine is exposed to the inbound internet (no port, no tunnel, no public URL). It's a dumb pipe over the same engine: your message in, the rendered scene back. Setup is a copy-pasteable five minutes — see **[docs/DISCORD.md](docs/DISCORD.md)**.
@@ -103,6 +124,8 @@ pip install -e '.[discord]'
 export CONSTRUCT_DISCORD_TOKEN="your-bot-token"   # never committed
 python -m construct.discord_bot                   # then DM the bot
 ```
+
+DM the bot a `.txt`/`.md` document and it builds that world into the library (narrating the six stages back to you), then tells you how to play it — same engine, no port exposed.
 
 ### One play surface, many front ends
 
