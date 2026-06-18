@@ -149,6 +149,8 @@ def _cmd_scenarios() -> int:
 def _cmd_new(args: argparse.Namespace) -> int:
     from construct.game import create_scenario_from_ingest, create_scenario_from_interview
     endless = getattr(args, "endless", False)
+    def _stage(msg: str) -> None:  # live progress + PB-layer showcase on stdout
+        print(msg, flush=True)
     if args.interview is not None:
         brief = args.interview.strip()
         if not brief:
@@ -162,11 +164,13 @@ def _cmd_new(args: argparse.Namespace) -> int:
             print("No brief given; nothing to build.", file=sys.stderr)
             return 2
         name = args.name or "world"
-        meta = create_scenario_from_interview(name, brief, _provider(), endless=endless)
+        meta = create_scenario_from_interview(name, brief, _provider(),
+                                              endless=endless, on_stage=_stage)
     else:
         prose = Path(args.ingest)
         name = args.name or prose.stem.replace(" ", "_")
-        meta = create_scenario_from_ingest(name, prose, _provider(), endless=endless)
+        meta = create_scenario_from_ingest(name, prose, _provider(),
+                                           endless=endless, on_stage=_stage)
     print(f"Scenario {name!r} created: {meta['title']}")
     print(f"  protagonist: {meta['protagonist']}")
     print(f"  theme: {meta['theme']}")

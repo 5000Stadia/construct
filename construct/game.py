@@ -156,6 +156,19 @@ def _beat_expr(beat: dict, player_frame: str):
     return Occurred(beat["entity"])
 
 
+def _emit(on_stage, msg: str) -> None:
+    """Surface an ingestion stage update — to the supplied sink (CLI stdout,
+    Discord, import-folder log) and always to the logger. Each stage names the
+    pattern-buffer layer being exercised: progress *and* a live showcase of the
+    adoption (founder request)."""
+    logger.info(msg)
+    if on_stage is not None:
+        try:
+            on_stage(msg)
+        except Exception:  # a status sink must never sink a build
+            pass
+
+
 #: Kind-scoped traversal policy (PB RFC-003 / letter 058): which portal `kind`s
 #: gate a passage, and on what. route() derives clear|blocked|obscured from a
 #: portal entity's facts under this policy; an undeclared kind never gates
@@ -218,10 +231,11 @@ def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
 
 
 def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
-                       spath: Path, endless: bool) -> dict:
+                       spath: Path, endless: bool, on_stage=None) -> dict:
     """Shared session-zero tail (both creation paths): once canon is
     established, author the hidden arc over it (lint-gated), seed
-    knowledge frames, and write the scenario meta. ENTRY + DESTINATION."""
+    knowledge frames, and write the scenario meta. ENTRY + DESTINATION.
+    Emits per-stage status (stages 2-6) via `on_stage`."""
     from construct.arc.executor import arc_entities, turn_time
 
     # Global coreference finalize pass (PB IDENTITY-RECALL-V1/V2, letters
@@ -229,6 +243,8 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # see, then triage the declined residue. Run BEFORE arc authoring and frame
     # seeding so both bind to reconciled identities. Idempotent; the containment
     # veto keeps it from fusing a container with its contents.
+    _emit(on_stage, "Stage 2 · Reconciling identity · cross-chunk coreference "
+                    "recall + structured-triage residue (PB)")
     try:
         result = world.porcelain.reconcile()
         proposals = result.get("proposals", [])
@@ -240,8 +256,11 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
 
     # Passability policy (PB RFC-003): declare which portal kinds gate, so
     # route() can derive blocked/obscured/clear from portal facts at play time.
+    _emit(on_stage, "Stage 3 · Declaring passability · RFC-003 traversal policy "
+                    "for route() (PB)")
     _declare_traversal_policy(world)
 
+    _emit(on_stage, "Stage 4 · Authoring the hidden arc over canon")
     reads = PorcelainWorldReads(world)
     people = _known_people(world)
     digest = _world_digest(world)
@@ -294,9 +313,12 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
 
     # NPC-knows seeding (P4 frame-scoped secrecy); reversible (knows:
     # frames only).
+    _emit(on_stage, "Stage 5 · Seeding character knowledge · frame-scoped "
+                    "secrecy (knows:<id>, P4) (PB)")
     cast = _seed_cast(arc.protagonist, people)
     seeded = seed_character_frames(world, provider, cast, digest)
 
+    _emit(on_stage, "Stage 6 · Sealing the scenario")
     meta = {"title": title, "protagonist": arc.protagonist,
             "theme": proposal["theme"], "stance": "fiction", "mode": "pure",
             "arc_scope": sorted(e for e in arc_entities(arc) if reads.has_entity(e)),
@@ -306,9 +328,10 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
 
 
 def create_scenario_from_ingest(name: str, prose_path: Path,
-                                provider: Provider, endless: bool = False) -> dict:
+                                provider: Provider, endless: bool = False,
+                                on_stage=None) -> dict:
     """Session-zero Path A: fresh ingest of a work through OUR pipeline
-    → pristine scenario."""
+    → pristine scenario. Emits per-stage status via `on_stage`."""
     WORLDS_DIR.mkdir(exist_ok=True)
     spath = scenario_path(name)
     if spath.exists():
@@ -322,11 +345,12 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
     try:
         # WORLD-A: chunked ingest, scene cursor advancing per chunk.
         chunks = _chunk_chapters(text)
-        logger.info("ingesting %d chunks from %s", len(chunks), prose_path)
+        _emit(on_stage, f"Stage 1 · Ingesting prose → pattern-buffer · model "
+                        f"extraction → assertions, provenance-tracked ({len(chunks)} chunks)")
         for i, chunk in enumerate(chunks, start=1):
             world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}", at=float(i))
-            logger.info("chunk %d/%d ingested", i, len(chunks))
-        return _finalize_scenario(world, name, title, provider, spath, endless)
+            _emit(on_stage, f"   …chunk {i}/{len(chunks)} extracted")
+        return _finalize_scenario(world, name, title, provider, spath, endless, on_stage)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
@@ -337,7 +361,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
 
 
 def create_scenario_from_interview(name: str, brief: str, provider: Provider,
-                                   endless: bool = False) -> dict:
+                                   endless: bool = False, on_stage=None) -> dict:
     """Session-zero Path B: build a world LIVE from a brief (no source
     text). An interviewer cohort expands the brief into the constitutive
     spine — charter, places + lateral graph, key NPCs with dispositional
@@ -351,6 +375,8 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
     if spath.exists():
         raise FileExistsError(f"scenario {name!r} already exists at {spath}")
 
+    _emit(on_stage, "Stage 1 · Interviewing → pattern-buffer · expanding the brief "
+                    "into a constitutive spine (stated canon)")
     spine = cohorts.interview_world(provider, brief)
     title = (spine.get("title") or name).strip()
     world = _world(spath, name, model=engine_tier_dispatch(provider),
@@ -365,7 +391,7 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
         world.ingestor.cursor.advance(1.0)
         world.porcelain.ingest_structured(items)
         logger.info("interview authored %d spine items", len(items))
-        return _finalize_scenario(world, name, title, provider, spath, endless)
+        return _finalize_scenario(world, name, title, provider, spath, endless, on_stage)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)

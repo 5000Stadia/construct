@@ -70,9 +70,15 @@ def chdir_tmp(tmp_path, monkeypatch):
 
 
 def test_interview_builds_playable_scenario(chdir_tmp):
+    stages: list[str] = []
     meta = create_scenario_from_interview(
         "harbor", "a drowned harbor town where the harbor master hides a betrayal",
-        _InterviewStub())
+        _InterviewStub(), on_stage=stages.append)
+    # Per-stage status fires, naming each PB layer (progress + showcase).
+    joined = " | ".join(stages)
+    for n in ("Stage 1", "Stage 2", "Stage 3", "Stage 4", "Stage 5", "Stage 6"):
+        assert n in joined, f"missing {n} in {joined}"
+    assert "Reconciling identity" in joined and "passability" in joined
     assert meta["protagonist"] == PROT
     assert meta["title"] == "The Drowned Harbor"
     assert meta["theme"]
