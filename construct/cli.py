@@ -78,6 +78,17 @@ def build_parser() -> argparse.ArgumentParser:
     knows.add_argument("--contrast", metavar="OTHER",
                        help="another character: show what each knows that the other doesn't")
 
+    imp = sub.add_parser("import", help="ingest a document (.txt/.md) into the library, "
+                                        "or watch a drop folder")
+    imp.add_argument("path", nargs="?",
+                     help="a .txt/.md file to ingest (omit with --watch)")
+    imp.add_argument("--watch", action="store_true",
+                     help="poll the import folder and ingest drops as they land")
+    imp.add_argument("--dir", metavar="DIR", default="import",
+                     help="import folder for --watch (default: import/)")
+    imp.add_argument("--name", help="scenario name (default: unique slug of the filename)")
+    imp.add_argument("--endless", action="store_true", help="no terminal arc")
+
     turn = sub.add_parser("turn", help="process exactly one player turn (one-shot; scripting/tests)")
     turn.add_argument("playthrough", help="scenario name (its single slot is the save)")
     turn.add_argument("player_input", metavar="INPUT")
@@ -260,6 +271,30 @@ def _cmd_turn(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_import(args: argparse.Namespace) -> int:
+    from construct.library import (ingest_document, scan_import_folder,
+                                   watch_import_folder)
+    def _stage(msg: str) -> None:
+        print(msg, flush=True)
+    if args.watch:
+        try:
+            watch_import_folder(_provider(), import_dir=args.dir, on_stage=_stage)
+        except KeyboardInterrupt:
+            print("\nstopped watching.")
+        return 0
+    if not args.path:
+        print("Give a .txt/.md file to import, or --watch a folder.", file=sys.stderr)
+        return 2
+    try:
+        name, meta = ingest_document(args.path, _provider(), name=args.name,
+                                     endless=args.endless, on_stage=_stage)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"import failed: {exc}", file=sys.stderr)
+        return 2
+    print(f"Imported into the library: {meta['title']}  (play: construct play {name})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "scenarios":
@@ -272,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_knows(args)
     if args.command == "turn":
         return _cmd_turn(args)
+    if args.command == "import":
+        return _cmd_import(args)
     raise AssertionError("unreachable")
 
 
