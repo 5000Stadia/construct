@@ -197,3 +197,17 @@ def mark_sent(conn: sqlite3.Connection, platform: str, update_id: int, seq: int)
     conn.execute(
         "UPDATE outbox SET sent=1 WHERE platform=? AND update_id=? AND seq=?",
         (platform, update_id, seq))
+
+
+def interrupted_updates(conn: sqlite3.Connection, platform: str) -> list[int]:
+    """Updates marked processed that produced NO outbox reply — i.e. a crash
+    struck between claiming the update and recording its reply (mid-turn). Every
+    handled event records ≥1 chunk, so an empty outbox here means the turn never
+    completed. These are surfaced LOUDLY (not silently skipped); they are not
+    re-run, since `Session.turn` already mutated the slot and is not idempotent —
+    at-most-once on a mid-turn crash, by design, the player simply retries."""
+    rows = conn.execute(
+        "SELECT update_id FROM processed p WHERE platform=? AND NOT EXISTS "
+        "(SELECT 1 FROM outbox o WHERE o.platform=p.platform AND o.update_id=p.update_id)",
+        (platform,)).fetchall()
+    return [r["update_id"] for r in rows]

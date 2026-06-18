@@ -229,6 +229,51 @@ class TestTelegramAdapter:
         assert f.calls == [] and client.sent == []
         assert registry.get_offset(conn, "telegram") == 7
 
+    def test_send_failure_does_not_drop_reply_and_resends(self, conn):
+        code = registry.mint_invite(conn, "telegram", "anchor", now=NOW)
+        registry.claim_invite(conn, code, "telegram", "7", now=NOW)
+        f = _Factory()
+        core = _core(conn, f)
+
+        class _FlakyTG:
+            def __init__(self):
+                self.sent, self.fail = [], True
+
+            def send_message(self, chat_id, text):
+                if self.fail:
+                    self.fail = False
+                    raise RuntimeError("429 Too Many Requests")
+                self.sent.append((chat_id, text))
+
+        flaky = _FlakyTG()
+        with pytest.raises(RuntimeError):  # first send fails → propagates
+            telegram_bot.process_updates(conn, core, flaky, [_msg(3, 7, "hello")],
+                                         now_fn=lambda: NOW)
+        # the reply is durably recorded, unsent; the turn ran once; offset not advanced
+        assert registry.pending_outbox(conn, "telegram")
+        assert f.sessions["telegram:7"].turns == ["hello"]
+        assert registry.get_offset(conn, "telegram") == 0
+        # next poll drains the outbox (resend) without re-running the turn
+        telegram_bot.process_updates(conn, core, flaky, [], now_fn=lambda: NOW)
+        assert flaky.sent and registry.pending_outbox(conn, "telegram") == []
+        assert f.sessions["telegram:7"].turns == ["hello"]  # still once
+
+    def test_interrupted_update_is_detectable_not_silent(self, conn):
+        # a crash between claim and record_outbox: claimed, but no reply
+        registry.claim_update(conn, "telegram", 99)
+        assert registry.interrupted_updates(conn, "telegram") == [99]
+        registry.record_outbox(conn, "telegram", 99, "c", ["reply"])
+        assert registry.interrupted_updates(conn, "telegram") == []
+
+    def test_client_raises_redacted_on_not_ok(self):
+        from types import SimpleNamespace as NS
+        resp = NS(status_code=200, json=lambda: {"ok": False, "description": "bad"})
+        client = telegram_bot.TelegramClient("123:SECRET",
+                                             http=NS(get=lambda u, params=None: resp))
+        with pytest.raises(RuntimeError) as exc:
+            client.send_message("1", "hi")
+        assert "SECRET" not in str(exc.value)
+
     def test_outbox_recorded_before_send_and_resends(self, conn):
         code = registry.mint_invite(conn, "telegram", "anchor", now=NOW)
         registry.claim_invite(conn, code, "telegram", "9", now=NOW)
@@ -317,3 +362,16 @@ class TestLoopback:
         assert any(t == "narrated<I step inside>" for t in texts)
         # re-pumping the same inbound (restart) runs no new turns (exactly-once)
         assert loopback.pump(conn, core, inbound, outbox, now_fn=lambda: NOW) == 0
+
+    def test_outbox_replayed_after_a_crash(self, tmp_path):
+        # a reply recorded but not delivered (crash before append) is replayed
+        conn = registry.connect(tmp_path / "reg.sqlite")
+        registry.record_outbox(conn, "loopback", 5, "u1", ["recovered line"])
+        outbox = tmp_path / "out.jsonl"
+        inbound = tmp_path / "in.jsonl"
+        inbound.write_text("")  # nothing new inbound
+        core = loopback.build_core(conn, session_factory=_Factory(),
+                                   log_dir=tmp_path / "t")
+        loopback.pump(conn, core, inbound, outbox, now_fn=lambda: NOW)
+        assert "recovered line" in outbox.read_text()
+        assert registry.pending_outbox(conn, "loopback") == []

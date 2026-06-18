@@ -49,16 +49,26 @@ class TelegramClient:
         try:
             resp = self._http.get(f"{self._base}/getUpdates",
                                   params={"offset": offset, "timeout": LONG_POLL_SECONDS})
-            return resp.json().get("result", [])
+            data = resp.json()
         except Exception as exc:
             raise RuntimeError(self._redact(str(exc))) from None
+        if not data.get("ok"):
+            raise RuntimeError(f"getUpdates not ok: {self._redact(str(data))}")
+        return data.get("result", [])
 
     def send_message(self, chat_id: str, text: str) -> None:
+        """Send one message; RAISE (redacted) on any non-ok response so the
+        caller does NOT mark it sent — a 429/Bad Request must be retried, not
+        silently dropped (Codex review)."""
         try:
-            self._http.get(f"{self._base}/sendMessage",
-                           params={"chat_id": chat_id, "text": text})
+            resp = self._http.get(f"{self._base}/sendMessage",
+                                  params={"chat_id": chat_id, "text": text})
+            ok = resp.json().get("ok", False)
+            status = getattr(resp, "status_code", 200)
         except Exception as exc:
             raise RuntimeError(self._redact(str(exc))) from None
+        if not ok or status >= 400:
+            raise RuntimeError(self._redact(f"sendMessage failed (status={status})"))
 
 
 def _event_from_update(update: dict) -> InboundEvent | None:
@@ -90,7 +100,11 @@ def flush_outbox(conn, client: TelegramClient) -> None:
 def process_updates(conn, core: TransportCore, client: TelegramClient,
                     updates: list[dict], *, now_fn: Callable[[], float] = time.time) -> int:
     """Handle a batch of raw Telegram updates; advance + persist the offset
-    past each (durable-record-then-advance). Returns the new offset."""
+    past each. Order per update: dedup-claim → run turn → record the reply
+    DURABLY → send → mark sent → advance offset. A send failure raises before
+    the offset advances, so the next poll resends from the outbox without
+    re-running the turn (exactly-once turn, at-least-once send)."""
+    flush_outbox(conn, client)  # resend anything left unsent by a prior failure
     offset = registry.get_offset(conn, PLATFORM)
     for update in updates:
         uid = int(update["update_id"])
@@ -98,13 +112,20 @@ def process_updates(conn, core: TransportCore, client: TelegramClient,
         if ev is not None and registry.claim_update(conn, PLATFORM, uid):
             out = core.handle(ev, now=now_fn())
             registry.record_outbox(conn, PLATFORM, uid, out.chat_id, out.chunks)
-            for seq, ch in enumerate(out.chunks):
-                client.send_message(out.chat_id, ch)
-                registry.mark_sent(conn, PLATFORM, uid, seq)
-        # advance past this update (message handled, or deliberately ignored)
+        _send_pending(conn, client, uid)  # raises on failure → offset NOT advanced
         offset = max(offset, uid + 1)
         registry.set_offset(conn, PLATFORM, offset)
     return offset
+
+
+def _send_pending(conn, client: TelegramClient, update_id: int) -> None:
+    """Send (and mark sent) any unsent outbox chunks for one update, in order.
+    A send that raises leaves the remaining chunks unsent for the next flush."""
+    for row in registry.pending_outbox(conn, PLATFORM):
+        if row["update_id"] != update_id:
+            continue
+        client.send_message(row["chat_id"], row["text"])
+        registry.mark_sent(conn, PLATFORM, update_id, row["seq"])
 
 
 def _drain_backlog(conn, client: TelegramClient) -> None:
@@ -128,6 +149,9 @@ def serve(registry_path, token: str, *, session_factory=None, client: TelegramCl
     core = TransportCore(conn, platform=PLATFORM, msg_limit=MSG_LIMIT,
                          session_factory=session_factory)
     client = client or TelegramClient(token)
+    for uid in registry.interrupted_updates(conn, PLATFORM):
+        logger.error("telegram: update %s was interrupted mid-turn; its reply was "
+                     "never produced (the player may retry) — not re-running", uid)
     flush_outbox(conn, client)
     _drain_backlog(conn, client)
     i = 0

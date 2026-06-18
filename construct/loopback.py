@@ -50,11 +50,24 @@ def _append(path: Path, obj: dict) -> None:
         fh.write(json.dumps(obj) + "\n")
 
 
+def _flush(conn, platform: str, outbox_path: Path) -> None:
+    """Deliver (append + mark sent) any unsent outbox chunks — the loopback
+    analogue of resending: recovers replies recorded before a prior crash
+    (Codex review: the outbox must be replayed, not only written inline)."""
+    for row in registry.pending_outbox(conn, platform):
+        _append(outbox_path, {"update_id": row["update_id"], "seq": row["seq"],
+                              "chat_id": row["chat_id"], "text": row["text"]})
+        registry.mark_sent(conn, platform, row["update_id"], row["seq"])
+
+
 def pump(conn, core: TransportCore, inbound_path: Path, outbox_path: Path,
          *, now_fn: Callable[[], float] = time.time) -> int:
     """Process all pending inbound lines once; return how many turns ran.
-    Exactly-once: an update already in the registry is skipped, so a restart
-    re-reading the whole inbound file never re-runs a turn."""
+    Order mirrors the Telegram adapter: drain the outbox first (recover any
+    reply recorded but not yet delivered), then per new update dedup-claim →
+    run → record the reply DURABLY → deliver. Exactly-once: an update already
+    in the registry is skipped, so a restart never re-runs a turn."""
+    _flush(conn, core._platform, outbox_path)
     ran = 0
     for e in _read_inbound(inbound_path):
         try:
@@ -69,10 +82,7 @@ def pump(conn, core: TransportCore, inbound_path: Path, outbox_path: Path,
             text=str(e.get("text", "")), update_ids=(uid,))
         out = core.handle(ev, now=now_fn())
         registry.record_outbox(conn, core._platform, uid, out.chat_id, out.chunks)
-        for seq, ch in enumerate(out.chunks):
-            _append(outbox_path, {"update_id": uid, "seq": seq,
-                                  "chat_id": out.chat_id, "text": ch})
-            registry.mark_sent(conn, core._platform, uid, seq)
+        _flush(conn, core._platform, outbox_path)  # deliver this reply now
         ran += 1
     return ran
 
