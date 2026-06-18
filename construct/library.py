@@ -59,6 +59,21 @@ def ingest_document(path: str | Path, provider: Provider, *, on_stage: OnStage |
     return name, meta
 
 
+def ingest_bytes(filename: str, data: bytes | str, provider: Provider, *,
+                 on_stage: OnStage | None = None, endless: bool = False) -> tuple[str, dict]:
+    """Ingest a document delivered as bytes (e.g. a Discord attachment): write
+    it to a temp file and delegate to `ingest_document`. The filename gives the
+    type (.txt/.md) and the scenario name. Returns (scenario_name, meta)."""
+    import tempfile
+    suffix = Path(filename).suffix.lower()
+    if suffix not in INGEST_SUFFIXES:
+        raise ValueError(f"unsupported document type {suffix!r} — use .txt or .md")
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / Path(filename).name
+        p.write_bytes(data if isinstance(data, bytes) else data.encode("utf-8"))
+        return ingest_document(p, provider, on_stage=on_stage, endless=endless)
+
+
 def scan_import_folder(provider: Provider, *, import_dir: str | Path = IMPORT_DIR,
                        on_stage: OnStage | None = None,
                        processed_dir: str | Path | None = None) -> list[tuple[str, dict]]:

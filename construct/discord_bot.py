@@ -291,6 +291,40 @@ async def _best_effort_typing(channel):
                 pass
 
 
+async def _ingest_attachment(channel, attachment) -> bool:
+    """A `.txt`/`.md` attachment → a new library scenario, with the six PB-layer
+    stage updates streamed to the channel. The heavy build runs OFF the event
+    loop (`to_thread`); stage messages marshal back via the loop. Returns True
+    if the attachment was an ingestible document (handled), else False."""
+    import os.path
+    from construct.library import INGEST_SUFFIXES, ingest_bytes
+    from construct.provider import CodexProvider
+
+    if os.path.splitext(attachment.filename)[1].lower() not in INGEST_SUFFIXES:
+        return False
+    await channel.send(f"📥 Ingesting **{attachment.filename}** into the library — "
+                       f"I'll narrate each pattern-buffer stage as it lands…")
+    try:
+        data = await attachment.read()
+    except Exception as exc:
+        await channel.send(f"❌ couldn't read the attachment: {exc}")
+        return True
+    loop = asyncio.get_running_loop()
+
+    def _on_stage(msg: str) -> None:  # called from the build thread
+        asyncio.run_coroutine_threadsafe(channel.send(msg), loop)
+
+    try:
+        name, meta = await asyncio.to_thread(
+            ingest_bytes, attachment.filename, data, CodexProvider(), on_stage=_on_stage)
+        await channel.send(f"✅ **{meta.get('title', name)}** is in the library. "
+                           f"Play it: `{PREFIX}play {name}`")
+    except Exception as exc:
+        logger.exception("discord library ingest failed")
+        await channel.send(f"❌ ingest failed: {exc}")
+    return True
+
+
 def build_client(default_scenario: str | None = None):
     """Construct the discord client. discord.py is imported HERE so the
     core engine never depends on it (gated like the Codex live smoke)."""
@@ -361,6 +395,12 @@ def build_client(default_scenario: str | None = None):
         if seen.seen(message.id):                     # Discord re-delivers on reconnect
             logger.debug("dropping duplicate message id %s", message.id)
             return
+        # A dropped .txt/.md document → ingest it into the library (alongside
+        # the example world). Handled inline (off-loop build); not a turn.
+        if getattr(message, "attachments", None):
+            for att in message.attachments:
+                if await _ingest_attachment(message.channel, att):
+                    return
         body = (message.content or "").strip()
         if not body:
             return

@@ -29,6 +29,22 @@ def test_ingest_document_rejects_bad_input(chdir_tmp):
         library.ingest_document(bad, provider=None)
 
 
+def test_ingest_bytes_routes_through_build(chdir_tmp, monkeypatch):
+    # The Discord-attachment path: bytes + filename -> library scenario.
+    seen = {}
+
+    def _fake_build(name, prose_path, provider, endless=False, on_stage=None):
+        seen["name"] = name
+        seen["text"] = prose_path.read_text()
+        return {"title": f"Built {name}"}
+
+    monkeypatch.setattr(library, "create_scenario_from_ingest", _fake_build)
+    name, meta = library.ingest_bytes("Sea Wall.md", b"# Sea Wall\n\nthe tide", provider=None)
+    assert name == "sea_wall" and seen["text"].startswith("# Sea Wall")
+    with pytest.raises(ValueError):
+        library.ingest_bytes("nope.pdf", b"x", provider=None)
+
+
 def test_scan_folder_ingests_moves_and_is_fail_open(chdir_tmp, monkeypatch):
     imp = chdir_tmp / "import"
     imp.mkdir()
