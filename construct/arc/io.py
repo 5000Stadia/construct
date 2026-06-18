@@ -185,6 +185,17 @@ def _as_float(v) -> float | None:
     return None if v is None else float(v)
 
 
+def _synth_refusal(arc_id: str) -> Clock:
+    """The canonical refusal-clock backstop (mirrors `game._build_arc`): a
+    quiescence ender that always exists, used when the stored refusal rows
+    can't be read back. Keeps a world ALWAYS able to conclude."""
+    return Clock(
+        clock_id="clock:refusal", fires_when=C.TurnsQuiet(15),
+        effects=({"entity": "event:world_concludes", "attribute": "kind",
+                  "value": "refusal_conclusion"},),
+        bound_to=arc_id, rung=Rung.REFUSAL)
+
+
 def _safe_phase(value, bid: str) -> Phase:
     """A beat's phase, tolerant of a missing/invalid stored row. Phase only
     affects pacing/ordering (climax sufficiency is read from a separate index),
@@ -274,6 +285,10 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
             correlates=tuple(json.loads(correlates)) if correlates else None,
         ))
     clock_ids = json.loads(get(arc_id, "clock_index") or "[]")
+    # The refusal clock is ALWAYS appended last (arc_to_items/index_items), so
+    # its id is the structural backstop when its `rung` row doesn't materialize
+    # (a read-path drop at world scale — see _synth_refusal / PB report).
+    refusal_id = clock_ids[-1] if clock_ids else None
     clocks, refusal = [], None
     for cid in clock_ids:
         rung_val = get(cid, "rung")
@@ -281,8 +296,8 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
         effects = get(cid, "effects")
         if fires_when is None or effects is None:
             # A broken escalation clock degrades pacing, not coherence —
-            # fail open LOUDLY and keep playing; the refusal clock below
-            # stays fatal (it is the universal backstop).
+            # fail open LOUDLY and keep playing; the refusal backstop below
+            # is synthesized if it can't be read.
             import logging
             logging.getLogger(__name__).error(
                 "clock %s has incomplete plot rows (fires_when=%s effects=%s) — skipped",
@@ -296,12 +311,25 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
             rung=Rung(rung_val) if rung_val else None,
             rearm=get(cid, "rearm") or "once",
         )
-        if clock.rung is Rung.REFUSAL:
-            refusal = clock
+        # rung may not materialize at scale; the last-indexed clock IS the
+        # refusal clock by construction, so identify it by position too.
+        if clock.rung is Rung.REFUSAL or cid == refusal_id:
+            refusal = clock if clock.rung is Rung.REFUSAL else \
+                Clock(clock.clock_id, clock.fires_when, clock.effects,
+                      bound_to=clock.bound_to, rung=Rung.REFUSAL, rearm=clock.rearm)
         else:
             clocks.append(clock)
     if refusal is None:
-        raise ValueError(f"{arc_id}: no refusal clock in {frame} — arc is corrupt")
+        if not clock_ids:
+            raise ValueError(f"{arc_id}: no clocks in {frame} — arc is corrupt")
+        # The refusal clock's own rows didn't materialize (read-path drop at
+        # scale). It is a FIXED backstop, so synthesize the canonical one rather
+        # than leave the arc without its universal ender (fail-open, loud).
+        import logging
+        logging.getLogger(__name__).error(
+            "%s: refusal clock rows did not materialize — synthesizing the "
+            "canonical refusal backstop", arc_id)
+        refusal = _synth_refusal(arc_id)
     failure_raw = get(arc_id, "failure_when")
     pin_ids = json.loads(get(arc_id, "pin_index") or "[]")
     pins = tuple(_pin_from_reads(get, pid) for pid in pin_ids)
