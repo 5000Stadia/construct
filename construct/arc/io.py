@@ -17,6 +17,31 @@ from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Pin,
 _PIN_FIELDS = ("scope_kind", "subject_entity", "directive", "subject_attribute",
                "anchor", "valid_from", "valid_to", "severity")
 
+#: Attributes whose value is an opaque JSON blob the host round-trips verbatim
+#: (serialized exprs, lists, dicts). They MUST be stored `literal` — left
+#: untyped, the ingest classifier mis-types a blob like `{"op":"occurred",...}`
+#: as an `entity`, and at world scale the identity-reconcile pass then
+#: resolves/drops it, silently losing a beat/clock. (Root-caused on a fresh
+#: `anchor` re-seal: `beat:truth_costs_protection` dropped. Pinning literal
+#: keeps these blobs opaque — never classified, never identity-merged.)
+_JSON_BLOB_ATTRS = frozenset({
+    "climax_ready_beats", "phase_budget", "failure_when", "tension",
+    "world_condition", "premise", "achievable_via", "unreachable_if",
+    "correlates", "fires_when", "effects", "beat_index", "clock_index",
+    "pin_index",
+})
+
+
+def _with_frame_and_types(items: list[dict], frame: str) -> list[dict]:
+    """Stamp the frame and pin JSON-blob attributes to `literal` value_type."""
+    out = []
+    for item in items:
+        item = dict(item, frame=frame)
+        if item["attribute"] in _JSON_BLOB_ATTRS and "value_type" not in item:
+            item["value_type"] = "literal"
+        out.append(item)
+    return out
+
 _ATOM_TYPES = {
     "state_is": C.StateIs, "located": C.Located, "in_frame": C.InFrame,
     "occurred": C.Occurred, "beat_achieved": C.BeatAchieved,
@@ -125,7 +150,7 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
         items += clock_to_items(clock, arc.arc_id)
     for pin in arc.pins:
         items += pin_to_items(pin, arc.arc_id)
-    return [dict(item, frame=frame) for item in items]
+    return _with_frame_and_types(items, frame)
 
 
 def pin_to_items(pin: Pin, arc_id: str) -> list[dict]:
@@ -375,17 +400,16 @@ def arc_from_cache(d: dict) -> Arc:
 
 
 def index_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
-    """Beat/clock indexes so reconstruction never scans the frame."""
-    return [
+    """Beat/clock indexes so reconstruction never scans the frame. These are
+    JSON-blob values, pinned `literal` (see `_JSON_BLOB_ATTRS`)."""
+    return _with_frame_and_types([
         {"entity": arc.arc_id, "attribute": "beat_index",
-         "value": json.dumps([b.beat_id for b in arc.beats]),
-         "timeless": True, "frame": frame},
+         "value": json.dumps([b.beat_id for b in arc.beats]), "timeless": True},
         {"entity": arc.arc_id, "attribute": "clock_index",
          "value": json.dumps([c.clock_id for c in arc.clocks] + [arc.refusal_clock.clock_id]),
-         "timeless": True, "frame": frame},
+         "timeless": True},
         # The pin discovery index (Cx 062 #1): the turn loop reads candidate
         # pin ids from here, never a host-side log scan.
         {"entity": arc.arc_id, "attribute": "pin_index",
-         "value": json.dumps([p.pin_id for p in arc.pins]),
-         "timeless": True, "frame": frame},
-    ]
+         "value": json.dumps([p.pin_id for p in arc.pins]), "timeless": True},
+    ], frame)

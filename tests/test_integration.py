@@ -131,6 +131,27 @@ class TestArcRoundTrip:
         assert all(not f["entity"].startswith(("beat:", "clock:", "arc:", "shape:"))
                    for f in snap["facts"])
 
+    def test_json_blob_rows_are_pinned_literal(self):
+        # Root-caused on a fresh anchor re-seal: a beat's achievable_via JSON
+        # blob ({"op":"occurred",...}) was stored value_type=entity, so the
+        # identity-reconcile pass dropped it and lost the beat. Every JSON-blob
+        # plot row must be pinned `literal` so it's never classified/merged.
+        from construct.arc.grammar import Pin
+        arc = replace(make_arc(),
+                      pins=(Pin("pin:p", "region", "place:x", "d", anchor="place:x"),))
+        items = arc_io.arc_to_items(arc) + arc_io.index_items(arc)
+        blob_attrs = {"achievable_via", "world_condition", "premise", "tension",
+                      "phase_budget", "climax_ready_beats", "fires_when", "effects",
+                      "beat_index", "clock_index", "pin_index"}
+        seen = set()
+        for it in items:
+            if it["attribute"] in blob_attrs:
+                seen.add(it["attribute"])
+                assert it.get("value_type") == "literal", \
+                    f"{it['attribute']} not pinned literal: {it.get('value_type')}"
+        # the rows that actually bit us must be among those checked
+        assert {"achievable_via", "beat_index"} <= seen
+
     def test_missing_beat_phase_loads_tolerantly(self, world):
         # A real defect surfaced by the loopback self-test: the sealed `anchor`
         # world had a beat with a None phase, and Phase(None) crashed the whole
