@@ -392,9 +392,16 @@ class CodexProvider(Provider):
         keepalive makes the *kernel* probe the peer; a dead one surfaces as a
         socket error in ~60s (30s idle + 3×10s probes) → a normal exception the
         existing fail-open/retry handles, instead of an indefinite hang.
-        SO_KEEPALIVE is portable; the TCP_KEEP* tuning is Linux-only (guarded)."""
+        SO_KEEPALIVE is portable; the TCP_KEEP*/USER_TIMEOUT tuning is Linux-only
+        (guarded). `TCP_USER_TIMEOUT` (ms) is the direct one for our case: it
+        bounds how long *sent, unacknowledged* data may sit before the connection
+        errors — i.e. request sent, response stalled — where idle-keepalive probes
+        wouldn't even start. Keepalive covers the idle-dead case; USER_TIMEOUT the
+        in-flight-stalled case. Both fail healthy long streams safely (data keeps
+        getting ACKed)."""
         opts: list[tuple[int, int, int]] = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)]
-        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10),
+                            ("TCP_KEEPCNT", 3), ("TCP_USER_TIMEOUT", 60_000)):
             if hasattr(socket, name):
                 opts.append((socket.IPPROTO_TCP, getattr(socket, name), value))
         return opts
