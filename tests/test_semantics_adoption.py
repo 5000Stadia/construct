@@ -23,6 +23,19 @@ def test_traversal_policy_attrs_are_structural_set_valued():
         assert attribute_default(attr) == {"structural": True, "arity": "set_valued"}
 
 
+def test_arc_enum_attrs_are_structural():
+    # PB 066: the model can nondeterministically classify a standing arc enum
+    # value (e.g. rung="refusal") as EVENT, which ERASES it from every fold.
+    # Declaring these structural short-circuits to CONSTITUTIVE before any model
+    # call, so they fold deterministically and can't be flipped.
+    for attr in ("rung", "rearm", "beat_phase", "weight", "delta_type",
+                 "refusal_variant", "scope_kind"):
+        assert attribute_default(attr) == {"structural": True}
+    # mutable arc attrs are deliberately NOT structural (they legitimately change)
+    assert attribute_default("status") is None
+    assert attribute_default("phase") is None
+
+
 def test_declare_traversal_policy_makes_no_model_call(tmp_path):
     # Regression for the build wedge (2026-06): declaring the policy on a world
     # with NO model must not raise / hang — structural attrs skip the classifier

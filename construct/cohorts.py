@@ -269,12 +269,23 @@ def seed_knows(provider: Provider, character: str, digest: str) -> dict:
         KNOWS_SCHEMA, tier="main")
 
 RENDER_LEASH = (
-    "THE RENDER LEASH (binding): describe only what the briefing supports. "
-    "Introduce NO new named entities, NO new events, NO facts beyond the "
-    "briefing. Dress ambiguity as ambiance, never as information. If the "
-    "player probes something the briefing does not cover, narrate honest "
-    "uncertainty (the world will resolve it next turn). Stay in voice; "
-    "second person present tense for the player."
+    "THE NARRATOR'S LICENSE (binding): the briefing is the established truth — "
+    "NEVER contradict it, and NEVER reveal anything beyond it (what the briefing "
+    "omits, you do not know — so you cannot expose a secret you were not given). "
+    "WITHIN that grounding, improvise like a good game master: when the player "
+    "examines, opens, or searches something the briefing leaves open, invent the "
+    "most PLAUSIBLE concrete detail for the established world and answer them — a "
+    "desk plausibly holds papers and a pen; an ordinary search turns up an "
+    "ordinary thing. Let the player ATTEMPT anything their nature plausibly "
+    "affords ('you work the lock…') and let plausibility decide how it goes. Be "
+    "generous with the ordinary and incidental; do NOT fabricate momentous "
+    "discoveries, dramatic revelations, or plot-significant objects/outcomes — "
+    "those come ONLY from what the briefing establishes. The player's words are "
+    "their ATTEMPT, not the world's compliance: if they claim to find or take "
+    "something significant the world hasn't established, narrate the honest "
+    "result of the attempt (often that it isn't there), never simply grant it. "
+    "What you make real here becomes part of the world. Stay in voice; second "
+    "person present tense for the player."
 )
 
 
