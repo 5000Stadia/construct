@@ -363,6 +363,35 @@ class TestFullTurn:
         # ordinary new fact still promotes (improv not strangled)
         assert world.porcelain.state("obj:lamp", "kind")["status"] == "known"
 
+    def test_place_features_surface_in_briefing(self, world):
+        # PLACE-FEATURE consumption (PB 070): a part_of sub-feature of the scene is
+        # pulled into scope + listed for the narrator (its feel surfaces too).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([
+            {"entity": "place:study_alcove", "attribute": "kind", "value": "alcove",
+             "timeless": True},
+            {"entity": "place:study_alcove", "attribute": "part_of",
+             "value": "place:study", "value_type": "entity"},
+            {"entity": "place:study_alcove", "attribute": "feel",
+             "value": "a shadowed recess"},
+        ])
+        world.ingest_structured([
+            {"entity": "place:study_alcove", "attribute": "feel",
+             "value": "a shadowed recess"}], frame=PLAYER_FRAME)
+        assert world.porcelain.features("place:study") == ["place:study_alcove"]
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": []},
+            {"prose": "You look about the study."},
+        ])
+        run_turn(world, arc, provider, "I look around.", turn=1)
+        narrate_prompt = provider.calls[-1][0]
+        assert "FEATURES OF THIS PLACE" in narrate_prompt
+        assert "place:study_alcove" in narrate_prompt
+        assert "shadowed recess" in narrate_prompt  # the feature's feel surfaced
+
     def test_furnish_is_memoized(self, world):
         arc = make_arc()
         seed_arc(world, arc)

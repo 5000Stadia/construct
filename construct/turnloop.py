@@ -371,7 +371,17 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if scope is None:
         scope = sorted(e for e in arc_entities(arc) if live_reads.has_entity(e))
         trace.point_reads += len(arc_entities(arc))
-    snap_scope = list(scope) + ([scene] if scene else [])
+    # The scene's structural FEATURES — its `part_of`-children (PLACE-FEATURE-
+    # ABSTRACTION-V1, PB 070): a place's sub-features (a hatch in the dome, the
+    # desk in the office) are pulled into scope so their facts (incl. `feel`)
+    # surface, and listed for the narrator. Empty until `part_of` is authored.
+    scene_features = []
+    if scene:
+        try:
+            scene_features = list(p.features(scene))
+        except Exception:  # read unsupported / error — never break the turn
+            scene_features = []
+    snap_scope = list(scope) + ([scene] if scene else []) + scene_features
     canon_snap = _snap_or_empty(p, snap_scope)
     canon_table = _table(canon_snap)
 
@@ -546,6 +556,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         f"SCENE ({player_frame}):",
         "\n".join(scene_lines) or "(nothing established here yet — the grid shows through)",
     ]
+    if scene_features:
+        # Navigable sub-features of this place (PLACE-FEATURE; part_of-children),
+        # distinct from the things merely in the room.
+        briefing_parts.append("\nFEATURES OF THIS PLACE (its sub-features/"
+                              "structures): " + ", ".join(scene_features))
     if active_pins:
         pin_lines = [f"[{ap.pin.scope_kind}] {ap.pin.directive}"
                      for ap in active_pins[:_PIN_CAP]]
