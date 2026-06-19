@@ -370,6 +370,57 @@ class TestFullTurn:
         assert "out of character" in result.prose
 
 
+def test_author_flavor_cohort():
+    # NARRATIVE-FLAVOR-INGEST: the cohort returns a world-level style voice + per
+    # entity feels, and is shown the entity ids + digest.
+    from construct.cohorts import author_flavor
+    prov = StubProvider([{"style": "terse 1920s harbor-noir; rain-slick, cynical",
+                          "feels": [{"entity": "person:rival", "feel": "too calm by half"}]}])
+    out = author_flavor(prov, "DIGEST: a drowned port.", ["person:rival", "place:study"])
+    assert out["style"].startswith("terse") and out["feels"][0]["entity"] == "person:rival"
+    prompt = prov.calls[0][0]
+    assert "person:rival" in prompt and "WORLD DIGEST" in prompt
+    assert prov.calls[0][2] == "main"  # authoring tier
+
+
+def test_style_overlay_in_briefing(world):
+    # The world-level voice overlay rides into the narrator's briefing every turn.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": []},
+        {"prose": "You look."},
+    ])
+    run_turn(world, arc, provider, "I look around.", turn=1,
+             style="terse 1920s harbor-noir; rain-slick, cynical")
+    narrate_prompt = provider.calls[-1][0]
+    assert "STYLE" in narrate_prompt and "harbor-noir" in narrate_prompt
+    assert "never new facts" in narrate_prompt  # the voice-not-facts guardrail
+
+
+def test_terminal_epilogue_names_cast_and_reveals(world):
+    # NARRATIVE-FLAVOR-INGEST §3: a win_loss terminal renders a movie-epilogue —
+    # names the cast for per-character fates + reveals the truth at the curtain.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": [
+        {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": []},
+        {"prose": "You name the rival; the meter's truth is out."},
+    ])
+    result = run_turn(world, arc, provider, "I name the culprit.", turn=1,
+                      scenario_mode="win_loss")
+    assert result.trace.terminal is True
+    narrate_prompt = provider.calls[-1][0]
+    assert "EPILOGUE" in narrate_prompt
+    assert "person:rival" in narrate_prompt   # the cast (a fate for each)
+    assert "THE TRUTH" in narrate_prompt       # concealment lifts at the curtain
+
+
 def test_names_protagonist_guard():
     from construct.turnloop import names_protagonist
     assert names_protagonist("Allocation Officer Marn straightens.", "person:marn")

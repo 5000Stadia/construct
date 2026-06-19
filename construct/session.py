@@ -186,7 +186,8 @@ class Session:
         try:
             result = run_turn(self._world, self._arc, self._provider, text, n,
                               scope=self._scope, mode=self._mode, endless=self._endless,
-                              scenario_mode=self._scenario_mode)
+                              scenario_mode=self._scenario_mode,
+                              style=self._meta.get("style", ""))
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
             return Reply(prose=f"(the turn could not complete: {exc})",

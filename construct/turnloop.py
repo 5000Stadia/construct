@@ -243,7 +243,7 @@ def terminal_outcome(reads: Any) -> str | None:
 def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              turn: int, scope: list[str] | None = None,
              mode: str = "pure", endless: bool = False,
-             scenario_mode: str = "endless") -> TurnResult:
+             scenario_mode: str = "endless", style: str = "") -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
     'coauthor' (the player may declare facts into the world).
@@ -533,7 +533,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             trace.dropped_cohorts.append(f"npc_intent:{npc} ({exc})")
 
     # ---- BRIEFING (no plot:, structurally — player-frame reads only) ----
-    briefing_parts = [
+    briefing_parts = []
+    if style:
+        # The world-level voice overlay (NARRATIVE-FLAVOR-INGEST): HOW to write,
+        # distilled once at ingest. Shapes voice/tone only — never adds facts.
+        briefing_parts.append(
+            f"STYLE (render the grounded world in this voice — tone only, never "
+            f"new facts): {style}\n")
+    briefing_parts += [
         f"SCENE ({player_frame}):",
         "\n".join(scene_lines) or "(nothing established here yet — the grid shows through)",
     ]
@@ -548,10 +555,29 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         flavor = ("triumphant but earned — the goal is reached"
                   if outcome == "won" else
                   "somber — the goal is lost, the chance gone")
+        # The movie epilogue (NARRATIVE-FLAVOR-INGEST §3): name the cast so each
+        # gets a fate, and lift concealment at the curtain — feed the canon
+        # resolution so the narrator can land the truth (the one place a knowing
+        # narrator is right; the fates are improvised from the final world-state).
+        cast = sorted({arc.protagonist}
+                      | {e for e in arc_entities(arc) if e.startswith("person:")})
+        reveal_scope = [e for e in (set(arc_entities(arc)) | set(scope or []))
+                        if e.startswith(("person:", "place:", "obj:", "fact:"))
+                        and live_reads.has_entity(e)]
+        reveal = [f"{f['entity']} · {f['attribute']} · {f['value']}"
+                  for f in _snap_or_empty(p, sorted(reveal_scope)).get("facts", [])
+                  if f["entity"] != arc.protagonist][:20]
         briefing_parts.append(
             f"\nTHE STORY ENDS HERE ({outcome}). Render a final, buttoned-up "
-            f"aftermath: {flavor}. Close the world's threads in the settled wake; "
-            f"apply NO new pressure and open NO new hooks — this is the last beat.")
+            f"EPILOGUE — {flavor}. Like a film's closing: for the protagonist (you) "
+            f"AND each of these characters, give a fitting FATE — where they end "
+            f"up, what the outcome cost or won them: {cast}. Concealment lifts now "
+            f"(the story is over): you MAY name what was hidden. Close every thread "
+            f"in the settled wake; apply NO new pressure, open NO new hooks — this "
+            f"is the last beat.")
+        if reveal:
+            briefing_parts.append("\nTHE TRUTH (revealed at the curtain — weave in "
+                                  "what fits the ending):\n" + "\n".join(reveal))
     elif concluded and not endless:
         briefing_parts.append("\nTHE ARC HAS RESOLVED — render this turn as "
                               "aftermath/denouement: the world responds to the "

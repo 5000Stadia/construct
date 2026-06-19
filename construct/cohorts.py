@@ -215,6 +215,57 @@ def author_story(provider: Provider, seed: str = "") -> dict:
         STORY_AUTHOR_SCHEMA, tier="main", deliberate=True)
 
 
+FLAVOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "style": {"type": "string",
+                  "description": "ONE voice/tone directive for the narrator: the "
+                  "work's genre, era, geography, culture, and narrative "
+                  "register/diction. This is HOW to write everything — the "
+                  "persistent voice overlay. It must NEVER introduce facts; it "
+                  "shapes the telling of the grounded world, not its contents."},
+        "feels": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "entity": {"type": "string",
+                           "description": "an EXACT entity id from the list below"},
+                "feel": {"type": "string",
+                         "description": "this person/place/thing's narrative FEEL "
+                         "beyond literal description — its mood, charge, or what "
+                         "makes it notable/suspicious (a short evocative phrase)"},
+            },
+            "required": ["entity", "feel"],
+        }},
+    },
+    "required": ["style", "feels"],
+}
+
+
+def author_flavor(provider: Provider, digest: str, entity_ids: list[str]) -> dict:
+    """Session-zero narrative-flavor extraction (NARRATIVE-FLAVOR-INGEST): run
+    ONCE at ingest to distill the fiction's concentrated genre/style juice into
+    the shape — a world-level STYLE/voice overlay (HOW everything is written) and
+    a per-entity FEEL (the charge/mood/suspicion of each person/place/thing,
+    beyond its literal description). The host stores style on the scenario meta
+    and feels as ordinary attributes on the entities; the engine never sees
+    'fiction' as a concept (Jarvis litmus). Authoring → good tier."""
+    return complete_sync(provider,
+        "You are distilling the NARRATIVE FLAVOR of a work for a text construct — "
+        "the feel and charm beyond literal description. From the world digest, "
+        "produce:\n"
+        "- `style`: ONE voice/tone directive — the work's genre, era, geography, "
+        "culture, and narrative register/diction. This is HOW the narrator should "
+        "write EVERYTHING; it shapes voice, NEVER facts.\n"
+        "- `feels`: for the SIGNIFICANT people, places, and things, a short "
+        "evocative phrase capturing each one's mood/charge/what makes it notable "
+        "or suspicious — the texture a reader feels, not the literal description. "
+        "Use the EXACT entity ids from the list; cover only the ones that carry "
+        "real narrative weight (skip the inert).\n\n"
+        f"AVAILABLE ENTITY IDS:\n{entity_ids}\n\n"
+        f"WORLD DIGEST:\n{digest}",
+        FLAVOR_SCHEMA, tier="main", deliberate=True)
+
+
 def interview_world(provider: Provider, brief: str) -> dict:
     """Session-zero Path B (SESSION-ZERO WORLD-B): expand a human brief
     into a world's constitutive spine — the charter, the place(s) and

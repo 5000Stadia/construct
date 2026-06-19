@@ -369,9 +369,17 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     cast = _seed_cast(arc.protagonist, people)
     seeded = seed_character_frames(world, provider, cast, digest)
 
+    _emit(on_stage, "Stage 5.5 · Distilling narrative flavor · genre/voice overlay "
+                    "+ per-entity feel (host annotation; engine stays vanilla)")
+    style = _author_flavor(world, provider, digest, reads)
+
     _emit(on_stage, "Stage 6 · Sealing the scenario")
     meta = {"title": title, "protagonist": arc.protagonist,
             "theme": proposal["theme"], "stance": "fiction", "mode": "pure",
+            # The world-level STYLE/voice overlay (NARRATIVE-FLAVOR-INGEST): a
+            # one-time render directive fed to the narrator every turn (HOW to
+            # write, never facts). Scenario-level, like theme.
+            "style": style,
             # `mode` (pure/coauthor) is turn-loop input authority — never
             # overloaded. `scenario_mode` is the win/loss-vs-freeplay axis
             # (WIN-LOSS §10, Cx 063): separate field so the declaration-denial
@@ -597,6 +605,40 @@ def _canon_entity_ids(world: Any) -> set[str]:
 def _known_people(world: Any) -> list[str]:
     """Person entities in canon."""
     return sorted(e for e in _canon_entity_ids(world) if e.startswith("person:"))
+
+
+#: Cap on entities offered to the flavor cohort (people/places/things).
+FLAVOR_ENTITY_CAP = 40
+
+
+def _author_flavor(world: Any, provider: Provider, digest: str, reads: Any) -> str:
+    """Distill the fiction's narrative flavor at ingest (NARRATIVE-FLAVOR-INGEST):
+    a world-level STYLE/voice directive (returned, → scenario meta) and a
+    per-entity FEEL written as an ordinary attribute on each people/place/thing
+    (canon + player-frame mirror, so the narrator's scene read surfaces it). The
+    engine never sees 'flavor' as a concept — it's host annotation over vanilla
+    facts. Fail-open: a flavor-cohort failure must never sink the build (returns
+    '' / writes no feels)."""
+    from construct import cohorts
+    ids = sorted(e for e in _canon_entity_ids(world)
+                 if e.startswith(("person:", "place:", "obj:")))[:FLAVOR_ENTITY_CAP]
+    try:
+        flavor = cohorts.author_flavor(provider, digest, ids)
+    except Exception as exc:  # never sink the build on a flavor miss
+        logger.warning("flavor cohort skipped: %s", exc)
+        return ""
+    player_frame = f"knows:{reads.state('arc:main', 'protagonist', frame='plot:main') or ''}"
+    items = []
+    for f in flavor.get("feels", []):
+        entity, feel = f.get("entity"), f.get("feel")
+        if entity and feel and reads.has_entity(entity):
+            items.append({"entity": entity, "attribute": "feel", "value": feel})
+    if items:
+        world.porcelain.ingest_structured(items)                     # canon
+        if player_frame != "knows:":
+            world.porcelain.ingest_structured(items, frame=player_frame)  # scene-visible
+        logger.info("flavor: %d entity feels written", len(items))
+    return (flavor.get("style") or "").strip()
 
 
 #: Fallback shown when the authored goal leaks a hidden term (fail-closed):
