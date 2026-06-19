@@ -334,6 +334,15 @@ class TestSetup:
     def test_first_load_menu_enter_is_play(self):
         assert setup.first_load_menu(input_fn=lambda _p: "", out=lambda *_a: None) == "play"
 
+    def test_token_read_from_dotenv(self, monkeypatch):
+        # drop the token in a .env (the operator's tomorrow-path) → read_token finds it
+        from pathlib import Path
+        Path(".env").write_text("# local secrets\nCONSTRUCT_TELEGRAM_TOKEN = \"123:ABCdef\"\n")
+        assert setup.read_token() == "123:ABCdef"
+        # env var still wins over .env
+        monkeypatch.setenv(setup.TOKEN_ENV, "999:ENV")
+        assert setup.read_token() == "999:ENV"
+
 
 # ---- loopback: full offline flow -----------------------------------------
 

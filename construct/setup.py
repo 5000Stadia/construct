@@ -28,6 +28,10 @@ CONSTRUCT_DIR = WORLDS_DIR / ".construct"      # under the gitignored worlds/
 CONFIG_PATH = CONSTRUCT_DIR / "config.json"    # non-secret
 TOKEN_PATH = CONSTRUCT_DIR / "telegram_token"  # 0600, secret
 TOKEN_ENV = "CONSTRUCT_TELEGRAM_TOKEN"
+#: .env files checked for the token (gitignored). Drop a line
+#: `CONSTRUCT_TELEGRAM_TOKEN=123:ABC…` in either and `construct telegram`
+#: picks it up — no interactive wizard needed.
+DOTENV_PATHS = [Path(".env"), CONSTRUCT_DIR / ".env"]
 
 
 def load_config() -> dict:
@@ -44,12 +48,37 @@ def save_config(cfg: dict) -> None:
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
 
 
+def _token_from_dotenv() -> str | None:
+    """Read CONSTRUCT_TELEGRAM_TOKEN from a `.env` file (KEY=VALUE lines;
+    quotes + comments tolerated). Lets the operator drop the token in a file
+    rather than run the wizard. Never logged."""
+    for path in DOTENV_PATHS:
+        if not path.exists():
+            continue
+        try:
+            for line in path.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip() == TOKEN_ENV:
+                    val = val.strip().strip('"').strip("'")
+                    if val:
+                        return val
+        except OSError:
+            continue
+    return None
+
+
 def read_token() -> str | None:
-    """The token from the environment (preferred for CI/headless) or the
-    0600 file. Never logged."""
+    """The token, in precedence order: the environment, a `.env` file
+    (DOTENV_PATHS), then the 0600 secrets file. Never logged."""
     env = os.environ.get(TOKEN_ENV)
     if env:
         return env.strip()
+    dot = _token_from_dotenv()
+    if dot:
+        return dot
     if TOKEN_PATH.exists():
         return TOKEN_PATH.read_text().strip() or None
     return None
