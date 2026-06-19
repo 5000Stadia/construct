@@ -434,6 +434,25 @@ class TestFullTurn:
         assert "out of character" in result.prose
 
 
+def test_who_knows_inspect(tmp_path, monkeypatch):
+    # WHO-KNOWS-INVERSE consumption (PB 071): which characters' frames hold a
+    # fact — computed, not stored.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "worlds").mkdir()
+    from construct.game import _world, scenario_path, who_knows_inspect
+    w = _world(scenario_path("demo"), "demo", stance="fiction", title="D")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([{"entity": "fact:secret", "attribute": "culprit",
+                          "value": "person:rival", "timeless": True}])
+    # the guard knows the culprit; the clerk does not
+    w.ingest_structured([{"entity": "fact:secret", "attribute": "culprit",
+                          "value": "person:rival"}], frame="knows:person:guard")
+    w.close()
+    r = who_knows_inspect("demo", "fact:secret", "culprit")
+    assert "person:guard" in r["characters"]
+    assert "person:clerk" not in r["characters"]
+
+
 def test_arc_protected_keys():
     from construct.arc.executor import arc_protected_keys
     # the arc's load-bearing fact (the destination key) is protected; the gate

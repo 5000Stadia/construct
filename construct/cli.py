@@ -90,6 +90,13 @@ def build_parser() -> argparse.ArgumentParser:
     knows.add_argument("--contrast", metavar="OTHER",
                        help="another character: show what each knows that the other doesn't")
 
+    wk = sub.add_parser("whoknows", help="the inverse: which characters know a fact "
+                                         "(computed, not stored — WHO-KNOWS-INVERSE)")
+    wk.add_argument("scenario")
+    wk.add_argument("entity", help="the fact's entity id (e.g. fact:secret)")
+    wk.add_argument("attribute", help="the attribute (e.g. culprit)")
+    wk.add_argument("--value", default=None, help="restrict to a specific value")
+
     imp = sub.add_parser("import", help="ingest a document (.txt/.md) into the library, "
                                         "or watch a drop folder")
     imp.add_argument("path", nargs="?",
@@ -483,6 +490,19 @@ def _cmd_knows(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_whoknows(args: argparse.Namespace) -> int:
+    from construct.game import who_knows_inspect
+    r = who_knows_inspect(args.scenario, args.entity, args.attribute, value=args.value)
+    fact = f"{r['entity']} · {r['attribute']}" + (f" = {r['value']}" if r['value'] else "")
+    if r["characters"]:
+        print(f"Characters who know ({fact}):")
+        for c in r["characters"]:
+            print(f"  {c}")
+    else:
+        print(f"No character's knowledge frame holds ({fact}).")
+    return 0
+
+
 def _cmd_turn(args: argparse.Namespace) -> int:
     from construct import Session
 
@@ -596,6 +616,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_play(args)
     if args.command == "knows":
         return _cmd_knows(args)
+    if args.command == "whoknows":
+        return _cmd_whoknows(args)
     if args.command == "turn":
         return _cmd_turn(args)
     if args.command == "import":

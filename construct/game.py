@@ -860,6 +860,27 @@ def knows_inspect(name: str, character: str, contrast: str | None = None) -> dic
         world.close()
 
 
+def who_knows_inspect(name: str, entity: str, attribute: str,
+                      value: object = None) -> dict:
+    """The INVERSE of knows_inspect (WHO-KNOWS-INVERSE-V1, PB 071): which
+    characters' knowledge frames hold a fact — computed by the engine
+    (`p.who_knows`), not stored. The frame-scoped-secrecy showcase: "which NPCs
+    know the culprit?" Folded-not-raw (superseded/retracted beliefs drop),
+    identity-aware. Read-only on the pristine scenario; no model."""
+    spath = scenario_path(name)
+    if not spath.exists():
+        raise FileNotFoundError(f"no scenario {name!r}")
+    world = _world(spath, name)                          # model=None: reads are LLM-free
+    try:
+        frames = world.porcelain.who_knows(entity, attribute, value)
+        characters = sorted(f.split("knows:", 1)[1] for f in frames
+                            if f.startswith("knows:"))
+        return {"entity": entity, "attribute": attribute, "value": value,
+                "frames": frames, "characters": characters}
+    finally:
+        world.close()
+
+
 def _world_digest(world: Any, limit: int = 6000) -> str:
     """A people+key-entity snapshot digest for authoring calls."""
     ids = _canon_entity_ids(world)
