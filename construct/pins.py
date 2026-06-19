@@ -72,28 +72,39 @@ def resolve_active_pins(
     present_entities: set[str],
     as_of: float,
     spent: set[str] | None = None,
+    progress: float = 0.0,
 ) -> list[ActivePin]:
     """Return the pins active this turn, ordered for the briefing (band, then
     salience desc, then pin_id for stability). `ancestry` is the protagonist's
     containment chain as a set; `present_entities` are the scene's occupants;
     `as_of` is the single awareness coordinate; `spent` are permanently
-    resolved pins (excluded). A `social` pin whose `anchor` names a group
-    rather than a single present entity simply never matches here — group
-    presence is deferred (Cx 062 #4), not silently scanned."""
+    resolved pins (excluded). `progress` ∈ [0,1] is arc progress — an
+    `escalates` (foreshadowing) pin's salience rises from its base toward 1 as
+    the player closes in on the reveal (the clue-trail). A `social` pin whose
+    `anchor` names a group rather than a single present entity simply never
+    matches here — group presence is deferred (Cx 062 #4), not silently scanned."""
     spent = spent or set()
+    progress = _clamp01(progress)
+
+    def _final(pin, base: float) -> float:
+        # Foreshadowing pins get louder with arc progress (base → 1).
+        return _clamp01(base + progress * (1.0 - base)) if pin.escalates else base
+
     active: list[ActivePin] = []
     for pin in pins:
         if pin.pin_id in spent:
             continue
         if pin.scope_kind == "region":
             if pin.anchor and pin.anchor in ancestry:
-                active.append(ActivePin(pin, _clamp01(0.4 * pin.severity), _BAND["region"]))
+                active.append(ActivePin(pin, _final(pin, _clamp01(0.4 * pin.severity)),
+                                        _BAND["region"]))
         elif pin.scope_kind == "social":
             if pin.anchor and pin.anchor in present_entities:
-                active.append(ActivePin(pin, _clamp01(pin.severity), _BAND["social"]))
+                active.append(ActivePin(pin, _final(pin, _clamp01(pin.severity)),
+                                        _BAND["social"]))
         elif pin.scope_kind == "temporal":
             sal = _temporal_salience(pin, as_of)
             if sal is not None:
-                active.append(ActivePin(pin, sal, _BAND["temporal"]))
+                active.append(ActivePin(pin, _final(pin, sal), _BAND["temporal"]))
     active.sort(key=lambda a: (a.band, -a.salience, a.pin.pin_id))
     return active

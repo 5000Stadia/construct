@@ -37,7 +37,7 @@ from construct.arc.executor import (
     navigate,
     turn_time,
 )
-from construct.arc.grammar import Arc
+from construct.arc.grammar import Arc, Weight
 from construct.pins import resolve_active_pins
 from construct.provider import Provider, ProviderError
 
@@ -444,9 +444,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                      for a in ev.agents}
         except Exception:
             spent = set()
+        # Arc progress drives foreshadowing escalation: fraction of REQUIRED
+        # beats achieved → an `escalates` pin's clue gets louder as the reveal
+        # nears (v2 clue-trail).
+        required = [b for b in arc.beats if b.weight is Weight.REQUIRED]
+        done = sum(1 for b in required
+                   if live_reads.assertion_in_frame("plot:main", b.beat_id, "status", "achieved"))
+        progress = (done / len(required)) if required else 0.0
         active_pins = resolve_active_pins(
             arc.pins, ancestry=set(chain), present_entities=present_entities,
-            as_of=awareness_as_of, spent=spent)
+            as_of=awareness_as_of, spent=spent, progress=progress)
         pin_subjects = {ap.subject_key for ap in active_pins}
         trace.pins = [(ap.pin.pin_id, ap.pin.scope_kind, round(ap.salience, 3))
                       for ap in active_pins]

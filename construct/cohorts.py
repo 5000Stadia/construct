@@ -233,8 +233,13 @@ FLAVOR_SCHEMA = {
                          "description": "this person/place/thing's narrative FEEL "
                          "beyond literal description — its mood, charge, or what "
                          "makes it notable/suspicious (a short evocative phrase)"},
+                "clue": {"type": "boolean",
+                         "description": "true if this feel is a CLUE pointing "
+                         "toward the hidden mystery (a suspicious tell) that "
+                         "should grow louder as the player closes in; false for "
+                         "ambient/atmospheric feel"},
             },
-            "required": ["entity", "feel"],
+            "required": ["entity", "feel", "clue"],
         }},
     },
     "required": ["style", "feels"],

@@ -112,6 +112,10 @@ class Pin:
     valid_from: float | None = None
     valid_to: float | None = None
     severity: float = 1.0  # [0,1] base weight, modulates salience
+    #: A foreshadowing/clue pin: its salience ESCALATES with arc progress, so the
+    #: clue gets louder as the player closes in on the reveal (the good-DM
+    #: clue-trail, NARRATIVE-FLAVOR-INGEST v2). Steady when False.
+    escalates: bool = False
 
 
 @dataclass(frozen=True)

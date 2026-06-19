@@ -629,16 +629,50 @@ def _author_flavor(world: Any, provider: Provider, digest: str, reads: Any) -> s
         return ""
     player_frame = f"knows:{reads.state('arc:main', 'protagonist', frame='plot:main') or ''}"
     items = []
+    clues = []  # (entity, feel) flagged as a clue → an escalating foreshadow pin
     for f in flavor.get("feels", []):
         entity, feel = f.get("entity"), f.get("feel")
         if entity and feel and reads.has_entity(entity):
             items.append({"entity": entity, "attribute": "feel", "value": feel})
+            if f.get("clue") and entity.startswith(("person:", "place:")):
+                clues.append((entity, feel))
     if items:
         world.porcelain.ingest_structured(items)                     # canon
         if player_frame != "knows:":
             world.porcelain.ingest_structured(items, frame=player_frame)  # scene-visible
         logger.info("flavor: %d entity feels written", len(items))
+    if clues:
+        _author_foreshadow_pins(world, clues)
     return (flavor.get("style") or "").strip()
+
+
+def _author_foreshadow_pins(world: Any, clues: list[tuple[str, str]]) -> None:
+    """Mint escalating foreshadowing pins from clue-feels and append them to the
+    arc's plot rows + pin_index (NARRATIVE-FLAVOR-INGEST v2). A person-clue →
+    social pin (fires when present), a place-clue → region pin (fires in scope);
+    `escalates=True` so the clue grows louder as the player closes in. Fail-open:
+    a pin-authoring miss never sinks the build."""
+    from construct.arc.grammar import Pin
+    from construct.arc.io import pin_to_items
+    p = world.porcelain
+    try:
+        existing = json.loads(p.state("arc:main", "pin_index", frame="plot:main") or "[]")
+        new_ids, items = [], []
+        for i, (entity, feel) in enumerate(clues):
+            pin_id = f"pin:clue_{_slug(entity)}_{i}"
+            scope = "social" if entity.startswith("person:") else "region"
+            pin = Pin(pin_id=pin_id, scope_kind=scope, subject_entity=entity,
+                      directive=feel, anchor=entity, severity=0.6, escalates=True)
+            items += pin_to_items(pin, "arc:main")
+            new_ids.append(pin_id)
+        p.ingest_structured(items, frame="plot:main")
+        p.ingest_structured([{"entity": "arc:main", "attribute": "pin_index",
+                              "value": json.dumps(existing + new_ids),
+                              "value_type": "literal", "timeless": True}],
+                            frame="plot:main")
+        logger.info("flavor: %d foreshadow pins authored", len(new_ids))
+    except Exception as exc:
+        logger.warning("foreshadow-pin authoring skipped: %s", exc)
 
 
 #: Fallback shown when the authored goal leaks a hidden term (fail-closed):

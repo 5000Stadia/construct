@@ -192,18 +192,24 @@ class TestArcRoundTrip:
                 subject_attribute="gravity", anchor="place:study", severity=0.5),
             Pin("pin:bomb", "temporal", "fact:secret", "a device counts down",
                 valid_from=1.0, valid_to=9.0, severity=1.0),
+            Pin("pin:clue", "social", "person:rival", "won't meet your eye",
+                anchor="person:rival", severity=0.6, escalates=True),  # v2 foreshadow
         )
         arc = replace(make_arc(), pins=pins)
         seed_arc(world, arc)
         rebuilt = arc_io.arc_from_frame(PorcelainWorldReads(world))
-        assert {p.pin_id for p in rebuilt.pins} == {"pin:law", "pin:bomb"}
+        assert {p.pin_id for p in rebuilt.pins} == {"pin:law", "pin:bomb", "pin:clue"}
         law = next(p for p in rebuilt.pins if p.pin_id == "pin:law")
         assert law.anchor == "place:study" and law.severity == 0.5
         bomb = next(p for p in rebuilt.pins if p.pin_id == "pin:bomb")
         assert bomb.valid_from == 1.0 and bomb.valid_to == 9.0
+        # the escalates flag round-trips (False default + True foreshadow)
+        clue = next(p for p in rebuilt.pins if p.pin_id == "pin:clue")
+        assert clue.escalates is True and law.escalates is False
         # cache path preserves them too
         cached = arc_io.arc_from_cache(arc_io.arc_to_cache(arc))
-        assert {p.pin_id for p in cached.pins} == {"pin:law", "pin:bomb"}
+        assert {p.pin_id for p in cached.pins} == {"pin:law", "pin:bomb", "pin:clue"}
+        assert next(p for p in cached.pins if p.pin_id == "pin:clue").escalates is True
         # no pins → empty tuple through both
         assert arc_io.arc_from_cache(arc_io.arc_to_cache(make_arc())).pins == ()
 
@@ -440,7 +446,8 @@ def test_author_flavor_cohort():
     # entity feels, and is shown the entity ids + digest.
     from construct.cohorts import author_flavor
     prov = StubProvider([{"style": "terse 1920s harbor-noir; rain-slick, cynical",
-                          "feels": [{"entity": "person:rival", "feel": "too calm by half"}]}])
+                          "feels": [{"entity": "person:rival", "feel": "too calm by half",
+                                     "clue": True}]}])
     out = author_flavor(prov, "DIGEST: a drowned port.", ["person:rival", "place:study"])
     assert out["style"].startswith("terse") and out["feels"][0]["entity"] == "person:rival"
     prompt = prov.calls[0][0]

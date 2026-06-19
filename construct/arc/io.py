@@ -163,6 +163,9 @@ def pin_to_items(pin: Pin, arc_id: str) -> list[dict]:
         if val is not None:
             items.append({"entity": pin.pin_id, "attribute": field_name,
                           "value": val, "timeless": True})
+    if pin.escalates:  # written only when true → read back as a clean truthiness
+        items.append({"entity": pin.pin_id, "attribute": "escalates",
+                      "value": "yes", "timeless": True})
     return items
 
 
@@ -178,6 +181,7 @@ def _pin_from_reads(get, pin_id: str) -> Pin:
         valid_from=_as_float(get(pin_id, "valid_from")),
         valid_to=_as_float(get(pin_id, "valid_to")),
         severity=_as_float(get(pin_id, "severity")) or 1.0,
+        escalates=bool(get(pin_id, "escalates")),
     )
 
 
@@ -379,7 +383,8 @@ def arc_to_cache(arc: Arc) -> dict:
         "climax_ready_beats": list(arc.climax_ready_beats),
         "phase_budget": {p.value: n for p, n in arc.phase_budget.items()},
         "failure_when": expr_to_obj(arc.failure_when) if arc.failure_when else None,
-        "pins": [{f: getattr(p, f) for f in ("pin_id", *_PIN_FIELDS)} for p in arc.pins],
+        "pins": [{f: getattr(p, f) for f in ("pin_id", *_PIN_FIELDS, "escalates")}
+                 for p in arc.pins],
     }
 
 

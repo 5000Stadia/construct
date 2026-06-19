@@ -91,6 +91,27 @@ class TestSalience:
         assert 0.0 <= s <= 1.0
 
 
+class TestEscalation:
+    def test_escalating_pin_rises_with_progress(self):
+        pin = Pin("pin:clue", "social", "person:x", "tells a small lie",
+                  anchor="person:x", severity=0.5, escalates=True)
+        present = {"person:x"}
+        s0 = resolve_active_pins([pin], ancestry=set(), present_entities=present,
+                                 as_of=5.0, progress=0.0)[0].salience
+        s1 = resolve_active_pins([pin], ancestry=set(), present_entities=present,
+                                 as_of=5.0, progress=1.0)[0].salience
+        assert abs(s0 - 0.5) < 1e-9 and abs(s1 - 1.0) < 1e-9  # base → 1 as reveal nears
+        sm = resolve_active_pins([pin], ancestry=set(), present_entities=present,
+                                 as_of=5.0, progress=0.5)[0].salience
+        assert s0 < sm < s1
+
+    def test_non_escalating_ignores_progress(self):
+        pin = Pin("pin:law", "social", "person:y", "calm", anchor="person:y", severity=0.5)
+        s = resolve_active_pins([pin], ancestry=set(), present_entities={"person:y"},
+                                as_of=5.0, progress=1.0)[0].salience
+        assert abs(s - 0.5) < 1e-9  # steady regardless of progress
+
+
 class TestOrdering:
     def test_cross_kind_band_order_is_deterministic(self):
         # temporal (urgent) before social before region (law)
