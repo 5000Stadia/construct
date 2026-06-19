@@ -44,6 +44,13 @@ logger = logging.getLogger(__name__)
 
 _ABSENT = object()
 _PIN_CAP = 6  # max pins surfaced per turn (Cx 062: cap + stable order)
+#: The narrator's prose is staged here, NOT canon, so the ingest gate can
+#: catch a contradiction of established canon before it overwrites it
+#: (GATED-INGEST-COHORT; Cx round-robin). Non-contradicting rows promote to
+#: canon; a row that changes an established value stays quarantined here for
+#: arc review. Narrator-origin is stamped via `source` (PB 067).
+_PROPOSED = "proposed:main"
+_NARRATOR_SOURCE = "narrator"
 
 
 @dataclass
@@ -74,6 +81,7 @@ class TurnTrace:
     outcome: str | None = None  # arc_outcome this turn: won|lost|None
     terminal: bool = False  # this turn ended the scenario (win_loss mode + outcome)
     pins: list = field(default_factory=list)  # (pin_id, scope_kind, salience) surfaced this turn
+    contradictions: list = field(default_factory=list)  # narrator rows quarantined (changed established canon)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -600,41 +608,66 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if names_protagonist(prose, arc.protagonist):
         trace.player_boundary = "FLAGGED: protagonist named in third person"
 
-    # ---- POST: render is canon; concealment audit -------------------------
+    # ---- POST: INGEST GATE (GATED-INGEST-COHORT) --------------------------
+    # The licensed narrator improvises freely WITHIN its grounding, but its
+    # prose is not trusted straight to canon. Stage it in a quarantine frame,
+    # then promote everything EXCEPT a row that overwrites an established canon
+    # value (a contradiction) — those stay quarantined for arc review. New
+    # facts and same-value restatements promote (so good improv — the drawer's
+    # papers, the paperclip — is never blocked). Narrator-origin is stamped.
     pre_keys = {(row["entity"], row["attribute"]) for row in receipt_rows}
-    post_rows = _receipt_rows(p.ingest(prose, scene=scene, at=turn_time(turn)))
-    canon_table.update(_table(_snap_or_empty(p, snap_scope)))
-    _mirror_rows(p, post_rows, player_frame, canon_table, trace)
-
-    briefing_keys = set(player_table)
     pre_entities = {row["entity"] for row in receipt_rows}
-    # The license is what the narrator was GIVEN: the briefing (scene
-    # facts incl. furnished descriptions, NPC intents, the nudge
-    # directive) plus the player's own words. What it invents beyond
-    # that stays flagged (letters 011/020/025). Token-subset matching:
-    # an extracted entity is licensed when every word of its name was
-    # given ("upper ribs patchwork dome" ⊆ "upper ribs of the Patchwork
-    # Dome"; possessives normalized).
+    briefing_keys = set(player_table)
     license_tokens = set(
         f"{briefing}\n{player_input}".lower()
         .replace("’", "").replace("'", "")
         .replace(",", " ").replace(".", " ").replace(";", " ").replace(":", " ")
         .split())
 
-    def _licensed(row: dict) -> bool:
-        key = (row["entity"], row["attribute"])
-        if key in briefing_keys or key in pre_keys:
+    def _licensed(entity: str, attribute: str) -> bool:
+        # Licensed = the narrator was GIVEN it: a briefing/player key, an entity
+        # already in play, the scene, or an entity whose every name-token came
+        # from the briefing+input (possessives normalized).
+        if (entity, attribute) in briefing_keys or (entity, attribute) in pre_keys:
             return True
-        if row["entity"] in pre_entities or row["entity"] == scene:
+        if entity in pre_entities or entity == scene:
             return True
-        name_tokens = row["entity"].split(":", 1)[-1].replace("-", "_").split("_")
+        name_tokens = entity.split(":", 1)[-1].replace("-", "_").split("_")
         return all(tok in license_tokens for tok in name_tokens if tok)
 
-    leaked = [
-        (row["entity"], row["attribute"]) for row in post_rows
-        if row.get("frame") in (None, "canon") and not _licensed(row)
-    ]
-    trace.concealment_audit = "clean" if not leaked else f"FLAGGED: {leaked[:5]}"
+    canon_before = dict(canon_table)  # established values BEFORE this render
+    staged = _receipt_rows(p.ingest(prose, scene=scene, at=turn_time(turn),
+                                    source=_NARRATOR_SOURCE, frame=_PROPOSED))
+    # the entities the narrator's prose touched (drop meta/assertion ids); read
+    # their proposed-frame values (snapshot facts are fact-only — no meta noise)
+    staged_entities = sorted({
+        r["entity"] for r in staged
+        if ":" in r["entity"] and not r["entity"].startswith(("a:", "attr:"))})
+    proposed_vals = _table(_snap_or_empty(p, staged_entities, frame=_PROPOSED))
+
+    promote: list[dict] = []
+    contradictions: list[tuple] = []
+    for (entity, attribute), newv in proposed_vals.items():
+        established = canon_before.get((entity, attribute), _ABSENT)
+        licensed_super = (entity, attribute) in pre_keys or (entity, attribute) in briefing_keys
+        if established is not _ABSENT and established != newv and not licensed_super:
+            contradictions.append((entity, attribute))  # narrator overwrote established truth
+        else:
+            promote.append({"entity": entity, "attribute": attribute, "value": newv})
+    if promote:
+        p.ingest_structured(promote, frame="canon")
+        canon_table.update(_table(_snap_or_empty(p, snap_scope)))
+        _mirror_rows(p, promote, player_frame, canon_table, trace)
+    trace.contradictions = sorted(contradictions)
+
+    leaked = [(it["entity"], it["attribute"]) for it in promote
+              if not _licensed(it["entity"], it["attribute"])]
+    audit = []
+    if leaked:
+        audit.append(f"unlicensed:{leaked[:5]}")
+    if contradictions:
+        audit.append(f"quarantined:{sorted(contradictions)[:5]}")
+    trace.concealment_audit = "clean" if not audit else "FLAGGED: " + " ".join(audit)
 
     p.ingest_structured([
         {"entity": f"event:turn_{turn}", "attribute": "kind", "value": "turn",

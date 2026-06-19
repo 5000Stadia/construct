@@ -304,6 +304,36 @@ class TestFullTurn:
         assert "PINNED AWARENESS" not in provider.calls[-1][0]
         assert result.trace.pins == []
 
+    def test_ingest_gate_quarantines_contradiction_promotes_new(self, world):
+        # GATED-INGEST-COHORT: the narrator improvises freely, but a row that
+        # OVERWRITES an established canon value it was NOT shown (a contradiction
+        # of un-retrieved truth) is quarantined to proposed:, not committed;
+        # genuinely NEW facts (good improv) still promote to canon.
+        arc = make_arc()
+        seed_arc(world, arc)
+        # an established canon fact NOT mirrored to the player frame (so it is
+        # not in the briefing the narrator saw — the residual read-gap case)
+        world.ingest_structured([{"entity": "obj:ledger", "attribute": "seal",
+                                  "value": "intact"}])
+        world._extractions.append({"items": []})                      # player input
+        world._extractions.append({"items": [                         # narrator prose
+            {"entity": "obj:ledger", "attribute": "seal", "value": "broken"},  # contradiction
+            {"entity": "obj:candle", "attribute": "kind", "value": "object"},  # new → promote
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": []},
+            {"prose": "You study the desk; a candle gutters in the draft."},
+        ])
+        # scope holds only KNOWN entities; obj:candle is new — the gate picks it
+        # up from what the narrator's prose touched, not from the initial scope.
+        result = run_turn(world, arc, provider, "I study the desk.", turn=1,
+                          scope=["obj:ledger", PLAYER, "place:study"])
+        # contradiction quarantined: canon keeps the established value
+        assert world.porcelain.state("obj:ledger", "seal")["fact"]["value"] == "intact"
+        assert ("obj:ledger", "seal") in result.trace.contradictions
+        # new fact promoted (good improv preserved)
+        assert world.porcelain.state("obj:candle", "kind")["status"] == "known"
+
     def test_furnish_is_memoized(self, world):
         arc = make_arc()
         seed_arc(world, arc)
