@@ -246,6 +246,42 @@ FLAVOR_SCHEMA = {
 }
 
 
+INTRO_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "intro": {"type": "string",
+                  "description": "a short THEMATIC INTRODUCTION (2-4 sentences) in "
+                  "the work's voice: the premise, the world, and what's at stake — "
+                  "the thematic frame the player steps into. It must NOT reveal the "
+                  "ending or the hidden answer; it sets the stage and the mood, "
+                  "then lands on the player's aim."},
+    },
+    "required": ["intro"],
+}
+
+
+def author_intro(provider: Provider, digest: str, theme: str, style: str,
+                 aim: str) -> dict:
+    """Author the THEMATIC INTRODUCTION shown at the opening (founder, 2026-06):
+    the premise/stakes in the work's voice, ending on the player's non-spoiling
+    AIM — like the framing crawl before a film. Identified from the fiction; if
+    the fiction is thin the model improvises a fitting frame. Never spoils the
+    ending. Authoring → good tier."""
+    return complete_sync(provider,
+        "You are writing the THEMATIC INTRODUCTION for a text construct — the "
+        "framing the player reads as they step into the world (like a film's "
+        "opening). In the work's VOICE, set the premise, the world, and what is at "
+        "stake — the theme, not the plot. Then land on the player's AIM as the "
+        "closing line. HARD RULE: do NOT reveal the ending, the culprit, the "
+        "mechanism, or any hidden answer — set the stage and the stakes, no more. "
+        "Keep it to 2-4 sentences.\n\n"
+        f"VOICE/STYLE: {style or '(neutral)'}\n"
+        f"THEME: {theme}\n"
+        f"THE PLAYER'S AIM (end on this, non-spoiling): {aim}\n\n"
+        f"WORLD DIGEST:\n{digest}",
+        INTRO_SCHEMA, tier="main", deliberate=True)
+
+
 def author_flavor(provider: Provider, digest: str, entity_ids: list[str]) -> dict:
     """Session-zero narrative-flavor extraction (NARRATIVE-FLAVOR-INGEST): run
     ONCE at ingest to distill the fiction's concentrated genre/style juice into

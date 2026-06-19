@@ -474,6 +474,18 @@ def test_author_flavor_cohort():
     assert prov.calls[0][2] == "main"  # authoring tier
 
 
+def test_author_intro_cohort():
+    # The thematic introduction: premise/stakes in voice, ending on the aim.
+    from construct.cohorts import author_intro
+    prov = StubProvider([{"intro": "Rain on a drowned port; the ledgers lie. "
+                          "Find the honest number."}])
+    out = author_intro(prov, "DIGEST", theme="truth vs scarcity",
+                       style="terse noir", aim="name who falsified the meter")
+    assert "honest number" in out["intro"]
+    prompt = prov.calls[0][0]
+    assert "name who falsified the meter" in prompt and "do NOT reveal" in prompt
+
+
 def test_style_overlay_in_briefing(world):
     # The world-level voice overlay rides into the narrator's briefing every turn.
     arc = make_arc()

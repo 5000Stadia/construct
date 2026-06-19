@@ -115,6 +115,11 @@ class Session:
         where = self.location()
         line = f"You are {self.protagonist}" + (f", at {where}." if where else ".")
         head = f"{self.title}\n{line}"
+        # The thematic introduction (founder, 2026-06): premise/stakes in voice,
+        # authored at ingest, ending on the aim — the framing the player steps into.
+        intro = self._meta.get("intro")
+        if intro:
+            head += f"\n\n{intro}\n"
         goal = self.goal_statement()
         if goal:
             head += f"\nYour aim: {goal}"

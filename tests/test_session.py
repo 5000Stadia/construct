@@ -170,6 +170,15 @@ class TestSession:
         assert "Your aim: name who is responsible" in s.opening()
         s.close()
 
+    def test_thematic_intro_shown_at_opening(self, scenario, tmp_path):
+        meta_path = (tmp_path / "worlds" / "demo.world").with_suffix(".meta.json")
+        meta = json.loads(meta_path.read_text())
+        meta["intro"] = "The lamplit study holds its secrets. Find the one that matters."
+        meta_path.write_text(json.dumps(meta))
+        s = Session.open(scenario, player_id="u1", provider=_provider())
+        assert "holds its secrets" in s.opening()
+        s.close()
+
     def test_endless_has_no_aim(self, scenario):
         # The default fixture meta has no scenario_mode → endless → no aim.
         s = Session.open(scenario, player_id="u1", provider=_provider())

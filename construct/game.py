@@ -392,6 +392,19 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # seal, shown only in win_loss mode. Freeplay/endless has no fixed aim.
     if not endless:
         meta["goal_statement"] = _player_goal(proposal, world)
+    # The thematic introduction (founder, 2026-06): the premise/stakes in voice,
+    # ending on the player's non-spoiling aim — shown at the opening. Authored
+    # last (it needs the style + the aim). Fail-open: never sinks the build.
+    _emit(on_stage, "Stage 6.1 · Authoring the thematic introduction "
+                    "(premise/stakes → the non-spoiling aim)")
+    from construct import cohorts
+    aim = meta.get("goal_statement") or "find your way through the story to its end"
+    try:
+        meta["intro"] = (cohorts.author_intro(provider, digest, proposal["theme"],
+                                              style, aim).get("intro") or "").strip()
+    except Exception as exc:
+        logger.warning("thematic intro skipped: %s", exc)
+        meta["intro"] = ""
     spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
     return meta
 
@@ -634,7 +647,7 @@ def _author_flavor(world: Any, provider: Provider, digest: str, reads: Any) -> s
         entity, feel = f.get("entity"), f.get("feel")
         if entity and feel and reads.has_entity(entity):
             items.append({"entity": entity, "attribute": "feel", "value": feel})
-            if f.get("clue") and entity.startswith(("person:", "place:")):
+            if f.get("clue") and entity.startswith(("person:", "place:", "obj:")):
                 clues.append((entity, feel))
     if items:
         world.porcelain.ingest_structured(items)                     # canon
@@ -660,7 +673,9 @@ def _author_foreshadow_pins(world: Any, clues: list[tuple[str, str]]) -> None:
         new_ids, items = [], []
         for i, (entity, feel) in enumerate(clues):
             pin_id = f"pin:clue_{_slug(entity)}_{i}"
-            scope = "social" if entity.startswith("person:") else "region"
+            # place-clue → region (fires when you're within it); person/object-clue
+            # → social presence (fires when the suspect/object is in the scene).
+            scope = "region" if entity.startswith("place:") else "social"
             pin = Pin(pin_id=pin_id, scope_kind=scope, subject_entity=entity,
                       directive=feel, anchor=entity, severity=0.6, escalates=True)
             items += pin_to_items(pin, "arc:main")
