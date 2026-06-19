@@ -30,6 +30,7 @@ from construct.arc.executor import (
     arc_concluded,
     arc_entities,
     arc_outcome,
+    arc_protected_keys,
     beat_pass,
     clock_pass,
     counters_from_session,
@@ -82,6 +83,7 @@ class TurnTrace:
     terminal: bool = False  # this turn ended the scenario (win_loss mode + outcome)
     pins: list = field(default_factory=list)  # (pin_id, scope_kind, salience) surfaced this turn
     contradictions: list = field(default_factory=list)  # narrator rows quarantined (changed established canon)
+    quarantined: list = field(default_factory=list)  # narrator rows quarantined (unlicensed assertion of an arc key)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -671,13 +673,23 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         if ":" in r["entity"] and not r["entity"].startswith(("a:", "attr:"))})
     proposed_vals = _table(_snap_or_empty(p, staged_entities, frame=_PROPOSED))
 
+    protected_keys = arc_protected_keys(arc)  # the arc's load-bearing facts
     promote: list[dict] = []
     contradictions: list[tuple] = []
+    quarantined: list[tuple] = []
     for (entity, attribute), newv in proposed_vals.items():
-        established = canon_before.get((entity, attribute), _ABSENT)
-        licensed_super = (entity, attribute) in pre_keys or (entity, attribute) in briefing_keys
+        key = (entity, attribute)
+        established = canon_before.get(key, _ABSENT)
+        licensed_super = key in pre_keys or key in briefing_keys
         if established is not _ABSENT and established != newv and not licensed_super:
-            contradictions.append((entity, attribute))  # narrator overwrote established truth
+            contradictions.append(key)  # narrator overwrote established truth
+        elif (established is _ABSENT and key in protected_keys
+              and not _licensed(entity, attribute)):
+            # Momentous default-deny (option A): a NEW, unlicensed assertion of an
+            # arc key — the narrator handing away the answer / granting the win.
+            # Quarantine to proposed: for arc review; a legitimately-discovered
+            # arc fact is in the player frame → _licensed → promotes normally.
+            quarantined.append(key)
         else:
             promote.append({"entity": entity, "attribute": attribute, "value": newv})
     if promote:
@@ -685,6 +697,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         canon_table.update(_table(_snap_or_empty(p, snap_scope)))
         _mirror_rows(p, promote, player_frame, canon_table, trace)
     trace.contradictions = sorted(contradictions)
+    trace.quarantined = sorted(quarantined)
 
     leaked = [(it["entity"], it["attribute"]) for it in promote
               if not _licensed(it["entity"], it["attribute"])]
@@ -692,7 +705,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if leaked:
         audit.append(f"unlicensed:{leaked[:5]}")
     if contradictions:
-        audit.append(f"quarantined:{sorted(contradictions)[:5]}")
+        audit.append(f"contradiction:{sorted(contradictions)[:5]}")
+    if quarantined:
+        audit.append(f"momentous:{sorted(quarantined)[:5]}")
     trace.concealment_audit = "clean" if not audit else "FLAGGED: " + " ".join(audit)
 
     p.ingest_structured([

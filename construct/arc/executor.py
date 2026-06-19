@@ -208,6 +208,27 @@ def navigate(counters: PacingCounters, delta_size: int,
     return choice
 
 
+def arc_protected_keys(arc: Arc) -> set[tuple[str, str]]:
+    """The `(entity, attribute)` KEYS the hidden arc turns on — its beats'
+    conditions + the destination + premise (GATED-INGEST-COHORT, momentous
+    default-deny, option A). The ingest gate default-denies a NEW, UNLICENSED
+    narrator assertion of one of these (it would hand away the answer / grant
+    the win), routing it to quarantine for arc review; ordinary detail on the
+    SAME entities (a different attribute) still promotes — so improv isn't
+    strangled, only the load-bearing facts are protected."""
+    from construct.arc.conditions import InFrame, StateIs, atoms_of
+
+    keys: set[tuple[str, str]] = set()
+    exprs = [b.achievable_via for b in arc.beats]
+    exprs += [b.unreachable_if for b in arc.beats if b.unreachable_if]
+    exprs += [arc.shape.world_condition, arc.shape.premise]
+    for expr in exprs:
+        for atom in atoms_of(expr):
+            if isinstance(atom, (StateIs, InFrame)):
+                keys.add((atom.entity, atom.attribute))
+    return keys
+
+
 def arc_entities(arc: Arc) -> set[str]:
     """Entity ids the arc references (for arc_touch detection and the
     irony-delta scope)."""

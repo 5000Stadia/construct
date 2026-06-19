@@ -334,6 +334,35 @@ class TestFullTurn:
         # new fact promoted (good improv preserved)
         assert world.porcelain.state("obj:candle", "kind")["status"] == "known"
 
+    def test_gate_quarantines_unlicensed_arc_key_promotes_ordinary(self, world):
+        # GATED-INGEST slice 2 (momentous default-deny, option A): a NEW, UNLICENSED
+        # narrator assertion of an ARC KEY (handing away the answer) is quarantined;
+        # ordinary new facts still promote. A legitimately-discovered arc fact (in
+        # the player frame → licensed) would promote — this is the unlicensed case.
+        from construct.arc.conditions import InFrame
+        from construct.arc.grammar import Beat, Phase, Weight
+        arc = replace(make_arc(), beats=(
+            Beat("beat:motive", Phase.CRISIS, Weight.REQUIRED,
+                 achievable_via=InFrame(PLAYER_FRAME, "fact:motive", "reason", "greed")),
+        ) + make_arc().beats)
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})                      # player input
+        world._extractions.append({"items": [                         # narrator prose
+            {"entity": "fact:motive", "attribute": "reason", "value": "greed"},  # arc key → quarantine
+            {"entity": "obj:lamp", "attribute": "kind", "value": "object"},      # ordinary → promote
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": []},
+            {"prose": "You sense a motive; a lamp sputters in the corner."},
+        ])
+        result = run_turn(world, arc, provider, "I press her on why.", turn=1,
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        # the arc key is NOT canonized — the narrator can't hand the answer
+        assert world.porcelain.state("fact:motive", "reason")["status"] != "known"
+        assert ("fact:motive", "reason") in result.trace.quarantined
+        # ordinary new fact still promotes (improv not strangled)
+        assert world.porcelain.state("obj:lamp", "kind")["status"] == "known"
+
     def test_furnish_is_memoized(self, world):
         arc = make_arc()
         seed_arc(world, arc)
@@ -368,6 +397,13 @@ class TestFullTurn:
         provider = StubProvider([{"kind": "ooc", "moves_to": "", "requires": []}])
         result = run_turn(world, arc, provider, "save and quit please", turn=1)
         assert "out of character" in result.prose
+
+
+def test_arc_protected_keys():
+    from construct.arc.executor import arc_protected_keys
+    # the arc's load-bearing fact (the destination key) is protected; the gate
+    # default-denies an unlicensed narrator assertion of it.
+    assert ("fact:secret", "culprit") in arc_protected_keys(make_arc())
 
 
 def test_author_flavor_cohort():
