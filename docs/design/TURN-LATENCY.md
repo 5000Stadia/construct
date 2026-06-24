@@ -116,6 +116,29 @@ structural `shareable` Clue field + tests proving no protected/clue/private row 
 prompt; private/secret + schema-failure fallback to per-NPC = required. So prompt-level ensemble
 is a QUALITY prototype with a safety contract, NOT on the latency critical path.
 
+## Kernos reframe (077-from-kernos) — collapse render+capture; the turn shrinks to ~2 calls
+Kernos (the more mature reference host, a tool-calling turn system) replied to the deliberation
+with a stronger version of candidate B + a cast-flat NPC model. Routed to Cx for convergence
+(080-from-c); pending Cx + a provider-capability check before sequencing.
+- **B as KILL, not shrink — delta-as-TOOL-CALLS:** `narrate` emits prose as free-form CONTENT
+  AND the world-delta as structured TOOL CALLS in ONE completion (two channels, NOT prose-as-a-
+  JSON-field — that degrades prose). Kills `post_extract` (~30s). The gate is UNCHANGED: it sits
+  between proposal and effect and validates the narrator's tool-call delta exactly as any
+  proposal ("narrator proposes, gate disposes") — so it doesn't cross the trust boundary.
+  Same-call is MORE coherent than a cold post-hoc extractor; belt-and-suspenders = the gate flags
+  a delta row referencing an entity absent from the prose (no model call). DEPENDS ON: the
+  provider supporting prose+tool-calls in one completion (a contract question, like streaming).
+- **Don't classify bookkeeping durability:** receipts/events/transcript are operational artifacts,
+  not durable user-facts — skip durability classification entirely; batch-classify genuine
+  world-facts at a BOUNDARY (compaction), never per-turn. (Matches our 074 §2.)
+- **NPC cost = O(focus), not O(cast):** fold AMBIENT present NPCs into the render (narrator voices
+  the room); a focused NPC call only for an NPC in active dialogue / a drive-fired consequential
+  action. Most turns: zero dedicated NPC calls.
+- **Target ~2 calls/turn:** classify folds into the render's structured channel too → render(+
+  classify + delta) + time(cheap) + focused-NPC-only-when-in-dialogue. Kernos's est: ~65s→~35s.
+If Cx converges + the provider supports tool-calls, B-via-tool-calls SUPERSEDES the B-hybrid and
+becomes the single biggest steady-state cut (~30s), reordering ahead of Lever 1's deferral.
+
 ## The four levers
 
 ### Lever 1 — DEFER post-render work behind a SESSION-LEVEL FINALIZATION BARRIER (#1 win, ~24s/turn)
