@@ -1448,6 +1448,62 @@ def test_movement_to_a_person_redirects_to_their_place(world):
     assert world.porcelain.locate(PLAYER)[0] == "place:pantry"
 
 
+def test_adapt_genuine_writes_clue_through_the_authorized_doorway(world):
+    # NARRATION-DISCIPLINE.md make-it-real (Cx 087): a genuine adaptation writes the pursued
+    # detail into knows:<protagonist> via the SAME learn_clue_items shape + a hidden plot: receipt.
+    from construct.arc.adapt import apply_adaptation
+    seed_arc(world, make_arc())
+    dec = {"lane": "genuine", "pillar_id": "pillar:means", "reason": "the wet ring proves a glass",
+           "fact": ["fact:means", "is", "glass_was_here"]}
+    res = apply_adaptation(world, dec, protagonist=PLAYER, turn=3, reads=PorcelainWorldReads(world))
+    assert res["applied"] and res["lane"] == "genuine"
+    rd = PorcelainWorldReads(world)
+    assert rd.assertion_in_frame(PLAYER_FRAME, "fact:means", "is", "glass_was_here")
+    # the audit receipt is a HIDDEN plot-frame event (provenance), not a canon/player-frame fact
+    recs = rd.events(kind="improv_adaptation", frame="plot:main")
+    assert any(e.event_id == "event:adapt_3" for e in recs)
+    # and the budget ledger advanced (session frame, hidden)
+    from construct.arc.adapt import adaptations_used
+    assert adaptations_used(rd) == 1
+
+
+def test_adapt_red_herring_without_debunker_declines(world):
+    # A false path WITHOUT a reachable debunker is the dead-end problem relabeled (Cx 087) → decline.
+    from construct.arc.adapt import apply_adaptation
+    seed_arc(world, make_arc())
+    dec = {"lane": "red_herring", "pillar_id": "pillar:means",
+           "fact": ["fact:means", "is", "blamed_widow"], "debunker_fact": None}
+    res = apply_adaptation(world, dec, protagonist=PLAYER, turn=1, reads=PorcelainWorldReads(world))
+    assert not res["applied"] and res["lane"] == "rejected_no_debunker"
+    assert not PorcelainWorldReads(world).assertion_in_frame(PLAYER_FRAME, "fact:means", "is", "blamed_widow")
+
+
+def test_adapt_decline_and_plot_supersede_are_noops(world):
+    # decline = atmosphere (fail-open); plot_supersede = deferred (never silently mutate the solve).
+    from construct.arc.adapt import apply_adaptation
+    seed_arc(world, make_arc())
+    rd = PorcelainWorldReads(world)
+    assert apply_adaptation(world, {"lane": "decline"}, protagonist=PLAYER, turn=1, reads=rd)["applied"] is False
+    sup = apply_adaptation(world, {"lane": "plot_supersede", "fact": ["f", "a", "v"]},
+                           protagonist=PLAYER, turn=1, reads=rd)
+    assert not sup["applied"] and sup["lane"] == "deferred_plot_supersede"
+
+
+def test_adapt_budget_caps_adaptations(world):
+    # Make-it-real is budgeted (the generator's pacing lesson) — beyond the cap, decline.
+    from construct.arc.adapt import ADAPT_BUDGET, apply_adaptation
+    seed_arc(world, make_arc())
+    for i in range(ADAPT_BUDGET):
+        r = apply_adaptation(world, {"lane": "genuine", "pillar_id": "p",
+                                     "fact": [f"fact:x{i}", "is", "y"]},
+                             protagonist=PLAYER, turn=i + 1, reads=PorcelainWorldReads(world))
+        assert r["applied"]
+    over = apply_adaptation(world, {"lane": "genuine", "pillar_id": "p",
+                                    "fact": ["fact:over", "is", "y"]},
+                            protagonist=PLAYER, turn=99, reads=PorcelainWorldReads(world))
+    assert not over["applied"] and over["lane"] == "budget_exhausted"
+
+
 def test_movement_to_undiscovered_offscene_target_is_blocked(world):
     # Cx 061 #3: canon referability is not player entitlement. Moving to an OFFSCENE cast
     # member's place before learning their whereabouts must be blocked (no teleport via a
