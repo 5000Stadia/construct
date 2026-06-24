@@ -1133,8 +1133,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                          if pid in by_pillar]
                 if offer:
                     with _phase(trace, "adapt"):
+                        # route on the PRECISE pursued detail (Cx 089 #2), not the full input
                         decision = cohorts.adapt_decision(
-                            provider, player_input, unfilled_pillars=offer, actor=actor)
+                            provider, examines_target, unfilled_pillars=offer, actor=actor)
                     trace.cohort_calls.append("adapt:cheap")
                     lane = (decision or {}).get("lane")
                     pid = (decision or {}).get("pillar_id") or ""

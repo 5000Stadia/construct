@@ -118,12 +118,13 @@ def main() -> None:
             w(f"> **Player:** {inp}\n")
             w((r.prose or "(empty)") + "\n")
             learned = getattr(tr, "learned_clues", [])
+            adapted = getattr(tr, "adapted", [])
             concl = getattr(tr, "conclusion_shape", "")
             weave = getattr(tr, "weave_decision", "")
             w(f"*trace: act={tr.act} pacing={tr.pacing} adj={tr.adjudication} "
               f"audit={tr.concealment_audit} npcs={npcs or '-'} "
               f"weave={weave or '-'}{('/' + tr.weave_card) if getattr(tr, 'weave_card', '') else ''} "
-              f"learned_clues={learned or '-'} "
+              f"learned_clues={learned or '-'} adapted={adapted or '-'} "
               f"{('conclusion=' + concl + ' (' + getattr(tr, 'conclusion_basis', '') + ')') if concl else ''} "
               f"time={tr.time_now!r} moved={tr.movement_status or '-'} "
               f"reveals={tr.reveals or '-'} dropped={tr.dropped_cohorts or '-'}*\n")

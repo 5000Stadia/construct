@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 #: (the generator's pacing lesson). Beyond this, pursued threads decline to atmosphere.
 ADAPT_BUDGET = 4
 
+#: The only lanes the doorway will act on (Cx 089 #2 — keep it narrow as callers grow).
+_KNOWN_LANES = frozenset({"genuine", "red_herring", "plot_supersede", "decline"})
+
 
 def adaptations_used(reads: Any) -> int:
     """How many improv threads have already been adapted this playthrough (the budget read) —
@@ -82,6 +85,11 @@ def apply_adaptation(world: Any, decision: dict, *, protagonist: str, turn: int,
     fact = (decision or {}).get("fact")
     result = {"applied": False, "lane": lane, "learned": [], "reason": reason}
 
+    # Narrow the doorway (Cx 089 #2): only the known lanes may apply. An unknown lane string
+    # (a new/buggy caller) declines to atmosphere rather than falling through to a write.
+    if lane not in _KNOWN_LANES:
+        logger.info("adapt: unknown lane %r — declining to atmosphere", lane)
+        return {**result, "lane": "rejected_unknown_lane", "applied": False}
     if lane == "decline":
         return {**result, "lane": "decline"}
     if lane == "plot_supersede":

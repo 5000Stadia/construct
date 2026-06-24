@@ -1536,6 +1536,49 @@ def test_make_it_real_skips_a_generic_look_around(world):
         PLAYER_FRAME, "fact:means", "is", "vial_missing")
 
 
+def test_make_it_real_skips_the_authored_holder(world):
+    # Cx 089 #1: a close inspection of the ACTUAL authored object holder goes through EXAMINE
+    # delivery — it must NOT trigger make-it-real (no adapt:cheap call, no short-circuited gate).
+    import dataclasses
+    from construct.cast import CastNode, Clue
+    from construct.arc.grammar import Pillar
+    pillar = Pillar("pillar:means", "the means", required=True,
+                    genuine_via=InFrame(PLAYER_FRAME, "fact:means", "is", "vial_missing"))
+    arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "obj:bag", "attribute": "kind", "value": "object", "timeless": True},
+        {"entity": "obj:bag", "attribute": "in", "value": "place:study"},
+    ])
+    cast = {"obj:bag": CastNode("obj:bag", "evidence", "the doctor's bag", holds_clues=(
+        Clue("clue:vial", "pillar:means", ("fact:means", "is", "vial_missing"),
+             coverage_effect="genuine", reveal_condition="scrutiny"),))}
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([                                # examines the AUTHORED bag
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": "",
+         "examines_target": "the doctor's bag"},
+        {"prose": "You open the bag; a vial slot sits conspicuously empty."},
+    ])
+    result = run_turn(world, arc, provider, "I examine the doctor's bag closely.", turn=2,
+                      cast=cast, scope=["obj:bag", PLAYER, "place:study"])
+    # normal EXAMINE delivery handled it — make-it-real never ran (no adapt:cheap call)
+    assert "clue:vial" in result.trace.learned_clues
+    assert result.trace.adapted == []
+    assert "adapt:cheap" not in result.trace.cohort_calls
+
+
+def test_adapt_rejects_unknown_lane(world):
+    # Cx 089 #2: a buggy/new caller passing an unknown lane declines to atmosphere — it must
+    # NEVER fall through to a write.
+    from construct.arc.adapt import apply_adaptation
+    seed_arc(world, make_arc())
+    res = apply_adaptation(world, {"lane": "frobnicate", "fact": ["fact:x", "is", "y"]},
+                           protagonist=PLAYER, turn=1, reads=PorcelainWorldReads(world))
+    assert not res["applied"] and res["lane"] == "rejected_unknown_lane"
+    assert not PorcelainWorldReads(world).assertion_in_frame(PLAYER_FRAME, "fact:x", "is", "y")
+
+
 def test_adapt_red_herring_without_debunker_declines(world):
     # A false path WITHOUT a reachable debunker is the dead-end problem relabeled (Cx 087) → decline.
     from construct.arc.adapt import apply_adaptation
