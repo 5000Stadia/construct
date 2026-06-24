@@ -1911,16 +1911,29 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # Best-effort + after the render, so it never blocks or breaks a turn.
     if _clock is not None:
         try:
-            from construct.clock import commit_elapsed, delta_from_estimate
+            from construct.clock import (
+                commit_elapsed,
+                delta_from_estimate,
+                deterministic_elapsed,
+            )
             with _phase(trace, "time_estimate"):
-                est = cohorts.estimate_elapsed(
-                    provider, now=_clock.render(),
-                    hours_per_day=_clock.calendar.hours_per_day,
-                    phases=_clock.calendar.phase_names,
-                    action=player_input, narration=prose)
+                # TURN-LATENCY Lever C (Cx 077): most turns advance time predictably by action
+                # kind — use a DETERMINISTIC estimate and skip the ~6s model call. Fall back to
+                # the model `estimate_elapsed` ONLY when the input carries explicit temporal
+                # language (a wait/jump/rest/montage that may cross a phase/day boundary).
+                _moved = trace.movement_status in ("clear", "obscured")
+                est = deterministic_elapsed(player_input, moved=_moved)
+                if est is None:
+                    est = cohorts.estimate_elapsed(
+                        provider, now=_clock.render(),
+                        hours_per_day=_clock.calendar.hours_per_day,
+                        phases=_clock.calendar.phase_names,
+                        action=player_input, narration=prose)
+                    trace.cohort_calls.append("estimate_elapsed")
+                else:
+                    trace.cohort_calls.append("time_estimate:deterministic")
             trace.time_advanced = delta_from_estimate(_clock, est)
             commit_elapsed(world, trace.time_advanced)
-            trace.cohort_calls.append("estimate_elapsed")
         except Exception as exc:  # noqa: BLE001 — time never sinks a turn
             logger.warning("diegetic-time estimate failed: %s", exc)
             trace.dropped_cohorts.append(f"estimate_elapsed ({exc})")

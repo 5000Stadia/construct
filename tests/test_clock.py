@@ -132,3 +132,20 @@ def test_estimate_elapsed_cohort_shape():
                                    phases=["dawn", "noon", "dusk", "night"],
                                    action="I wait until sunset", narration="")
     assert out["jump_to_phase"] == "dusk"
+
+
+def test_deterministic_elapsed_skips_model_for_ordinary_turns():
+    # TURN-LATENCY Lever C (Cx 077): ordinary turns get a deterministic minute delta (no model
+    # call); explicit temporal language returns None → the caller falls back to the model.
+    from construct.clock import deterministic_elapsed
+    # ordinary actions → a deterministic estimate by kind
+    assert deterministic_elapsed("I examine the doctor's bag closely")["advance_minutes"] == 12
+    assert deterministic_elapsed("I go to the study")["advance_minutes"] == 6
+    assert deterministic_elapsed("I ask Hobbes who he saw")["advance_minutes"] == 3
+    assert deterministic_elapsed("I look around the parlor")["advance_minutes"] == 1
+    assert deterministic_elapsed("I take the candle")["advance_minutes"] == 2
+    assert deterministic_elapsed("I press the doctor", moved=True)["advance_minutes"] == 6
+    # explicit temporal language → defer to the model (None)
+    assert deterministic_elapsed("I wait until sunset") is None
+    assert deterministic_elapsed("I sleep through the night") is None
+    assert deterministic_elapsed("Three days later, I return") is None

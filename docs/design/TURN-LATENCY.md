@@ -34,6 +34,88 @@ furnish) ≈ narrate(34) + post_extract(18) + npc_intent(9) + npc_action(7) + pl
 time_estimate(6) + classify(3) + weave(2) ≈ **~85s**. So the dominant EVERY-TURN perceived win
 is Lever 1 (defer ingest, ~24s), then narrate (inherent), then the npc/ingest model calls.
 
+## The six functional groups (the organizing frame — founder, 2026-06-23)
+Every per-turn step belongs to one of six functional GROUPS, and the parallel/serial/deferrable
+boundaries fall straight out of them:
+
+| # | Group | Steps | Nature |
+|---|-------|-------|--------|
+| 1 | **Identification** | `classify` | Serial GATE — decides kind/move/target; all else branches on it |
+| 2 | **Settlement** | `player_ingest`, movement, possession, entitlement-gate | Serial — commits the player's action; DEFINES the world the rest reads |
+| 3 | **Generation** | `furnish`, `npc_turn`, `weave_pick` | PARALLEL — pure model calls over the frozen settled world; commits serialize after |
+| 4 | **Resolution** | interview delivery/discovery, `clock_pass`, `beat_pass` | Deterministic — host computation, no model call |
+| 5 | **Assembly** | briefing build + `narrate` | Serial, LAST — composes the response; the user sees output HERE |
+| 6 | **Finalization** | `post_extract`, promote/mirror, receipt, archive, compact, `time_estimate`, conclusion-effect | DEFERRABLE — does not change the prose already sent |
+
+Turn shape: **`[1] → [2] → [3 parallel] → [4] → [5 Assembly = user sees it] ‖ [6 Finalization deferred]`**
+
+The levers map ONTO the groups: Group 3 is the only internally-parallel group (Lever 4 = fold,
+done; Lever 3 = overlap, marginal post-memoization); Group 6 is the only deferrable group
+(Lever 1 = the ~24s/turn win); Groups 1-2 are the irreducible serial prefix (can't parallelize —
+they define the world); Group 5 is the serial endpoint (only STREAMING helps, out of scope).
+
+## Deliberation synthesis (Cx 077) — the refined, safer build order
+A creative-latency deliberation with Cx (letters 076/077) reshaped the plan. Dispositions:
+- **C — deterministic `time_estimate`: GREEN.** Replace the per-turn `estimate_elapsed` model call
+  with deterministic defaults by `kind` + classifier fields (look/ask 0-2m; examine/search 5-20m;
+  movement→travel table; take 1-3m); model fallback ONLY for explicit temporal language
+  ("wait until sunset"), long travel/rest, or montage. Preserve `delta_from_estimate`/
+  `commit_elapsed` — change only how the estimate is produced. ~6s, low-risk (already best-effort).
+- **A-lite — conditional `player_ingest` skip: GREEN.** NOT a full classify+extract merge (that
+  bloats the cheap classifier + risks the verdict, and protected-key licensing needs the real
+  extraction's `pre_keys`). Instead add `needs_player_ingest`/`asserts_or_reveals` to
+  `CLASSIFY_SCHEMA` (default conservatively TRUE); SKIP `p.ingest(player_input)` only on turns that
+  can't add/license facts (pure look, pure talk w/ no claim, simple move/take already on
+  `moves_to`/`takes`, questions routing to `ask()`); KEEP extraction for discoveries/claims/
+  declarations. ~6s on many turns. (The `EXTRACTION-AND-DISCOVERY.md` option-B bridge.)
+- **B-hybrid — delta hints SHRINK post_extract, not replace it: YELLOW.** Narrator self-report
+  CANNOT replace extraction (the gate is built on "narrator prose is untrusted"; self-report can
+  under/over-report and miss the safety catches — contradiction/protected-same-value/phantom).
+  Safe: `narrate` returns `{prose, touched_entities/delta_hints}`; feed the hints to SHRINK the
+  extraction scope/prompt; keep extraction over the ACTUAL prose + the deterministic gate
+  unchanged; trust a "no deltas" claim only for tightly-defined renders (adjudication-denial/OOC/
+  pure-status). Cuts much of the 18s without crossing the trust boundary.
+- **D — batch all NPCs into one prompt: BLOCKED (naive).** One prompt with all private `knows:<npc>`
+  sheets violates frame isolation (structural windows, not prompt instructions). Lever 4 already
+  landed the real win (one cheap per-NPC call, parallel). Only provider-level batching (separate
+  prompts) / public-scene-only / a 4+ cast threshold w/ per-NPC fail-open fallback are testable.
+- **E — stream `narrate`: GREEN perceived, YELLOW impl.** The biggest founder-visible win (narrator
+  is the floor; perceived ≈ time-to-first-token) but a PROVIDER + TRANSPORT contract change
+  (`complete()` collects SSE → one JSON today; Telegram only `sendMessage`). Separate transport
+  slice; loopback first; composes with B + Lever 1.
+- **Cx-added levers:** (i) **prompt-cache locality** — keep stable narrator instructions
+  BYTE-IDENTICAL + put dynamic briefing LATE so the provider's `prompt_cache_key` prefix stays
+  warm (semantics-free main-call speedup); (ii) **idle-window caching** of deterministic read-only
+  assembly artifacts (NPC sheets, scene materialization, status, scope, stable briefing fragments)
+  keyed by world revision — NO speculative model calls; (iii) furnish = invalidation-correctness
+  only, not latency.
+
+**Refined build order (safest/highest-value first):** C (deterministic time) → A-lite (conditional
+ingest) → prompt-cache locality → B-hybrid (hint-shrunk extraction) → **Lever 1 (defer G6, the
+~24s, careful)** → E (streaming, transport slice). Lever 3 + D deprioritized. Each: instrument
+`trace.timings`, suite green, re-time live.
+
+## Target shape + ensemble ruling (Cx 079 — confirms the sequence, corrects a premise)
+**Target turn shape:** `entry-barrier (drain pending finalizer) → G1 Identify (classify +
+needs_player_ingest) → G2 Settle (deterministic adjudication/move/take + CONDITIONAL
+player_ingest) → freeze immutable inputs → G3 model generation in PARALLEL (furnish on cache-miss,
+npc_turn, weave, commitment-judge) → G4 deterministic resolution (serialize commits, delivery,
+clocks/beats/coverage, briefing) → G5 Assemble/narrate (stable prefix + dynamic late; STREAM when
+built) → SEND → G6 Finalize + populate read-only caches in the idle window`.
+**Build sequence (Cx 079):** 1) C + A-lite + prompt-cache (now). 2) B-hybrid (no gate change).
+3) Lever 1 G6 deferral (the real steady-state win, behind the durable record + barrier). 4)
+streaming (transport slice, loopback first). 5) provider-level batching / public-room ensemble
+(prototype only, after a structural `shareable` field).
+**Ensemble batching — CORRECTION (Cx 079):** my "protected keys are never in any NPC call" was
+WRONG — `npc_turn` is handed each NPC's `knows:<npc>` character-sheet, which is frame-respecting
+but does NOT filter Construct's protected keys, and cast clues seed as ORDINARY facts in holder
+frames. So a present NPC's sheet can carry game-bearing private rows; naive PROMPT-level all-NPC
+batching can leak them. Rulings: provider-level batch (N separate prompts) = clean/GREEN-if-
+supported; public-room ensemble (one prompt, PUBLIC/shareable rows only) = YELLOW, needs a
+structural `shareable` Clue field + tests proving no protected/clue/private row crosses the shared
+prompt; private/secret + schema-failure fallback to per-NPC = required. So prompt-level ensemble
+is a QUALITY prototype with a safety contract, NOT on the latency critical path.
+
 ## The four levers
 
 ### Lever 1 — DEFER post-render work behind a SESSION-LEVEL FINALIZATION BARRIER (#1 win, ~24s/turn)

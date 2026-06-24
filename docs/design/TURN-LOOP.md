@@ -70,8 +70,8 @@ auditable in `session:main` like every pacing decision.
 | Tier | Provider mapping | Used by |
 |---|---|---|
 | **Deterministic** | no model call | materialize, resonances, locate/fold, clock firing, beat structural verdict, irony delta, concealment audit, pacing policy table |
-| **Cheap** | provider tier `"cheap"` | input-classifier, ingestion extraction, beat-candidate proposal, `refer()` tier-2, nudge-content selection |
-| **Good** | provider tier `"main"` | the **Narrator** (principal) and the **NPC engines** — and ONLY these |
+| **Cheap** | provider tier `"cheap"` | input-classifier, ingestion extraction, beat-candidate proposal, `refer()` tier-2, nudge-content selection, the folded **`npc_turn`** (TURN-LATENCY Lever 4 — the per-turn NPC action+intent decision is light) |
+| **Good** | provider tier `"main"` | the **Narrator** (principal); the legacy `npc_world_action` engine (the turn loop now uses cheap `npc_turn`) |
 
 The punchline: a turn is two good-tier call groups (narrator + present
 NPCs in parallel) over a deterministic + cheap substrate. The tier is a

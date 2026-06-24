@@ -235,6 +235,49 @@ def commit_elapsed(world, delta_minutes: int) -> None:
                           "value": int(delta_minutes), "value_type": "delta"}])
 
 
+#: Explicit temporal language that warrants the MODEL estimate — a real wait / jump / rest /
+#: travel-montage the deterministic table can't resolve (it may cross a phase or day boundary).
+_TEMPORAL_MARKERS = (
+    "wait", "until", "sleep", "asleep", "rest", "nap", "doze", "overnight", "tomorrow",
+    "next day", "next morning", "hours", "hour later", "an hour", "days", "day later",
+    "later", "dawn", "dusk", "sunrise", "sunset", "morning", "noon", "midday", "afternoon",
+    "evening", "nightfall", "midnight", "week", "month", "year", "linger for", "all night",
+)
+#: Action-verb → minutes buckets for the deterministic estimate (TURN-LATENCY C, Cx 077).
+# NB: "study" is intentionally OMITTED — it collides with the common room noun ("the study");
+# examine/inspect/search/scour cover the intent without the false positive.
+_EXAMINE_VERBS = frozenset({"examine", "inspect", "search", "scour",
+                            "comb", "investigate", "scrutinize"})
+_MOVE_VERBS = frozenset({"go", "walk", "head", "travel", "enter", "leave", "cross",
+                         "climb", "descend", "follow", "approach", "return"})
+_TAKE_VERBS = frozenset({"take", "grab", "pick", "pocket", "open", "use", "pour", "lift",
+                         "hand", "give", "draw"})
+_GLANCE_VERBS = frozenset({"look", "glance", "observe", "watch", "listen", "consider",
+                           "think", "wait", "pause", "note"})
+
+
+def deterministic_elapsed(action: str, *, moved: bool = False) -> dict | None:
+    """A cheap, DETERMINISTIC diegetic-time delta for ordinary turns (DIEGETIC-TIME.md /
+    TURN-LATENCY Lever C, Cx 077): most turns advance time predictably by their ACTION kind, so
+    the per-turn `estimate_elapsed` MODEL call is skipped. Returns an estimate dict (the same
+    `{advance_minutes}` shape `delta_from_estimate` consumes) for ordinary actions, or **None**
+    when the input carries explicit TEMPORAL language (a wait/jump/rest/montage) that needs the
+    model to resolve a phase- or day-boundary. Best-effort + monotonic — time only goes forward."""
+    low = action.lower()
+    if any(m in low for m in _TEMPORAL_MARKERS):
+        return None  # explicit time language → defer to the model estimate (phase/day jump)
+    toks = set(low.replace(",", " ").replace(".", " ").replace("?", " ").split())
+    if toks & _EXAMINE_VERBS:
+        return {"advance_minutes": 12}      # close inspection / searching
+    if moved or (toks & _MOVE_VERBS):
+        return {"advance_minutes": 6}       # local movement within the scene/site
+    if toks & _TAKE_VERBS:
+        return {"advance_minutes": 2}       # take / use a simple object
+    if toks & _GLANCE_VERBS:
+        return {"advance_minutes": 1}       # a look / brief beat
+    return {"advance_minutes": 3}           # ordinary action / questioning a person
+
+
 def delta_from_estimate(clock: Clock, estimate: dict) -> int:
     """Turn the `estimate_elapsed` cohort's output into a forward delta (minutes):
     a phase wait jumps to the next onset; a day-skip adds whole days; else the

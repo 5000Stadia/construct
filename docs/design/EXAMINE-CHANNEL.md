@@ -91,6 +91,38 @@ surfaces the evidence, (b) a glance does not (scrutiny-gated), (c) plain objects
 not evidence, (d) the conclusion correlates physical + testimonial. Route the transcript to Cx
 for a RE-SCORE against the 7.2 baseline — fair-play and genre-faithfulness should rise.
 
+## 8b. Cx 073 tightenings (FOLDED — binding)
+1. **`object_seen` ≠ earned evidence.** Add explicit live conditions `examined` (looked-at) and
+   `scrutiny` (close inspection). Required physical evidence uses `scrutiny`; `object_seen` stays
+   for hooks/glances/ambient orientation only (never required pillar fill). LIVE set after this
+   slice = `{none, pressure, examined, scrutiny}`. A lazy player who only glances earns nothing.
+2. **Holder = `holder_id + delivery_channel`, NOT an object pretending to be a person.** NO
+   `knows:obj:*` frames. Person/ASK keeps `knows:<person>` seeding. For obj/place/EXAMINE: the
+   physical fact may exist as PROTECTED canon truth (kept in `arc_protected_keys`, filtered from
+   player-facing briefings until earned) OR canon-seeding is deferred — either way the host
+   card/clue METADATA persists in scenario meta (as the cast blob does), and COVERAGE fills only
+   when EXAMINE delivery writes the fact into the PLAYER frame. Canon truth vs. frame-scoped
+   player knowledge stays distinct.
+3. **Reachability generalizes; entitlement stays distinct from topology.** A holder is reachable
+   iff in the scene/containment chain, in a reachable place, or in a place made reachable by a
+   LEARNED lead. "Named" does NOT mean reachable — it writes the player ENTITLEMENT (a
+   `whereabouts`/lead) to seek the place, exactly like the off-scene-person discovery write.
+   Canonical chain: witness clue names the surgery → `knows:player` gains the lead to
+   `place:surgery` → player travels → `obj:doctors_bag` present → `scrutiny` → missing-vial fact.
+4. **Classifier target field first; verb+`refer` fallback.** Add `examines_target` to
+   `CLASSIFY_SCHEMA`; tokenized verb detection (examine/inspect/search/study/check/look closely/
+   open/compare/measure) + `world.refer` only as recovery. Resolve the TARGET first, THEN choose
+   the channel: a `person:` target routes to ASK/ordinary-look, never physical delivery. Do NOT
+   key scrutiny off `needs_test` alone (ASK treats needs_test as pressure; a search in a
+   one-NPC room must not accidentally deliver that NPC's pressure clue).
+
+**Test pins (Cx 073):** required pillar covered ONLY by an object `scrutiny` clue passes
+solvability when the object is reachable; the SAME clue FAILS when the object is off-scene with
+no learned lead; a glance/`object_seen` does NOT fill a required pillar; a plain non-clue object
+yields atmosphere but writes NO pillar fact; NO `knows:obj:*` frame is created; EXAMINE writes the
+same `learn_clue_items` payload into `knows:<protagonist>`; existing ASK tests still pass (no
+"documents"→"doctor" false hit); the conclusion briefing weaves ≥1 physical with ≥1 testimonial.
+
 ## 9. Build order
 1. Object/site clue holders in `cast.py` (Clue holder may be obj/place; `examined`/`scrutiny`
    conditions; `_live_reachable` + reachability generalized from `person:` to any holder).

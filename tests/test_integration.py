@@ -1030,10 +1030,11 @@ class TestFullTurn:
         arc = make_arc()
         seed_arc(world, arc)
         world._extractions.extend([{"items": []}] * 4)
-        # Each turn: classify → narrate → estimate_elapsed (the diegetic-time call).
+        # Each turn: classify → narrate. Diegetic time is now DETERMINISTIC for ordinary turns
+        # (TURN-LATENCY Lever C) — "look around" needs no estimate_elapsed model call.
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around."}, _EST,
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around again."}, _EST,
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around."},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around again."},
         ])
         r1 = run_turn(world, arc, provider, "I look around.", turn=1)
         r2 = run_turn(world, arc, provider, "I look around once more.", turn=2)
@@ -1266,7 +1267,6 @@ def test_play_style_directive_in_briefing(world):
     provider = StubProvider([
         {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You look."},
-        _EST,
     ])
     run_turn(world, arc, provider, "I look around.", turn=1,
              play_style="PLAY STYLE — MYSTERY: compress travel; dwell on clues.")

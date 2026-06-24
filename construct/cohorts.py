@@ -3,7 +3,9 @@
 Each cohort is a single-purpose provider call: selectively invoked,
 fail-open (the caller decides; see turnloop), silent. Tier assignment
 per the founder's table: cheap for parse/extract/select, good ("main")
-ONLY for the narrator and NPC engines.
+for the narrator. (NPC-engine tiering: the legacy `npc_world_action` is
+main; the folded per-turn `npc_turn` (TURN-LATENCY Lever 4) is CHEAP —
+the action+intent decision is light, and the turn loop uses `npc_turn`.)
 """
 
 from __future__ import annotations
