@@ -301,17 +301,21 @@ AUTHOR_CAST_SCHEMA = {
 
 
 def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
-                protagonist: str, people: list[str], feedback: str = "") -> dict:
+                protagonist: str, people: list[str], feedback: str = "",
+                signature_directive: str = "") -> dict:
     """Author the populated cast (STORY-SHAPES §8): the pillars (causes) + the people who
     hold the clues that fill them. Returns the raw proposal; the caller parses it
     (`cast.cast_from_proposal`), VALIDATES solvability (`cast.is_solvable`), and derives the
     pillars (`cast.build_pillars`). Genre-faithful (FICTION_CRAFT); fair-by-construction.
-    `feedback` (prior solvability problems) is fed back on a re-author retry."""
+    `feedback` (prior solvability problems) is fed back on a re-author retry.
+    `signature_directive` (GENRE-SIGNATURE-ELEMENTS.md author-insist block) names the genre's
+    fundamental elements the cast MUST establish."""
     fix = (f"\n\nYOUR PRIOR ATTEMPT FAILED THE FAIRNESS CHECK: {feedback}\nFix EXACTLY those "
            f"problems — most often a required pillar needs a genuine clue revealable with "
            f"reveal_condition 'none' or 'pressure'.\n" if feedback else "")
+    sig = (f"\n\n{signature_directive}\n" if signature_directive else "")
     return complete_sync(provider,
-        FICTION_CRAFT +
+        FICTION_CRAFT + sig +
         f"Author the POPULATED CAST for this story. This is a '{shape_label}' shape.\n"
         f"THEME: {theme}\n"
         f"PROTAGONIST (the player — never a cast member): {protagonist}\n"

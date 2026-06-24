@@ -507,3 +507,61 @@ def test_end_to_end_cast_to_arc_coverage():
     w = _world({("fact:motive", "is", "debt"), ("fact:means", "blamed", "person:cook")})
     cov = arc_coverage(w, arc)
     assert cov == {"pillar:motive": "genuine", "pillar:means": "false"}
+
+
+def _deduction_cast_with_signature():
+    # a minimal deduction cast that SHIPS the signature: a strong red herring (with a reachable
+    # debunker) + a cross-suspicion edge (the butler's clue points at the doctor).
+    return (
+        CastNode("person:butler", "witness", "the butler", first_witness=True,
+                 presence="at_scene", holds_clues=(
+            Clue("clue:opp", "pillar:opportunity", ("person:doctor", "seen_entering", "the study"),
+                 coverage_effect="genuine", reveal_condition="none"),)),
+        CastNode("person:doctor", "suspect", "the doctor", presence="at_scene", is_culprit=True,
+                 holds_clues=(
+            Clue("clue:means", "pillar:means", ("fact:means", "is", "vial_gone"),
+                 coverage_effect="genuine", reveal_condition="pressure"),
+            Clue("clue:redherring", "pillar:means", ("fact:means", "claimed", "natural"),
+                 coverage_effect="false", is_red_herring=True, reveal_condition="none",
+                 debunked_by="clue:means"),)),
+    )
+
+
+def test_signature_support_passes_a_well_formed_deduction_cast():
+    from construct.cast import validate_signature_support
+    cast = _deduction_cast_with_signature()
+    assert validate_signature_support(["deduction"], cast) == []
+    assert validate_signature_support("deduction", cast) == []  # scalar shape accepted
+
+
+def test_signature_support_flags_a_missing_red_herring():
+    from construct.cast import validate_signature_support
+    # drop the red herring clue → deduction signature incomplete
+    butler, doctor = _deduction_cast_with_signature()
+    doctor = CastNode("person:doctor", "suspect", "the doctor", presence="at_scene",
+                      is_culprit=True, holds_clues=(doctor.holds_clues[0],))  # genuine only
+    probs = validate_signature_support(["deduction"], (butler, doctor))
+    assert any("red herring" in p for p in probs)
+
+
+def test_signature_support_flags_missing_cross_suspicion():
+    from construct.cast import validate_signature_support
+    # two people, but no clue references another cast member → no cross-suspicion edge
+    cast = (
+        CastNode("person:a", "witness", "A", first_witness=True, presence="at_scene", holds_clues=(
+            Clue("clue:1", "pillar:x", ("fact:x", "is", "y"), coverage_effect="genuine",
+                 reveal_condition="none"),
+            Clue("clue:rh", "pillar:x", ("fact:x", "claimed", "z"), coverage_effect="false",
+                 is_red_herring=True, reveal_condition="none", debunked_by="clue:1"),)),
+        CastNode("person:b", "suspect", "B", presence="at_scene", is_culprit=True, holds_clues=()),
+    )
+    probs = validate_signature_support(["deduction"], cast)
+    assert any("cross-suspicion" in p for p in probs)
+
+
+def test_signature_support_noop_for_non_deduction_shapes():
+    from construct.cast import validate_signature_support
+    # a bond/romance world is prompt + live-acceptance only in v1 — no hard lint, no false flags
+    cast = _deduction_cast_with_signature()  # cast content irrelevant for non-deduction
+    assert validate_signature_support(["bond"], cast) == []
+    assert validate_signature_support([], cast) == []

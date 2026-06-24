@@ -74,6 +74,8 @@ Drawn from each shape's `medium`/`payoff` (story_shapes.py) + STORY-SHAPES-CATAL
 ### bond (relationship / intimacy)
 - **earned_intimacy_beats** (N) — connection built through vulnerability/gesture, never declared.
 - **real_friction_that_tests** (A+N) — a genuine source of conflict between the parties, pressed live.
+- **misread_corrected** (A+N) — a guard-with-a-crack: a misread/wound that must be surfaced and
+  repaired; the romance engine turns on misunderstanding → vulnerability → repair (Cx 097).
 - **the_costly_gesture** (N) — connection is proven by a choice that costs something.
 - **a_two_sided_other** (A) — the other party has their own wants and wounds, not a mirror.
 
@@ -86,7 +88,8 @@ Drawn from each shape's `medium`/`payoff` (story_shapes.py) + STORY-SHAPES-CATAL
 
 ### contest (competition / combat / proving)
 - **escalating_rounds** (N) — each challenge harder than the last; victory fought for.
-- **the_worthy_rival** (A) — an opponent with their own arc and credibility, not a punching bag.
+- **the_worthy_rival** (A+N) — an opponent with their own arc and credibility (not a punching bag),
+  authored AND kept credible by the narrator round to round (Cx 097).
 - **preparation_pays** (A+N) — scouting/training authored and made to matter.
 - **scoreboard_vs_meaning** (N) — the meaningful win may differ from the literal result (Rocky).
 
@@ -100,6 +103,8 @@ Drawn from each shape's `medium`/`payoff` (story_shapes.py) + STORY-SHAPES-CATAL
 - **gradual_unfolding** (N) — place and meaning revealed in layers, never front-loaded.
 - **the_sense_of_wonder** (N) — awe is the payoff; let it breathe.
 - **the_place_as_character** (A) — a richly-layered, internally-coherent place authored to explore.
+- **competing_explanations** (A+N) — rival theories / disputed readings of what the place or
+  phenomenon MEANS, so discovery is interpretive, not pure scenic reveal (Cx 097).
 - **the_cost_of_knowing** (A+N) — understanding has a price; arrival is not free.
 
 ### mastery (craft / building / procedure)
@@ -116,6 +121,8 @@ Drawn from each shape's `medium`/`payoff` (story_shapes.py) + STORY-SHAPES-CATAL
   desired state, not a failure (already in `cost_disposition`).
 
 ### transformation (moral / identity / mythic)
+- **the_old_self_made_legible** (A) — the starting self / its temptation is established up front, so
+  the changed self can be PROVEN against it (the moral field needs the before-state; Cx 097).
 - **the_defining_choice** (A+N) — a real dilemma with stakes, pressed live.
 - **the_ordeal** (N) — change is forced through hardship, not comfort.
 - **the_cost_of_change** (N) — becoming someone new costs the old self something.
@@ -132,9 +139,27 @@ Drawn from each shape's `medium`/`payoff` (story_shapes.py) + STORY-SHAPES-CATAL
    `author-insist` elements; fed into `cohorts.author_cast` (and the world-build authoring
    prompt) so generated fiction is required to establish them. The existing solvability/viability
    gates remain the safety net.
-4. No `CastNode`/schema/grammar changes required for v1 (cross-suspicion rides existing
-   `knows:<npc>` seeding via the author directive; a structured field is a *possible* later
-   refinement, not needed to embody the spirit).
+4. **A light authoring LINT, not an engine (Cx 097).** Author-insist-via-prompt can *ask* for the
+   signature package but cannot *prove* it shipped — and the hard fairness promises players get
+   stuck on must be proven. Add `validate_signature_support(shape, proposal_or_cast) -> list[str]`
+   (problems; empty = ok), checked alongside the existing solvability gate in `game.py`:
+   - **Deduction (v1):** require `>=1` authored STRONG red herring (`is_red_herring &&
+     coverage_effect == "false"`); reuse `check_solvability`'s existing live-debunker validation
+     for it (do NOT invent a red-herring builder). `the_culprit_present_and_surfaceable` is already
+     covered by the deduction staging gate.
+   - **Cross-suspicion/alibis (v1):** a CHEAP lint — require multiple suspect-role nodes AND at
+     least some clue/hook facts that REFERENCE other cast members (a suspicion edge exists in the
+     material). No graph synthesis. If a shape's element can't be cheaply checked, it is honestly
+     "prompt + live-acceptance only" — never *claimed* guaranteed.
+   - Other shapes: start prompt-only; grow a lint **only where live validation shows a concrete
+     fairness gap** (don't pre-build checks no live run has needed).
+   No `CastNode`/grammar changes for v1 (cross-suspicion rides existing `knows:<npc>` seeding via
+   the author directive; a structured suspicion-edge field is a possible later refinement).
+
+The crisp channel boundary (Cx 097): **author-insist** establishes durable scenario substance;
+**narrator-emphasize** changes what the live narrator dwells on; live-improvised red herrings are
+valid ONLY under NARRATION-DISCIPLINE (become a genuine/false path with a reachable debunker via
+the host doorway, or curtailed before creation — never silently promoted into engine truth).
 
 ## Acceptance (per the make-it-real method)
 

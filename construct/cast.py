@@ -231,6 +231,38 @@ def check_solvability(required_pillar_ids: list[str], cast: tuple[CastNode, ...]
     return problems
 
 
+def validate_signature_support(shapes, cast: tuple[CastNode, ...]) -> list[str]:
+    """Light AUTHORING lint (GENRE-SIGNATURE-ELEMENTS.md, Cx 097): prove the genre's HARD
+    signature promises actually shipped — author-insist via prompt can ASK, this CHECKS the
+    fairness promises players get stuck on. NOT a per-element engine; reuses existing material.
+    Returns problems (empty = ok). `shapes` is the world's shape list (primary + secondary).
+
+    Lints DEDUCTION for v1 (it has the live baseline): a strong red herring must EXIST (its
+    debunker reachability is `check_solvability`'s job) and a cross-suspicion edge must exist
+    (some clue's fact references ANOTHER cast member). Other shapes are prompt + live-acceptance
+    only — grow a lint only where live validation shows a concrete gap (don't pre-build checks)."""
+    shapes = [shapes] if isinstance(shapes, str) else list(shapes or [])
+    problems: list[str] = []
+    if "deduction" in shapes:
+        clues = all_clues(cast)
+        if not any(c.is_red_herring and c.coverage_effect == "false" for c in clues):
+            problems.append("deduction signature: no STRONG red herring present "
+                            "(need a clue with is_red_herring + coverage_effect 'false') — a "
+                            "mystery without a false lead rings false")
+        ids = {n.node_id for n in cast}
+        people = [n for n in cast if n.node_id.startswith("person:")]
+        if len(people) < 2:
+            problems.append(f"deduction signature: cross-suspicion needs ≥2 suspect/person "
+                            f"nodes, found {len(people)}")
+        elif not any(ref in ids and ref != n.node_id
+                     for n in cast for c in n.holds_clues
+                     for ref in (c.surface_fact[0], c.surface_fact[2])):
+            problems.append("deduction signature: no cross-suspicion edge — no clue's fact "
+                            "references another cast member (the suspects don't point at "
+                            "one another)")
+    return problems
+
+
 def is_solvable(required_pillar_ids: list[str], cast: tuple[CastNode, ...]) -> bool:
     return not check_solvability(required_pillar_ids, cast)
 

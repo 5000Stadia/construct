@@ -73,3 +73,42 @@ def test_shape_directive_is_genre_appropriate():
     assert "deduction" in blend and "gambit" in blend
     # unknown → empty
     assert ss.shape_directive("nope") == ""
+
+
+def test_signature_elements_ride_the_shapes_not_the_cards():
+    # GENRE-SIGNATURE-ELEMENTS.md (Cx 097): every shape carries signature elements, each tagged
+    # author / narrator; selectors union primary+secondary and de-dupe by name.
+    for shape, els in ss.SHAPE_SIGNATURE.items():
+        assert els, f"{shape} has no signature elements"
+        for el in els:
+            assert el["name"] and el["element"]
+            assert set(el["channels"]) <= {"author", "narrator"} and el["channels"]
+
+
+def test_deduction_signature_in_both_channels():
+    # narrator-emphasize rides shape_directive; author-insist rides author_signature_directive
+    narr = ss.shape_directive("mystery_whodunnit").lower()
+    assert "red herring" not in narr  # phrasing check below; element wording is "false lead"
+    assert "false lead" in narr and "point at one another" in narr  # red_herrings + cross_suspicion
+    auth = ss.author_signature_directive("mystery_whodunnit").lower()
+    assert "false lead" in auth and "point at one another" in auth
+    assert "alibis" in auth  # author-only element surfaces in the author block
+
+
+def test_signature_does_not_leak_clue_trail_into_romance():
+    # the falsifier, extended to signature: a bond world gets NONE of deduction's signature
+    rom = ss.shape_directive("romance").lower()
+    for deduction_only in ("false lead", "point at one another", "lay a trail of clues",
+                           "red herring", "cross-suspicion"):
+        assert deduction_only not in rom
+    # and bond's own signature IS present
+    assert "vulnerability" in rom and "repaired" in rom  # earned_intimacy + misread_corrected
+    # author block for romance carries no deduction author-insist either
+    assert "alibis" not in ss.author_signature_directive("romance").lower()
+
+
+def test_signature_blend_unions_primary_and_secondary():
+    # mystery + political intrigue → deduction + gambit: both shapes' signature present, de-duped
+    auth = ss.author_signature_directive(["mystery_whodunnit", "political_intrigue"]).lower()
+    assert "alibis" in auth                  # deduction (primary)
+    assert "interests cross" in auth         # gambit (secondary) factions element

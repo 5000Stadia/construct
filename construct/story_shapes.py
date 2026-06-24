@@ -142,6 +142,150 @@ SHAPE_CONCLUSION: dict[str, dict] = {
 }
 
 
+#: Per-shape SIGNATURE ELEMENTS (GENRE-SIGNATURE-ELEMENTS.md, Cx 097 GREEN-shape) — the
+#: fundamental elements that ARE the spirit of each genre, embodied (not engined) through two
+#: channels: `author` (the generated fiction MUST establish it) and `narrator` (live improv
+#: leans into it, governed by NARRATION-DISCIPLINE). Host-side control data, never canon.
+#: Each element: {"name", "element" (one-line directive), "channels": ("author"|"narrator", ...)}.
+SHAPE_SIGNATURE: dict[str, list[dict]] = {
+    "deduction": [
+        {"name": "red_herrings", "channels": ("author", "narrator"),
+         "element": "plant at least one false lead with a tell; the narrator may improvise more "
+                    "live, each one debunkable in play (never a dead-end)"},
+        {"name": "cross_suspicion", "channels": ("author", "narrator"),
+         "element": "the suspects point at one another — play the web so testimony must be weighed"},
+        {"name": "alibis_and_contradictions", "channels": ("author",),
+         "element": "suspects carry alibis that corroborate or conflict; the contradictions are the trail"},
+        {"name": "culprit_present_and_surfaceable", "channels": ("author",),
+         "element": "the answer is reachable in play, never offstage"},
+        {"name": "the_earned_reveal", "channels": ("narrator",),
+         "element": "reveal only when the player has assembled enough — never hand it over"},
+    ],
+    "bond": [
+        {"name": "earned_intimacy_beats", "channels": ("narrator",),
+         "element": "build connection through vulnerability and gesture — never a declared shortcut"},
+        {"name": "real_friction_that_tests", "channels": ("author", "narrator"),
+         "element": "a genuine source of conflict between the parties, pressed live"},
+        {"name": "misread_corrected", "channels": ("author", "narrator"),
+         "element": "a guard-with-a-crack: a misread or wound surfaced and then repaired"},
+        {"name": "the_costly_gesture", "channels": ("narrator",),
+         "element": "connection is proven by a choice that costs something"},
+        {"name": "a_two_sided_other", "channels": ("author",),
+         "element": "the other party has their own wants and wounds, not a mirror"},
+    ],
+    "endurance": [
+        {"name": "mounting_threat", "channels": ("narrator",),
+         "element": "escalate the pressure; never grant easy relief or safety"},
+        {"name": "scarcity_and_resource_pressure", "channels": ("author", "narrator"),
+         "element": "real constraints authored, spent and felt in play"},
+        {"name": "the_clock", "channels": ("author",),
+         "element": "a deadline or closing window bounds the ordeal"},
+        {"name": "isolation", "channels": ("author", "narrator"),
+         "element": "help is far; the protagonist is thrown on their own resources"},
+        {"name": "the_glimpsed_dread", "channels": ("narrator",),
+         "element": "the threat is felt before it is seen (horror blend)"},
+    ],
+    "contest": [
+        {"name": "escalating_rounds", "channels": ("narrator",),
+         "element": "each challenge harder than the last; the victory is fought for, never gifted"},
+        {"name": "the_worthy_rival", "channels": ("author", "narrator"),
+         "element": "an opponent with their own arc and credibility — authored AND kept credible round to round"},
+        {"name": "preparation_pays", "channels": ("author", "narrator"),
+         "element": "scouting and training are authored and made to matter"},
+        {"name": "scoreboard_vs_meaning", "channels": ("narrator",),
+         "element": "the meaningful win may differ from the literal result"},
+    ],
+    "gambit": [
+        {"name": "factions_with_competing_agendas", "channels": ("author",),
+         "element": "real players whose interests cross"},
+        {"name": "the_plan_and_its_execution", "channels": ("author", "narrator"),
+         "element": "a scheme with moving parts that the player works"},
+        {"name": "complications_force_adaptation", "channels": ("narrator",),
+         "element": "the board shifts; the player must improvise around the break"},
+        {"name": "the_concealed_twist_or_betrayal", "channels": ("author", "narrator"),
+         "element": "planted, kept hidden until it lands"},
+    ],
+    "discovery": [
+        {"name": "gradual_unfolding", "channels": ("narrator",),
+         "element": "place and meaning revealed in layers, never front-loaded"},
+        {"name": "the_sense_of_wonder", "channels": ("narrator",),
+         "element": "awe is the payoff; let it breathe"},
+        {"name": "the_place_as_character", "channels": ("author",),
+         "element": "a richly-layered, internally-coherent place authored to explore"},
+        {"name": "competing_explanations", "channels": ("author", "narrator"),
+         "element": "rival theories or disputed readings of what it means — interpretive, not pure scenic reveal"},
+        {"name": "the_cost_of_knowing", "channels": ("author", "narrator"),
+         "element": "understanding has a price; arrival is not free"},
+    ],
+    "mastery": [
+        {"name": "incremental_competence", "channels": ("narrator",),
+         "element": "skill accrues through practice; it is never granted"},
+        {"name": "setbacks_that_teach", "channels": ("author", "narrator"),
+         "element": "authored failure points that advance understanding"},
+        {"name": "a_clear_standard", "channels": ("author",),
+         "element": "an explicit bar or benchmark the work is measured against"},
+        {"name": "the_made_thing_or_run_system", "channels": ("author",),
+         "element": "a concrete artifact or system is the payoff"},
+    ],
+    "farce": [
+        {"name": "mistaken_identity_or_cross_purposes", "channels": ("author", "narrator"),
+         "element": "a misunderstanding engine seeded and stoked"},
+        {"name": "compounding_complications", "channels": ("narrator",),
+         "element": "each fix makes it worse; the snowball is the point"},
+        {"name": "comic_timing_and_the_blowup", "channels": ("narrator",),
+         "element": "escalate toward the set-piece blowup; do not resolve it early"},
+        {"name": "false_coverage_is_engine_live", "channels": ("author",),
+         "element": "the comic premise running is the desired state, not a failure"},
+    ],
+    "transformation": [
+        {"name": "the_old_self_made_legible", "channels": ("author",),
+         "element": "establish the starting self and its temptation up front, so the change can be proven against it"},
+        {"name": "the_defining_choice", "channels": ("author", "narrator"),
+         "element": "a real dilemma with stakes, pressed live"},
+        {"name": "the_ordeal", "channels": ("narrator",),
+         "element": "change is forced through hardship, not comfort"},
+        {"name": "the_cost_of_change", "channels": ("narrator",),
+         "element": "becoming someone new costs the old self something"},
+        {"name": "proven_by_action_not_declared", "channels": ("narrator",),
+         "element": "the changed self is shown, never merely stated"},
+    ],
+}
+
+
+def _signature_for(shapes: list[str], channel: str) -> list[dict]:
+    """Signature elements across the given shapes whose channels include `channel`
+    ('author'|'narrator'), de-duplicated by name (a blend's shared element appears once)."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for s in shapes:
+        for el in SHAPE_SIGNATURE.get(s, ()):
+            if channel in el["channels"] and el["name"] not in seen:
+                seen.add(el["name"])
+                out.append(el)
+    return out
+
+
+def signature_elements(game_types, channel: str) -> list[dict]:
+    """The signature elements for a world's game-type(s) on one channel ('author'|'narrator'),
+    primary + secondary shapes unioned. Empty list if nothing resolves."""
+    prof = shapes_for(game_types)
+    if not prof:
+        return []
+    return _signature_for([prof["shape"], *prof["secondary"]], channel)
+
+
+def author_signature_directive(game_types) -> str:
+    """The AUTHOR-INSIST block for world/cast authoring — the signature elements the generated
+    fiction MUST establish for this world's shape(s). '' if nothing resolves. (Narrator-emphasize
+    elements ride `shape_directive`; this is the build-time half.)"""
+    els = signature_elements(game_types, "author")
+    if not els:
+        return ""
+    lines = "\n".join(f"- {el['element']}" for el in els)
+    return ("GENRE SIGNATURE — the generated fiction MUST establish these (they are the spirit of "
+            "this genre; a story missing them rings false):\n" + lines)
+
+
 def conclusion_profile(game_types) -> dict | None:
     """The conclusion profile for a world's game-type(s) — the PRIMARY shape's
     SHAPE_CONCLUSION entry (trigger / cost_disposition / clock). The cost_disposition
@@ -164,9 +308,18 @@ def shape_directive(game_types) -> str:
     lines = [f"- {_SHAPE_LINE[s]}" for s in shapes if s in _SHAPE_LINE]
     if not lines:
         return ""
-    return ("STORY SHAPE (how this story earns its payoff — hold this discipline; it is "
-            f"NOT a clue hunt unless deduction is named): this plays as "
-            f"{' + '.join(shapes)}.\n" + "\n".join(lines))
+    block = ("STORY SHAPE (how this story earns its payoff — hold this discipline; it is "
+             f"NOT a clue hunt unless deduction is named): this plays as "
+             f"{' + '.join(shapes)}.\n" + "\n".join(lines))
+    # NARRATOR-EMPHASIZE signature elements (GENRE-SIGNATURE-ELEMENTS.md): the genre's spirit
+    # the live narrator should lean into. Unioned across primary+secondary, de-duped by name.
+    sig = _signature_for(shapes, "narrator")
+    if sig:
+        block += ("\nEMBODY THE GENRE (lean into these live — improvise them where they fit; "
+                  "anything you invent that implies a lead or a hidden truth must serve the "
+                  "destination or be left uncreated):\n"
+                  + "\n".join(f"- {el['element']}" for el in sig))
+    return block
 
 
 def shape_for(game_type: str) -> dict | None:

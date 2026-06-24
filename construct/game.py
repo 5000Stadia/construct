@@ -417,9 +417,10 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     cast_nodes: tuple = ()
     cast_proposal: dict | None = None
     try:
-        from construct.story_shapes import shapes_for
-        _shape = (shapes_for(resolved_game_types) or {}).get("shape") \
-            if resolved_game_types else None
+        from construct.story_shapes import author_signature_directive, shapes_for
+        _prof = shapes_for(resolved_game_types) if resolved_game_types else None
+        _shape = (_prof or {}).get("shape")
+        _shapes = [_prof["shape"], *_prof["secondary"]] if _prof else []
         if _shape:
             import dataclasses as _dc
 
@@ -428,14 +429,19 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 build_pillars,
                 cast_from_proposal,
                 check_solvability,
+                validate_signature_support,
             )
+            # The author-insist half of GENRE-SIGNATURE-ELEMENTS (Cx 097): the fundamental
+            # elements the generated fiction MUST establish for this shape, fed to the cohort.
+            _sig_dir = author_signature_directive(resolved_game_types)
             # Re-author up to 3x, feeding back the solvability problems (mirrors the arc
             # lint retry) — most misses are one required pillar lacking a none/pressure
             # genuine clue, which the feedback fixes. Still fail-open to pillar-less.
             _feedback = ""
             for _attempt in range(3):
                 _cprop = _co.author_cast(provider, digest, proposal.get("theme", ""),
-                                         _shape, arc.protagonist, people, feedback=_feedback)
+                                         _shape, arc.protagonist, people, feedback=_feedback,
+                                         signature_directive=_sig_dir)
                 _cast, _specs = cast_from_proposal(_cprop)
                 _req = [pid for pid, _label, required in _specs if required]
                 # Validate holders against canon ids too (Cx 032: a clue on a phantom NPC
@@ -446,6 +452,10 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 # cast must fail here (→ re-author / pillar-less), never be patched by improv.
                 _problems = check_solvability(_req, _cast, known_ids=set(known_ids),
                                               require_staging=(_shape == "deduction"))
+                # GENRE-SIGNATURE-ELEMENTS lint (Cx 097): the genre's hard signature promises
+                # must actually ship (e.g. a deduction cast needs a strong red herring + a
+                # cross-suspicion edge). Merged into the same feedback/retry loop as solvability.
+                _problems = _problems + validate_signature_support(_shapes, _cast)
                 if not _problems and _cast:
                     arc = _dc.replace(arc,
                                       pillars=build_pillars(_specs, _cast, arc.protagonist))
