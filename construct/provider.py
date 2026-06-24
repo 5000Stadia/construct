@@ -481,7 +481,16 @@ class CodexProvider(Provider):
                 f"Codex transport cap — the briefing composer owns budget-shaping; "
                 f"shrink the prompt, do not raise the cap")
         auth = self._read_auth()
-        bound = min(self._timeouts.get(tier, DEFAULT_TIMEOUTS[tier]), HARD_BOUND_SECONDS)
+        # `deliberate` (planning-class) calls are BUILD-TIME authoring only (story/cast/intro/
+        # premise/flavor/arc/interview — never an interactive turn), and legitimately run long
+        # (story_authoring ~150-300s). They were failing at the 300s main default during slow
+        # provider spells even though there's headroom to HARD_BOUND. So give deliberate calls
+        # the full HARD_BOUND (the user already waits for a build); interactive calls (narrate,
+        # classify, npc_turn) keep their snappy tier default. Fixes the fresh-genre generation
+        # ProviderTimeout (story_authoring exceeded 300s).
+        _tier_bound = self._timeouts.get(tier, DEFAULT_TIMEOUTS[tier])
+        bound = min(max(_tier_bound, HARD_BOUND_SECONDS) if deliberate else _tier_bound,
+                    HARD_BOUND_SECONDS)
         url = f"{self._base_url}/codex/responses"
         import httpx
         try:
