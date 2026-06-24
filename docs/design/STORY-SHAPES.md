@@ -292,6 +292,12 @@ map-history / reliability / competing explanations; Farce = ensemble / timing-fu
 excuse / blame-chain.
 
 ### 8.4 Cross-suspicion web — sparse graph + ONE synthesis call (no N²)
+> **SUPERSEDED (founder, 2026-06-24 → `GENRE-SIGNATURE-ELEMENTS.md`).** This deterministic
+> cross-suspicion *engine* is retired as overbuilding. Cross-suspicion is a SIGNATURE ELEMENT of
+> the Deduction shape — embodied via **author-insist** (the cast must cross-suspect / carry
+> conflicting alibis) + **narrator-emphasize** (play the web live), not a sparse-graph synthesis
+> call. The edge-plan/realization machinery below is kept only as historical design context.
+
 Compact cast table (role/faction/location_at_event/relationship/secret_pressure/
 reliability/clue_ids) → assign genuine holders to pillars → build a **deterministic
 sparse directed edge plan** (ring edges connect the cast; pillar edges point each clue
