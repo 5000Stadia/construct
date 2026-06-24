@@ -81,6 +81,13 @@ CLASSIFY_SCHEMA = {
                   "description": "the object the player PICKS UP / takes into their "
                   "possession this turn (lifts, grabs, pockets, tucks under their arm), "
                   "as they named it ('the ledger'); empty if they take nothing."},
+        "asserts_or_reveals": {"type": "boolean",
+                  "description": "true if this input could ESTABLISH or CHANGE a world fact "
+                  "that isn't already captured by moves_to/takes — i.e. the player asserts "
+                  "something new about the world, makes a claim, declares a fact, or performs "
+                  "an action that plausibly alters or reveals state worth recording. FALSE for "
+                  "pure looking/observing, asking, or plain talk with no claim, and for simple "
+                  "movement/taking already captured by moves_to/takes. When UNSURE, say true."},
     },
     "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of"],
 }

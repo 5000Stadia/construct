@@ -630,6 +630,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     needs_test, uncertain_of = False, ""
     commits, commitment = False, ""
     takes = ""
+    asserts_or_reveals = True  # conservative default (TURN-LATENCY A-lite): keep extraction
     # A brief actor descriptor so `classify` can wave off a test for things this
     # character is plainly proficient at (ACTION-RESOLUTION §1). Cheap point reads.
     actor = ""
@@ -651,6 +652,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         commits = bool(verdict.get("commits")) and kind in ("action", "declaration")
         commitment = (verdict.get("commitment") or "").strip() or player_input
         takes = (verdict.get("takes") or "").strip()
+        # Default TRUE on absence (old stubs / schema-less classify) so extraction is never
+        # silently skipped where a fact could be asserted (protected-key licensing depends on it).
+        asserts_or_reveals = bool(verdict.get("asserts_or_reveals", True))
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:
         kind = "action"
@@ -741,15 +745,24 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #    after a re-ask): the render extraction below is the authoritative capture and
     #    movement rides moves_to/refer, so a failed player-input extraction must NOT
     #    sink the turn — degrade to no player-stated facts this turn (logged).
-    try:
-        with _phase(trace, "player_ingest"):
-            receipt_rows = _receipt_rows(
-                p.ingest(player_input, source=arc.protagonist, at=turn_time(turn),
-                         classify="batch", extract="lean"))
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("player-input extraction failed; continuing: %s", exc)
-        trace.dropped_cohorts.append(f"player_ingest ({exc})")
-        receipt_rows = []
+    # TURN-LATENCY Lever A-lite (Cx 077/079): SKIP the expensive player-input extraction on
+    # turns that can't assert/reveal a new fact — pure look/ask/talk, and simple move/take
+    # already captured deterministically by moves_to/takes below. classify flags this via
+    # `asserts_or_reveals` (default TRUE → conservative: old stubs / uncertainty keep extraction,
+    # so protected-key licensing via pre_keys is never silently lost). ~6s saved on those turns.
+    receipt_rows = []
+    if asserts_or_reveals:
+        try:
+            with _phase(trace, "player_ingest"):
+                receipt_rows = _receipt_rows(
+                    p.ingest(player_input, source=arc.protagonist, at=turn_time(turn),
+                             classify="batch", extract="lean"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("player-input extraction failed; continuing: %s", exc)
+            trace.dropped_cohorts.append(f"player_ingest ({exc})")
+            receipt_rows = []
+    else:
+        trace.dropped_cohorts.append("player_ingest (skipped: no asserts/reveals)")
 
     # 2b. Movement (letter 026): the player's relocation commits
     #     deterministically — refer() resolves the destination as the

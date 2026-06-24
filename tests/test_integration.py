@@ -1257,6 +1257,30 @@ def test_author_intro_cohort():
     assert "do NOT reveal" in prompt                         # spoilers still forbidden
 
 
+def test_conditional_player_ingest_skips_extraction_when_no_assert(world):
+    # TURN-LATENCY Lever A-lite (Cx 077/079): when classify says the input can't assert/reveal a
+    # fact (pure look), SKIP the expensive player-input extraction. Movement/take still ride
+    # moves_to/takes; protected-key licensing is unaffected (no facts asserted this turn).
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": []})  # ONLY the post-render extraction is consumed
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "asserts_or_reveals": False},
+        {"prose": "You take in the quiet room."},
+    ])
+    r = run_turn(world, arc, provider, "I look around the room.", turn=1)
+    assert any("player_ingest (skipped" in d for d in r.trace.dropped_cohorts)
+    # default-TRUE keeps extraction when the field is absent (old stubs / uncertainty)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider2 = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"prose": "You pry the panel loose."},
+    ])
+    r2 = run_turn(world, arc, provider2, "I pry the loose panel open.", turn=2)
+    assert not any("player_ingest (skipped" in d for d in r2.trace.dropped_cohorts)
+
+
 def test_play_style_directive_in_briefing(world):
     # The game-type directive (GAME-TYPES.md) rides in the narrator briefing every
     # turn — a maintained instruction, not a toggle matrix.
