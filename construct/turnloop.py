@@ -219,12 +219,20 @@ _EXAMINE_VERBS = frozenset({
 })
 
 
+#: Close-inspection adverbs: "look CLOSELY / CAREFULLY at X" is scrutiny even though "look" alone
+#: is a glance (Cx 083 — the folded §8b spec named "look closely"). A bare "look around" is not.
+_SCRUTINY_ADVERBS = ("closely", "carefully", "close at", "in detail", "minutely")
+
+
 def _is_scrutiny(text_low: str) -> bool:
     """Is the player CLOSELY inspecting a physical thing this turn (the EXAMINE analogue of
-    `_is_pressing`)? True when an examine/inspect/search-class verb is present. Used to gate
-    `scrutiny` object-clues; a glance without such a verb earns only `examined`-level clues."""
+    `_is_pressing`)? True when an examine/inspect/search-class verb is present, OR a close-
+    inspection adverb ('look closely/carefully at …'). A bare 'look around'/'notice' is a glance,
+    not scrutiny. Gates `scrutiny` object-clues; a glance earns only `examined`-level clues."""
     toks = set(text_low.replace(",", " ").replace(".", " ").replace("?", " ").split())
-    return bool(toks & _EXAMINE_VERBS)
+    if toks & _EXAMINE_VERBS:
+        return True
+    return any(adv in text_low for adv in _SCRUTINY_ADVERBS)
 
 
 #: Role-address synonyms: the player-agent addresses a suspect by their ROLE, often with a

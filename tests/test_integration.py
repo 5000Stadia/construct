@@ -798,6 +798,16 @@ class TestFullTurn:
         assert PorcelainWorldReads(world).assertion_in_frame(
             PLAYER_FRAME, "fact:means", "is", "vial_missing")
 
+    def test_is_scrutiny_catches_look_closely(self):
+        # Cx 083: "look closely/carefully at X" is scrutiny (spec named it), but a bare glance is not.
+        from construct.turnloop import _is_scrutiny
+        assert _is_scrutiny("i examine the doctor's bag closely")
+        assert _is_scrutiny("i inspect the bag")
+        assert _is_scrutiny("i look closely at the bag")
+        assert _is_scrutiny("i study the bag carefully")
+        assert not _is_scrutiny("i look around the room")
+        assert not _is_scrutiny("i notice the bag on the table")
+
     def test_examine_glance_and_plain_object_surface_nothing(self, world):
         # A GLANCE (no inspect verb) does not earn the scrutiny clue; and a plain object that
         # isn't a cast node yields no pillar fact (the narrator renders it as atmosphere).
