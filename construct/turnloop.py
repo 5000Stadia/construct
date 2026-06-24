@@ -1382,6 +1382,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             logger.warning("judge_commitment failed: %s", exc)
             commitment_grade = "partial"
             trace.dropped_cohorts.append(f"judge_commitment ({exc})")
+        # Cx 093 — deterministic coverage is the SOURCE OF TRUTH: on a provably SOUND solve (every
+        # required pillar GENUINELY covered) a wishy-washy 'partial' is normalized to 'vindicated'
+        # BEFORE it is persisted, so the receipt grade never contradicts a coverage triumph. A
+        # 'wrong' grade is preserved (it may signal a named conflicting target) — the receipt is
+        # kept off 'lost' below instead. Legacy pillar-less arcs are untouched (model judge owns).
+        if (commitment_grade == "partial" and arc.pillars
+                and coverage_summary(live_reads, arc).get("sound")):
+            commitment_grade = "vindicated"
+            logger.info("commitment grade 'partial' reconciled to 'vindicated' on sound coverage")
         p.ingest_structured([
             {"entity": f"claim:{arc.protagonist}", "attribute": "committed",
              "value": commitment[:300]},
@@ -1407,6 +1416,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # else → won) while the grade itself flavors the epilogue.
     if commitment_grade and outcome is None:
         outcome = "lost" if commitment_grade == "wrong" else "won"
+    # Cx 093 — receipt hygiene: a provably SOUND solve must never write an arc_lost beside a
+    # coverage triumph. A preserved 'wrong' grade (a possible named conflicting target) flavors
+    # the epilogue but cannot force a loss when coverage is objectively sound.
+    if (outcome == "lost" and commitment_grade and arc.pillars
+            and coverage_summary(live_reads, arc).get("sound")):
+        logger.info("terminal outcome reconciled lost->won on sound coverage (grade %r)",
+                    commitment_grade)
+        outcome = "won"
     trace.outcome = outcome
     terminal = scenario_mode == "win_loss" and outcome is not None
     trace.terminal = terminal

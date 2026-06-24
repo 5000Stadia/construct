@@ -630,6 +630,39 @@ class TestFullTurn:
         prompt = _narrate_prompt(provider)
         assert "EFFECT" in prompt and "triumph" in prompt
 
+    def test_sound_coverage_reconciles_a_wishy_washy_commitment_grade(self, world):
+        # Cx 093: deterministic coverage is the source of truth. On a provably SOUND solve
+        # (required pillar genuinely covered), a model judge returning the wishy-washy 'partial'
+        # is normalized to 'vindicated' and the receipt is 'won' — no grade/conclusion seam.
+        import dataclasses
+        from construct.arc.executor import turn_time
+        from construct.arc.grammar import Pillar
+        pillar = Pillar("pillar:culprit", "who did it", required=True,
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"))
+        arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            frame=PLAYER_FRAME)
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "names the killer"},
+            {"grade": "partial", "rationale": "judge was wishy-washy"},   # the spurious grade
+            {"prose": "You lay out the case; the rival is named."},
+        ])
+        result = run_turn(world, arc, provider, "I lay out the case and name the killer.", turn=5,
+                          scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.conclusion_shape == "triumph"
+        assert result.trace.commitment_grade == "vindicated"   # reconciled from 'partial'
+        assert result.trace.outcome == "won" and result.trace.terminal is True
+        # the persisted receipt grade was rewritten too (no contradictory claim row)
+        assert PorcelainWorldReads(world).state("claim:person:player", "grade") == "vindicated"
+
     def test_farce_all_false_concludes_warm_no_twist(self, world):
         # Cx 027 blocker 3: a fully-live FARCE (every required pillar false-filled) is a WARM
         # comic triumph — NOT a costly comeuppance (false != cost here) and NOT a wrong-case
