@@ -770,6 +770,60 @@ class TestFullTurn:
         assert npc_calls == ["npc_turn:person:witness:cheap"]
         assert "person:witness: wants deflect" in _narrate_prompt(provider)
 
+    def test_examine_delivery_surfaces_an_object_clue_into_the_player_frame(self, world):
+        # EXAMINE-CHANNEL.md: closely INSPECTING a present clue-bearing OBJECT surfaces its
+        # evidentiary fact into knows:<protagonist> — the EXAMINE-channel analogue of ASK.
+        from construct.cast import CastNode, Clue, cast_seed_plan
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "obj:bag", "attribute": "kind", "value": "object", "timeless": True},
+            {"entity": "obj:bag", "attribute": "in", "value": "place:study"},
+        ])
+        cast = {"obj:bag": CastNode("obj:bag", "evidence", "the doctor's bag", holds_clues=(
+            Clue("clue:vial", "pillar:means", ("fact:means", "is", "vial_missing"),
+                 coverage_effect="genuine", reveal_condition="scrutiny"),))}
+        # NO knows:obj frame is ever seeded for an object holder (Cx 073)
+        assert all(not f.startswith("knows:obj") for f, _ in cast_seed_plan(tuple(cast.values())))
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You open the bag; a vial slot sits conspicuously empty."},
+        ])
+        result = run_turn(world, arc, provider, "I examine the doctor's bag closely.", turn=1,
+                          cast=cast, scope=["obj:bag", PLAYER, "place:study"])
+        assert "clue:vial" in result.trace.learned_clues
+        assert PorcelainWorldReads(world).assertion_in_frame(
+            PLAYER_FRAME, "fact:means", "is", "vial_missing")
+
+    def test_examine_glance_and_plain_object_surface_nothing(self, world):
+        # A GLANCE (no inspect verb) does not earn the scrutiny clue; and a plain object that
+        # isn't a cast node yields no pillar fact (the narrator renders it as atmosphere).
+        from construct.cast import CastNode, Clue
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "obj:bag", "attribute": "kind", "value": "object", "timeless": True},
+            {"entity": "obj:bag", "attribute": "in", "value": "place:study"},
+        ])
+        cast = {"obj:bag": CastNode("obj:bag", "evidence", "the doctor's bag", holds_clues=(
+            Clue("clue:vial", "pillar:means", ("fact:means", "is", "vial_missing"),
+                 reveal_condition="scrutiny"),))}
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "Your eyes pass over the table and the bag upon it."},
+        ])
+        # a glance ("notice"/"see") has no examine verb → not scrutiny → no delivery
+        r = run_turn(world, arc, provider, "I take in the room and notice the bag on the table.",
+                     turn=1, cast=cast, scope=["obj:bag", PLAYER, "place:study"])
+        assert "clue:vial" not in r.trace.learned_clues
+        assert not PorcelainWorldReads(world).assertion_in_frame(
+            PLAYER_FRAME, "fact:means", "is", "vial_missing")
+
     def test_discovery_writes_offscene_whereabouts_and_briefs_the_lead(self, world):
         # INVESTIGATION-SHAPE.md §3c: a delivered clue that NAMES an off-scene suspect makes
         # their whereabouts player-known (frame entitlement) and briefs the lead, so the

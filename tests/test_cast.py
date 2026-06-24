@@ -220,6 +220,14 @@ def test_revealable_clues_gates_by_condition():
     assert [c.clue_id for c in revealable_clues(node, trust=True)] == ["c1", "c2"]
     # under pressure: c1 + c3
     assert [c.clue_id for c in revealable_clues(node, pressure=True)] == ["c1", "c3"]
+    # EXAMINE channel (EXAMINE-CHANNEL.md): examined/scrutiny gate physical-clue holders
+    enode = CastNode("obj:bag", holds_clues=(
+        Clue("e_glance", "p", ("obj:bag", "a", "v1"), reveal_condition="examined"),
+        Clue("e_close", "p", ("obj:bag", "a", "v2"), reveal_condition="scrutiny"),
+    ))
+    assert [c.clue_id for c in revealable_clues(enode, examined=True)] == ["e_glance"]
+    # scrutiny implies examined → both surface on close inspection
+    assert [c.clue_id for c in revealable_clues(enode, scrutiny=True)] == ["e_glance", "e_close"]
     # with the object seen: c1 + c4
     assert [c.clue_id for c in revealable_clues(node, objects_seen=frozenset({"obj:ledger"}))] \
         == ["c1", "c4"]
@@ -342,6 +350,32 @@ def test_staging_gate_requires_singleton_culprit_and_first_witness():
     problems = check_solvability(req, cast, require_staging=True)
     assert any("exactly ONE is_culprit" in p for p in problems)
     assert any("exactly ONE first_witness" in p for p in problems)
+
+
+def test_solvability_counts_object_scrutiny_clue_when_reachable():
+    # EXAMINE-CHANNEL.md (Cx 073 pin): a required pillar covered ONLY by an object's `scrutiny`
+    # clue is solvable when the object is physically reachable, and fails when it's stranded.
+    from construct.cast import check_solvability
+    req = ["pillar:means"]
+    reachable = (
+        _staged("person:witness", "at_scene", first_witness=True, is_culprit=True, clues=(
+            Clue("c_name", "pillar:means", ("obj:bag", "noted", "x")),)),
+        _staged("person:other", "at_scene", clues=()),
+        _staged("obj:bag", "at_scene", clues=(  # the physical means clue, examinable at-scene
+            Clue("c_vial", "pillar:means", ("fact:means", "is", "vial_missing"),
+                 reveal_condition="scrutiny"),)),
+    )
+    assert check_solvability(req, reachable, require_staging=True) == []
+    # same clue on an OFF-SCENE object with no naming lead → unreachable → fails
+    stranded = (
+        _staged("person:witness", "at_scene", first_witness=True, is_culprit=True, clues=(
+            Clue("c1", "pillar:means", ("fact:x", "is", "y")),)),
+        _staged("person:other", "at_scene", clues=()),
+        _staged("obj:bag", "offscene", "place:vault", clues=(
+            Clue("c_vial", "pillar:means", ("fact:means", "is", "vial_missing"),
+                 reveal_condition="scrutiny"),)),
+    )
+    assert any("obj:bag" in p for p in check_solvability(req, stranded, require_staging=True))
 
 
 def test_staging_gate_is_off_by_default_backward_compat():

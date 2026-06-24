@@ -24,12 +24,16 @@ from construct.arc.grammar import Pillar
 COVERAGE_EFFECTS = ("genuine", "false", "context")
 #: How a clue becomes available (the cost/condition of learning it).
 REVEAL_MODES = ("volunteered", "pressed", "traded", "contradicted")
-REVEAL_CONDITIONS = ("none", "trust", "pressure", "object_seen")
-#: The reveal conditions LIVE interview delivery actually supports today (turnloop v1):
-#: unconditional, and pressure (inferred from the action). `trust`/`object_seen` need
-#: signals not yet wired, so a clue gated on them is NOT live-reachable — the solvability
-#: gate must not count it (Cx 032 blocker 2). Widen this as those signals land.
-LIVE_REVEAL_CONDITIONS = frozenset({"none", "pressure"})
+#: ASK channel: none/trust/pressure (questioning a person). EXAMINE channel (EXAMINE-CHANNEL.md):
+#: `examined` (a look at the object surfaces it) and `scrutiny` (close inspection earns it — the
+#: EXAMINE analogue of `pressure`). `object_seen` stays a HOOK/glance/ambient condition, NEVER
+#: required evidence (Cx 073).
+REVEAL_CONDITIONS = ("none", "trust", "pressure", "object_seen", "examined", "scrutiny")
+#: The reveal conditions LIVE delivery supports — the solvability gate counts ONLY these (a clue
+#: gated on an un-delivered signal is NOT live-reachable; Cx 032 blocker 2). ASK delivers
+#: none/pressure; the EXAMINE channel (turnloop examine-delivery) delivers examined/scrutiny.
+#: `object_seen`/`trust` are NOT live (hooks/glances/unwired) — never count for required evidence.
+LIVE_REVEAL_CONDITIONS = frozenset({"none", "pressure", "examined", "scrutiny"})
 
 
 @dataclass(frozen=True)
@@ -357,6 +361,11 @@ def cast_seed_plan(cast: tuple[CastNode, ...]) -> list[tuple[str, list[dict]]]:
     no rows. This is what makes the cast genuinely KNOW the pieces the player must gather."""
     plan: list[tuple[str, list[dict]]] = []
     for node in cast:
+        # ASK channel only: seed a `knows:<npc>` frame for PERSON holders. OBJECT/SITE holders
+        # (EXAMINE channel, Cx 073) get NO `knows:obj` frame — their clue fact lives as PROTECTED
+        # canon truth (arc_protected_keys), surfaced into the player frame only on EXAMINE delivery.
+        if not node.node_id.startswith("person:"):
+            continue
         items = [{"entity": e, "attribute": a, "value": v}
                  for (e, a, v) in (c.surface_fact for c in node.holds_clues)]
         if items:
@@ -374,17 +383,23 @@ def learn_clue_items(clue: Clue) -> list[dict]:
 
 
 def revealable_clues(node: CastNode, *, trust: bool = False, pressure: bool = False,
+                     examined: bool = False, scrutiny: bool = False,
                      objects_seen: frozenset = frozenset()) -> list[Clue]:
-    """The clues `node` will surface THIS interaction, gating by `reveal_condition`
-    (§8.1): 'none' always; 'trust'/'pressure' when that lever is present; 'object_seen'
-    when the relevant object is in `objects_seen`. The host calls this when the player
-    questions an NPC, then writes each returned clue via `learn_clue_items`."""
+    """The clues `node` will surface THIS interaction, gating by `reveal_condition`:
+    ASK channel — 'none' always; 'trust'/'pressure' when that lever is present. EXAMINE
+    channel (EXAMINE-CHANNEL.md) — 'examined' when the object is being looked at; 'scrutiny'
+    when it's being CLOSELY inspected (the examine analogue of pressure). 'object_seen' when
+    the relevant object is in `objects_seen` (a hook/glance, never required evidence). The host
+    calls this when the player questions a person OR inspects an object, then writes each
+    returned clue via `learn_clue_items`. (`scrutiny` implies `examined`.)"""
     out = []
     for c in node.holds_clues:
         cond = c.reveal_condition
         if cond == "none" \
                 or (cond == "trust" and trust) \
                 or (cond == "pressure" and pressure) \
+                or (cond == "examined" and (examined or scrutiny)) \
+                or (cond == "scrutiny" and scrutiny) \
                 or (cond == "object_seen" and c.surface_fact[0] in objects_seen):
             out.append(c)
     # Truth wins the per-turn slot: genuine clues lead, then context, then false/red-herring

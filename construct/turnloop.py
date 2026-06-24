@@ -209,6 +209,24 @@ def _is_pressing(text_low: str, *, needs_test: bool) -> bool:
     return bool(toks & _PRESSURE_VERBS) or bool(toks & _PROBE_SIGNALS)
 
 
+#: EXAMINE channel (EXAMINE-CHANNEL.md): verbs that mark the player INSPECTING a physical thing.
+#: Inspecting a NAMED object is close inspection (scrutiny) — it earns the object's evidentiary
+#: clue, not just a glance. A bare "look around" (no object) is NOT scrutiny (handled elsewhere).
+_EXAMINE_VERBS = frozenset({
+    "examine", "inspect", "search", "study", "check", "scrutinize", "scour", "comb",
+    "investigate", "open", "compare", "measure", "probe", "read", "test", "feel", "smell",
+    "turn", "lift", "pry",
+})
+
+
+def _is_scrutiny(text_low: str) -> bool:
+    """Is the player CLOSELY inspecting a physical thing this turn (the EXAMINE analogue of
+    `_is_pressing`)? True when an examine/inspect/search-class verb is present. Used to gate
+    `scrutiny` object-clues; a glance without such a verb earns only `examined`-level clues."""
+    toks = set(text_low.replace(",", " ").replace(".", " ").replace("?", " ").split())
+    return bool(toks & _EXAMINE_VERBS)
+
+
 #: Role-address synonyms: the player-agent addresses a suspect by their ROLE, often with a
 #: common synonym ('Doctor' for a 'family physician', 'Constable' for a 'policeman'). Map the
 #: synonym a player would say → the role tokens the surface_role carries, so role-address
@@ -998,6 +1016,37 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 except Exception as exc:  # one clue must not sink the turn
                     trace.dropped_cohorts.append(f"learn_clue:{clue.clue_id} ({exc})")
                 break  # one fresh clue per NPC per turn (an earned trickle, not a dump)
+
+    # ---- EXAMINE DELIVERY (EXAMINE-CHANNEL.md) -----------------------------------------
+    # Inspecting a present clue-bearing OBJECT/SITE surfaces its evidentiary fact into the
+    # player frame — the EXAMINE-channel analogue of interview delivery. Earned (close
+    # inspection = scrutiny; a glance = examined-level), present-gated (the object must be
+    # in/within the scene), one fresh clue per object per turn. A PLAIN object (not a cast
+    # node) matches nothing → no delivery, so the narrator renders it as atmosphere (never
+    # fabricated evidence). Object holders carry NO knows:<obj> frame — their fact rides the
+    # player frame only here (Cx 073). Fail-open per clue.
+    if cast and kind == "action" and _is_scrutiny(player_input.lower()):
+        from construct.cast import learn_clue_items as _lci
+        from construct.cast import revealable_clues as _rc
+        low_ex = player_input.lower()
+        _cast_items = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
+        for oid, onode in _cast_items:
+            if oid.startswith("person:"):
+                continue  # people are the ASK channel, handled above
+            _orole = getattr(onode, "surface_role", "")
+            if not _names_entity(oid, low_ex, role=_orole) or not _present(oid):
+                continue
+            for clue in _rc(onode, examined=True, scrutiny=True):
+                e, a, v = clue.surface_fact
+                if live_reads.assertion_in_frame(player_frame, e, a, v):
+                    continue  # already learned — don't re-surface
+                try:
+                    p.ingest_structured(_lci(clue), frame=player_frame, classify="batch")
+                    learned.append((oid, clue))
+                except Exception as exc:  # one clue must not sink the turn
+                    trace.dropped_cohorts.append(f"examine_clue:{clue.clue_id} ({exc})")
+                break  # one fresh clue per object per turn
+
     trace.learned_clues = [c.clue_id for (_npc, c) in learned]
 
     # ---- DISCOVERY → REACHABILITY (INVESTIGATION-SHAPE.md §3c) -----------------------
