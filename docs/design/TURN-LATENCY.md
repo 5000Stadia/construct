@@ -139,6 +139,26 @@ with a stronger version of candidate B + a cast-flat NPC model. Routed to Cx for
 If Cx converges + the provider supports tool-calls, B-via-tool-calls SUPERSEDES the B-hybrid and
 becomes the single biggest steady-state cut (~30s), reordering ahead of Lever 1's deferral.
 
+**CONVERGED RULING (Cx 081 + Kernos 077):** B-via-tool-calls is GREEN as a DESIGN DIRECTION
+(same completion = free-form prose + structured delta proposals; the existing promotion/
+quarantine gate stays the only canon doorway), YELLOW-to-build behind a spec/flag, BLOCKED as a
+cut-now schema swap. Two gates Cx added: (1) **no native dual channel** — `CodexProvider.complete`
+returns one JSON dict; this needs a new `complete_with_tools(...) -> {content, calls}` provider
+method (a provider slice, like streaming), NOT just adding JSON to `NARRATE_SCHEMA` (which would
+make prose a JSON string — Kernos's exact warning). (2) **the gate licenses "could have been
+allowed to say," not "was shown in prose"** — a same-call proposal isn't evidence the player SAW
+it, so add a NON-MODEL ALIGNMENT GUARD before promotion (proposed entities visible by name/alias
+or a checked evidence span; stronger evidence for protected/momentous/new rows; Kernos's
+"absent-from-prose" flag is necessary but not sufficient). Approved build shape: `narrate_with_
+delta` cohort behind a flag → delta through the existing gate → alignment guard → fail-open
+(bad delta ships prose, skips commit) → regression tests (unrendered row quarantined, protected
+same-value quarantined, earned protected promotes, contradiction quarantined, phantom blocked,
+proposal-failure doesn't sink the turn). Until built, the B-hybrid (hints SHRINK extraction)
+stands. Bookkeeping-durability-skip = a separate focused pass (endorsed). NPC-by-focus needs the
+frame-secrecy discipline (ambient→render, private-consequential→focused/protected call).
+**Sequencing: B stays the biggest candidate cut but is a provider+gate slice; C/A-lite/prompt-
+cache/Lever-1 (G6 deferral) remain the safer immediate path.**
+
 ## The four levers
 
 ### Lever 1 — DEFER post-render work behind a SESSION-LEVEL FINALIZATION BARRIER (#1 win, ~24s/turn)
