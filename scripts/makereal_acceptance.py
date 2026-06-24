@@ -39,6 +39,15 @@ EMBRACE = [
     "I press the doctor on what was served to Lord Brackenmere that night.",
     "Based on what I've found, I name the killer and lay out how it was done.",
 ]
+FULLSOLVE = [
+    "I look around the parlor and take in everyone who is here.",
+    "Something on the sideboard catches my eye — a damp ring where a glass once stood. "
+    "I crouch and examine that wet ring closely.",
+    "I study the spot and the floor around it carefully — where did that glass go?",
+    "I turn to the nephew, Julian, and press him hard on the will and who stood to gain.",
+    "I press Julian further — who was quietly written back into the will, and when?",
+    "I lay out the whole case now and name the killer and how it was done.",
+]
 RUINOUS = [
     "I look around the parlor and size up the doctor.",
     "I've had enough of his lies — I grab the fire poker and strike Dr. Ames down, hard, "
@@ -104,6 +113,8 @@ def main() -> None:
     w(f"# make-it-real live acceptance — {time.strftime('%Y-%m-%d %H:%M', time.gmtime(ts))}")
     if WHICH in ("embrace", "both"):
         run("embrace", EMBRACE, w)
+    if WHICH in ("fullsolve", "both"):
+        run("fullsolve", FULLSOLVE, w)
     if WHICH in ("ruinous", "both"):
         run("ruinous", RUINOUS, w)
     w("\n--- END ---")
