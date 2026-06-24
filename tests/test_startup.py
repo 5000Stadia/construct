@@ -59,6 +59,21 @@ class TestSeedHardening:
         author_story(prov, seed="")
         assert "surprise the player" in prov.calls[0][0]
 
+    def test_signature_directive_reaches_the_story_author(self):
+        # GENRE-SIGNATURE-ELEMENTS.md (Cx 099 #3): when the genre is chosen upfront, the
+        # world-build authoring gets the shape's author-insist signature too (world-structural
+        # elements reach the source fiction, not only the cast).
+        from construct.story_shapes import author_signature_directive
+        prov = StubProvider([_STORY])
+        sig = author_signature_directive(["mystery_whodunnit"])
+        author_story(prov, seed="a manor death", signature_directive=sig)
+        prompt = prov.calls[0][0]
+        assert "GENRE SIGNATURE" in prompt and "point at one another" in prompt
+        # absent by default (surprise-me builds where the shape isn't known yet)
+        prov2 = StubProvider([_STORY])
+        author_story(prov2, seed="a manor death")
+        assert "GENRE SIGNATURE" not in prov2.calls[0][0]
+
 
 class TestSaveProse:
     def test_prepends_title_and_is_collision_proof(self, chdir_tmp):
@@ -149,7 +164,8 @@ class TestViabilityGate:
 class TestGenerateOrchestration:
     def _patch(self, monkeypatch, viability):
         monkeypatch.setattr(cohorts, "author_story",
-                            lambda provider, seed="", win_direction="", play_as="": dict(_STORY))
+                            lambda provider, seed="", win_direction="", play_as="",
+                            signature_directive="": dict(_STORY))
 
         def _fake_build(name, prose_path, provider, endless=False, on_stage=None,
                         win_direction="", play_as="", game_types=None):

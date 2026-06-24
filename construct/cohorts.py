@@ -992,7 +992,7 @@ def ingest_additions(provider: Provider, additions: list[str], digest: str,
 
 
 def author_story(provider: Provider, seed: str = "", win_direction: str = "",
-                 play_as: str = "") -> dict:
+                 play_as: str = "", signature_directive: str = "") -> dict:
     """Session-zero Path 2 (STARTUP-ENTRY §3): write a COMPLETE short work
     from an optional seed — the hidden source-of-truth bible that the
     ingest pipeline then projects. Prose-first is Construct's showcase loop
@@ -1053,6 +1053,7 @@ def author_story(provider: Provider, seed: str = "", win_direction: str = "",
         "careful reader could uncover — this is what the playable arc gates "
         "on, so make it concrete and discoverable, not vague;\n"
         "- consistent, concrete detail at honest precision; real prose."
+        + (f"\n\n{signature_directive}" if signature_directive else "")
         + premise + aim + as_who,
         STORY_AUTHOR_SCHEMA, tier="main", deliberate=True, task="sty")
 

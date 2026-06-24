@@ -846,8 +846,15 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
 
     _emit(on_stage, "Stage 0 · Authoring the hidden source story · prose-first "
                     "(the showcase loop: fiction → projection)")
+    # World-structural author-insist (GENRE-SIGNATURE-ELEMENTS.md / Cx 099 #3): when the genre is
+    # CHOSEN upfront, the world-build authoring gets the shape's author-insist signature too — so
+    # non-cast-shaped elements (the_clock, the_place_as_character, the_made_thing) are established
+    # in the source fiction, not only the cast. Grows on demand: empty when game_types is unknown
+    # (surprise-me), where the cast-shaped signature still rides author_cast after shape derivation.
+    from construct.story_shapes import author_signature_directive as _asd
+    _story_sig = _asd(game_types) if game_types else ""
     work = cohorts.author_story(provider, seed=seed, win_direction=win_direction,
-                                play_as=play_as)
+                                play_as=play_as, signature_directive=_story_sig)
     prose_path = _save_generated_prose(name, work)
     _emit(on_stage, f"   …hidden bible saved (authoring side of the firewall) "
                     f"→ {prose_path}")
