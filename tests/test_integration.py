@@ -663,6 +663,41 @@ class TestFullTurn:
         # the persisted receipt grade was rewritten too (no contradictory claim row)
         assert PorcelainWorldReads(world).state("claim:person:player", "grade") == "vindicated"
 
+    def test_sound_coverage_keeps_wrong_grade_but_never_loses(self, world):
+        # Cx 095 belt-and-suspenders: a 'wrong' grade on SOUND coverage is PRESERVED as flavor
+        # (it may signal a player-named conflicting target), but it must NOT force an arc_lost —
+        # the receipt reconciles lost->won so there's no loss beside a coverage triumph.
+        import dataclasses
+        from construct.arc.executor import turn_time
+        from construct.arc.grammar import Pillar
+        pillar = Pillar("pillar:culprit", "who did it", required=True,
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"))
+        arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            frame=PLAYER_FRAME)
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the butler"},
+            {"grade": "wrong", "rationale": "named a conflicting target"},   # preserved as flavor
+            {"prose": "You name the butler, though the evidence pointed elsewhere."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the butler.", turn=5,
+                          scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.conclusion_shape == "triumph"
+        assert result.trace.commitment_grade == "wrong"       # PRESERVED (not normalized)
+        assert result.trace.outcome == "won"                  # but reconciled off 'lost'
+        assert result.trace.terminal is True
+        # the won receipt was written; no arc_lost beside the triumph
+        from construct.turnloop import terminal_outcome
+        assert terminal_outcome(PorcelainWorldReads(world)) == "won"
+
     def test_farce_all_false_concludes_warm_no_twist(self, world):
         # Cx 027 blocker 3: a fully-live FARCE (every required pillar false-filled) is a WARM
         # comic triumph — NOT a costly comeuppance (false != cost here) and NOT a wrong-case
