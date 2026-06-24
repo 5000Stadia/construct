@@ -316,7 +316,7 @@ def shape_directive(game_types) -> str:
     sig = _signature_for(shapes, "narrator")
     if sig:
         block += ("\nEMBODY THE GENRE (lean into these live — improvise them where they fit; "
-                  "anything you invent that implies a lead or a hidden truth must serve the "
+                  "anything you invent that creates a new player-pursuable thread must serve the "
                   "destination or be left uncreated):\n"
                   + "\n".join(f"- {el['element']}" for el in sig))
     return block

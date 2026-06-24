@@ -559,6 +559,32 @@ def test_signature_support_flags_missing_cross_suspicion():
     assert any("cross-suspicion" in p for p in probs)
 
 
+def test_signature_support_requires_a_live_reachable_cross_edge():
+    from construct.cast import validate_signature_support
+    # the ONLY cross-suspicion edge is gated behind trust → can't surface under current delivery,
+    # so it must NOT count as shipped (Cx 099).
+    cast = (
+        CastNode("person:a", "witness", "A", first_witness=True, presence="at_scene", holds_clues=(
+            Clue("clue:1", "pillar:x", ("fact:x", "is", "y"), coverage_effect="genuine",
+                 reveal_condition="none"),
+            Clue("clue:rh", "pillar:x", ("fact:x", "claimed", "z"), coverage_effect="false",
+                 is_red_herring=True, reveal_condition="none", debunked_by="clue:1"),
+            # the cross-edge (points at person:b) gated behind trust → not live-reachable
+            Clue("clue:x", "pillar:x", ("person:b", "seen_with", "the victim"),
+                 coverage_effect="genuine", reveal_condition="trust"),)),
+        CastNode("person:b", "suspect", "B", presence="at_scene", is_culprit=True, holds_clues=()),
+    )
+    probs = validate_signature_support(["deduction"], cast)
+    assert any("cross-suspicion" in p for p in probs)
+    # make that same edge live-reachable (pressure) → now it counts
+    a, b = cast
+    live = CastNode("person:a", "witness", "A", first_witness=True, presence="at_scene",
+                    holds_clues=(a.holds_clues[0], a.holds_clues[1],
+                                 Clue("clue:x", "pillar:x", ("person:b", "seen_with", "the victim"),
+                                      coverage_effect="genuine", reveal_condition="pressure")))
+    assert validate_signature_support(["deduction"], (live, b)) == []
+
+
 def test_signature_support_noop_for_non_deduction_shapes():
     from construct.cast import validate_signature_support
     # a bond/romance world is prompt + live-acceptance only in v1 — no hard lint, no false flags

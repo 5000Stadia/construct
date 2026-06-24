@@ -254,12 +254,14 @@ def validate_signature_support(shapes, cast: tuple[CastNode, ...]) -> list[str]:
         if len(people) < 2:
             problems.append(f"deduction signature: cross-suspicion needs ≥2 suspect/person "
                             f"nodes, found {len(people)}")
-        elif not any(ref in ids and ref != n.node_id
+        elif not any(_live_reachable(c) and ref in ids and ref != n.node_id
                      for n in cast for c in n.holds_clues
                      for ref in (c.surface_fact[0], c.surface_fact[2])):
-            problems.append("deduction signature: no cross-suspicion edge — no clue's fact "
-                            "references another cast member (the suspects don't point at "
-                            "one another)")
+            # Cx 099: the edge must be LIVE-reachable, not merely authored — a trust/object_seen
+            # cross-edge can't surface under current delivery, so it doesn't count as shipped.
+            problems.append("deduction signature: no LIVE-reachable cross-suspicion edge — no "
+                            "live-reachable clue's fact references another cast member (the "
+                            "suspects don't point at one another in play)")
     return problems
 
 
