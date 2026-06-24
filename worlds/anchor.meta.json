@@ -1,0 +1,30 @@
+{
+  "title": "The Last Honest Meter",
+  "protagonist": "person:ilsa_renn",
+  "theme": "An honest record only matters when someone chooses truth over belonging to the machinery that feeds them.",
+  "stance": "fiction",
+  "mode": "pure",
+  "style": "Dust-dry civic noir in a failing off-world colony: bureaucratic, water-starved, morally corroded, with clipped hardboiled diction, ledger-room precision, and a faint elegiac ache for machinery that outlived the people meant to be saved.",
+  "scenario_mode": "endless",
+  "arc_scope": [
+    "person:clerk_tin_ear",
+    "person:cray",
+    "person:ilsa_renn"
+  ],
+  "seeded_frames": [
+    "person:ilsa_renn",
+    "person:clerk_tin_ear",
+    "person:clerk_with_tin_ear",
+    "person:cray",
+    "person:marn"
+  ],
+  "endless": true,
+  "goal_statement": "",
+  "intro": "Anchor runs on ration chits, patched pipe, and the old mercy of machines nobody thanks until they fail. In the Allocation Office, every liter has a column, every column has a keeper, and every keeper learns what the colony pays for comfort: silence, signatures, and a clean place inside the apparatus. An honest record is just dead ink unless someone is willing to stand outside the machinery that feeds them.",
+  "genre": "dystopian bureaucratic sci-fi",
+  "game_type": [
+    "mystery_whodunnit",
+    "political_intrigue"
+  ],
+  "premise": "In Anchor, an administered community is organized around the Allocation Office, its vault racks, its ledgers, and the meters that determine who is counted. Administrator Cray\u2019s office requests clerks, signs orders, and keeps the records people must live inside, while long-serving staff like the clerk with the tin ear maintain the inventory that turns survival into paperwork."
+}

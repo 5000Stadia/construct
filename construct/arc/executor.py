@@ -16,7 +16,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from construct.arc.conditions import PacingCounters, Truth, evaluate
-from construct.arc.grammar import Arc, Rung, Weight
+from construct.arc.grammar import Arc, Phase, Pillar, Rung, Weight
+
+#: Lifecycle terminals (LIVING-WORLD-GENERATOR §3). `active` is the live state;
+#: the four terminals are reached at most once each. `won` ends a story (main
+#: arc); the three non-won terminals emit FALLOUT (a standing world-consequence
+#: that seeds later generation) and, for the main arc in win_loss, end the story.
+LIFECYCLE_TERMINALS = ("won", "lost", "cancelled", "incompletable")
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +191,359 @@ def arc_outcome(reads: Any, arc: Arc) -> str | None:
     return None
 
 
+# --- pillar coverage (STORY-SHAPES §0a/§8 — conclusion as effect) -------
+#: Tri-state coverage of a causal pillar, computed host-side from the player
+#: frame. The conclusory scene is the NARRATED EFFECT of this coverage; it is
+#: never a win/loss gate.
+COVERAGE = ("genuine", "false", "unfilled")
+
+
+def pillar_coverage(reads: Any, pillar: Pillar) -> str:
+    """Coverage of ONE pillar from the player frame. 'genuine' wins a tie with
+    'false' — a real cause established trumps a lingering red herring."""
+    if pillar.genuine_via is not None and \
+            evaluate(pillar.genuine_via, reads) is Truth.TRUE:
+        return "genuine"
+    if pillar.false_via is not None and \
+            evaluate(pillar.false_via, reads) is Truth.TRUE:
+        return "false"
+    return "unfilled"
+
+
+def arc_coverage(reads: Any, arc: Arc) -> dict[str, str]:
+    """{pillar_id: coverage} across all the arc's pillars (host-side; the engine
+    never infers pillar coverage). Empty when the arc declares no pillars."""
+    return {p.pillar_id: pillar_coverage(reads, p) for p in arc.pillars}
+
+
+def coverage_summary(reads: Any, arc: Arc) -> dict:
+    """Digest of pillar coverage for the conclusory scene + the convergence pull.
+    Counts are over REQUIRED pillars (the causes that must be addressed; optional
+    pillars enrich but never gate). `complete` = every required pillar is covered
+    one way or the other (genuine OR false) — the case is ready to land, soundly or
+    not; `sound` = every required pillar GENUINELY covered (a clean case)."""
+    cov = arc_coverage(reads, arc)
+    required = [p.pillar_id for p in arc.pillars if p.required]
+    genuine = [pid for pid in required if cov[pid] == "genuine"]
+    false = [pid for pid in required if cov[pid] == "false"]
+    unfilled = [pid for pid in required if cov[pid] == "unfilled"]
+    return {
+        "coverage": cov,
+        "required": required,
+        "genuine": genuine,
+        "false": false,
+        "unfilled": unfilled,
+        "complete": bool(required) and not unfilled,
+        "sound": bool(required) and len(genuine) == len(required),
+    }
+
+
+def conclusion_from_coverage(summary: dict, *,
+                             cost_disposition: str = "peril_redemption",
+                             world_event: str | None = None,
+                             cost_weight: float = 0.0) -> dict | None:
+    """Map pillar coverage → the conclusory OUTCOME_SHAPE, as the EFFECT of the causes
+    the player put in place — NEVER a win/loss verdict (STORY-SHAPES §0a, CATALOG §0).
+
+    `summary` is `coverage_summary(...)`. `cost_disposition` sets the polarity (CATALOG §0
+    finding 3): `peril_redemption`/`repair`/`sacrifice` read GENUINE coverage as the sound
+    ending and FALSE as the wrong/costly one; `fail_forward` (comedy) INVERTS it — a
+    false-filled engine pillar means the comic engine is LIVE (the desired blowup),
+    `genuine` (defused) is the anticlimax, all-`unfilled` is the damp squib. `world_event`
+    ('win'|'loss'|None) is read ALONGSIDE coverage for shapes whose ending also reads an
+    external result (finding 5 — Contest's scoreboard: sound coverage + 'loss' = "proved
+    himself, lost the decision" = costly_victory; 'win' on an unsound-but-complete case =
+    a hollow bittersweet). `cost_weight` in [0,1] is the run's accrued-cost integral; it
+    downgrades a clean win toward costly_victory (the §0a "integral of the whole run").
+
+    Returns {outcome∈OUTCOME_SHAPES, sound, effect_sound, wrong_case, basis} or None when
+    the arc declares no required pillars (→ the legacy world_condition terminal owns close).
+    `sound` = all required GENUINE (polarity-independent; used by delta_type). `effect_sound`
+    = the conclusion is the INTENDED/positive resolution UNDER this cost_disposition (CATALOG
+    §0 finding 3 / Cx 027 — for fail_forward a live comic blowup is effect-sound even though
+    nothing is genuine). `wrong_case` = the player committed to a MISTAKEN case (a false-
+    filled required cause) → the curtain twist is warranted; ALWAYS False under fail_forward
+    (a false-fill there is success fuel, never a wrong case)."""
+    required = summary.get("required") or []
+    if not required:
+        return None
+    genuine, false_, unfilled = (summary["genuine"], summary["false"], summary["unfilled"])
+    all_genuine, complete = summary["sound"], summary["complete"]
+    high_cost = cost_weight >= 0.5
+
+    if cost_disposition == "fail_forward":
+        # Comedy inverts: false == the comic engine is LIVE (the desired blowup); genuine ==
+        # defused (anticlimax); unfilled == never lit (damp squib). A false-fill is SUCCESS,
+        # never a wrong case → wrong_case is always False. `cost_weight` here must be
+        # collateral-derived, NOT false-count (the caller honors this — Cx 027 blocker 3).
+        live, unlit = len(false_), len(unfilled)
+        if live == len(required):
+            outcome = "costly_victory" if high_cost else "triumph"  # comeuppance vs warm
+            basis = "comic engine fully live → " + ("comeuppance" if high_cost else "warm blowup")
+        elif live >= 1:
+            outcome, basis = "partial", "a near-miss collision; some fuses lit"
+        elif unlit == len(required):
+            outcome, basis = "quiet_failure", "the damp squib — nothing was ever lit"
+        else:
+            outcome, basis = "partial", "the anticlimax — everything tidily defused"
+        effect_sound = outcome in ("triumph", "costly_victory", "partial")
+        return {"outcome": outcome, "sound": all_genuine, "effect_sound": effect_sound,
+                "wrong_case": False, "basis": basis}
+
+    # Normal polarity (genuine is the sound fill; a false-filled required cause = wrong case).
+    wrong_case = bool(false_)
+    if all_genuine:
+        if world_event == "loss":  # Rocky: proved on the causes, the external result went against
+            outcome, basis = "costly_victory", \
+                "proved on the causes, though the external result went against"
+        else:
+            outcome = "costly_victory" if high_cost else "triumph"
+            basis = "all causes genuinely established" + (" at heavy cost" if high_cost else "")
+    elif complete:  # every required pillar covered, but ≥1 falsely → a wrong/mixed case lands
+        outcome, basis = "bittersweet", \
+            "the case concludes but rests on a false cause — it lands wrongly"
+    elif world_event == "win" and genuine:  # a scoreboard win on an unsound case = hollow
+        outcome, basis = "bittersweet", \
+            "won the external result, but the proof was never truly earned"
+    elif genuine:  # partial progress, some causes still open at a forced close
+        outcome, basis = "partial", "some causes established, others left open"
+    elif false_:  # built only on red herrings
+        outcome, basis = "failure", "the case rests entirely on false causes"
+    else:  # nothing established
+        outcome, basis = "quiet_failure", "the causes were never established"
+    return {"outcome": outcome, "sound": all_genuine, "effect_sound": all_genuine,
+            "wrong_case": wrong_case, "basis": basis}
+
+
+#: TRANSFORMATION reconciliation (CATALOG §0 finding 4): the arc's ConclusionShape
+#: `delta_type` should DERIVE from pillar coverage, not be declared in parallel.
+def delta_type_from_coverage(summary: dict) -> str | None:
+    """Derive the character-delta type from pillar coverage (Transformation). All causes
+    genuine → `drive_inverted` (the change holds); partial-genuine → `desire_renounced`
+    (turned from the old life, repair unfinished); else None (no inversion — the old self
+    persists). Keeps delta_type a FUNCTION of coverage so a declared delta can't contradict
+    the pillar state. None when no required pillars."""
+    if not (summary.get("required") or []):
+        return None
+    if summary["sound"]:
+        return "drive_inverted"
+    if summary["genuine"]:
+        return "desire_renounced"
+    return None
+
+
+# --- conclusive outcomes (CONCLUSIVE-OUTCOME-SPEC C1, Gate A) -----------
+#: The narrative-shaped ending vocabulary (host enum, NOT engine). Replaces the
+#: binary won/lost AT THE PLAYER-FACING terminal receipt; `arc_outcome`/
+#: `arc_lifecycle` stay binary internally. `pyrrhic` was collapsed into
+#: `costly_victory` (overlap destabilizes the judge — Cx Q-S1). The free
+#: `outcome_gloss` carries the specifics.
+OUTCOME_SHAPES = ("triumph", "costly_victory", "bittersweet",
+                  "partial", "failure", "quiet_failure")
+
+_PHASE_ORDER = {Phase.SETUP: 0, Phase.RISING: 1, Phase.CRISIS: 2,
+                Phase.CLIMAX: 3, Phase.FALLING: 4}
+
+
+def climax_ready(reads: Any, arc: Arc) -> bool:
+    """Has the arc reached climax readiness — K of its `climax_ready_beats`
+    achieved? (Fields existed; this is the one interpretation tests pin — Cx C1#2.)"""
+    if not arc.climax_ready_beats:
+        return False
+    got = sum(1 for bid in arc.climax_ready_beats
+              if reads.state(bid, "status", frame=PLOT) == "achieved")
+    return got >= arc.climax_ready_k
+
+
+def current_phase(reads: Any, arc: Arc) -> Phase:
+    """Deterministically derive the arc's current dramatic phase from world state
+    (Cx C1#1 — no persisted phase exists). Concluded → FALLING; climax-ready →
+    CLIMAX; else the furthest phase among ACHIEVED beats (default SETUP)."""
+    if arc_concluded(reads, arc):
+        return Phase.FALLING
+    if climax_ready(reads, arc):
+        return Phase.CLIMAX
+    achieved = [b.phase for b in arc.beats
+                if reads.state(b.beat_id, "status", frame=PLOT) == "achieved"]
+    if not achieved:
+        return Phase.SETUP
+    return max(achieved, key=lambda p: _PHASE_ORDER[p])
+
+
+@dataclass
+class ConclusiveCandidate:
+    """The 'something happened this scene that could end the story' signal the
+    turn loop assembles from its tick trace — the explicit candidate Gate A needs
+    (reading only `reads` would lose the 'just this turn' distinction — Cx C1#3)."""
+    climax_beat_achieved: bool = False       # a climax_ready_beat was achieved this tick
+    refusal_or_deadline_fired: bool = False  # a refusal/deadline clock fired this tick
+    required_beat_foreclosed: bool = False   # a required beat closed this tick
+    post_climax_window_expired: bool = False  # K quiet post-climax turns elapsed (C1#4)
+
+    def any(self) -> bool:
+        return (self.climax_beat_achieved or self.refusal_or_deadline_fired
+                or self.required_beat_foreclosed or self.post_climax_window_expired)
+
+
+def conclusive_eligible(reads: Any, arc: Arc, *, contract: str,
+                        candidate: ConclusiveCandidate) -> bool:
+    """Gate A — the cheap, deterministic eligibility check before we spend the
+    LLM final-page judge (Gate B). Returns False (→ don't even ask) unless ALL:
+    Story contract; in CRISIS/CLIMAX/FALLING (or a refusal/foreclosure path is
+    live); minimum arc progress; and a candidate event this turn. The post-climax
+    window expiring is itself a candidate, so it can fire with no fresh event."""
+    from construct.arc.conditions import ClockFired
+    if contract != "story":
+        return False
+    refusal_fired = evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE
+    foreclosed = _required_unreachable(reads, arc)
+    phase = current_phase(reads, arc)
+    if not (phase in (Phase.CRISIS, Phase.CLIMAX, Phase.FALLING)
+            or refusal_fired or foreclosed):
+        return False
+    if not (climax_ready(reads, arc) or foreclosed or refusal_fired):
+        return False
+    return candidate.any()
+
+
+# --- the arc lifecycle (LIVING-WORLD-GENERATOR §3) ----------------------
+
+@dataclass
+class Fallout:
+    """The world-consequence emitted when an arc dies (a TRUE canon fact, the
+    engine membrane — PB letter 072 §2). `directive` is the host-side narrator
+    briefing (never stored). `term_id` is the terminal event the consequence
+    chains to via `caused_by`, so the situation lens surfaces it as a live
+    thread (generator fuel) on re-entry."""
+    arc_id: str
+    lifecycle: str
+    term_id: str
+    entity: str
+    attribute: str
+    value: str
+    directive: str
+
+
+#: delta_type → the standing world-consequence its UNRESOLVED arc leaves behind.
+#: A deterministic phrasing map (no model call in P1): the attribute/value is the
+#: canon consequence row; `say` is the diegetic acknowledgment directive. tension
+#: is (entity, stronger_drive, weaker_drive); the consequence records that the
+#: drive the arc meant to resolve was left standing.
+#: Phrasings are CHARACTER-ARC shaped (keyed on delta_type), NOT genre-specific:
+#: they describe how a person was left unchanged, and the narrator re-voices them
+#: in the world's own style (noir, fantasy, sci-fi…). Keep them genre-neutral so
+#: they don't bias the render toward any one kind of story (founder, P2).
+_FALLOUT = {
+    "drive_inverted": (
+        "unchecked_drive",
+        "{say}'s {strong} was never overcome — it still rules them."),
+    "desire_at_cost": (
+        "desire_unresolved",
+        "{say}'s aim was neither won nor surrendered — it hangs unresolved."),
+    "desire_renounced": (
+        "desire_ungiven",
+        "{say} never let go of {strong}; it still holds them."),
+    "identity_accepted": (
+        "identity_unreconciled",
+        "{say} never came to terms with who they are — the rift remains."),
+    "homecoming_changed": (
+        "homecoming_denied",
+        "{say} never returned changed — the way back stays closed."),
+}
+_DEFAULT_FALLOUT = ("arc_unresolved",
+                    "{say}'s story closed unresolved — the stakes linger.")
+
+
+def _human(entity: str) -> str:
+    """A readable name for an entity id, for the narrator directive (not stored)."""
+    return entity.split(":", 1)[-1].replace("_", " ")
+
+
+def _required_unreachable(reads: Any, arc: Arc) -> bool:
+    """Is a REQUIRED beat closed (its `unreachable_if` fired)? The path-foreclosed
+    half of `incompletable`. Reads beat statuses `beat_pass` already wrote."""
+    for beat in arc.beats:
+        if beat.weight is Weight.REQUIRED and \
+                reads.state(beat.beat_id, "status", frame=PLOT) == "closed":
+            return True
+    return False
+
+
+def _repair_exhausted(reads: Any, arc: Arc) -> bool:
+    """Is repair exhausted? **P1 operationalization:** no repair generator exists
+    yet, so "exhausted" == the universal refusal backstop has fired. A freshly-
+    closed required beat with the refusal clock still ARMED is therefore NOT
+    incompletable — the hard rule (PB letter 072 §5): incompletable is repair-
+    exhausted, never first-unreachable. Reserve a `repair_budget` counter here
+    for P2's repair attempts."""
+    from construct.arc.conditions import ClockFired
+    return evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE
+
+
+def _cancelled(reads: Any, arc: Arc) -> bool:
+    """Was this arc explicitly cancelled (a host-written `event:arc_cancelled_<id>`
+    in the session frame)? Reserved authoring escape hatch — no P1 path emits it
+    automatically."""
+    slug = arc.arc_id.split(":", 1)[1]
+    return reads.state(f"event:arc_cancelled_{slug}", "kind",
+                       frame=SESSION) == "arc_cancelled"
+
+
+def arc_lifecycle(reads: Any, arc: Arc) -> str:
+    """Classify the arc: `won | lost | cancelled | incompletable | active`.
+    Won-first (it's the strongest signal — reuses `arc_outcome`). `incompletable`
+    is checked BEFORE `lost` so a foreclosed path is named precisely rather than
+    read as a mere timeout; both require the refusal backstop, so the ordering
+    only refines the diagnosis. Derived each tick; the host persists transitions."""
+    outcome = arc_outcome(reads, arc)
+    if outcome == "won":
+        return "won"
+    if _cancelled(reads, arc):
+        return "cancelled"
+    if _required_unreachable(reads, arc) and _repair_exhausted(reads, arc):
+        return "incompletable"
+    if outcome == "lost":
+        return "lost"
+    return "active"
+
+
+def stored_lifecycle(reads: Any, arc: Arc) -> str:
+    """The persisted lifecycle state (so re-entry never re-fires fallout)."""
+    return reads.state(arc.arc_id, "lifecycle", frame=PLOT) or "active"
+
+
+def set_lifecycle(world: Any, arc: Arc, value: str, turn: int) -> None:
+    world.porcelain.ingest_structured([
+        {"entity": arc.arc_id, "attribute": "lifecycle", "value": value,
+         "valid_from": turn_time(turn)},
+    ], frame=PLOT)
+
+
+def emit_fallout(world: Any, arc: Arc, lifecycle: str, turn: int) -> Fallout:
+    """Write the dead arc's standing world-CONSEQUENCE to canon (the membrane:
+    a true world-fact with `caused_by` → the terminal event, via the ingestor
+    doorway — exactly the `clock_pass` effect-commit pattern). Returns the Fallout
+    record (the narrator directive is host-side, never stored). The DERIVED notion
+    "this is dramatic tension" is NEVER written — only the concrete consequence."""
+    slug = arc.arc_id.split(":", 1)[1]
+    term_id = f"event:arc_terminal_{slug}"
+    entity, strong, _weak = arc.shape.tension
+    attribute, say = _FALLOUT.get(arc.shape.delta_type, _DEFAULT_FALLOUT)
+    canon = [
+        {"entity": term_id, "attribute": "kind", "value": "arc_terminal",
+         "valid_from": turn_time(turn)},
+        {"entity": entity, "attribute": attribute, "value": strong,
+         "caused_by": term_id, "valid_from": turn_time(turn)},
+    ]
+    world.porcelain.ingest_structured(canon)  # canon — a true world consequence
+    directive = say.format(say=_human(entity), strong=_human(strong))
+    logger.info("arc fallout: %s -> %s (%s.%s=%s caused_by %s)",
+                arc.arc_id, lifecycle, entity, attribute, strong, term_id)
+    return Fallout(arc_id=arc.arc_id, lifecycle=lifecycle, term_id=term_id,
+                   entity=entity, attribute=attribute, value=strong,
+                   directive=directive)
+
+
 # --- the navigator (deterministic policy table, ARC-LAYER §5) -----------
 
 _RUNG_THRESHOLDS = (
@@ -222,6 +581,16 @@ def arc_protected_keys(arc: Arc) -> set[tuple[str, str]]:
     exprs = [b.achievable_via for b in arc.beats]
     exprs += [b.unreachable_if for b in arc.beats if b.unreachable_if]
     exprs += [arc.shape.world_condition, arc.shape.premise]
+    # PILLAR CLUE FACTS are load-bearing answers too (Cx 041): the genuine/false coverage
+    # conditions reference the clue facts the player must EARN through play. Protect them so
+    # no narrator path (incl. card-weaving's deliver_card) can promote/mirror an unearned
+    # clue — only the authorized interview-delivery write (`learn_clue_items` straight to
+    # knows:<protagonist>) lands them.
+    for pillar in arc.pillars:
+        if pillar.genuine_via is not None:
+            exprs.append(pillar.genuine_via)
+        if pillar.false_via is not None:
+            exprs.append(pillar.false_via)
     for expr in exprs:
         for atom in atoms_of(expr):
             if isinstance(atom, (StateIs, InFrame)):
@@ -239,6 +608,13 @@ def arc_entities(arc: Arc) -> set[str]:
     exprs = [b.achievable_via for b in arc.beats]
     exprs += [b.unreachable_if for b in arc.beats if b.unreachable_if]
     exprs += [arc.shape.world_condition, arc.shape.premise]
+    # Pillar coverage conditions reference the clue FACT entities (STORY-SHAPES §8 / Cx 032
+    # blocker 1): include them so the scenario scope surfaces the clues the player gathers.
+    for pillar in arc.pillars:
+        if pillar.genuine_via is not None:
+            exprs.append(pillar.genuine_via)
+        if pillar.false_via is not None:
+            exprs.append(pillar.false_via)
     for expr in exprs:
         for atom in atoms_of(expr):
             out.update(_entity_referents(atom))

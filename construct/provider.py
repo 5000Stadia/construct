@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import platform
+import re
 import socket
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -89,10 +90,15 @@ ModelCallable = Callable[[str, dict], dict]
 
 
 def complete_sync(provider: Provider, prompt: str, schema: dict, *, tier: Tier = "main",
-                  deliberate: bool = False) -> dict:
+                  deliberate: bool = False, task: str = "") -> dict:
     """Sync bridge for the (synchronous) host stack. The v0 turn loop is
     fully synchronous because the engine invokes its model shim
-    synchronously mid-call; async fan-out is a later optimization."""
+    synchronously mid-call; async fan-out is a later optimization.
+
+    `task` prepends the systematic section tag (see `task_tag`/`task_of`), so
+    routing/tiering/profiling latch onto a stable marker rather than the prose."""
+    if task:
+        prompt = task_tag(task) + prompt
     return asyncio.run(provider.complete(prompt, schema, tier=tier, deliberate=deliberate))
 
 
@@ -118,6 +124,44 @@ def engine_callable(provider: Provider, tier: Tier = "main") -> ModelCallable:
 #: classifier are cheap; only narration and character interpretation
 #: are good-tier).
 _CHEAP_ENGINE_PREFIXES = ("Extract world-state", "Classify the lifetime")
+
+#: Reasoning-effort (thinking-level) ordering for gpt-5 models, low→high.
+_EFFORT_RANK = {"minimal": 0, "low": 1, "medium": 2, "high": 3}
+
+#: Systematic prompt sectioning (founder): every HOST cohort prompt OPENS with a
+#: stable, content-independent TASK TAG — a 3-letter code in mathematical white
+#: brackets `⟦abc⟧`. Routing/tiering/profiling latch onto the tag, never the prose
+#: (a FICTION_CRAFT preamble or any wording change must not break dispatch). The
+#: bracket chars `⟦⟧` (U+27E6/27E7) effectively never occur in fiction — unlike
+#: ASCII `[]<>` which a sci-fi terminal-sim scene might emit — AND agents that
+#: produce player-facing text are explicitly FORBIDDEN to emit them (see
+#: `FORBID_TASK_MARKERS`), so content can never be mistaken for a tag. Engine
+#: prompts (extraction/classification) are engine-owned and untagged; they keep
+#: prefix-based dispatch (see `_CHEAP_ENGINE_PREFIXES`).
+_TASK_OPEN, _TASK_CLOSE = "⟦", "⟧"  # ⟦ ⟧
+_TASK_RE = re.compile(_TASK_OPEN + r"([a-z]{3})" + _TASK_CLOSE)
+
+#: A one-line ban to weave into any cohort whose OUTPUT is shown to the player or
+#: re-ingested, so the reserved markers never appear in content.
+FORBID_TASK_MARKERS = (
+    "Never write the characters ⟦ or ⟧ (reserved control markers).")
+
+
+def task_tag(code: str) -> str:
+    """The stable section header to prepend to a host cohort prompt (3-letter code)."""
+    return f"{_TASK_OPEN}{code}{_TASK_CLOSE}\n"
+
+
+def task_of(prompt: str) -> str:
+    """The 3-letter task code a prompt is tagged with, or '' (engine/untagged)."""
+    m = _TASK_RE.search(prompt[:120])
+    return m.group(1) if m else ""
+
+
+#: Host tasks whose render FLOORS at high effort regardless of tier default —
+#: player-facing prose (founder ruling): the narrator (`nar`) holding a live scene
+#: and the cold open (`opn`) the player first steps into.
+_HIGH_EFFORT_TASKS = frozenset({"nar", "opn"})
 
 
 def engine_tier_dispatch(provider: Provider) -> ModelCallable:
@@ -242,10 +286,21 @@ class CodexProvider(Provider):
         cheap_model: str | None = None,
         base_url: str | None = None,
         timeouts: dict[str, float] | None = None,
+        main_effort: str | None = None,
+        cheap_effort: str | None = None,
     ) -> None:
         self._auth_path = auth_path or Path.home() / ".codex" / "auth.json"
         self._main_model = main_model or os.getenv("HOLODECK_CODEX_MODEL", "gpt-5.5")
         self._cheap_model = cheap_model or os.getenv("HOLODECK_CODEX_CHEAP_MODEL", "gpt-5.4-mini")
+        # The MAIN tier's THINKING LEVEL (reasoning effort) — settable, because
+        # main carries the quality-bearing work (narration, authoring, NPC voice,
+        # generation). Effort is the latency cliff (letter 022 C: ~22s low vs 180s+
+        # medium per call), so the default stays `low` (good model, low effort —
+        # no behaviour change) and you dial it UP when you want more deliberation.
+        # `deliberate` calls (arc authoring) still floor at medium. Levels:
+        # minimal | low | medium | high. Cheap stays low (plumbing speed).
+        self._main_effort = main_effort or os.getenv("HOLODECK_CODEX_MAIN_EFFORT", "low")
+        self._cheap_effort = cheap_effort or os.getenv("HOLODECK_CODEX_CHEAP_EFFORT", "low")
         self._base_url = (base_url or os.getenv(
             "HOLODECK_CODEX_BASE_URL", "https://chatgpt.com/backend-api")).rstrip("/")
         self._timeouts = dict(DEFAULT_TIMEOUTS, **(timeouts or {}))
@@ -306,15 +361,25 @@ class CodexProvider(Provider):
         if model.startswith("gpt-5"):
             # Reasoning effort is THE latency cliff (measured: 22s low vs
             # 180s+ medium per extraction; a medium-effort narrate put a
-            # turn over 5 minutes — letter 022 finding C). Default LOW on
-            # both tiers: good model, low effort. Only `deliberate` calls
-            # (planning-class: arc authoring) pay for medium. Env
-            # override applies everywhere.
-            default_effort = "medium" if deliberate else "low"
-            body["reasoning"] = {
-                "effort": os.getenv("HOLODECK_CODEX_REASONING_EFFORT", default_effort),
-                "summary": "auto",
-            }
+            # turn over 5 minutes — letter 022 finding C). Per-tier thinking
+            # level: cheap stays low (plumbing speed); main uses the SETTABLE
+            # `main_effort` (default low — no behaviour change until dialled up).
+            # `deliberate` floors main at medium (planning-class: arc authoring).
+            # The legacy global env override still wins everywhere if set.
+            if tier == "cheap":
+                effort = self._cheap_effort
+            else:
+                effort = self._main_effort
+                if deliberate and _EFFORT_RANK.get(effort, 1) < _EFFORT_RANK["medium"]:
+                    effort = "medium"
+            effort = os.getenv("HOLODECK_CODEX_REASONING_EFFORT", effort)
+            # The narrator holding a LIVE SCENE is the crown jewel (player-facing
+            # prose) — it floors at HIGH effort regardless of the tier default or a
+            # lower global override (founder: narration quality over latency).
+            if task_of(prompt) in _HIGH_EFFORT_TASKS and \
+                    _EFFORT_RANK.get(effort, 1) < _EFFORT_RANK["high"]:
+                effort = "high"
+            body["reasoning"] = {"effort": effort, "summary": "auto"}
         # Session-correlation for backend prompt-cache hits (load-bearing
         # on large payloads per the Kernos production findings).
         body["prompt_cache_key"] = self._session_id

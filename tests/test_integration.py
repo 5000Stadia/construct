@@ -21,6 +21,19 @@ PLAYER = "person:player"
 PLAYER_FRAME = f"knows:{PLAYER}"
 
 
+#: A canned `estimate_elapsed` response (the per-turn diegetic-time cohort) for
+#: multi-turn StubProvider queues that would otherwise misalign.
+_EST = {"advance_minutes": 5, "jump_to_phase": "", "jump_days": 0, "reason": "a look"}
+
+
+def _narrate_prompt(provider):
+    """The most recent NARRATE/open-scene prompt — identified by 'narrator' (the
+    per-turn diegetic-time `estimate_elapsed` cohort now also runs and would
+    otherwise be `calls[-1]`)."""
+    narrate = [c[0] for c in provider.calls if "narrator" in c[0].lower()]
+    return narrate[-1] if narrate else provider.calls[-1][0]
+
+
 @pytest.fixture
 def world(tmp_path):
     # Classify prompts go to the rule classifier; extraction prompts pop
@@ -243,7 +256,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
 
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []},                       # classify
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},                       # classify
             {"prose": "The ledger tells you everything: the rival did it."},
         ])
 
@@ -261,7 +274,7 @@ class TestFullTurn:
         assert trace.furnished == ["place:study·description"]
         # The player-character boundary (letter 025): the narrate prompt
         # carries the hard identity constraint.
-        narrate_prompt = provider.calls[-1][0]
+        narrate_prompt = _narrate_prompt(provider)
         assert "THE PLAYER CHARACTER (hard constraint)" in narrate_prompt
         assert PLAYER in narrate_prompt
         st = world.porcelain.state("place:study", "description")
@@ -285,11 +298,11 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You take in the cold study."},
         ])
         result = run_turn(world, arc, provider, "I look around.", turn=1)
-        narrate_prompt = provider.calls[-1][0]
+        narrate_prompt = _narrate_prompt(provider)
         # the directive is woven into the briefing as a PINS block...
         assert "PINNED AWARENESS" in narrate_prompt
         assert "the air here is thin and cold" in narrate_prompt
@@ -303,11 +316,11 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "Quiet."},
         ])
         result = run_turn(world, arc, provider, "I wait.", turn=1)
-        assert "PINNED AWARENESS" not in provider.calls[-1][0]
+        assert "PINNED AWARENESS" not in _narrate_prompt(provider)
         assert result.trace.pins == []
 
     def test_ingest_gate_quarantines_contradiction_promotes_new(self, world):
@@ -327,7 +340,7 @@ class TestFullTurn:
             {"entity": "obj:candle", "attribute": "kind", "value": "object"},  # new → promote
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You study the desk; a candle gutters in the draft."},
         ])
         # scope holds only KNOWN entities; obj:candle is new — the gate picks it
@@ -358,7 +371,7 @@ class TestFullTurn:
             {"entity": "obj:lamp", "attribute": "kind", "value": "object"},      # ordinary → promote
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You sense a motive; a lamp sputters in the corner."},
         ])
         result = run_turn(world, arc, provider, "I press her on why.", turn=1,
@@ -368,6 +381,621 @@ class TestFullTurn:
         assert ("fact:motive", "reason") in result.trace.quarantined
         # ordinary new fact still promotes (improv not strangled)
         assert world.porcelain.state("obj:lamp", "kind")["status"] == "known"
+
+    def test_protected_same_value_restatement_is_quarantined_not_mirrored(self, world):
+        # Cx 022 blocking #1 (the live leak): the mystery's answer is ALREADY canon
+        # (fact:secret culprit = person:rival) but the player has NOT discovered it
+        # (it is not in their knowledge frame). If the narrator merely RESTATES it
+        # (SAME value), the old gate slipped it past the contradiction check and
+        # promoted+MIRRORED it into knows:<player> — handing over the solution. The
+        # strict protected gate quarantines it: canon unchanged, player still ignorant.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})                      # player input
+        world._extractions.append({"items": [                         # narrator prose
+            {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "It dawns on you: the rival is plainly behind it."},
+        ])
+        result = run_turn(world, arc, provider, "I muse aloud about who did it.", turn=1,
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        # canon is unchanged (it was already person:rival) ...
+        assert world.porcelain.state("fact:secret", "culprit")["fact"]["value"] == "person:rival"
+        # ... but the PLAYER never learned it — the leak vector (_mirror_rows into
+        # the player frame) is closed, even for a same-value restatement.
+        assert world.porcelain.state(
+            "fact:secret", "culprit", frame=PLAYER_FRAME)["status"] != "known"
+        assert ("fact:secret", "culprit") in result.trace.quarantined
+
+    def test_protected_fact_already_earned_still_promotes(self, world):
+        # The strict gate must NOT block LEGITIMATE discovery: a protected fact the
+        # player has ALREADY earned (it is in their knowledge frame → briefing_keys)
+        # is licensed, so the narrator restating it promotes normally — discovery and
+        # its echoes are never strangled.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([  # the player has discovered it — it is in their frame
+            {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+        ], frame=PLAYER_FRAME)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": [
+            {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "You lay out the case against the rival you already know is guilty."},
+        ])
+        result = run_turn(world, arc, provider, "I confront the rival.", turn=1,
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert ("fact:secret", "culprit") not in result.trace.quarantined
+
+    def test_protected_question_is_deflected_not_improvised(self, world):
+        # Cx 022 blocking #2: a QUESTION the player frame can't answer falls through
+        # to the narrator to IMPROVISE — but if it reaches for the hidden answer,
+        # improvisation could brush the secret. Such a question is DEFLECTED instead:
+        # the briefing gets the WITHHELD directive, never the affirming improv one.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append(  # ask plan: unresolvable → no facts → falls through
+            {"refer_targets": [], "keys": [], "wants_location": False})
+        world._extractions.append({"items": []})                      # player input
+        world._extractions.append({"items": []})                      # narrator prose
+        provider = StubProvider([
+            {"kind": "question", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "The clerk only shrugs; the record is silent on that."},
+        ])
+        result = run_turn(world, arc, provider, "Who is the culprit, really?", turn=1,
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        narrate_prompt = _narrate_prompt(provider)
+        assert "WITHHELD QUESTION" in narrate_prompt
+        assert "UNDER-DETERMINED QUESTION" not in narrate_prompt
+        assert result.trace.adjudication.startswith("deflect")
+
+    def test_ordinary_underdetermined_question_still_improvises(self, world):
+        # The deflection must be SURGICAL: an innocent under-determined question (no
+        # secret vocabulary) still gets the affirming improv directive, so the world
+        # answers what a resident would plainly know (the founder's north star).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append(
+            {"refer_targets": [], "keys": [], "wants_location": False})
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "question", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "The nearest canteen is two corridors over, past the pumps."},
+        ])
+        result = run_turn(world, arc, provider, "Where's the closest place to eat?",
+                          turn=1, scope=["fact:secret", PLAYER, "place:study"])
+        narrate_prompt = _narrate_prompt(provider)
+        assert "UNDER-DETERMINED QUESTION" in narrate_prompt
+        assert "WITHHELD QUESTION" not in narrate_prompt
+
+    def test_render_extraction_failure_does_not_sink_turn(self, world):
+        # The play harness caught this: a SchemaViolation in the post-render prose
+        # extraction was sinking already-delivered turns. The prose is the deliverable;
+        # extraction is bookkeeping → it must FAIL-OPEN (ship prose, skip the commit).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})  # player-input extraction
+        real_ingest = world.porcelain.ingest
+
+        def boom(text, **kw):
+            if kw.get("frame") == "proposed:main":      # the render staging ingest
+                raise RuntimeError("schema violation (simulated)")
+            return real_ingest(text, **kw)
+
+        world.porcelain.ingest = boom
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "You read the worn ledger by lamplight."},
+        ])
+        result = run_turn(world, arc, provider, "I read the ledger.", turn=1)
+        assert "worn ledger" in result.prose          # prose STILL ships
+        assert any("post_extract" in d for d in result.trace.dropped_cohorts)  # logged fail-open
+        world.porcelain.ingest = real_ingest
+
+    def test_narrator_phantom_is_never_canonized(self, world):
+        # Harness bug: the extraction minted a phantom `person:narrator` (from pronouns)
+        # and located the ledger IN it, breaking adjudication. The gate drops any row that
+        # IS the narrator phantom or locates something in it; ordinary facts still promote.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})                      # player input
+        world._extractions.append({"items": [                         # render prose
+            {"entity": "person:narrator", "attribute": "kind", "value": "person"},
+            {"entity": "obj:ledger", "attribute": "in", "value": "person:narrator"},
+            {"entity": "obj:lamp", "attribute": "kind", "value": "object"},  # ordinary
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "You study the desk by lamplight."},
+        ])
+        result = run_turn(world, arc, provider, "I study the desk.", turn=1,
+                          scope=["obj:ledger", PLAYER, "place:study"])
+        assert world.porcelain.state("person:narrator", "kind")["status"] != "known"
+        led = world.porcelain.state("obj:ledger", "in")
+        assert led["status"] != "known" or led["fact"]["value"] != "person:narrator"
+        assert world.porcelain.state("obj:lamp", "kind")["status"] == "known"  # ordinary promotes
+
+    def test_player_takes_object_records_possession(self, world):
+        # Founder's ledger bug: taking an object must record it HELD (obj.in = player), so
+        # the adjudicator and narrator agree the player has it — not lose it to a phantom.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([
+            {"entity": "obj:spoon", "attribute": "kind", "value": "object", "timeless": True},
+            {"entity": "obj:spoon", "attribute": "in", "value": "place:study"},
+            {"entity": "obj:spoon", "attribute": "name", "value": "brass spoon"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "takes": "the brass spoon"},
+            {"prose": "You lift the brass spoon and tuck it away."},
+        ])
+        result = run_turn(world, arc, provider, "I pick up the brass spoon.", turn=1,
+                          scope=["obj:spoon", PLAYER, "place:study"])
+        assert result.trace.took == "obj:spoon"
+        assert world.porcelain.state("obj:spoon", "in")["fact"]["value"] == PLAYER
+
+    def test_conclusory_commitment_terminates_with_grade(self, world):
+        # Phase 3 win-model: at the conclusory scene (climax-ready) the player's decisive
+        # commitment is JUDGED once → a graded outcome that ENDS the story (win_loss) and
+        # is recorded for the epilogue.
+        from construct.arc.executor import turn_time
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(  # climax-ready (earned) — beat achieved
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
+            {"grade": "vindicated", "rationale": "matches the culprit"},   # judge_commitment
+            {"prose": "You name the rival; the room stills."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the rival, citing the ledger.",
+                          turn=5, scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.commitment_grade == "vindicated"
+        assert result.trace.terminal is True and result.trace.outcome == "won"
+        assert world.porcelain.state(f"claim:{PLAYER}", "grade")["fact"]["value"] == "vindicated"
+
+    def test_wrong_commitment_still_terminates(self, world):
+        # "Player may be wrong": a WRONG accusation still ENDS the story (the wrong person
+        # goes down); the grade is wrong → outcome lost, the twist lands at the epilogue.
+        from construct.arc.executor import turn_time
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the clerk"},
+            {"grade": "wrong", "rationale": "the clerk is not the culprit"},
+            {"prose": "You name the clerk; the order is signed."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the clerk.", turn=5,
+                          scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.commitment_grade == "wrong"
+        assert result.trace.terminal is True and result.trace.outcome == "lost"
+        # the epilogue plays the TWIST (Phase 4) on a wrong commitment
+        prompt = _narrate_prompt(provider)
+        assert "THE TWIST" in prompt and "Sherlock" in prompt
+
+    def test_pillar_arc_concludes_as_coverage_effect(self, world):
+        # CONCLUSION AS EFFECT (STORY-SHAPES §0a): a pillar-bearing arc concludes with a
+        # coverage-driven OUTCOME_SHAPE on the trace, and the epilogue narrates the EFFECT
+        # of the causes (not "you won/lost"). Sound coverage → triumph.
+        import dataclasses
+        from construct.arc.executor import turn_time
+        from construct.arc.grammar import Pillar
+        pillar = Pillar("pillar:culprit", "who did it", required=True,
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit",
+                                            "person:rival"))
+        arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+        seed_arc(world, arc)
+        # climax-ready (earned) AND the genuine cause established in the player frame
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            frame=PLAYER_FRAME)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
+            {"grade": "vindicated", "rationale": "matches"},
+            {"prose": "You name the rival; the truth lands."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the rival.", turn=5,
+                          scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.terminal is True
+        # the EFFECT of sound coverage — never a win/lose verdict
+        assert result.trace.conclusion_shape == "triumph"
+        assert result.trace.conclusion_basis
+        prompt = _narrate_prompt(provider)
+        assert "EFFECT" in prompt and "triumph" in prompt
+
+    def test_farce_all_false_concludes_warm_no_twist(self, world):
+        # Cx 027 blocker 3: a fully-live FARCE (every required pillar false-filled) is a WARM
+        # comic triumph — NOT a costly comeuppance (false != cost here) and NOT a wrong-case
+        # twist. cost_disposition='fail_forward' must reach `triumph` and suppress the twist.
+        import dataclasses
+        from construct.arc.executor import turn_time
+        from construct.arc.grammar import Pillar
+        mixup = Pillar("pillar:mixup", "the mistaken identity", required=True,
+                       false_via=InFrame(PLAYER_FRAME, "fact:mixup", "live", "true"))
+        arc = dataclasses.replace(make_arc(), pillars=(mixup,))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        # the comic engine is LIVE (the false-fill is success fuel, not a cost)
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:mixup", "attribute": "live", "value": "true"}], frame=PLAYER_FRAME)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "plays along as the Duke"},
+            {"grade": "partial", "rationale": "the dinner lands chaotically"},
+            {"prose": "The king roars with laughter; the pig is knighted."},
+        ])
+        result = run_turn(world, arc, provider, "I lean into the mix-up at dinner.", turn=5,
+                          scenario_mode="win_loss", cost_disposition="fail_forward",
+                          scope=["fact:mixup", PLAYER, "place:study"])
+        assert result.trace.terminal is True
+        assert result.trace.conclusion_shape == "triumph"  # warm, not costly_victory
+        prompt = _narrate_prompt(provider)
+        assert "THE TWIST" not in prompt  # a triumphant farce must not trip the wrong-case twist
+
+    def test_rocky_sound_coverage_plus_scoreboard_loss_live(self, world):
+        # Cx 027 blocker 2: Contest reads the scoreboard (a world EVENT) ALONGSIDE coverage.
+        # Sound proof + a scoreboard LOSS must render as costly_victory ("proved himself,
+        # lost the decision") — reachable in live play via reads_world_event, not just units.
+        import dataclasses
+        from construct.arc.executor import turn_time
+        from construct.arc.grammar import Pillar
+        proof = Pillar("pillar:proof", "proved on the standard", required=True,
+                       genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"))
+        arc = dataclasses.replace(make_arc(), pillars=(proof,))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            frame=PLAYER_FRAME)
+        # the scoreboard says the match was lost (authored canon, not the won/lost receipt)
+        world.porcelain.ingest_structured(
+            [{"entity": "scoreboard:main", "attribute": "outcome", "value": "loss"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "goes the distance"},
+            {"grade": "vindicated", "rationale": "stood the full bout"},
+            {"prose": "The bell rings; you are still standing."},
+        ])
+        result = run_turn(world, arc, provider, "I go the distance.", turn=5,
+                          scenario_mode="win_loss", reads_world_event=True,
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.terminal is True
+        assert result.trace.conclusion_shape == "costly_victory"  # proved himself, lost the bout
+
+    def test_interview_delivery_surfaces_a_clue_into_the_player_frame(self, world):
+        # STORY-SHAPES §8: questioning a PRESENT cast member surfaces its authorized clue
+        # into knows:<protagonist>, advancing pillar coverage — the live mechanism.
+        from construct.cast import CastNode, Clue
+        arc = make_arc()
+        seed_arc(world, arc)
+        # a fresh witness in the player's room (no prior `in` to conflict with), holding a
+        # clue (the motive), revealable on questioning
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        cast = {"person:witness": CastNode("person:witness", "witness", "the witness",
+                holds_clues=(
+            Clue("clue:motive", "pillar:motive", ("fact:motive", "is", "debt"),
+                 coverage_effect="genuine", reveal_condition="none"),))}
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "deflect",
+             "line_hint": ""},                                   # present witness: npc_turn (folded)
+            {"prose": "The witness hesitates, then admits the debt that drove it."},
+        ])
+        result = run_turn(world, arc, provider, "I press the witness about money.", turn=2,
+                          cast=cast, scope=["person:witness", PLAYER, "place:study"])
+        assert "clue:motive" in result.trace.learned_clues
+        # the fact is now in the player's knowledge frame
+        assert PorcelainWorldReads(world).assertion_in_frame(
+            PLAYER_FRAME, "fact:motive", "is", "debt")
+        # the narrator was briefed to deliver it in character this turn
+        prompt = _narrate_prompt(provider)
+        assert "LEARNED THIS TURN" in prompt
+
+    def test_npc_turn_returns_combined_shape(self):
+        # TURN-LATENCY Lever 4: the folded cohort returns the union of the old
+        # npc_world_action + npc_intent shapes in a single call.
+        from construct import cohorts
+        provider = StubProvider([
+            {"acts": True, "action": "the witness rises", "speaks": True,
+             "intent": "warn the detective", "line_hint": "clipped"},
+        ])
+        out = cohorts.npc_turn(provider, "person:witness", "{}", "{}", "person:pc")
+        assert set(out) == {"acts", "action", "speaks", "intent", "line_hint"}
+        assert out["acts"] is True and out["action"] == "the witness rises"
+        assert out["speaks"] is True and out["intent"] == "warn the detective"
+
+    def test_present_npc_yields_exactly_one_npc_turn_call(self, world):
+        # TURN-LATENCY Lever 4: a present NPC produces ONE npc_turn:<id> cohort call
+        # (was npc_action:<id> + npc_intent:<id>), and the speak-intent still reaches
+        # the narrator briefing.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "deflect",
+             "line_hint": "wary"},                               # the single folded call
+            {"prose": "The witness eyes you warily."},
+        ])
+        result = run_turn(world, arc, provider, "I look at the witness.", turn=2,
+                          scope=["person:witness", PLAYER, "place:study"])
+        npc_calls = [c for c in result.trace.cohort_calls if c.startswith("npc_")]
+        assert npc_calls == ["npc_turn:person:witness:cheap"]
+        assert "person:witness: wants deflect" in _narrate_prompt(provider)
+
+    def test_discovery_writes_offscene_whereabouts_and_briefs_the_lead(self, world):
+        # INVESTIGATION-SHAPE.md §3c: a delivered clue that NAMES an off-scene suspect makes
+        # their whereabouts player-known (frame entitlement) and briefs the lead, so the
+        # player can go visit them. The off-scene suspect's place is canon (layer 1).
+        from construct.cast import CastNode, Clue
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        # the present witness holds a clue NAMING the off-scene suspect (their id is the fact's
+        # entity); the off-scene node carries their canonical place.
+        cast = {
+            "person:witness": CastNode("person:witness", "witness", "the witness",
+                presence="at_scene", first_witness=True, holds_clues=(
+                Clue("clue:lead", "pillar:motive", ("person:bell", "seen_near", "place:study"),
+                     coverage_effect="genuine", reveal_condition="none"),)),
+            "person:bell": CastNode("person:bell", "suspect", "the captain",
+                presence="offscene", location="place:bell_cottage", is_culprit=True),
+        }
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "tell",
+             "line_hint": ""},                                   # witness npc_turn (folded)
+            {"prose": "The witness says Bell was seen near here, then nods toward his cottage."},
+        ])
+        result = run_turn(world, arc, provider, "I ask the witness who else was about.", turn=2,
+                          cast=cast, scope=["person:witness", PLAYER, "place:study"])
+        # the off-scene suspect's whereabouts is now in the player's frame (entitlement)
+        assert "person:bell" in result.trace.discovered
+        assert PorcelainWorldReads(world).assertion_in_frame(
+            PLAYER_FRAME, "person:bell", "whereabouts", "place:bell_cottage")
+        # and the narrator was briefed to offer the lead
+        assert "A LEAD OPENS" in _narrate_prompt(provider)
+
+    def test_weave_governance_peppers_a_hooked_card(self, world):
+        # CARD-WEAVING.md / Cx 039: with an un-played hooked card (pressure-gated, so the
+        # player's non-pressing turn doesn't surface it), the weave governor may pepper the
+        # HOOK — a directive woven at a seam — and the card is marked hook_proposed (the
+        # floor accrues). Supersedes the old passive "PEOPLE WORTH PRESSING" nudge.
+        from construct.cast import CastNode, Clue
+        from construct.arc.executor import SESSION
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "name", "value": "Hobbes", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        cast = {"person:witness": CastNode("person:witness", "witness", "the witness",
+                holds_clues=(
+            Clue("clue:motive", "pillar:motive", ("fact:motive", "is", "debt"),
+                 coverage_effect="genuine", reveal_condition="pressure",
+                 hook_text="Hobbes keeps starting a sentence about the will he can't finish"),))}
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "wait",
+             "line_hint": ""},                                   # witness npc_turn (folded)
+            {"decision": "pepper_hook", "card_id": "clue:motive",  # weave_pick
+             "seam_hint": "as you scan the room", "directive": "Hobbes falters mid-sentence"},
+            {"prose": "Hobbes opens his mouth, then thinks better of it."},
+        ])
+        result = run_turn(world, arc, provider, "I take in the room and the faces.", turn=2,
+                          cast=cast, scope=["person:witness", PLAYER, "place:study"])
+        assert result.trace.learned_clues == []          # pressure-gated; the FACT stays withheld
+        assert result.trace.weave_decision == "pepper_hook"
+        assert result.trace.weave_card == "clue:motive"
+        prompt = _narrate_prompt(provider)
+        # the woven directive carries the AUTHORED hook_text (not the model's free directive)
+        assert "WEAVE THIS IN" in prompt
+        assert "Hobbes keeps starting a sentence about the will" in prompt
+        # the model's free directive is NOT forwarded (safety: hook only)
+        assert "Hobbes falters mid-sentence" not in prompt
+        # pepper_hook must instruct NOT to state the underlying fact (the safety seam)
+        assert "do NOT state the underlying fact" in prompt
+        # the hook is marked proposed (the floor accrues across turns)
+        assert PorcelainWorldReads(world).state(
+            "card:clue:motive", "weave_state", frame=SESSION) == "hook_proposed"
+
+    def test_deliver_card_cannot_leak_an_unearned_clue(self, world):
+        # Cx 041 BLOCKING fix: deliver_card on a pressure-gated clue the player did NOT earn
+        # must not voice/promote the fact. Two guards: (1) deliver_card demotes to pepper_hook
+        # when the fact isn't in the player frame; (2) the pillar clue fact is now a protected
+        # key, so even a narrator restatement is quarantined — never canon, never knows:player.
+        import dataclasses
+        from construct.cast import CastNode, Clue
+        from construct.arc.executor import SESSION
+        from construct.arc.grammar import Pillar
+        pillar = Pillar("pillar:motive", "the motive", required=True,
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:motive", "is", "debt"))
+        arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        cast = {"person:witness": CastNode("person:witness", "witness", "the witness",
+                holds_clues=(
+            Clue("clue:motive", "pillar:motive", ("fact:motive", "is", "debt"),
+                 coverage_effect="genuine", reveal_condition="pressure",
+                 hook_text="the witness keeps starting a sentence about the will he can't finish"),))}
+        world._extractions.append({"items": []})                       # player input
+        world._extractions.append({"items": [                          # narrator tries to voice it
+            {"entity": "fact:motive", "attribute": "is", "value": "debt"}]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "wait",
+             "line_hint": ""},                                   # npc_turn (folded)
+            {"decision": "deliver_card", "card_id": "clue:motive",  # weave_pick — UNEARNED
+             # both the free directive AND a malicious seam_hint try to smuggle the fact:
+             "seam_hint": "as the witness confesses the debt was the motive",
+             "directive": "the witness BLURTS that the debt did it"},
+            {"prose": "The witness wavers, on the edge of speech."},
+        ])
+        result = run_turn(world, arc, provider, "I glance around the study.", turn=2,
+                          cast=cast, scope=["person:witness", "fact:motive", PLAYER, "place:study"])
+        # deliver_card was demoted (the fact wasn't earned)
+        assert result.trace.weave_decision == "pepper_hook"
+        assert result.trace.learned_clues == []
+        prompt = _narrate_prompt(provider)
+        # NO free model prose reaches the weave directive — neither the unsafe `directive`
+        # NOR a malicious `seam_hint`; only the authored safe hook is woven (Cx 045 hardening)
+        assert "BLURTS that the debt" not in prompt
+        assert "confesses the debt was the motive" not in prompt  # malicious seam_hint stripped
+        assert "starting a sentence about the will he can't finish" in prompt
+        # and the narrator's restatement is quarantined — not canon, not in the player frame
+        assert world.porcelain.state("fact:motive", "is")["status"] != "known"
+        assert not PorcelainWorldReads(world).assertion_in_frame(
+            PLAYER_FRAME, "fact:motive", "is", "debt")
+
+    def test_commitment_before_climax_does_not_conclude(self, world):
+        # The commitment is EARNED, never turn 1: commits=True but NOT climax-ready → no
+        # judge call, no termination (the player jumped the gun).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
+            {"prose": "You blurt an accusation; nothing locks — you've barely arrived."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the rival immediately.", turn=1,
+                          scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.commitment_grade == ""        # not judged (not earned)
+        assert result.trace.terminal is False
+
+    def test_holdmode_briefing_is_a_foreshadowing_card_plus_neutral(self, world):
+        # CARD MODEL (STORY-SHAPES.md — supersedes the structural-absence pass): in
+        # hold-mode the narrator IS given the hidden destination, but framed as a card to
+        # FORESHADOW toward (weave clues, never blurt), NOT as a vault. It rides with the
+        # neutral-narrator discipline. The answer reaching the briefing no longer leaks
+        # because the player frame is clean (seed fix), the gate backstops, and the
+        # narrator is told to lay a trail, never hand it over.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "You scan the shelves."},
+        ])
+        result = run_turn(world, arc, provider, "I look over the records.", turn=1)
+        prompt = _narrate_prompt(provider)
+        # the DM gets the destination AS A CARD — present, with the don't-blurt discipline
+        assert "THE HIDDEN DESTINATION" in prompt and "FORESHADOW toward it" in prompt
+        assert "never blurt" in prompt.lower() or "hand it over" in prompt.lower()
+        # neutral-narrator discipline rides alongside — neutrality is EPISTEMIC (about
+        # the answer), NOT a flattening of human feeling (founder calibration)
+        assert "NEUTRAL ON THE ANSWER" in prompt
+        assert "A PEOPLED WORLD" in prompt and "full emotion" in prompt
+        # the gate is still the commit backstop (audit clean — nothing leaked to canon)
+        assert result.trace.concealment_audit == "clean"
+
+    def test_convergence_act_one_plants_without_relocating(self, world):
+        # CONVERGENCE-TO-CONCLUSION: a fresh arc (no beats achieved) is Act I — the
+        # briefing gets a gentle convergence pull, NOT the relocate-the-climax push.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "You take in the study."},
+        ])
+        result = run_turn(world, arc, provider, "I look around.", turn=1)
+        prompt = _narrate_prompt(provider)
+        assert "CONVERGENCE" in prompt and "ACT I" in prompt
+        assert "RELOCATE" not in prompt
+        assert result.trace.act == "I"
+
+    def test_convergence_act_two_relocates_when_climax_ready(self, world):
+        # Climax-ready (the climax_ready_beat is achieved) → Act II: the briefing now
+        # tells the narrator to converge hard and RELOCATE the pivotal beat to wherever
+        # the player is — without revealing the answer.
+        from construct.arc.executor import turn_time
+        arc = make_arc()
+        seed_arc(world, arc)
+        # Mark the climax-ready beat achieved — with a later valid_from so it
+        # supersedes the seeded `pending` (as beat_pass does). climax_ready → Act II;
+        # the world_condition (culprit in the PLAYER frame) is NOT satisfied, so the
+        # arc is NOT concluded — exactly the "primed but not over" state.
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"prose": "You press on."},
+        ])
+        result = run_turn(world, arc, provider, "I keep digging.", turn=5,
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        prompt = _narrate_prompt(provider)
+        assert "CONVERGENCE" in prompt and "ACT II" in prompt
+        assert "RELOCATE" in prompt and "AT HAND" in prompt
+        assert result.trace.act == "II"
 
     def test_place_features_surface_in_briefing(self, world):
         # PLACE-FEATURE consumption (PB 070): a part_of sub-feature of the scene is
@@ -389,11 +1017,11 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You look about the study."},
         ])
         run_turn(world, arc, provider, "I look around.", turn=1)
-        narrate_prompt = provider.calls[-1][0]
+        narrate_prompt = _narrate_prompt(provider)
         assert "FEATURES OF THIS PLACE" in narrate_prompt
         assert "place:study_alcove" in narrate_prompt
         assert "shadowed recess" in narrate_prompt  # the feature's feel surfaced
@@ -402,9 +1030,10 @@ class TestFullTurn:
         arc = make_arc()
         seed_arc(world, arc)
         world._extractions.extend([{"items": []}] * 4)
+        # Each turn: classify → narrate → estimate_elapsed (the diegetic-time call).
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []}, {"prose": "You look around."},
-            {"kind": "action", "moves_to": "", "requires": []}, {"prose": "You look around again."},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around."}, _EST,
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around again."}, _EST,
         ])
         r1 = run_turn(world, arc, provider, "I look around.", turn=1)
         r2 = run_turn(world, arc, provider, "I look around once more.", turn=2)
@@ -421,17 +1050,120 @@ class TestFullTurn:
             {"entity": "obj:rampway", "attribute": "kind", "value": "ramp"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": []}, {"prose": "You take the rampway down."},
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You take the rampway down."},
         ])
         result = run_turn(world, arc, provider, "I walk down the rampway.", turn=1)
         assert result.trace.concealment_audit == "clean"
 
-    def test_ooc_short_circuits(self, world):
+    def test_exit_intent_short_circuits_with_flag(self, world):
+        # classify → exit: the turn does NOT advance the world; it flags the
+        # transport to confirm leaving (GAME-TYPES/exit flow).
         arc = make_arc()
         seed_arc(world, arc)
-        provider = StubProvider([{"kind": "ooc", "moves_to": "", "requires": []}])
-        result = run_turn(world, arc, provider, "save and quit please", turn=1)
-        assert "out of character" in result.prose
+        provider = StubProvider([{"kind": "exit", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}])
+        r = run_turn(world, arc, provider, "can we do a new story?", turn=1)
+        assert r.exit_requested is True
+        assert r.prose == ""
+
+    def test_ooc_is_answered_by_conduit_and_short_circuits(self, world):
+        arc = make_arc()
+        seed_arc(world, arc)
+        # classify → ooc, then the Conduit host reply (no narration cohort = the
+        # world does not advance on an OOC turn).
+        provider = StubProvider([
+            {"kind": "ooc", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"reply": "No — you haven't met the win or loss condition yet."},
+        ])
+        result = run_turn(world, arc, provider, "have I won yet?", turn=1)
+        assert result.prose.startswith("Conduit:")
+        assert "win or loss condition" in result.prose
+
+
+def test_names_entity_matches_narrated_names():
+    # castdemo live-run finding (Cx 032 Q1): the player-agent addresses suspects by their
+    # NARRATED names; the id-stem alone missed them. _names_entity now also matches the
+    # significant tokens of the NPC's `name` fact (honorifics/articles dropped).
+    from construct.turnloop import _names_entity
+    # by narrated surname / role despite an opaque id
+    assert _names_entity("person:butler", "i press hobbes about the study",
+                         name="Hobbes, the butler")
+    assert _names_entity("person:heir", "i ask the nephew about the will",
+                         name="Julian, the disinherited nephew")
+    assert _names_entity("person:doctor", "i question dr. ames about the vial",
+                         name="Dr. Ames, the family physician")
+    # id-stem still works without a name
+    assert _names_entity("person:clerk", "i talk to the clerk")
+    # honorifics/articles alone do NOT match (no false hit on 'the'/'dr')
+    assert not _names_entity("person:doctor", "the man by the door", name="Dr. Ames")
+    # an unrelated input matches nobody
+    assert not _names_entity("person:heir", "i examine the clock", name="Julian, the nephew")
+    # role-address by synonym engages the right NPC ('Doctor' for a family physician)
+    assert _names_entity("person:orme", "doctor, when did you last see him?",
+                         role="family physician")
+    # WHOLE-TOKEN matching (Cx 049): substring 'doc' must NOT hit 'documents', so examining
+    # documents near a present doctor does NOT falsely engage him and leak a clue.
+    assert not _names_entity("person:orme", "i examine the documents on the desk",
+                             role="family physician")
+    assert not _names_entity("person:orme", "i study the physiology textbook",
+                             role="family physician")
+    # ROLE tokens are address-filtered to role-NOUN heads (Cx 051): a descriptor in the
+    # surface_role (the victim's name, a place/scandal, a generic 'family') must NOT engage
+    # the NPC, or an unrelated probe surfaces their clue unearned.
+    assert not _names_entity("person:parker", "who saw sir julian before dinner?",
+                             role="Sir Julian's valet")
+    assert not _names_entity("person:celia", "what happened at market dalling?",
+                             role="young gentlewoman connected to the old Market Dalling scandal")
+    assert not _names_entity("person:orme", "what does the family know?",
+                             role="family physician")
+    # but the genuine role-noun head DOES address them
+    assert _names_entity("person:parker", "valet, where were you at nine?",
+                         role="Sir Julian's valet")
+    assert _names_entity("person:celia", "i turn to the gentlewoman",
+                         role="young gentlewoman connected to the scandal")
+
+
+def test_colocated_is_containment_aware():
+    # Founder NPC-liveness bug: NPCs the cold open narrates as present were going
+    # inert because presence demanded an exact `in == scene` match. _colocated is
+    # containment-aware: an NPC inside the player's scene (the anchor case — player
+    # at the colony level, clerk in a room within it) now counts as present.
+    from construct.turnloop import _colocated
+    player = ["place:anchor", "place:flats"]
+    # the live anchor bug: clerk deep inside the player's scene → present
+    assert _colocated(["place:office", "place:tier", "place:anchor", "place:flats"],
+                      "place:anchor", player) is True
+    # exact same immediate place → present
+    assert _colocated(["place:study", "place:hall"], "place:study",
+                      ["place:study", "place:hall"]) is True
+    # an unrelated room (no shared containment) → NOT present
+    assert _colocated(["place:flat"], "place:study", ["place:study"]) is False
+    # NPC whose immediate place sits on the player's chain (coarser-grain area) → present
+    assert _colocated(["place:anchor", "place:flats"], "place:desk",
+                      ["place:desk", "place:office", "place:anchor"]) is True
+    # no location at all (the Cray data-gap case) → never present
+    assert _colocated([], "place:anchor", player) is False
+
+
+def test_parallel_preserves_order_and_isolates_failures():
+    # Cx 022 #5 (NPC parallel determinism): _parallel runs the per-NPC cohort
+    # thunks concurrently but MUST return results positionally aligned to the input
+    # (so zip(npcs, results) is correct), and a thunk that raises yields its
+    # exception in-place (callers fail-open per NPC) without sinking the batch.
+    from construct.turnloop import _parallel
+
+    def mk(i):
+        def f():
+            if i == 2:
+                raise ValueError(f"boom-{i}")
+            return i * 10
+        return f
+
+    out = _parallel([mk(0), mk(1), mk(2), mk(3)])
+    assert out[0] == 0 and out[1] == 10 and out[3] == 30   # order preserved
+    assert isinstance(out[2], ValueError)                   # failure isolated in slot
+    # the single-thunk fast path also isolates a raise (no thread pool)
+    assert isinstance(_parallel([mk(2)])[0], ValueError)
+    assert _parallel([]) == []
 
 
 def test_who_knows_inspect(tmp_path, monkeypatch):
@@ -474,16 +1206,72 @@ def test_author_flavor_cohort():
     assert prov.calls[0][2] == "main"  # authoring tier
 
 
+def test_clean_prose_strips_leaked_json_meta_tail():
+    # The play harness caught the model spilling its JSON wrapper + reasoning into the
+    # prose value. _clean_prose truncates at the first control/meta marker; clean prose
+    # is untouched.
+    from construct.cohorts import _clean_prose
+    leaked = ('You study the desk; the ledger lies open and dry. should have its own '
+              'log and seal."}    _久久爱=final elọpọ? Wait final schema expected JSON object')
+    out = _clean_prose(leaked)
+    assert out.endswith("log and seal.")
+    assert "final schema" not in out and '"}' not in out
+    # a second observed shape (meta phrase mid-tail)
+    assert _clean_prose('I see none on this strip."}-vesm JSON includes maybe invalid').endswith("strip.")
+    # SMART-quote + brace tail (live whodunit Turn 6): the closing quote was a curly ” so the
+    # old straight-quote marker '"}' missed it; bare-brace cut catches it now.
+    smart = ('“The only person I can place there that night is the doctor. I saw him enter '
+             'alone. I heard no study bell after dinner.”} swineneＰＣＴＳＴＲ? 北京赛车开? '
+             'Wait final has weird? Actually final JSON has extra? It ends with')
+    out_s = _clean_prose(smart)
+    assert out_s.endswith("after dinner.”")
+    assert "swinene" not in out_s and "final JSON" not in out_s and "}" not in out_s
+    # clean prose is a no-op (no braces in fiction prose)
+    clean = "You step into the vault. Dust hangs in the lamp-light; the clerk does not look up."
+    assert _clean_prose(clean) == clean
+
+
+def test_render_leash_keeps_cast_distinct():
+    # Cray/clerk conflation bug (founder live feedback): the narrator merged two distinct
+    # established characters under an ambiguous player reference. The render leash now
+    # binds the narrator to keep the established cast distinct and resolve ambiguous
+    # references to it, never fabricating an identity-merge.
+    from construct.cohorts import RENDER_LEASH
+    assert "DISTINCT CAST" in RENDER_LEASH
+    assert "never invent that one character is secretly another" in RENDER_LEASH
+
+
 def test_author_intro_cohort():
-    # The thematic introduction: premise/stakes in voice, ending on the aim.
+    # The thematic introduction: premise/stakes in voice that GROUNDS the player —
+    # but NO objective/aim line (founder 2026-06-22: the call to action arises in
+    # play, never a game-y banner). The aim is no longer injected into the prompt.
     from construct.cohorts import author_intro
-    prov = StubProvider([{"intro": "Rain on a drowned port; the ledgers lie. "
-                          "Find the honest number."}])
+    prov = StubProvider([{"intro": "Rain on a drowned port; the ledgers lie."}])
     out = author_intro(prov, "DIGEST", theme="truth vs scarcity",
                        style="terse noir", aim="name who falsified the meter")
-    assert "honest number" in out["intro"]
+    assert "drowned port" in out["intro"]
     prompt = prov.calls[0][0]
-    assert "name who falsified the meter" in prompt and "do NOT reveal" in prompt
+    assert "do NOT end on an objective" in prompt            # no closing aim line
+    assert "name who falsified the meter" not in prompt      # aim not injected
+    assert "do NOT reveal" in prompt                         # spoilers still forbidden
+
+
+def test_play_style_directive_in_briefing(world):
+    # The game-type directive (GAME-TYPES.md) rides in the narrator briefing every
+    # turn — a maintained instruction, not a toggle matrix.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"prose": "You look."},
+        _EST,
+    ])
+    run_turn(world, arc, provider, "I look around.", turn=1,
+             play_style="PLAY STYLE — MYSTERY: compress travel; dwell on clues.")
+    np = _narrate_prompt(provider)
+    assert "PLAY STYLE — MYSTERY" in np and "dwell on clues" in np
 
 
 def test_style_overlay_in_briefing(world):
@@ -493,12 +1281,12 @@ def test_style_overlay_in_briefing(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": []},
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You look."},
     ])
     run_turn(world, arc, provider, "I look around.", turn=1,
              style="terse 1920s harbor-noir; rain-slick, cynical")
-    narrate_prompt = provider.calls[-1][0]
+    narrate_prompt = _narrate_prompt(provider)
     assert "STYLE" in narrate_prompt and "harbor-noir" in narrate_prompt
     assert "never new facts" in narrate_prompt  # the voice-not-facts guardrail
 
@@ -512,13 +1300,13 @@ def test_terminal_epilogue_names_cast_and_reveals(world):
         {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": []},
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You name the rival; the meter's truth is out."},
     ])
     result = run_turn(world, arc, provider, "I name the culprit.", turn=1,
                       scenario_mode="win_loss")
     assert result.trace.terminal is True
-    narrate_prompt = provider.calls[-1][0]
+    narrate_prompt = _narrate_prompt(provider)
     assert "EPILOGUE" in narrate_prompt
     assert "person:rival" in narrate_prompt   # the cast (a fate for each)
     assert "THE TRUTH" in narrate_prompt       # concealment lifts at the curtain
@@ -543,11 +1331,92 @@ def test_movement_relocates_player(world):
     world._extractions.append({"items": []})   # player-action extraction
     world._extractions.append({"items": []})   # post-render extraction
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the flat", "requires": []},
+        {"kind": "action", "moves_to": "the flat", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You cross to the flat."},
     ])
     run_turn(world, arc, provider, "I leave the study and go to the flat.", turn=1)
     assert world.porcelain.locate(PLAYER)[0] == "place:flat"  # superseded move
+
+
+def test_movement_to_a_person_redirects_to_their_place(world):
+    # INVESTIGATION-SHAPE.md §3c / Cx 057: "go to Parker" must travel to Parker's PLACE,
+    # never set the protagonist `in` a person entity.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.ingest_structured([
+        {"entity": "person:parker", "attribute": "kind", "value": "person",
+         "timeless": True, "aliases": ["parker"]},
+        {"entity": "place:pantry", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:parker", "attribute": "in", "value": "place:pantry"},
+    ])
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "parker", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"prose": "You go find Parker in the pantry."},
+    ])
+    run_turn(world, arc, provider, "I go to Parker.", turn=1)
+    # moved to Parker's PLACE, not 'into' the person
+    assert world.porcelain.locate(PLAYER)[0] == "place:pantry"
+
+
+def test_movement_to_undiscovered_offscene_target_is_blocked(world):
+    # Cx 061 #3: canon referability is not player entitlement. Moving to an OFFSCENE cast
+    # member's place before learning their whereabouts must be blocked (no teleport via a
+    # guessed/known alias); once discovered, the move is allowed.
+    from construct.cast import CastNode
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.ingest_structured([
+        {"entity": "place:cottage", "attribute": "kind", "value": "room",
+         "timeless": True, "aliases": ["the cottage"]},
+        {"entity": "person:bell", "attribute": "kind", "value": "person",
+         "timeless": True, "aliases": ["bell", "captain bell"]},
+        {"entity": "person:bell", "attribute": "in", "value": "place:cottage"},
+    ])
+    cast = {"person:bell": CastNode("person:bell", "suspect", "the captain",
+            presence="offscene", location="place:cottage", is_culprit=True)}
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the cottage", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"prose": "You don't yet know where to find the cottage."},
+    ])
+    result = run_turn(world, arc, provider, "I go to the cottage.", turn=1, cast=cast,
+                      scope=["person:bell", PLAYER, "place:study"])
+    # blocked — the player has not learned Bell's whereabouts; no teleport
+    assert world.porcelain.locate(PLAYER)[0] != "place:cottage"
+    assert result.trace.movement_status == "undiscovered"
+
+    # the PERSON-target path is gated too ("go to Bell" before discovery) — Cx 063 note
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider_p = StubProvider([
+        {"kind": "action", "moves_to": "bell", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"prose": "You don't yet know where Bell is."},
+    ])
+    res_p = run_turn(world, arc, provider_p, "I go to Bell.", turn=2, cast=cast,
+                     scope=["person:bell", PLAYER, "place:study"])
+    assert world.porcelain.locate(PLAYER)[0] != "place:cottage"
+    assert res_p.trace.movement_status == "undiscovered"
+
+    # now the player LEARNS the whereabouts → the route is entitled → the move lands
+    world.porcelain.ingest_structured(
+        [{"entity": "person:bell", "attribute": "whereabouts", "value": "place:cottage",
+          "value_type": "entity"}], frame=PLAYER_FRAME)
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider2 = StubProvider([
+        {"kind": "action", "moves_to": "the cottage", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        # the move lands → Bell (at place:cottage) becomes present, so npc cohorts run:
+        {"acts": False, "action": "", "speaks": True, "intent": "wait",
+         "line_hint": ""},                                    # bell npc_turn (folded)
+        {"prose": "You make your way to the cottage; Bell is here."},
+    ])
+    run_turn(world, arc, provider2, "I go to the cottage.", turn=2, cast=cast,
+             scope=["person:bell", PLAYER, "place:study", "place:cottage"])
+    assert world.porcelain.locate(PLAYER)[0] == "place:cottage"
 
 
 def test_adjudication_denies_phantom_key(world):
@@ -555,7 +1424,7 @@ def test_adjudication_denies_phantom_key(world):
     seed_arc(world, arc)
     provider = StubProvider([
         {"kind": "action", "moves_to": "",
-         "requires": ["the iron vault key"]},          # classify
+         "requires": ["the iron vault key"], "needs_test": False, "uncertain_of": ""},          # classify
         {"prose": "Your pocket holds no such key; the vault stays shut."},
     ])
     result = run_turn(world, arc, provider,
@@ -578,7 +1447,7 @@ def test_adjudication_allows_held_item(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": ["the brass key"]},
+        {"kind": "action", "moves_to": "", "requires": ["the brass key"], "needs_test": False, "uncertain_of": ""},
         {"prose": "You turn the brass key; the lock gives."},
     ])
     result = run_turn(world, arc, provider, "I unlock the chest with the brass key.",
@@ -654,7 +1523,7 @@ def _drive_winning_turn(world, scenario_mode):
     ]})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": []},
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You name the rival; the meter's truth is out and the settlement breathes."},
     ])
     return run_turn(world, arc, provider, "I examine the ledger.", turn=1,
@@ -741,16 +1610,17 @@ class TestGoalStatement:
             ],
         }
 
-    def test_hidden_terms_cover_canon_and_beat_answers(self, world):
+    def test_hidden_terms_are_only_the_answers_not_the_premise(self, world):
         from construct.game import _hidden_terms
         terms = _hidden_terms(world, self._proposal("anything"))
-        # local-part tokens of canon ids + beat answer entity/value tokens
-        assert {"rival", "secret", "study", "flat"} <= terms
-        # the beat ATTRIBUTE ('culprit') is a legitimate genre word for the
-        # aim ('name the culprit'), not a spoiler — only who/what is hidden
-        assert "culprit" not in terms
-        # short tokens dropped as noise
-        assert "in" not in terms
+        # ONLY the player_learns VALUE (the answer to discover) is a spoiler.
+        assert "rival" in terms
+        # the PREMISE is free for the aim to name (a genre-true goal SHOULD —
+        # 'lift the blight', 'name the culprit', 'explore the study'): the beat
+        # SUBJECT, its attribute, and the canon setting are NOT forbidden.
+        assert "secret" not in terms    # the beat subject entity (premise)
+        assert "culprit" not in terms   # the beat attribute (a genre word)
+        assert "study" not in terms and "flat" not in terms  # canon setting
 
     def test_safe_check_is_a_whole_word_disjoint(self):
         from construct.game import _goal_statement_safe
@@ -765,8 +1635,21 @@ class TestGoalStatement:
         from construct.game import _player_goal, _DEFAULT_GOAL
         clean = "solve the mystery and name who is responsible"
         assert _player_goal(self._proposal(clean), world) == clean
-        # leaks the culprit's id local-part → fail-closed to the default
+        # a genre-true aim naming the PREMISE/subject now passes (the fix — this
+        # used to fall back to boilerplate because 'secret'/'study' were forbidden)
+        premise = "uncover the secret at the heart of the study"
+        assert _player_goal(self._proposal(premise), world) == premise
+        # leaks the discovered ANSWER (the culprit) → fail-closed to the default
         leaky = "prove that person:rival did it"
         assert _player_goal(self._proposal(leaky), world) == _DEFAULT_GOAL
         # empty/absent → default, never crashes
         assert _player_goal(self._proposal(""), world) == _DEFAULT_GOAL
+
+    def test_player_goal_honors_user_chosen_win(self, world):
+        from construct.game import _player_goal, _DEFAULT_GOAL
+        # the player co-authored their aim (no authored goal) → use THEIRS
+        p = self._proposal("")
+        assert _player_goal(p, world, win_direction="slay the dragon and free the vale") \
+            == "slay the dragon and free the vale"
+        # but even the player's own framing can't spell out the discovered answer
+        assert _player_goal(p, world, win_direction="prove the rival did it") == _DEFAULT_GOAL

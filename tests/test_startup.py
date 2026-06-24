@@ -102,13 +102,57 @@ class TestViabilityGate:
         assert "empty arc_scope" in problems
         assert "no character knowledge seeded" in problems
 
+    def test_flags_born_won_world(self, chdir_tmp):
+        """A win_loss world whose destination is already true at genesis would end
+        on turn 1 (the dragon-wins-immediately failure) — the gate must catch it,
+        while a genuinely-unmet win passes."""
+        from construct.arc import io as arc_io
+        from construct.arc.conditions import InFrame, TurnsQuiet
+        from construct.arc.grammar import (
+            Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight)
+        P = "person:p"
+
+        def _seal(name, born_true):
+            wc = (InFrame("canon", P, "kind", "person") if born_true
+                  else InFrame(f"knows:{P}", "fact:x", "y", "z"))  # already true vs not
+            w = game._world(game.scenario_path(name), name, stance="fiction", title="T")
+            w.ingestor.cursor.advance(1.0)
+            w.ingest_structured([
+                {"entity": "place:r", "attribute": "kind", "value": "room", "timeless": True},
+                {"entity": P, "attribute": "kind", "value": "person", "timeless": True},
+                {"entity": P, "attribute": "in", "value": "place:r"},
+                {"entity": "person:q", "attribute": "kind", "value": "person", "timeless": True}])
+            beat = Beat("beat:b", Phase.CLIMAX, Weight.REQUIRED, achievable_via=wc)
+            ref = Clock("clock:refusal", TurnsQuiet(15),
+                        effects=({"entity": "event:c", "attribute": "kind",
+                                  "value": "refusal_conclusion"},),
+                        bound_to="arc:main", rung=Rung.REFUSAL)
+            shape = ConclusionShape("shape:main", "drive_inverted", (P, "a", "b"),
+                                    world_condition=wc,
+                                    premise=InFrame("canon", P, "kind", "person"),
+                                    refusal_variant_id="shape:refused")
+            arc = Arc("arc:main", P, shape, (beat,), (), ref, 1, ("beat:b",),
+                      {Phase.SETUP: 5, Phase.RISING: 6, Phase.CRISIS: 3,
+                       Phase.CLIMAX: 2, Phase.FALLING: 2})
+            w.porcelain.ingest_structured(arc_io.arc_to_items(arc) + arc_io.index_items(arc)
+                                          + arc_io.portfolio_items(["arc:main"]))
+            w.close()
+            return {"title": "T", "protagonist": P, "arc_scope": [P, "place:r"],
+                    "seeded_frames": [P], "scenario_mode": "win_loss"}
+
+        born = _assess_viability("bornwon", _seal("bornwon", True))
+        assert any("won on turn 1" in p for p in born)
+        good = _assess_viability("goodwin", _seal("goodwin", False))
+        assert not any("won on turn 1" in p for p in good)
+
 
 class TestGenerateOrchestration:
     def _patch(self, monkeypatch, viability):
         monkeypatch.setattr(cohorts, "author_story",
-                            lambda provider, seed="": dict(_STORY))
+                            lambda provider, seed="", win_direction="", play_as="": dict(_STORY))
 
-        def _fake_build(name, prose_path, provider, endless=False, on_stage=None):
+        def _fake_build(name, prose_path, provider, endless=False, on_stage=None,
+                        win_direction="", play_as="", game_types=None):
             if on_stage:
                 on_stage("Stage 1 · (stub ingest)")
             # mimic a real publish so the unpublish path has files to remove

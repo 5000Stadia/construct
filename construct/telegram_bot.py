@@ -146,9 +146,18 @@ def serve(registry_path, token: str, *, session_factory=None, client: TelegramCl
     """Run the Telegram transport loop. `poll_iterations` bounds the loop for
     tests/one-shot use; None = run forever (Ctrl-C to stop)."""
     conn = registry.connect(registry_path)
-    core = TransportCore(conn, platform=PLATFORM, msg_limit=MSG_LIMIT,
-                         session_factory=session_factory)
     client = client or TelegramClient(token)
+
+    def _notify(chat_id: str, text: str) -> None:
+        # Interim progress sends DURING a build (the Atrium pings) — outside the
+        # exactly-once outbox, best-effort: a dropped ping must not sink the build.
+        try:
+            client.send_message(chat_id, text)
+        except Exception:
+            logger.exception("telegram notify failed")
+
+    core = TransportCore(conn, platform=PLATFORM, msg_limit=MSG_LIMIT,
+                         session_factory=session_factory, notify=_notify)
     for uid in registry.interrupted_updates(conn, PLATFORM):
         logger.error("telegram: update %s was interrupted mid-turn; its reply was "
                      "never produced (the player may retry) — not re-running", uid)

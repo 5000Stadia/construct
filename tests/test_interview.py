@@ -7,7 +7,7 @@ import json
 import pytest
 
 from construct.game import create_scenario_from_interview
-from construct.provider import StubProvider
+from construct.provider import StubProvider, task_of
 
 PROT = "person:mara"
 SECRET = "fact:the_betrayal"
@@ -27,7 +27,7 @@ class _InterviewStub(StubProvider):
             return {"durability": "CONSTITUTIVE", "confidence": 0.9}
         if prompt.startswith("Extract world-state"):
             return {"items": []}
-        if prompt.startswith("You are the session-zero interviewer"):
+        if task_of(prompt) == "itv":
             return {
                 "title": "The Drowned Harbor", "description": "A sunken port town.",
                 "genre_era": "drowned-world noir",
@@ -44,7 +44,7 @@ class _InterviewStub(StubProvider):
                     {"entity": SECRET, "attribute": "culprit", "value": "person:rook"},
                 ],
             }
-        if prompt.startswith("You are authoring the hidden arc"):
+        if task_of(prompt) == "arc":
             return {
                 "protagonist": PROT, "theme": "the cost of holding back the sea",
                 "delta_type": "drive_inverted",
@@ -58,7 +58,7 @@ class _InterviewStub(StubProvider):
                      "attribute": "-", "value": "-"},
                 ],
             }
-        if prompt.startswith("You are authoring the private knowledge"):
+        if task_of(prompt) == "skn":
             return {"facts": [{"entity": PROT, "attribute": "role", "value": "harbor master"}]}
         raise AssertionError(f"unrouted: {prompt[:60]!r}")
 
@@ -101,12 +101,12 @@ def test_interview_is_playable_through_session(chdir_tmp):
 
     class _PlayStub(_InterviewStub):
         async def complete(self, prompt, schema, *, tier="main", deliberate=False):
-            if prompt.startswith("Classify this player input"):
+            if task_of(prompt) == "cls":
                 self.calls.append(("classify", tier))
                 return {"kind": "action", "moves_to": "", "requires": []}
-            if prompt.startswith("You are a story navigator"):
+            if task_of(prompt) == "ndg":
                 return {"thread": "", "directive": ""}
-            if prompt.startswith("You are the narrator"):
+            if task_of(prompt) == "nar":
                 return {"prose": "The harbor breathes around you, grey and patient."}
             if prompt.startswith("Resolve an unestablished aspect"):
                 return {"items": [{"value": "Grey water, salt-rotted pilings."}]}

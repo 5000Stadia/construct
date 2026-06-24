@@ -26,7 +26,7 @@ from construct.discord_bot import (
     heartbeat_unhealthy,
 )
 from construct.game import WORLDS_DIR, slot_path
-from construct.provider import StubProvider
+from construct.provider import StubProvider, task_of
 
 PLAYER = "person:player"
 PLAYER_FRAME = f"knows:{PLAYER}"
@@ -90,6 +90,118 @@ def scenario(tmp_path, monkeypatch):
     return "demo"
 
 
+def _author_cast_scenario(path, world_id):
+    """A scenario with a PILLAR + a present cast member holding the genuine clue, sealed the
+    way the FIXED `_finalize_scenario` leaves one: arc_scope = arc_entities ∪ cast node ids
+    (Cx 032 blocker 1), the clue seeded into the holder's knows: frame, meta['cast'] set.
+    No manual run-time scope — this exercises the real metadata → Session → run_turn path."""
+    from construct.arc.conditions import InFrame, TurnsQuiet
+    from construct.arc.executor import arc_entities
+    from construct.arc.grammar import (
+        Arc, Clock, ConclusionShape, Phase, Pillar, Rung,
+    )
+    from construct.cast import cast_from_proposal, cast_seed_plan
+
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        return rule(prompt, schema) if prompt.startswith("Classify the lifetime") else {"items": []}
+
+    w = World(path, world_id=world_id, model=StubModel(fallback=fallback),
+              stance="fiction", title="Cast Test World")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:study", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": PLAYER, "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": PLAYER, "attribute": "in", "value": "place:study"},
+        {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        {"entity": "fact:clue", "attribute": "kind", "value": "proposition", "timeless": True},
+    ])
+    pillar = Pillar("pillar:guilt", "the guilt", required=True,
+                    genuine_via=InFrame(PLAYER_FRAME, "fact:clue", "shows", "guilt"))
+    refusal = Clock("clock:refusal", TurnsQuiet(15),
+                    effects=({"entity": "event:concludes", "attribute": "kind",
+                              "value": "refusal_conclusion"},), bound_to="arc:main",
+                    rung=Rung.REFUSAL)
+    shape = ConclusionShape("shape:main", "drive_inverted", (PLAYER, "a", "b"),
+                            world_condition=InFrame(PLAYER_FRAME, "fact:clue", "shows", "guilt"),
+                            premise=InFrame("canon", "fact:clue", "kind", "proposition"),
+                            refusal_variant_id="shape:refused")
+    arc = Arc(arc_id="arc:main", protagonist=PLAYER, shape=shape, beats=(), clocks=(),
+              refusal_clock=refusal, climax_ready_k=1, climax_ready_beats=(),
+              pillars=(pillar,))
+    proposal = {"pillars": [{"id": "pillar:guilt", "label": "the guilt", "required": True}],
+                "cast": [{"id": "person:witness", "shape_role": "witness",
+                          "surface_role": "the witness", "clues": [
+                              {"clue_id": "clue:guilt", "pillar_id": "pillar:guilt",
+                               "fact": {"entity": "fact:clue", "attribute": "shows",
+                                        "value": "guilt"}, "coverage_effect": "genuine",
+                               "reveal_condition": "none"}]}]}
+    cast_nodes, _ = cast_from_proposal(proposal)
+    w.porcelain.ingest_structured(arc_io.arc_to_items(arc) + arc_io.index_items(arc))
+    for frame, items in cast_seed_plan(cast_nodes):  # the witness's knows: frame holds the clue
+        w.porcelain.ingest_structured(items, frame=frame)
+    w.porcelain.ingest_structured(
+        [{"entity": "event:turn_0", "attribute": "kind", "value": "turn",
+          "valid_from": turn_time(0)}], frame="session:main")
+    # scope built the FIXED way — arc referents (incl. pillar clue facts) ∪ cast node ids
+    scope = sorted(set(arc_entities(arc)) | {"person:witness"})
+    w.close()
+    path.with_suffix(".meta.json").write_text(json.dumps(
+        {"title": "Cast Test World", "protagonist": PLAYER, "arc_scope": scope,
+         "mode": "pure", "scenario_mode": "endless", "endless": True, "cast": proposal}))
+
+
+class _CastRoutingProvider(StubProvider):
+    """Routes Session model calls by task, including the present-NPC cohorts (npa/npi)."""
+
+    def __init__(self):
+        super().__init__([])
+
+    async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+        self.calls.append((prompt, schema, tier))
+        if prompt.startswith("Classify the lifetime"):
+            return {"durability": "STATE", "confidence": 0.9}
+        if prompt.startswith("Extract world-state"):
+            return {"items": []}
+        if prompt.startswith("Resolve an unestablished aspect"):
+            return {"items": [{"value": "A lamplit study."}]}
+        t = task_of(prompt)
+        if t == "cls":
+            return {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                    "uncertain_of": "", "commits": False, "commitment": ""}
+        if t == "npt":  # TURN-LATENCY Lever 4: folded per-NPC call
+            return {"acts": False, "action": "", "speaks": True,
+                    "intent": "answer", "line_hint": ""}
+        if t == "npa":
+            return {"acts": False, "action": ""}
+        if t == "npi":
+            return {"speaks": True, "intent": "answer", "line_hint": ""}
+        if t == "ndg":
+            return {"thread": "", "directive": ""}
+        if t == "nar":
+            return {"prose": "The witness, pressed, admits what they saw."}
+        return {"items": []}  # any tail call (e.g. time estimate) — harmless
+
+
+def test_interview_delivery_through_real_session_metadata(tmp_path, monkeypatch):
+    # Cx 032 blocker 1: prove interview delivery works through the REAL metadata scope
+    # (cast NPC reaches run_turn because _finalize unions cast nodes into arc_scope) — no
+    # hand-injected run_turn scope.
+    from construct.adapter import PorcelainWorldReads
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "worlds").mkdir()
+    _author_cast_scenario(tmp_path / "worlds" / "cast.world", "w:cast")
+    s = Session.open("cast", player_id="u1", provider=_CastRoutingProvider())
+    assert "person:witness" in s._scope  # the cast member is in the live scope
+    reply = s.turn("I press the witness about what they saw.")
+    assert reply.ok
+    # the clue surfaced into the player's knowledge frame via interview delivery
+    assert PorcelainWorldReads(s._world).assertion_in_frame(
+        PLAYER_FRAME, "fact:clue", "shows", "guilt")
+
+
 class _RoutingProvider(StubProvider):
     """One provider serves BOTH the engine model calls (extraction,
     classification, resolution) and the host cohorts — as the real
@@ -107,11 +219,11 @@ class _RoutingProvider(StubProvider):
             return {"items": []}
         if prompt.startswith("Resolve an unestablished aspect"):
             return {"items": [{"value": "A lamplit study, certain at its edges."}]}
-        if prompt.startswith("Classify this player input"):
+        if task_of(prompt) == "cls":
             return {"kind": "action", "moves_to": "", "requires": []}
-        if prompt.startswith("You are a story navigator"):
+        if task_of(prompt) == "ndg":
             return {"thread": "", "directive": ""}
-        if prompt.startswith("You are the narrator"):
+        if task_of(prompt) == "nar":
             return {"prose": "The study holds around you, lamplit and certain."}
         raise AssertionError(f"unrouted prompt: {prompt[:60]!r}")
 
@@ -157,8 +269,11 @@ class TestSession:
         assert reply.ok is False and "could not complete" in reply.prose
         s.close()  # session still usable/closeable
 
-    def test_win_loss_goal_shown_at_opening(self, scenario, tmp_path):
-        # Re-seal the scenario as win_loss with a player-facing aim.
+    def test_win_loss_goal_not_shown_as_banner(self, scenario, tmp_path):
+        # Founder 2026-06-22: NO forced goal banner — even in win_loss the objective
+        # is NOT stapled atop the opening; the call to action arises in the fiction.
+        # goal_statement() still returns the value (internal/win framing), but
+        # opening() never renders an 'aim' line.
         meta_path = tmp_path / "worlds" / "demo.world"
         meta_path = meta_path.with_suffix(".meta.json")
         meta = json.loads(meta_path.read_text())
@@ -166,8 +281,9 @@ class TestSession:
         meta["goal_statement"] = "name who is responsible"
         meta_path.write_text(json.dumps(meta))
         s = Session.open(scenario, player_id="u1", provider=_provider())
-        assert s.goal_statement() == "name who is responsible"
-        assert "Your aim: name who is responsible" in s.opening()
+        assert s.goal_statement() == "name who is responsible"   # field intact
+        assert "Your aim:" not in s.opening()                    # no banner
+        assert "name who is responsible" not in s.opening()
         s.close()
 
     def test_thematic_intro_shown_at_opening(self, scenario, tmp_path):
@@ -356,6 +472,29 @@ class TestEntryAsOf:
         s = Session.open(scenario, player_id="h", fresh=True, provider=_provider())
         assert s.entry_as_of is None
         assert "(entering as of" not in s.opening()
+        s.close()
+
+
+class TestColdOpenConcealment:
+    def test_live_threads_suppress_concealed_alias(self, scenario, monkeypatch):
+        # Cx 022 #3: a live event's alias/kind is freeform text, so it bypasses the
+        # (entity,attribute) protected-key filter — an event named after the hidden
+        # answer would leak it in the cold open's STILL-LIVE list. The concealment
+        # token filter drops the secret-bearing thread; benign threads survive.
+        s = Session.open(scenario, player_id="u1", provider=_provider())
+
+        def fake_snapshot(scope, lens=None, as_of=None, **kw):
+            return {"facts": [
+                {"entity": "event:e1", "attribute": "alias",
+                 "value": "the culprit is named at last"},   # brushes 'culprit' (protected)
+                {"entity": "event:e2", "attribute": "alias",
+                 "value": "the water ration tightens"},       # benign
+            ]}
+
+        monkeypatch.setattr(s._world.porcelain, "snapshot", fake_snapshot)
+        threads = s.live_threads()
+        assert "the water ration tightens" in threads
+        assert all("culprit" not in t for t in threads)       # concealed thread dropped
         s.close()
 
 

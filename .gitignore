@@ -1,19 +1,26 @@
-dev_inbox/
-__pycache__/
-*.egg-info/
-.venv/
-.pytest_cache/
-*.world
-
-# Runtime/built worlds (regenerable from examples/ source) + local agent state
-worlds/
+# Local state, secrets, caches — never committed.
 .claude/
-# Transport state + chat logs live under worlds/.construct/ (covered by worlds/
-# above); listed explicitly so it's clear secrets/transcripts never get committed.
-worlds/.construct/
-# Secrets (e.g. CONSTRUCT_TELEGRAM_TOKEN) — never committed.
+.venv/
+# secrets (e.g. CONSTRUCT_TELEGRAM_TOKEN) — gitignore has NO inline comments, so the
+# comment must be on its own line or the pattern becomes a literal ".env   # ..." and fails.
 .env
+.env.*
+dev_inbox/
+logs/
+*.egg-info/
+__pycache__/
+.pytest_cache/
 
-# Generated hidden bibles — runtime artifacts (per-user, the authoring side of
-# the firewall), distinct from the committed examples/ fixture (Kernos 063 B.2)
+# Generated hidden bibles — runtime artifacts (the authoring side of the firewall).
 generated/
+
+# Built/runtime worlds are regenerable from examples/ source (the firewall), so they
+# are ignored — EXCEPT the shipped demo scenario `anchor` (its pristine build + meta),
+# so a fresh clone has a good story ready to play. Per-player play slots, other test/
+# built worlds (incl. live_* and worlds/_retired/), backups, and transport state
+# (worlds/.construct/) all stay ignored. The committed source fixture lives in
+# examples/ (Kernos 063 B.2).
+*.world
+worlds/*
+!worlds/anchor.world
+!worlds/anchor.meta.json

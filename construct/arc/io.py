@@ -11,7 +11,9 @@ import json
 from dataclasses import fields
 
 from construct.arc import conditions as C
-from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Pin, Rung, Weight
+from construct.arc.grammar import (
+    Arc, Beat, Clock, ConclusionShape, Phase, Pillar, Pin, Rung, Weight,
+)
 
 #: The pin fields persisted as plot rows / cache keys (one row per field).
 _PIN_FIELDS = ("scope_kind", "subject_entity", "directive", "subject_attribute",
@@ -28,8 +30,15 @@ _JSON_BLOB_ATTRS = frozenset({
     "climax_ready_beats", "phase_budget", "failure_when", "tension",
     "world_condition", "premise", "achievable_via", "unreachable_if",
     "correlates", "fires_when", "effects", "beat_index", "clock_index",
-    "pin_index",
+    "pin_index", "arc_ids", "pillar_index", "genuine_via", "false_via",
 })
+
+#: The portfolio manifest entity — one row listing the active `arc:*` ids plus
+#: which one is the main (terminal-bearing) arc. The registry is "more named
+#: rows in `plot:main`", NOT a per-arc frame (every beat/clock/pin already
+#: namespaces by `arc_id` and statuses key by globally-unique entity id, so N
+#: arcs coexist in one frame). Absent → a single-arc world (backward compat).
+_PORTFOLIO = "arc:portfolio"
 
 
 def _with_frame_and_types(items: list[dict], frame: str) -> list[dict]:
@@ -150,7 +159,31 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
         items += clock_to_items(clock, arc.arc_id)
     for pin in arc.pins:
         items += pin_to_items(pin, arc.arc_id)
+    for pillar in arc.pillars:
+        items += pillar_to_items(pillar, arc.arc_id)
     return _with_frame_and_types(items, frame)
+
+
+def pillar_to_items(pillar: Pillar, arc_id: str) -> list[dict]:
+    """A pillar as plot rows (host-owned frame; never canon — STORY-SHAPES §0a/§8).
+    One entity per pillar (`kind=pillar`, `part_of=arc_id`), mirroring beats/pins.
+    `required` is stored as a "true"/"false" string (no bare-bool value ambiguity);
+    `genuine_via`/`false_via` ride the same Expr-JSON path as beats (pinned literal)."""
+    items = [
+        {"entity": pillar.pillar_id, "attribute": "kind", "value": "pillar", "timeless": True},
+        {"entity": pillar.pillar_id, "attribute": "part_of", "value": arc_id, "timeless": True},
+        {"entity": pillar.pillar_id, "attribute": "label", "value": pillar.label,
+         "timeless": True},
+        {"entity": pillar.pillar_id, "attribute": "required",
+         "value": "true" if pillar.required else "false", "timeless": True},
+    ]
+    if pillar.genuine_via is not None:
+        items.append({"entity": pillar.pillar_id, "attribute": "genuine_via",
+                      "value": json.dumps(expr_to_obj(pillar.genuine_via)), "timeless": True})
+    if pillar.false_via is not None:
+        items.append({"entity": pillar.pillar_id, "attribute": "false_via",
+                      "value": json.dumps(expr_to_obj(pillar.false_via)), "timeless": True})
+    return items
 
 
 def pin_to_items(pin: Pin, arc_id: str) -> list[dict]:
@@ -192,10 +225,18 @@ def _as_float(v) -> float | None:
 def _synth_refusal(arc_id: str) -> Clock:
     """The canonical refusal-clock backstop (mirrors `game._build_arc`): a
     quiescence ender that always exists, used when the stored refusal rows
-    can't be read back. Keeps a world ALWAYS able to conclude."""
+    can't be read back. Keeps a world ALWAYS able to conclude. The id is
+    per-arc (only the main arc uses the bare `clock:refusal`) so a synthesized
+    side-arc backstop never collides with the main refusal clock in the shared
+    `plot:main` frame (LIVING-WORLD-GENERATOR P1 — the multi-arc collision fix
+    applied to the fallback path too)."""
+    is_main = arc_id == "arc:main"
+    slug = arc_id.split(":", 1)[1]
+    cid = "clock:refusal" if is_main else f"clock:refusal_{slug}"
+    concludes = "event:world_concludes" if is_main else f"event:world_concludes_{slug}"
     return Clock(
-        clock_id="clock:refusal", fires_when=C.TurnsQuiet(15),
-        effects=({"entity": "event:world_concludes", "attribute": "kind",
+        clock_id=cid, fires_when=C.TurnsQuiet(15),
+        effects=({"entity": concludes, "attribute": "kind",
                   "value": "refusal_conclusion"},),
         bound_to=arc_id, rung=Rung.REFUSAL)
 
@@ -337,6 +378,8 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
     failure_raw = get(arc_id, "failure_when")
     pin_ids = json.loads(get(arc_id, "pin_index") or "[]")
     pins = tuple(_pin_from_reads(get, pid) for pid in pin_ids)
+    pillar_ids = json.loads(get(arc_id, "pillar_index") or "[]")
+    pillars = tuple(_pillar_from_reads(get, pid) for pid in pillar_ids)
     return Arc(
         arc_id=arc_id,
         protagonist=get(arc_id, "protagonist"),
@@ -350,6 +393,22 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
                       json.loads(get(arc_id, "phase_budget") or "{}").items()},
         failure_when=expr_from_obj(json.loads(failure_raw)) if failure_raw else None,
         pins=pins,
+        pillars=pillars,
+    )
+
+
+def _pillar_from_reads(get, pillar_id: str) -> Pillar:
+    """Reconstruct one Pillar from plot rows (mirrors _pin_from_reads). `required`
+    defaults True when the row is absent; `genuine_via`/`false_via` parse via the
+    Expr-JSON path when present."""
+    g = get(pillar_id, "genuine_via")
+    f = get(pillar_id, "false_via")
+    return Pillar(
+        pillar_id=pillar_id,
+        label=get(pillar_id, "label") or "",
+        required=(get(pillar_id, "required") or "true") != "false",
+        genuine_via=expr_from_obj(json.loads(g)) if g else None,
+        false_via=expr_from_obj(json.loads(f)) if f else None,
     )
 
 
@@ -385,6 +444,11 @@ def arc_to_cache(arc: Arc) -> dict:
         "failure_when": expr_to_obj(arc.failure_when) if arc.failure_when else None,
         "pins": [{f: getattr(p, f) for f in ("pin_id", *_PIN_FIELDS, "escalates")}
                  for p in arc.pins],
+        "pillars": [{
+            "pillar_id": p.pillar_id, "label": p.label, "required": p.required,
+            "genuine_via": expr_to_obj(p.genuine_via) if p.genuine_via else None,
+            "false_via": expr_to_obj(p.false_via) if p.false_via else None,
+        } for p in arc.pillars],
     }
 
 
@@ -429,7 +493,84 @@ def arc_from_cache(d: dict) -> Arc:
         phase_budget={Phase(k): v for k, v in d.get("phase_budget", {}).items()},
         failure_when=expr_from_obj(d["failure_when"]) if d.get("failure_when") else None,
         pins=tuple(Pin(**p) for p in d.get("pins", [])),
+        pillars=tuple(Pillar(
+            pillar_id=p["pillar_id"], label=p.get("label", ""),
+            required=p.get("required", True),
+            genuine_via=expr_from_obj(p["genuine_via"]) if p.get("genuine_via") else None,
+            false_via=expr_from_obj(p["false_via"]) if p.get("false_via") else None,
+        ) for p in d.get("pillars", [])),
     )
+
+
+def portfolio_items(arc_ids: list[str], main_arc_id: str = "arc:main",
+                    frame: str = "plot:main", valid_from: float | None = None) -> list[dict]:
+    """The portfolio manifest: which `arc:*` ids are active and which is main.
+
+    Two rows on `arc:portfolio`. `arc_ids` is a JSON list (pinned `literal` via
+    `_JSON_BLOB_ATTRS` — the same mis-classification hazard as the discovery
+    indexes). A world without this row is a single-arc world (see
+    `arc_ids_from_frame`). Session-zero writes them `timeless`; a mid-play UPDATE
+    (the P2 generator adding an arc) passes `valid_from` so the new list
+    SUPERSEDES the sealed one on the timeline."""
+    if valid_from is None:
+        meta = {"timeless": True}
+    else:
+        meta = {"valid_from": valid_from}
+    return _with_frame_and_types([
+        {"entity": _PORTFOLIO, "attribute": "arc_ids",
+         "value": json.dumps(list(arc_ids)), **meta},
+        {"entity": _PORTFOLIO, "attribute": "main_arc",
+         "value": main_arc_id, **meta},
+    ], frame)
+
+
+def portfolio_add_items(reads, arc_id: str, frame: str = "plot:main",
+                        valid_from: float | None = None) -> list[dict]:
+    """Items that add `arc_id` to the live portfolio (idempotent), preserving the
+    current main arc. The caller ingests them; with `valid_from` the updated list
+    supersedes the sealed one (the P2 generator's mid-play registration)."""
+    ids = arc_ids_from_frame(reads, frame=frame)
+    if arc_id not in ids:
+        ids = ids + [arc_id]
+    return portfolio_items(ids, main_arc_id=main_arc_from_frame(reads, frame=frame),
+                           frame=frame, valid_from=valid_from)
+
+
+def arc_ids_from_frame(reads, frame: str = "plot:main") -> list[str]:
+    """The active `arc:*` ids. Fail-open to `["arc:main"]` when no portfolio
+    manifest exists — a pre-portfolio (single-arc) world plays unchanged."""
+    raw = reads.state(_PORTFOLIO, "arc_ids", frame=frame)
+    if not raw:
+        return ["arc:main"]
+    try:
+        ids = json.loads(raw)
+        return list(ids) if ids else ["arc:main"]
+    except (ValueError, TypeError):
+        import logging
+        logging.getLogger(__name__).error(
+            "arc:portfolio.arc_ids is unreadable (%r) — defaulting to single arc", raw)
+        return ["arc:main"]
+
+
+def main_arc_from_frame(reads, frame: str = "plot:main") -> str:
+    """The main (terminal-bearing) arc id; fail-open to `arc:main`."""
+    return reads.state(_PORTFOLIO, "main_arc", frame=frame) or "arc:main"
+
+
+def portfolio_from_frame(reads, frame: str = "plot:main") -> list[Arc]:
+    """Reconstruct every arc in the portfolio. Each id goes through the
+    unchanged per-arc `arc_from_frame` (already `arc_id`-parametric); a broken
+    arc is dropped LOUDLY rather than crashing the whole load (the fail-open
+    discipline applied at the portfolio level)."""
+    arcs = []
+    for aid in arc_ids_from_frame(reads, frame=frame):
+        try:
+            arcs.append(arc_from_frame(reads, arc_id=aid, frame=frame))
+        except Exception:  # noqa: BLE001 — one bad arc must not sink the others
+            import logging
+            logging.getLogger(__name__).exception(
+                "arc %s failed to reconstruct — dropping it from the portfolio", aid)
+    return arcs
 
 
 def index_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
@@ -445,4 +586,8 @@ def index_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
         # pin ids from here, never a host-side log scan.
         {"entity": arc.arc_id, "attribute": "pin_index",
          "value": json.dumps([p.pin_id for p in arc.pins]), "timeless": True},
+        # The pillar discovery index (STORY-SHAPES §0a/§8): conclusion-as-effect reads
+        # the arc's causal pillars from here, never a frame scan.
+        {"entity": arc.arc_id, "attribute": "pillar_index",
+         "value": json.dumps([p.pillar_id for p in arc.pillars]), "timeless": True},
     ], frame)

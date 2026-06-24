@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS players (
     player_id   TEXT NOT NULL,
     scenario    TEXT NOT NULL,
     created_at  REAL NOT NULL,
+    started     INTEGER NOT NULL DEFAULT 0,
+    mode        TEXT,                            -- player's chosen experience: win_loss | endless
+    creation    TEXT,                            -- JSON: the in-progress Construct-dialogue brief (Atrium)
+    chargen     TEXT,                            -- JSON: the in-progress character sheet (the Foyer)
+    character   TEXT,                            -- JSON: the LAST completed character sheet (for /restart "keep")
+    status_pin  INTEGER NOT NULL DEFAULT 1,      -- show the time|location header atop each reply
+    last_status TEXT,                            -- last time|location header SHOWN (header appears only on change)
     PRIMARY KEY (platform, external_id)
 );
 CREATE TABLE IF NOT EXISTS offsets (
@@ -65,6 +72,16 @@ CREATE TABLE IF NOT EXISTS outbox (
     sent        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (platform, update_id, seq)
 );
+CREATE TABLE IF NOT EXISTS notes (
+    platform    TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    scenario    TEXT NOT NULL,
+    seq         INTEGER NOT NULL,            -- per (player, scenario), 1-based
+    text        TEXT NOT NULL,
+    context     TEXT,                        -- captured status line (time|place) at write
+    created_at  REAL NOT NULL,
+    PRIMARY KEY (platform, external_id, scenario, seq)
+);
 """
 
 
@@ -77,6 +94,20 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(_SCHEMA)
+    # Idempotent migrations for registries created before these columns existed.
+    for ddl in (
+        "ALTER TABLE players ADD COLUMN started INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE players ADD COLUMN mode TEXT",
+        "ALTER TABLE players ADD COLUMN creation TEXT",
+        "ALTER TABLE players ADD COLUMN chargen TEXT",
+        "ALTER TABLE players ADD COLUMN character TEXT",
+        "ALTER TABLE players ADD COLUMN status_pin INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE players ADD COLUMN last_status TEXT",
+    ):
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass  # column already present
     return conn
 
 
@@ -135,6 +166,14 @@ def claim_invite(conn: sqlite3.Connection, code: str, platform: str,
         raise
 
 
+def forget_player(conn: sqlite3.Connection, platform: str, external_id: str) -> None:
+    """Delete a player's mapping entirely — they become an UNCLAIMED sender again
+    (needs a fresh invite to return). For an operator self-wipe to replay the
+    brand-new-user flow. Leaves invites/offsets/outbox alone."""
+    conn.execute("DELETE FROM players WHERE platform=? AND external_id=?",
+                 (platform, external_id))
+
+
 def player_for(conn: sqlite3.Connection, platform: str, external_id: str) -> str | None:
     row = conn.execute(
         "SELECT player_id FROM players WHERE platform=? AND external_id=?",
@@ -148,6 +187,231 @@ def scenario_for(conn: sqlite3.Connection, platform: str, external_id: str) -> s
         "SELECT scenario FROM players WHERE platform=? AND external_id=?",
         (platform, external_id)).fetchone()
     return row["scenario"] if row else None
+
+
+def is_started(conn: sqlite3.Connection, platform: str, external_id: str) -> bool:
+    """Has this player begun play (seen the cold open) at least once? Lets the
+    transport show the opening on a brand-new player's first prose, then continue
+    (auto-resume) ever after — no /play command needed."""
+    row = conn.execute(
+        "SELECT started FROM players WHERE platform=? AND external_id=?",
+        (platform, external_id)).fetchone()
+    return bool(row and row["started"])
+
+
+def mark_started(conn: sqlite3.Connection, platform: str, external_id: str) -> None:
+    conn.execute("UPDATE players SET started=1 WHERE platform=? AND external_id=?",
+                 (platform, external_id))
+
+
+def get_mode(conn: sqlite3.Connection, platform: str, external_id: str) -> str | None:
+    """The player's chosen experience ("win_loss" | "endless"), set at the
+    session-zero mode interview on first contact. None until they answer."""
+    row = conn.execute(
+        "SELECT mode FROM players WHERE platform=? AND external_id=?",
+        (platform, external_id)).fetchone()
+    return row["mode"] if row and row["mode"] else None
+
+
+def set_mode(conn: sqlite3.Connection, platform: str, external_id: str, mode: str) -> None:
+    conn.execute("UPDATE players SET mode=? WHERE platform=? AND external_id=?",
+                 (mode, platform, external_id))
+
+
+def set_scenario(conn: sqlite3.Connection, platform: str, external_id: str,
+                 scenario: str) -> None:
+    """Repoint a player at a scenario they now own — e.g. after the Construct
+    dialogue BUILDS them a fresh world, so `scenario_for` (resume) finds it."""
+    conn.execute("UPDATE players SET scenario=? WHERE platform=? AND external_id=?",
+                 (scenario, platform, external_id))
+
+
+def get_creation(conn: sqlite3.Connection, platform: str, external_id: str) -> dict | None:
+    """The in-progress Construct-dialogue state (the Atrium brief + history),
+    or None if the player isn't mid-creation. JSON blob, host-side only."""
+    import json
+    row = conn.execute(
+        "SELECT creation FROM players WHERE platform=? AND external_id=?",
+        (platform, external_id)).fetchone()
+    if not (row and row["creation"]):
+        return None
+    try:
+        return json.loads(row["creation"])
+    except (ValueError, TypeError):
+        return None  # corrupt blob → start the dialogue fresh (fail-open)
+
+
+def set_creation(conn: sqlite3.Connection, platform: str, external_id: str,
+                 blob: dict) -> None:
+    import json
+    conn.execute("UPDATE players SET creation=? WHERE platform=? AND external_id=?",
+                 (json.dumps(blob), platform, external_id))
+
+
+def clear_creation(conn: sqlite3.Connection, platform: str, external_id: str) -> None:
+    """Drop the Atrium state once a world has been built/loaded (or to restart)."""
+    conn.execute("UPDATE players SET creation=NULL WHERE platform=? AND external_id=?",
+                 (platform, external_id))
+
+
+def get_chargen(conn: sqlite3.Connection, platform: str, external_id: str) -> dict | None:
+    """The in-progress Foyer character sheet + history, or None if not mid-Foyer."""
+    import json
+    row = conn.execute(
+        "SELECT chargen FROM players WHERE platform=? AND external_id=?",
+        (platform, external_id)).fetchone()
+    if not (row and row["chargen"]):
+        return None
+    try:
+        return json.loads(row["chargen"])
+    except (ValueError, TypeError):
+        return None
+
+
+def set_chargen(conn: sqlite3.Connection, platform: str, external_id: str,
+                blob: dict) -> None:
+    import json
+    conn.execute("UPDATE players SET chargen=? WHERE platform=? AND external_id=?",
+                 (json.dumps(blob), platform, external_id))
+
+
+def clear_chargen(conn: sqlite3.Connection, platform: str, external_id: str) -> None:
+    """Drop the Foyer state once the character is ingested and the story begins."""
+    conn.execute("UPDATE players SET chargen=NULL WHERE platform=? AND external_id=?",
+                 (platform, external_id))
+
+
+def get_character(conn: sqlite3.Connection, platform: str, external_id: str) -> dict | None:
+    """The LAST completed character sheet (saved when the Foyer finished), so a
+    `/restart` "keep my character" can re-apply it without re-running the interview.
+    None if the player has never finished the Foyer."""
+    import json
+    row = conn.execute(
+        "SELECT character FROM players WHERE platform=? AND external_id=?",
+        (platform, external_id)).fetchone()
+    if not (row and row["character"]):
+        return None
+    try:
+        return json.loads(row["character"])
+    except (ValueError, TypeError):
+        return None
+
+
+def set_character(conn: sqlite3.Connection, platform: str, external_id: str,
+                  sheet: dict) -> None:
+    """Persist the completed character sheet durably (survives a slot wipe)."""
+    import json
+    conn.execute("UPDATE players SET character=? WHERE platform=? AND external_id=?",
+                 (json.dumps(sheet), platform, external_id))
+
+
+# ---- player notes (`/note` / `/notes`) — player annotations, never PB canon ----
+
+def add_note(conn: sqlite3.Connection, platform: str, external_id: str,
+             scenario: str, text: str, context: str | None, now: float) -> int:
+    """Append a player note for this player+scenario; returns its 1-based seq.
+    Transactional (BEGIN IMMEDIATE + COALESCE(MAX(seq),0)+1) — matches the registry's
+    atomic style so a second transport can't collide on seq."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM notes "
+            "WHERE platform=? AND external_id=? AND scenario=?",
+            (platform, external_id, scenario)).fetchone()
+        seq = int(row["n"])
+        conn.execute(
+            "INSERT INTO notes (platform, external_id, scenario, seq, text, context, "
+            "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (platform, external_id, scenario, seq, text, context, now))
+        conn.execute("COMMIT")
+        return seq
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def list_notes(conn: sqlite3.Connection, platform: str, external_id: str,
+               scenario: str) -> list[dict]:
+    """This player's notes for ONE scenario, oldest→newest. Scoped to the scenario
+    (= the playthrough/series): notes carry across EPISODES of the same scenario
+    (continue → episode two plays over the same world) but NOT to a different
+    adventure (founder)."""
+    rows = conn.execute(
+        "SELECT scenario, seq, text, context, created_at FROM notes "
+        "WHERE platform=? AND external_id=? AND scenario=? ORDER BY created_at, rowid",
+        (platform, external_id, scenario)).fetchall()
+    return [{"scenario": r["scenario"], "seq": r["seq"], "text": r["text"],
+             "context": r["context"], "created_at": r["created_at"]} for r in rows]
+
+
+def delete_note(conn: sqlite3.Connection, platform: str, external_id: str,
+                scenario: str, position: int) -> dict | None:
+    """Delete the `position`-th note (1-based, as listed) for this player+scenario.
+    Returns the deleted note dict, or None if the position is out of range."""
+    notes = list_notes(conn, platform, external_id, scenario)
+    if position < 1 or position > len(notes):
+        return None
+    n = notes[position - 1]
+    conn.execute(
+        "DELETE FROM notes WHERE platform=? AND external_id=? AND scenario=? AND seq=?",
+        (platform, external_id, n["scenario"], n["seq"]))
+    return n
+
+
+def clear_notes(conn: sqlite3.Connection, platform: str, external_id: str,
+                scenario: str | None = None) -> int:
+    """Drop notes for this player. `scenario` → just that scenario's notes (a fresh
+    factory restart, or `/notes clear`); `None` → ALL the player's notes (a `/wipe`).
+    Returns the count cleared."""
+    if scenario is None:
+        cur = conn.execute(
+            "DELETE FROM notes WHERE platform=? AND external_id=?",
+            (platform, external_id))
+    else:
+        cur = conn.execute(
+            "DELETE FROM notes WHERE platform=? AND external_id=? AND scenario=?",
+            (platform, external_id, scenario))
+    return cur.rowcount
+
+
+def get_status_pin(conn: sqlite3.Connection, platform: str, external_id: str) -> bool:
+    """Whether the time|location header rides atop each reply (default ON)."""
+    row = conn.execute(
+        "SELECT status_pin FROM players WHERE platform=? AND external_id=?",
+        (platform, external_id)).fetchone()
+    return True if row is None else bool(row["status_pin"])
+
+
+def set_status_pin(conn: sqlite3.Connection, platform: str, external_id: str,
+                   on: bool) -> None:
+    conn.execute("UPDATE players SET status_pin=? WHERE platform=? AND external_id=?",
+                 (1 if on else 0, platform, external_id))
+
+
+def get_last_status(conn: sqlite3.Connection, platform: str, external_id: str) -> str | None:
+    """The last `time | location` header actually SHOWN to this player — the
+    auto-header rides atop a reply only when the current line DIFFERS from this
+    (so it reads as a 'time/place changed' indicator, not wallpaper)."""
+    row = conn.execute(
+        "SELECT last_status FROM players WHERE platform=? AND external_id=?",
+        (platform, external_id)).fetchone()
+    return row["last_status"] if row is not None else None
+
+
+def set_last_status(conn: sqlite3.Connection, platform: str, external_id: str,
+                    line: str) -> None:
+    conn.execute("UPDATE players SET last_status=? WHERE platform=? AND external_id=?",
+                 (line, platform, external_id))
+
+
+# ---- exit (back to the start menu) ----------------------------------------
+
+def set_started(conn: sqlite3.Connection, platform: str, external_id: str,
+                on: bool) -> None:
+    """Flip the started flag — `False` sends the player back to the Atrium (exit to
+    the start menu) without touching their saved slot (so they can resume later)."""
+    conn.execute("UPDATE players SET started=? WHERE platform=? AND external_id=?",
+                 (1 if on else 0, platform, external_id))
 
 
 # ---- exactly-once delivery bookkeeping (Telegram poller) ------------------

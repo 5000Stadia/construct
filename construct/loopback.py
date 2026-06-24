@@ -87,9 +87,11 @@ def pump(conn, core: TransportCore, inbound_path: Path, outbox_path: Path,
     return ran
 
 
-def build_core(conn, *, session_factory=None, log_dir=None) -> TransportCore:
+def build_core(conn, *, session_factory=None, log_dir=None, provider=None,
+               builder=None, notify=None) -> TransportCore:
     return TransportCore(conn, platform=PLATFORM, msg_limit=MSG_LIMIT,
-                         session_factory=session_factory, log_dir=log_dir)
+                         session_factory=session_factory, log_dir=log_dir,
+                         provider=provider, builder=builder, notify=notify)
 
 
 def serve(inbound_path: str | Path, outbox_path: str | Path, registry_path: str | Path,

@@ -54,6 +54,27 @@ class Beat:
 
 
 @dataclass(frozen=True)
+class Pillar:
+    """A CAUSE of the conclusion (STORY-SHAPES §0a/§8): a causal element whose
+    coverage helps determine the narrated conclusory scene (the EFFECT) — never a
+    win/loss verdict. Coverage is tri-state, computed host-side from the PLAYER
+    frame: 'genuine' (a genuine clue established the cause), 'false' (a red herring
+    is held as true — a wrong case built on it), 'unfilled' (neither).
+
+    Pillars are host-side control data; the engine never reads them. `genuine_via`
+    / `false_via` are conditions over the player's knowledge frame (the clues they
+    have actually surfaced), so coverage advances as the player interviews the cast
+    (the surface pillars fill through, §8). `required` pillars are the causes that
+    must be addressed for the case to land; optional pillars enrich it."""
+
+    pillar_id: str
+    label: str
+    required: bool = True
+    genuine_via: Expr | None = None
+    false_via: Expr | None = None
+
+
+@dataclass(frozen=True)
 class Clock:
     """A pre-authored conditional process, run by the host's
     deterministic executor (§2.4). `effects` are opaque structured items
@@ -140,6 +161,11 @@ class Arc:
     #: The pinned-awareness channel (PINNED-AWARENESS): host-owned, briefed
     #: every turn a pin's scope is active. Empty = no pins.
     pins: tuple[Pin, ...] = ()
+    #: The causal pillars of the conclusion (STORY-SHAPES §0a/§8). Coverage is
+    #: derived host-side (executor.arc_coverage); the conclusory scene is narrated
+    #: as the EFFECT of this coverage, not a win/loss verdict. Empty = the arc uses
+    #: the legacy world_condition terminal only (backward compatible).
+    pillars: tuple[Pillar, ...] = ()
 
     def beat(self, beat_id: str) -> Beat:
         for b in self.beats:

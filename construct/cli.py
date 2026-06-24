@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="construct",
         description="A text construct: persistent interactive fiction, played turn by turn.",
     )
-    # Not required: bare `construct` enters the holodeck shell (the default door).
+    # Not required: bare `construct` enters the construct projector shell (the default door).
     sub = parser.add_subparsers(dest="command", required=False)
 
     sub.add_parser("scenarios", help="list the scenario library (charter self-ID)")
@@ -59,8 +59,16 @@ def build_parser() -> argparse.ArgumentParser:
     new.add_argument("--endless", action="store_true",
                      help="no terminal arc: the world carries on past the arc's "
                           "destination instead of settling into aftermath")
+    new.add_argument("--win", dest="win_direction", default="", metavar="FRAMING",
+                     help="(win_loss) your OWN win/loss in your words — the AIM, "
+                          "not the answer (e.g. 'catch the killer; lose if I accuse "
+                          "the wrong person'). The world conceals the specifics.")
+    new.add_argument("--play-as", dest="play_as", default="", metavar="ROLE",
+                     help="who you want to BE — a role or character ('a hard-bitten "
+                          "detective', 'a knight sworn to the vale'). The story makes "
+                          "you the protagonist.")
 
-    shell = sub.add_parser("shell", help="the holodeck entry: converse with "
+    shell = sub.add_parser("shell", help="the construct projector entry: converse with "
                                          "Construct to load/create/import a setting")
     shell.add_argument("--debug", action="store_true")
 
@@ -195,13 +203,17 @@ def _cmd_new(args: argparse.Namespace) -> int:
                                 create_scenario_from_ingest,
                                 create_scenario_from_interview)
     endless = getattr(args, "endless", False)
+    win_direction = getattr(args, "win_direction", "") or ""
+    play_as = getattr(args, "play_as", "") or ""
     def _stage(msg: str) -> None:  # live progress + PB-layer showcase on stdout
         print(msg, flush=True)
     if getattr(args, "generate", None) is not None:
         name = args.name or "world"
         try:
             meta = create_scenario_from_generated(name, _provider(), seed=args.generate,
-                                                  endless=endless, on_stage=_stage)
+                                                  endless=endless, on_stage=_stage,
+                                                  win_direction=win_direction,
+                                                  play_as=play_as)
         except ViabilityError as exc:
             print(f"Generated world was not playable: {'; '.join(exc.problems)}.\n"
                   f"The source story is kept for inspection at {exc.source_path}.",
@@ -221,12 +233,15 @@ def _cmd_new(args: argparse.Namespace) -> int:
             return 2
         name = args.name or "world"
         meta = create_scenario_from_interview(name, brief, _provider(),
-                                              endless=endless, on_stage=_stage)
+                                              endless=endless, on_stage=_stage,
+                                              win_direction=win_direction,
+                                              play_as=play_as)
     else:
         prose = Path(args.ingest)
         name = args.name or prose.stem.replace(" ", "_")
         meta = create_scenario_from_ingest(name, prose, _provider(),
-                                           endless=endless, on_stage=_stage)
+                                           endless=endless, on_stage=_stage,
+                                           win_direction=win_direction, play_as=play_as)
     print(f"Scenario {name!r} created: {meta['title']}")
     print(f"  protagonist: {meta['protagonist']}")
     print(f"  theme: {meta['theme']}")
@@ -279,8 +294,23 @@ def _cmd_start(args: argparse.Namespace) -> int:
     # to the endless/no-terminal arc; win/loss is the terminating mode).
     endless = _ask("mode — [w]in/loss or [f]reeplay? ").lower().startswith("f")
     name = _ask("name for the new world> ") or "world"
-    ns = argparse.Namespace(name=name, endless=endless,
-                            generate=None, interview=None, ingest=None)
+    # The player may co-author their OWN win/loss in win_loss mode (founder): you
+    # set the AIM ("catch the killer", "slay the dragon", "and you lose if you
+    # accuse the wrong person"); the world authors and CONCEALS the specific
+    # answer. Naming the premise is welcome — the leak-guard only blocks spelling
+    # out the hidden solution.
+    # Who you want to BE — stated identity "just works": the story makes you the
+    # protagonist (founder). Offered on the create paths (2/3), optional.
+    play_as = _ask("who do you want to play as? (a role/character, or blank to let "
+                   "the story choose)> ").strip()
+    win_direction = ""
+    if not endless and _ask("set your own win/loss condition? [y/N] ").lower().startswith("y"):
+        print("Describe it in your words — the AIM, not the answer. E.g. "
+              "'I solve the mystery; I lose if I accuse the wrong person', or "
+              "'I'm a knight and I win by slaying the dragon'.")
+        win_direction = _ask("your win/loss> ").strip()
+    ns = argparse.Namespace(name=name, endless=endless, win_direction=win_direction,
+                            play_as=play_as, generate=None, interview=None, ingest=None)
     if choice == "2":
         ns.generate = _ask("optional seed (genre/premise, or blank to surprise me)> ")
     else:
@@ -318,7 +348,7 @@ def _world_loop(session, debug: bool) -> str:
     """The in-WORLD REPL: no `construct:` prefix — the LLM's output is solely
     the live narrative (the felt difference from the agent shell). Auto-saves
     every turn (Session persists each turn). Returns 'menu' if the player asked
-    to step back out to the holodeck shell, else 'quit'."""
+    to step back out to the construct projector shell, else 'quit'."""
     print(f"  {session.opening()}\n")
     print("Type what you do. (:help for commands, :menu to step out, :quit to leave.)")
     outcome = "quit"
@@ -372,7 +402,7 @@ def _saved_sessions() -> list[str]:
 
 
 def _cmd_shell(args: argparse.Namespace) -> int:
-    """The holodeck entry — a conversational host. While no setting is loaded
+    """The construct projector entry — a conversational host. While no setting is loaded
     the console shows a `construct:` prefix and you talk TO the agent in natural
     language; it has the tools to load an ingested setting, resume a saved
     session, create a new world, or import a fiction. On load the prefix
@@ -382,7 +412,7 @@ def _cmd_shell(args: argparse.Namespace) -> int:
     from construct.game import list_scenarios
 
     provider = _provider()
-    print("construct: The holodeck is empty. What setting would you like to load?\n")
+    print("construct: The construct projector is empty. What setting would you like to load?\n")
     while True:
         scenarios = [s["name"] for s in list_scenarios()]
         sessions = _saved_sessions()
@@ -417,7 +447,7 @@ def _cmd_shell(args: argparse.Namespace) -> int:
         # Loaded: the prefix disappears — hand off to the world.
         if _world_loop(session, args.debug) == "quit":
             return 0
-        print()  # back at the holodeck shell
+        print()  # back at the construct projector shell
 
 
 def _shell_open(provider, decision: dict, scenarios: list[str]):

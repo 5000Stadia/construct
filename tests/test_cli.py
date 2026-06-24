@@ -106,7 +106,8 @@ def test_start_menu_routes_to_generate(monkeypatch, capsys):
     # The guided menu is a surface over the flags: choosing "generate" must
     # delegate to the same build path with the chosen mode + seed.
     from construct import cli
-    answers = iter(["2", "f", "myworld", "a noir harbor"])  # generate, freeplay, name, seed
+    # generate, freeplay, name, play-as (blank), seed
+    answers = iter(["2", "f", "myworld", "", "a noir harbor"])
     monkeypatch.setattr("builtins.input", lambda _p="": next(answers))
     captured = {}
 
@@ -121,6 +122,7 @@ def test_start_menu_routes_to_generate(monkeypatch, capsys):
     assert ns.generate == "a noir harbor" and ns.name == "myworld"
     assert ns.endless is True  # freeplay → endless/no-terminal
     assert ns.ingest is None and ns.interview is None
+    assert ns.play_as == ""  # blank play-as is fine
 
 
 def test_shell_is_the_default_command():

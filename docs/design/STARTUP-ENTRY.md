@@ -100,3 +100,36 @@ review decisions baked in:
   endless/no-terminal; win/loss → terminating).
 - **`--interview` kept beside** generate-then-ingest: spine-first (sketch) vs
   prose-first (the showcase loop, the primary "build a rich new world" path).
+
+## SHIPPED — the live transport mode interview (2026-06-19)
+The "which mode" session-zero question is now asked **over the chat transport
+itself**, not just the CLI menu — so a Telegram/loopback player co-authors the
+shape of their own experience before the world opens (founder direction: "right
+before the story even starts… whether they want FreePlay or a conclusive end").
+
+Flow (`construct/transport_core.py`):
+1. **Claim → ask.** On a successful invite claim the gate sends `MODE_PROMPT`
+   ("a story that builds toward a real ENDING, or open-ended FREEPLAY?") and
+   records an `_ASKING` sentinel in the registry `mode` column.
+2. **Next message → answer.** The player's next message is read into a mode by
+   `_interpret_mode` (keyword cues; **ambiguous → endless**, the safe default —
+   stakes are never forced on someone who didn't ask). The chosen mode is
+   persisted, the player is marked `started`, the world opens FRESH, and the
+   cold open is shown. Their *next* message is the first move.
+3. **Two-step, entry-agnostic.** The prompt is shown exactly once regardless of
+   entry path — including legacy players who claimed before the interview
+   existed (mode `NULL` + not `started` → ask now, answer next).
+4. **Resume honors the choice.** A returning player auto-resumes in their stored
+   mode (`registry.get_mode`, normalized by `_valid_mode`); the sentinel never
+   reaches a `Session`.
+
+Modes (`Session`): **win_loss** (has an aim; can terminate) · **endless**
+(world carries on, never settles) · **bounded** (the CLI/legacy default: the arc
+concludes and the world settles into "concluded" pacing, no aim, no
+termination). In the live transport a concrete mode is ALWAYS supplied as
+`mode_override`, so the bounded default only governs CLI/tests.
+
+Also shipped: **`/feedback <note>`** — drops a letter into the operator
+`dev_inbox/` bundling the note with the last few turns of the player's
+transcript, so a problem flagged mid-play can be picked up and fixed without
+leaving the session.

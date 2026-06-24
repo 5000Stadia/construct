@@ -41,18 +41,26 @@ WORLDS_DIR = Path("worlds")
 #: distinct from the committed `examples/` fixture (Kernos 063 B; Cx 063 #7).
 GENERATED_DIR = Path("generated")
 
+#: Batch size for the deferred durability-classification pass (the build's main
+#: efficiency lever — see create_scenario_from_ingest). Groups N model-judged
+#: rows per call: bigger = fewer round trips, smaller = less context per call.
+CLASSIFY_BATCH_SIZE = int(os.getenv("CONSTRUCT_CLASSIFY_BATCH", "24"))
+
 ARC_SCHEMA = {
     "type": "object",
     "properties": {
         "protagonist": {"type": "string", "description": "entity id, e.g. person:joel"},
         "theme": {"type": "string", "description": "the pitchable theme, one line"},
         "goal_statement": {"type": "string",
-                           "description": "ONE non-spoiling line of player-facing "
-                           "aspiration for win_loss mode — the AIM, never the "
-                           "mechanism/culprit/solution. E.g. 'solve the mystery and "
-                           "name the culprit', 'survive the journey to safer ground'. "
-                           "Must NOT contain any entity id, character name, or the "
-                           "hidden answer."},
+                           "description": "ONE vivid player-facing line of aspiration "
+                           "for win_loss mode — the AIM in THIS world's genre. NAME the "
+                           "premise stakes (the dragon, the blight, the missing child, "
+                           "the locked heart); a beloved archetype is GOOD, not a flaw "
+                           "— 'solve the mystery and name the killer', 'slay the dragon "
+                           "and free the vale', 'win her heart across the years', 'bring "
+                           "the fort through the monsoon alive'. Reveal the PROBLEM, "
+                           "never the SOLUTION: no whodunit answer, no mechanism, no "
+                           "specific hidden fact the player must discover."},
         "failure_when": {
             "type": "object",
             "description": "OPTIONAL loss terminal for win_loss mode — the ONE "
@@ -273,7 +281,9 @@ def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
 
 
 def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
-                       spath: Path, endless: bool, on_stage=None) -> dict:
+                       spath: Path, endless: bool, on_stage=None,
+                       win_direction: str = "", play_as: str = "",
+                       game_types: list | None = None) -> dict:
     """Shared session-zero tail (both creation paths): once canon is
     established, author the hidden arc over it (lint-gated), seed
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION.
@@ -315,18 +325,38 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
 
     arc = None
     last_findings: list = []
+    from construct.cohorts import FICTION_CRAFT
+    play_as_note = (
+        f"THE PLAYER HAS ASKED TO PLAY AS: '{play_as.strip()}'. The `protagonist` "
+        f"MUST be that figure — pick the matching person: id from AVAILABLE IDS (the "
+        f"character the story wrote for this role); do not pick someone else.\n"
+        if play_as.strip() else "")
     for attempt in range(3):
         proposal = complete_sync(provider,
             "You are authoring the hidden arc for a text-construct scenario "
-            "(novel-arc mode: the mystery IS the arc). Below is the world's "
+            "(novel-arc mode: the mystery IS the arc).\n\n" + FICTION_CRAFT +
+            "Below is the world's "
             "people+entity digest. Choose the protagonist (the natural "
             "point-of-view character), the thematic conclusion shape, and "
             "4-6 path-independent beats.\n"
-            "Also emit `goal_statement`: ONE non-spoiling player-facing line of "
-            "aspiration — the AIM only (e.g. 'solve the mystery and name the "
-            "culprit', 'survive the journey to safer ground'). It must NEVER "
-            "contain a character name, an entity id, the mechanism, or the "
-            "hidden answer; it is shown to the player at the start.\n"
+            "INSIST ON AN INTERESTING DESTINATION. The win — the conclusion shape's "
+            "world_condition, reached when the climax beats are achieved — must be a "
+            "HARD-WON climax: a genuine achievement the player reaches ONLY through "
+            "real progress across the whole arc (bring the killer to justice, slay "
+            "the dragon, lift the curse, get the ring to the fire). It must NOT be "
+            "true at the start, nor reachable in the opening turn — never a born-true "
+            "or trivially-satisfied state. The climax beats are discoveries or acts "
+            "that take the arc to earn; a player_learns beat gates on a fact the "
+            "protagonist does NOT already know. Make the destination worth playing "
+            "toward.\n"
+            + play_as_note +
+            "Also emit `goal_statement`: ONE vivid player-facing line of "
+            "aspiration in THIS world's genre, shown to the player at the start. "
+            "NAME the premise stakes; a beloved archetype is GOOD ('solve the "
+            "mystery and name the killer', 'slay the dragon and free the vale', "
+            "'win her heart across the years', 'bring the fort through the monsoon "
+            "alive'). Reveal the PROBLEM, never the SOLUTION: never the whodunit "
+            "answer, the mechanism, or the specific hidden fact to be discovered.\n"
             "OPTIONALLY emit `failure_when`: the ONE event that ends the story "
             "in defeat (detection, capture, death). Prefer kind `event_occurs` "
             "with a plausible event kind (e.g. 'alarm_raised', 'player_unmasked'); "
@@ -338,10 +368,16 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             "plausible event kind instead.\n\n"
             f"AVAILABLE IDS (use these exact strings):\n{known_ids}\n\n"
             f"WORLD DIGEST:\n{digest}\n\n"
+            + (f"THE PLAYER HAS CHOSEN THEIR WIN/LOSS — honour it. Author the "
+               f"conclusion shape's `world_condition` toward this victory and, if "
+               f"they named a way to lose, the `failure_when` toward that defeat; "
+               f"set `goal_statement` to THEIR framing (the AIM). Keep the specific "
+               f"hidden answer concealed — never restate the solution: <<<WIN\n"
+               f"{win_direction.strip()}\nWIN>>>\n\n" if win_direction.strip() else "")
             + (f"PRIOR ATTEMPT FAILED LINT: {last_findings}; fix those — the "
                f"named entities are not in AVAILABLE IDS.\n"
                if last_findings else ""),
-            ARC_SCHEMA, tier="main", deliberate=True)
+            ARC_SCHEMA, tier="main", deliberate=True, task="arc")
         arc = _build_arc(proposal)
         findings = lint_arc(arc, reads)
         blocking = [f for f in findings if f.check != "2-paths"]
@@ -355,8 +391,86 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     if arc is None:
         raise RuntimeError(f"arc failed lint after 3 attempts: {last_findings}")
 
+    # Resolve the game type(s) UP FRONT — player-chosen if given, else derived from the
+    # fiction. The cast/pillar shape (below) AND the meta directive both need it; deriving
+    # it only at meta-build time (as before) meant the cast block saw `game_types=None` on
+    # the generate path and never fired (live-test finding 2026-06-23).
+    from construct import cohorts as _co  # local: `cohorts` is rebound later in this fn
+    from construct import play_styles as _ps
+    resolved_game_types = _ps.resolve(game_types)
+    if not resolved_game_types:
+        try:
+            # Strong signal: theme + the world digest (the intro isn't authored until after
+            # the cast block, so we can't use it here as the old late-derivation did).
+            _desc = (proposal.get("theme", "") + "\n\n" + digest)[:2000]
+            _gt = _co.classify_game_type(provider, title, _desc)
+            resolved_game_types = _ps.match_many(
+                [_gt.get("primary", "")] + (_gt.get("secondary") or []))
+        except Exception as exc:
+            logger.warning("game-type derivation skipped: %s", exc)
+            resolved_game_types = []
+
+    # The POPULATED CAST (STORY-SHAPES §8): author the causal PILLARS + the people who hold
+    # the clues that fill them, over the just-authored arc. GATED on solvability and fully
+    # fail-open — a world that can't be authored fairly stays on the legacy (pillar-less)
+    # terminal path rather than shipping an unsolvable mystery. Enrichment, never a blocker.
+    cast_nodes: tuple = ()
+    cast_proposal: dict | None = None
+    try:
+        from construct.story_shapes import shapes_for
+        _shape = (shapes_for(resolved_game_types) or {}).get("shape") \
+            if resolved_game_types else None
+        if _shape:
+            import dataclasses as _dc
+
+            from construct import cohorts as _co
+            from construct.cast import (
+                build_pillars,
+                cast_from_proposal,
+                check_solvability,
+            )
+            # Re-author up to 3x, feeding back the solvability problems (mirrors the arc
+            # lint retry) — most misses are one required pillar lacking a none/pressure
+            # genuine clue, which the feedback fixes. Still fail-open to pillar-less.
+            _feedback = ""
+            for _attempt in range(3):
+                _cprop = _co.author_cast(provider, digest, proposal.get("theme", ""),
+                                         _shape, arc.protagonist, people, feedback=_feedback)
+                _cast, _specs = cast_from_proposal(_cprop)
+                _req = [pid for pid, _label, required in _specs if required]
+                # Validate holders against canon ids too (Cx 032: a clue on a phantom NPC
+                # can never be interviewed) — known_ids is the canon allowlist above.
+                # For DEDUCTION, also gate on PHYSICAL staging (INVESTIGATION-SHAPE.md §3d):
+                # every required holder + the culprit must be reachable in play, with a
+                # spoon-fed opening (>=2 at_scene + a first_witness). A malformed whodunit
+                # cast must fail here (→ re-author / pillar-less), never be patched by improv.
+                _problems = check_solvability(_req, _cast, known_ids=set(known_ids),
+                                              require_staging=(_shape == "deduction"))
+                if not _problems and _cast:
+                    arc = _dc.replace(arc,
+                                      pillars=build_pillars(_specs, _cast, arc.protagonist))
+                    cast_nodes, cast_proposal = _cast, _cprop
+                    logger.info("authored %d pillar(s) + %d cast member(s) for %s (attempt %d)",
+                                len(arc.pillars), len(_cast), _shape, _attempt + 1)
+                    break
+                _feedback = "; ".join(_problems) or "the cast had no members"
+                logger.warning("cast not solvable (attempt %d): %s", _attempt + 1, _problems)
+            else:
+                logger.warning("cast unsolvable after retries — shipping pillar-less (legacy)")
+                logger.info("authored %d pillar(s) + %d cast member(s) for %s",
+                            len(arc.pillars), len(_cast), _shape)
+    except Exception as exc:  # cast authoring NEVER sinks a build
+        logger.warning("cast authoring skipped: %s", exc)
+        cast_nodes, cast_proposal = (), None
+
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc) + arc_io.index_items(arc))
+    # The portfolio manifest (LIVING-WORLD-GENERATOR P1): session zero authors
+    # one (main) arc, so the registry is a single-entry portfolio. It is written
+    # explicitly (rather than relying on the fail-open default) so the multi-arc
+    # load path is exercised uniformly; side arcs are added by the P2 generator.
+    world.porcelain.ingest_structured(
+        arc_io.portfolio_items([arc.arc_id], main_arc_id=arc.arc_id))
     world.porcelain.ingest_structured([
         {"entity": "event:turn_0", "attribute": "kind", "value": "turn",
          "valid_from": turn_time(0)},
@@ -367,7 +481,43 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     _emit(on_stage, "Stage 5 · Seeding character knowledge · frame-scoped "
                     "secrecy (knows:<id>, P4) (PB)")
     cast = _seed_cast(arc.protagonist, people)
-    seeded = seed_character_frames(world, provider, cast, digest)
+    from construct.arc.executor import arc_protected_keys
+    seeded = seed_character_frames(world, provider, cast, digest,
+                                   protagonist=arc.protagonist,
+                                   protected=arc_protected_keys(arc))
+    # Seed each cast member's CLUES into their own knows:<npc> frame — the diegetic pieces
+    # they can surface when interviewed (the clue/pillar metadata stays host-side). The
+    # protagonist never holds these (they DISCOVER them in play, §8). Fail-open per frame.
+    if cast_nodes:
+        from construct.cast import cast_seed_plan
+        for _frame, _items in cast_seed_plan(cast_nodes):
+            if _frame == f"knows:{arc.protagonist}":
+                continue  # never pre-seed the player with the answers
+            try:
+                world.porcelain.ingest_structured(_items, frame=_frame)
+            except Exception as exc:  # one bad frame must not sink the seal
+                logger.warning("cast clue seed for %s skipped: %s", _frame, exc)
+        # STAGE the cast in PLACE (INVESTIGATION-SHAPE.md §3a/§3c-layer-1): write ordinary
+        # canon `in` facts so the at_scene cast is co-located with the protagonist's crime
+        # scene and remote suspects sit in referable places to travel to. The scene place is
+        # the protagonist's own resolved location (narration = ground truth — we anchor on
+        # where the player actually is). No location → no staging (the gate already required
+        # at_scene members for deduction; a missing scene is logged, never invented here).
+        try:
+            from construct.cast import cast_location_plan
+            _chain = world.porcelain.locate(arc.protagonist)
+            _scene_place = _chain[0] if _chain else None
+            if _scene_place:
+                _loc_items = cast_location_plan(cast_nodes, _scene_place)
+                if _loc_items:
+                    world.porcelain.ingest_structured(_loc_items)
+                    logger.info("staged %d cast location fact(s) at scene %s",
+                                len(_loc_items), _scene_place)
+            else:
+                logger.warning("no resolved scene place for %s — cast staging skipped",
+                               arc.protagonist)
+        except Exception as exc:  # staging must never sink the seal
+            logger.warning("cast location staging skipped: %s", exc)
 
     _emit(on_stage, "Stage 5.5 · Distilling narrative flavor · genre/voice overlay "
                     "+ per-entity feel (host annotation; engine stays vanilla)")
@@ -385,13 +535,27 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             # (WIN-LOSS §10, Cx 063): separate field so the declaration-denial
             # guard can't be silently disabled. Inert until termination is wired.
             "scenario_mode": "endless" if endless else "win_loss",
-            "arc_scope": sorted(e for e in arc_entities(arc) if reads.has_entity(e)),
+            # Scope = arc referents (now incl. pillar clue-fact entities) UNION the cast
+            # node ids, so interview delivery actually sees present cast NPCs at play time
+            # (Cx 032 blocker 1 — the scope is the candidate set for presence/interview).
+            "arc_scope": sorted(
+                {e for e in arc_entities(arc) if reads.has_entity(e)}
+                | {n.node_id for n in cast_nodes if reads.has_entity(n.node_id)}),
+            # The portfolio manifest mirror on meta (LIVING-WORLD-GENERATOR P1):
+            # which arc is main (terminal-bearing) and the active arc ids.
+            "main_arc": arc.arc_id, "arc_ids": [arc.arc_id],
             "seeded_frames": seeded, "endless": bool(endless)}
+    # The populated cast (STORY-SHAPES §8), host-side control data the turn loop reads for
+    # interview delivery (which NPC holds which clue, gated by reveal_condition). Stored as
+    # the raw proposal; the session rebuilds typed nodes via cast.cast_from_proposal. Only
+    # present when a solvable cast was authored (else the world plays the legacy path).
+    if cast_proposal is not None:
+        meta["cast"] = cast_proposal
     # The player-facing aim is a derivative of the hidden destination, NOT a
     # plot:/canon row (Kernos ruling): a leak-checked line on the scenario
     # seal, shown only in win_loss mode. Freeplay/endless has no fixed aim.
     if not endless:
-        meta["goal_statement"] = _player_goal(proposal, world)
+        meta["goal_statement"] = _player_goal(proposal, world, win_direction)
     # The thematic introduction (founder, 2026-06): the premise/stakes in voice,
     # ending on the player's non-spoiling aim — shown at the opening. Authored
     # last (it needs the style + the aim). Fail-open: never sinks the build.
@@ -405,15 +569,58 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     except Exception as exc:
         logger.warning("thematic intro skipped: %s", exc)
         meta["intro"] = ""
+    # A short genre/story-type shelf-tag (founder): so the library can tell a guest
+    # what STYLE each title is. Fail-open — a missing tag just omits it.
+    try:
+        meta["genre"] = cohorts.classify_genre(provider, title,
+                                                meta.get("intro") or proposal["theme"])
+    except Exception as exc:
+        logger.warning("genre tag skipped: %s", exc)
+    # The BACK-OF-THE-BOOK PREMISE (founder): a concrete, canon-faithful where/when/
+    # what-system blurb the Foyer grounds its pregame world-intro in — authored FROM
+    # the digest so it describes the REAL world (not the model improvising one from a
+    # thin theme), and distinct from the voice `style` and the thematic `intro`.
+    # Fail-open: the Foyer falls back to intro/style+theme if absent.
+    _emit(on_stage, "Stage 6.2 · Authoring the back-of-the-book premise")
+    try:
+        meta["premise"] = (cohorts.author_premise(
+            provider, digest, proposal["theme"], meta.get("genre", ""))
+            .get("premise") or "").strip()
+    except Exception as exc:
+        logger.warning("premise authoring skipped: %s", exc)
+        meta["premise"] = ""
+    # The GAME TYPE(S) — the maintained play-style directive(s) the narrator holds
+    # all game (GAME-TYPES.md). Player-chosen at build if given; else DERIVED from
+    # the fiction (also how ingested worlds get a type — locked to what it is).
+    # Resolved up front (before the cast block) so the cast/pillar shape and this directive
+    # agree; just record it on meta here.
+    if resolved_game_types:
+        meta["game_type"] = resolved_game_types
+    # Batched durability classification (the deferred pass from
+    # create_scenario_from_ingest): ONE grouped sweep over everything ingested
+    # with inline classification off — the build's main efficiency win. A no-op
+    # on the interview path (inline classification already ran; classify_all only
+    # touches unclassified rows). Restores inline mode for live play after.
+    if not world.ingestor.classify_inline:
+        _emit(on_stage, "Stage 6.2 · Classifying durability · BATCHED grouped "
+                        "model calls (the build's main efficiency win)")
+        try:
+            world.classifier.classify_all(batch_size=CLASSIFY_BATCH_SIZE)
+        except Exception as exc:  # never sink a build on the optimization
+            logger.warning("batched durability classification failed: %s", exc)
+        world.ingestor.classify_inline = True
     spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
     return meta
 
 
 def create_scenario_from_ingest(name: str, prose_path: Path,
                                 provider: Provider, endless: bool = False,
-                                on_stage=None) -> dict:
+                                on_stage=None, win_direction: str = "",
+                                play_as: str = "", game_types: list | None = None) -> dict:
     """Session-zero Path A: fresh ingest of a work through OUR pipeline
-    → pristine scenario. Emits per-stage status via `on_stage`."""
+    → pristine scenario. Emits per-stage status via `on_stage`. `win_direction`
+    (optional) is the player's own chosen win/loss framing, threaded to the arc
+    author + the player-facing goal."""
     WORLDS_DIR.mkdir(exist_ok=True)
     spath = scenario_path(name)
     if spath.exists():
@@ -426,13 +633,38 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                    description=f"Ingested from {prose_path.name} via Construct session-zero")
     try:
         # WORLD-A: chunked ingest, scene cursor advancing per chunk.
+        # DEFER durability classification (the engine's supported "harness defers
+        # to batch" mode): per-row inline classification was ~400 serial cheap-
+        # model calls — ~65% of a ~35-min build (profiled). With it deferred, the
+        # rows land unclassified (read as the STATE default meanwhile), and one
+        # BATCHED pass at the end of _finalize classifies them in grouped calls —
+        # "same judgments, fewer round trips" (engine classify_all docstring).
+        world.ingestor.classify_inline = False
         chunks = _chunk_chapters(text)
         _emit(on_stage, f"Stage 1 · Ingesting prose → pattern-buffer · model "
                         f"extraction → assertions, provenance-tracked ({len(chunks)} chunks)")
+        skipped = 0
         for i, chunk in enumerate(chunks, start=1):
-            world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}", at=float(i))
+            try:
+                world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}", at=float(i))
+            except Exception as exc:  # noqa: BLE001 — one bad chunk must not sink
+                # A single extraction defect (e.g. a cycle-forming containment edge
+                # the model wrote) raises a hard engine invariant. Fail OPEN per
+                # chunk: log loudly, drop that chunk's facts, keep building — the
+                # viability gate still catches a world too thin to play.
+                skipped += 1
+                logger.warning("chunk %d/%d ingest failed (%s: %s) — skipping; the "
+                               "build continues", i, len(chunks),
+                               type(exc).__name__, str(exc)[:200])
+                _emit(on_stage, f"   …chunk {i}/{len(chunks)} SKIPPED "
+                                f"({type(exc).__name__})")
+                continue
             _emit(on_stage, f"   …chunk {i}/{len(chunks)} extracted")
-        return _finalize_scenario(world, name, title, provider, spath, endless, on_stage)
+        if skipped:
+            logger.warning("ingest completed with %d/%d chunk(s) skipped", skipped, len(chunks))
+        return _finalize_scenario(world, name, title, provider, spath, endless,
+                                  on_stage, win_direction=win_direction,
+                                  play_as=play_as, game_types=game_types)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
@@ -443,7 +675,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
 
 
 def create_scenario_from_interview(name: str, brief: str, provider: Provider,
-                                   endless: bool = False, on_stage=None) -> dict:
+                                   endless: bool = False, on_stage=None,
+                                   win_direction: str = "", play_as: str = "") -> dict:
     """Session-zero Path B: build a world LIVE from a brief (no source
     text). An interviewer cohort expands the brief into the constitutive
     spine — charter, places + lateral graph, key NPCs with dispositional
@@ -459,7 +692,7 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
 
     _emit(on_stage, "Stage 1 · Interviewing → pattern-buffer · expanding the brief "
                     "into a constitutive spine (stated canon)")
-    spine = cohorts.interview_world(provider, brief)
+    spine = cohorts.interview_world(provider, brief, play_as=play_as)
     title = (spine.get("title") or name).strip()
     world = _world(spath, name, model=engine_tier_dispatch(provider),
                    stance="fiction", title=title,
@@ -473,7 +706,9 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
         world.ingestor.cursor.advance(1.0)
         world.porcelain.ingest_structured(items)
         logger.info("interview authored %d spine items", len(items))
-        return _finalize_scenario(world, name, title, provider, spath, endless, on_stage)
+        return _finalize_scenario(world, name, title, provider, spath, endless,
+                                  on_stage, win_direction=win_direction,
+                                  play_as=play_as)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
@@ -564,13 +799,28 @@ def _assess_viability(name: str, meta: dict) -> list[str]:
             snap = world.porcelain.snapshot(sorted(scope), lens="establishing_set")
             if not snap.get("facts"):
                 problems.append("establishing set is empty (no coherent cold-open)")
+        # Born-won guard: a win_loss world whose destination is already satisfied at
+        # genesis would END on turn 1 (the dragon-wins-immediately failure). The win
+        # must be a hard-won climax, not a born-true state. Fail-open on arc-load.
+        if meta.get("scenario_mode") == "win_loss":
+            try:
+                from construct.arc.conditions import Truth, evaluate
+                _arc = arc_io.arc_from_frame(reads)
+                if evaluate(_arc.shape.world_condition, reads) is Truth.TRUE:
+                    problems.append("win condition already satisfied at genesis — the "
+                                    "story would be won on turn 1 (the destination must "
+                                    "be a hard-won climax, not a born-true state)")
+            except Exception as exc:  # never crash the gate on an arc-load hiccup
+                logger.warning("born-won viability check skipped: %s", exc)
     finally:
         world.close()
     return problems
 
 
 def create_scenario_from_generated(name: str, provider: Provider, *, seed: str = "",
-                                   endless: bool = False, on_stage=None) -> dict:
+                                   endless: bool = False, on_stage=None,
+                                   win_direction: str = "", play_as: str = "",
+                                   game_types: list | None = None) -> dict:
     """Session-zero Path 2 (STARTUP-ENTRY §3): author a complete HIDDEN story
     from an optional seed, save it on the authoring side of the firewall,
     ingest it through the UNCHANGED six-stage pipeline, then GATE on
@@ -586,13 +836,16 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
 
     _emit(on_stage, "Stage 0 · Authoring the hidden source story · prose-first "
                     "(the showcase loop: fiction → projection)")
-    work = cohorts.author_story(provider, seed=seed)
+    work = cohorts.author_story(provider, seed=seed, win_direction=win_direction,
+                                play_as=play_as)
     prose_path = _save_generated_prose(name, work)
     _emit(on_stage, f"   …hidden bible saved (authoring side of the firewall) "
                     f"→ {prose_path}")
 
     meta = create_scenario_from_ingest(name, prose_path, provider,
-                                       endless=endless, on_stage=on_stage)
+                                       endless=endless, on_stage=on_stage,
+                                       win_direction=win_direction, play_as=play_as,
+                                       game_types=game_types)
 
     _emit(on_stage, "Stage 7 · Viability gate · entry material + cold-open smoke "
                     "over shipped reads")
@@ -669,7 +922,15 @@ def _author_foreshadow_pins(world: Any, clues: list[tuple[str, str]]) -> None:
     from construct.arc.io import pin_to_items
     p = world.porcelain
     try:
-        existing = json.loads(p.state("arc:main", "pin_index", frame="plot:main") or "[]")
+        # pin_index is stored as a JSON-list literal, but read it defensively:
+        # state() may hand back the raw string, an already-parsed list, or nothing.
+        raw = p.state("arc:main", "pin_index", frame="plot:main")
+        if isinstance(raw, str):
+            existing = json.loads(raw or "[]")
+        elif isinstance(raw, list):
+            existing = raw
+        else:
+            existing = []  # absent or unexpected shape → start clean (fail-open)
         new_ids, items = [], []
         for i, (entity, feel) in enumerate(clues):
             pin_id = f"pin:clue_{_slug(entity)}_{i}"
@@ -692,29 +953,41 @@ def _author_foreshadow_pins(world: Any, clues: list[tuple[str, str]]) -> None:
 
 #: Fallback shown when the authored goal leaks a hidden term (fail-closed):
 #: win_loss always gets an aim line, never a spoiling one.
-_DEFAULT_GOAL = "Uncover the truth and see the story through to its end."
+_DEFAULT_GOAL = "See your story through to its end."
 
 
 def _hidden_terms(world: Any, proposal: dict) -> set[str]:
-    """The tokens a player-facing goal must NOT contain — the names and
-    answers the arc keeps hidden. Drawn from every canon entity id (its
-    local-part word tokens) plus each beat's answer entity/value. Short
-    tokens (<3 chars) are dropped as noise. This is the forbidden set the
-    leak-check tests the goal against; over-inclusion only costs a fall
-    back to the generic goal, never a leak (WIN-LOSS §10, Cx fail-closed)."""
+    """The tokens a player-facing goal must NOT contain — the ANSWERS the arc
+    keeps hidden, NOT the premise. A genre-true aim names the world's stakes
+    ("lift the blight", "toss the ring into the fire", "see the lost child
+    home") — those reference PREMISE entities (the problem, the setting), which
+    the player already knows from the intro and which the goal SHOULD evoke. The
+    spoiler is the SOLUTION: what the player must DISCOVER. So the forbidden set
+    is only the `player_learns` beat VALUES (the culprit, the cure, the secret)
+    plus a `player_learns` failure value — never the whole world vocabulary
+    (that over-broad set is what forced every goal back to boilerplate).
+    Short tokens (<3 chars) are dropped as noise. Fail-closed on the answers."""
     terms: set[str] = set()
 
-    def _add(raw: str) -> None:
-        local = str(raw).split(":", 1)[-1]
-        for tok in re.split(r"[^a-z0-9]+", local.lower()):
+    def _add_entity(raw: str) -> None:
+        # ONLY a discovered ENTITY identity is a spoiler (the 'Dr. Archibald'
+        # the player must name). A value that is an entity-id reference
+        # (person:/obj:/fact:…) contributes its local-part tokens; a plain
+        # literal value or a premise noun does NOT — naming the dragon, the
+        # blight, the winter is the AIM the player asked for, never a leak.
+        raw = str(raw)
+        if ":" not in raw:
+            return
+        for tok in re.split(r"[^a-z0-9]+", raw.split(":", 1)[-1].lower()):
             if len(tok) >= 3:
                 terms.add(tok)
 
-    for eid in _canon_entity_ids(world):
-        _add(eid)
     for b in proposal.get("beats", []):
-        _add(b.get("entity", ""))
-        _add(b.get("value", ""))
+        if b.get("kind") == "player_learns":
+            _add_entity(b.get("value", ""))
+    fw = proposal.get("failure_when") or {}
+    if fw.get("kind") == "player_learns":
+        _add_entity(fw.get("value", ""))
     return terms
 
 
@@ -727,16 +1000,26 @@ def _goal_statement_safe(goal: str, forbidden: set[str]) -> bool:
     return words.isdisjoint(forbidden)
 
 
-def _player_goal(proposal: dict, world: Any) -> str:
-    """The non-spoiling player-facing aim for win_loss mode: the authored
-    `goal_statement` if it passes the leak-check, else the generic default.
-    Fail-closed — a leaky goal is dropped, never shown (WIN-LOSS §10)."""
+def _player_goal(proposal: dict, world: Any, win_direction: str = "") -> str:
+    """The player-facing aim for win_loss mode. Precedence: the authored
+    `goal_statement` if it passes the leak-check; else the PLAYER'S OWN chosen
+    win framing (`win_direction`) if given — they authored it, so it is their
+    fiction to state, only blocked if it literally spells out the hidden ANSWER;
+    else the generic default. Fail-closed on the SOLUTION (never spoil the
+    discovered answer), but never let the leak-guard refuse the player the very
+    fiction they asked for (founder, WIN-LOSS §10)."""
+    forbidden = _hidden_terms(world, proposal)
     goal = (proposal.get("goal_statement") or "").strip()
-    if goal and _goal_statement_safe(goal, _hidden_terms(world, proposal)):
+    if goal and _goal_statement_safe(goal, forbidden):
         return goal
-    if goal:
-        logger.warning("goal_statement rejected (leaks a hidden term); "
-                       "using the generic default")
+    chosen = (win_direction or "").strip()
+    if chosen and _goal_statement_safe(chosen, forbidden):
+        return chosen  # the player's own aim — honour it
+    if goal or chosen:
+        leaked = {w for w in re.split(r"[^a-z0-9]+", f"{goal} {chosen}".lower())
+                  if w in forbidden}
+        logger.warning("goal/win framing names a hidden identity %s; using the "
+                       "default", sorted(leaked))
     return _DEFAULT_GOAL
 
 
@@ -749,7 +1032,7 @@ SEED_CAST_CAP = int(os.getenv("CONSTRUCT_SEED_CAST_CAP", "5"))
 #: over a bounded thread pool (~15-min from-scratch interview build → ~the
 #: slowest single seed). Bounded to respect provider rate limits. Default
 #: 1 = sequential, the prior behavior unchanged. A safe, reversible opt-in.
-SEED_CONCURRENCY = max(1, int(os.getenv("CONSTRUCT_SEED_CONCURRENCY", "1")))
+SEED_CONCURRENCY = max(1, int(os.getenv("CONSTRUCT_SEED_CONCURRENCY", "3")))
 
 
 def _seed_cast(protagonist: str, people: list[str]) -> list[str]:
@@ -760,12 +1043,23 @@ def _seed_cast(protagonist: str, people: list[str]) -> list[str]:
 
 
 def seed_character_frames(world: Any, provider: Provider,
-                          characters: list[str], digest: str) -> list[str]:
+                          characters: list[str], digest: str,
+                          protagonist: str = "",
+                          protected: set | None = None) -> list[str]:
     """Author each character's private `knows:<id>` frame from canon
     (frame-scoped secrecy, P4). Returns the ids actually seeded. Writes
     ONLY to knows: frames — never canon or plot: — so it is fully
     reversible (see reseed_character_frames). Fail-open per character: a
     failed authoring call skips that character, never the scenario.
+
+    CONCEALMENT (bug-fix 2026-06-22): the PROTAGONIST must NOT be seeded
+    with the arc's hidden answer — the player DISCOVERS the protected
+    (entity, attribute) facts in play, never starts knowing them
+    (STORY-SHAPE-AND-RESOLUTION; the live harness caught the player being
+    seeded that Cray signed the decommission order, i.e. the whole
+    mystery). When `protagonist`/`protected` are given, those keys are
+    stripped from the protagonist's seed (other characters are unaffected —
+    an NPC may legitimately know the secret).
 
     The per-character seed calls are independent (each authors one frame
     from the already-fixed `digest`; no call reads another's output), so
@@ -795,8 +1089,18 @@ def seed_character_frames(world: Any, provider: Provider,
     else:
         results = [_author(char) for char in characters]
 
+    protected = protected or set()
     seeded: list[str] = []
     for char, items in results:
+        if items and char == protagonist and protected:
+            # Strip the arc's hidden answer from the PLAYER's starting knowledge —
+            # they earn it through play, never begin knowing it.
+            kept = [it for it in items
+                    if (it["entity"], it["attribute"]) not in protected]
+            if len(kept) != len(items):
+                logger.info("protagonist seed: stripped %d protected (hidden-answer) "
+                            "fact(s) from knows:%s", len(items) - len(kept), char)
+            items = kept
         if items:
             world.porcelain.ingest_structured(items, frame=f"knows:{char}")
             seeded.append(char)
@@ -823,7 +1127,17 @@ def reseed_character_frames(name: str, provider: Provider,
         for char in targets:                       # clear the old frame first
             for row in world.buffer.visible(frame=f"knows:{char}"):
                 world.porcelain.retract(row.id, "reseed: re-authoring knowledge frame")
-        seeded = seed_character_frames(world, provider, targets, digest)
+        # Honor the protagonist's concealment filter on reseed too (same bug-fix).
+        from construct.adapter import PorcelainWorldReads
+        from construct.arc.executor import arc_protected_keys
+        protagonist, protected = "", set()
+        try:
+            _arc = arc_io.arc_from_frame(PorcelainWorldReads(world))
+            protagonist, protected = _arc.protagonist, arc_protected_keys(_arc)
+        except Exception:
+            logger.warning("reseed: could not load arc for protected-key filter")
+        seeded = seed_character_frames(world, provider, targets, digest,
+                                       protagonist=protagonist, protected=protected)
     finally:
         world.close()
     meta["seeded_frames"] = sorted(set(meta.get("seeded_frames", [])) | set(seeded))
@@ -905,14 +1219,25 @@ def _world_digest(world: Any, limit: int = 6000) -> str:
     return json.dumps(world.porcelain.snapshot(scope))[:limit] if scope else "(empty)"
 
 
-def _build_arc(proposal: dict) -> Arc:
+def _build_arc(proposal: dict, arc_id: str = "arc:main") -> Arc:
+    """Build an Arc from an authoring proposal. `arc_id` defaults to the main
+    arc; a non-main (side) arc gets a per-arc refusal-clock id so two arcs never
+    collide on `clock:refusal` in the shared `plot:main` frame (the one real
+    multi-arc collision — LIVING-WORLD-GENERATOR P1)."""
+    is_main = arc_id == "arc:main"
+    slug = arc_id.split(":", 1)[1]
+    # Non-main arcs suffix their beat ids with the arc slug so two arcs sharing
+    # `plot:main` never collide on a beat status row (and the escalation/pressure
+    # clock ids derived from the beat id inherit that uniqueness). The main arc
+    # keeps bare `beat:<slug>` ids — byte-for-byte the pre-portfolio behavior.
+    bsuffix = "" if is_main else f"_{slug}"
     protagonist = proposal["protagonist"]
     player_frame = f"knows:{protagonist}"
     beats = []
     for b in proposal["beats"]:
         raw = b["id"].split(":", 1)[-1]
         beats.append(Beat(
-            beat_id=f"beat:{_slug(raw)}",
+            beat_id=f"beat:{_slug(raw)}{bsuffix}",
             phase=Phase(b["phase"]),
             weight=Weight(b["weight"]),
             achievable_via=_beat_expr(b, player_frame),
@@ -921,7 +1246,7 @@ def _build_arc(proposal: dict) -> Arc:
         or [beats[-1].beat_id]
     k = max(1, min(2, len(climax) - 1)) if len(climax) > 1 else 1
     shape = ConclusionShape(
-        shape_id="shape:main",
+        shape_id=f"shape:{slug}",
         delta_type=proposal["delta_type"],
         tension=tuple(proposal["tension"][:3]) if len(proposal["tension"]) >= 3
         else (protagonist, "drive:a", "drive:b"),
@@ -938,13 +1263,15 @@ def _build_arc(proposal: dict) -> Arc:
               rung=(Rung.SURFACE, Rung.DRAW, Rung.CONVERGE)[min(i, 2)])
         for i, b in enumerate(beats) if b.weight is Weight.REQUIRED
     )
-    refusal = Clock(clock_id="clock:refusal", fires_when=TurnsQuiet(15),
-                    effects=({"entity": "event:world_concludes", "attribute": "kind",
+    refusal_id = "clock:refusal" if is_main else f"clock:refusal_{slug}"
+    concludes = "event:world_concludes" if is_main else f"event:world_concludes_{slug}"
+    refusal = Clock(clock_id=refusal_id, fires_when=TurnsQuiet(15),
+                    effects=({"entity": concludes, "attribute": "kind",
                               "value": "refusal_conclusion"},),
-                    bound_to="arc:main", rung=Rung.REFUSAL)
+                    bound_to=arc_id, rung=Rung.REFUSAL)
     failure_when = _failure_expr(proposal.get("failure_when"), player_frame)
     return Arc(
-        arc_id="arc:main", protagonist=protagonist, shape=shape,
+        arc_id=arc_id, protagonist=protagonist, shape=shape,
         beats=tuple(beats), clocks=clocks, refusal_clock=refusal,
         climax_ready_k=k, climax_ready_beats=tuple(climax),
         phase_budget={Phase.SETUP: 5, Phase.RISING: 6, Phase.CRISIS: 3,
@@ -963,6 +1290,51 @@ def start_playthrough(name: str, fresh: bool, player_id: str | None = None) -> P
     return slot
 
 
+def episode_checkpoint_path(name: str, player_id: str | None = None) -> Path:
+    """The per-player EPISODE-START checkpoint: a copy of the slot taken the
+    moment a new episode opens over the EXISTING world (no re-ingest — the world
+    is already in its end-of-last-episode state). It lets `/restart` roll the
+    CURRENT episode back to its opening without discarding earlier episodes' canon.
+    Absent for a first/only episode — the pristine `.world` IS that checkpoint
+    (a slot is just a recopy of it). See docs/design/EPISODIC-CONTINUATION.md."""
+    if player_id:
+        return WORLDS_DIR / f"{name}.{_safe_player_id(player_id)}.ep.checkpoint.world"
+    return WORLDS_DIR / f"{name}.ep.checkpoint.world"
+
+
+def checkpoint_episode_start(name: str, player_id: str | None = None) -> Path | None:
+    """Snapshot the current slot as the episode-start checkpoint (one file copy),
+    so `/restart` can restore THIS episode. For episode one there is no prior
+    slot to checkpoint and the pristine scenario serves; returns None then."""
+    slot = slot_path(name, player_id)
+    if not slot.exists():
+        return None
+    cp = episode_checkpoint_path(name, player_id)
+    shutil.copyfile(slot, cp)
+    logger.info("episode-start checkpoint written for %s", name)
+    return cp
+
+
+def restore_episode_start(name: str, player_id: str | None = None) -> bool:
+    """Roll the slot back to the CURRENT episode's opening. Returns True when a
+    checkpoint existed (episode >=2, mid-progression rollback); False otherwise
+    (caller falls back to a pristine fresh start = the first episode's opening)."""
+    cp = episode_checkpoint_path(name, player_id)
+    if not cp.exists():
+        return False
+    shutil.copyfile(cp, slot_path(name, player_id))
+    logger.info("restored %s to episode-start checkpoint", name)
+    return True
+
+
+def restore_original(name: str, player_id: str | None = None) -> None:
+    """Wipe back to the factory-fresh ORIGINAL scenario: drop the play slot AND
+    any episode checkpoint, so the next fresh entry recopies the pristine `.world`
+    (episode one, untouched). Discards ALL episode progression and live canon."""
+    slot_path(name, player_id).unlink(missing_ok=True)
+    episode_checkpoint_path(name, player_id).unlink(missing_ok=True)
+
+
 def open_playthrough(name: str, provider: Provider,
                      player_id: str | None = None) -> tuple[Any, Arc, dict]:
     slot = slot_path(name, player_id)
@@ -977,10 +1349,22 @@ def open_playthrough(name: str, provider: Provider,
     world = _world(slot, name, model=engine_tier_dispatch(provider))
     meta_path = scenario_path(name).with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-    # Reconstruct the arc from the plot: frame (~21ms post-037). A stamped
-    # arc_cache from an older scenario is ignored — the frame is the truth.
-    arc = arc_io.arc_from_cache(meta["arc_cache"]) if "arc_cache" in meta \
-        else arc_io.arc_from_frame(PorcelainWorldReads(world))
+    # Reconstruct the PORTFOLIO from the plot: frame (~21ms/arc post-037). The
+    # main (terminal-bearing) arc is returned as `arc` (backward-compatible 3-
+    # tuple); side arcs ride on a runtime meta key the Session reads. A legacy
+    # single-arc `arc_cache` (pre-portfolio) is wrapped as a one-arc portfolio;
+    # a world with no portfolio manifest fails open to a single `arc:main`.
+    reads = PorcelainWorldReads(world)
+    if "arc_cache" in meta:
+        arcs = [arc_io.arc_from_cache(meta["arc_cache"])]
+    else:
+        arcs = arc_io.portfolio_from_frame(reads)
+    if not arcs:
+        raise RuntimeError(f"scenario {name!r}: no arcs could be reconstructed")
+    main_arc_id = arc_io.main_arc_from_frame(reads)
+    arc = next((a for a in arcs if a.arc_id == main_arc_id), arcs[0])
+    meta["_side_arcs"] = [a for a in arcs if a.arc_id != arc.arc_id]
+    meta["main_arc"] = arc.arc_id
     return world, arc, meta
 
 

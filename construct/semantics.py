@@ -49,6 +49,13 @@ ARC_STRUCTURAL_ENUMS = frozenset({
     "scope_kind",
 })
 
+#: Monotonic ACCRUE counters (DIEGETIC-TIME.md): a baseline literal + signed
+#: deltas the engine folds into a running total ("math off the model"). Diegetic
+#: elapsed time is the textbook case (Kernos steer 074): each turn appends
+#: `+N minutes`. A distinctive attribute name (never a plain `minutes`) so no
+#: ordinary literal accidentally inherits accrue folding.
+ACCRUE_ATTRS = frozenset({"elapsed_minutes"})
+
 
 def attribute_default(attribute: str) -> dict | None:
     """The engine consults this for an attribute with no explicit
@@ -63,6 +70,8 @@ def attribute_default(attribute: str) -> dict | None:
     per-row classifier MODEL call at build time — which on a flaky provider can
     hang the whole build (the traversal-policy wedge, 2026-06). No model = no
     hang; the classifier treats a structural attribute as constitutive."""
+    if attribute in ACCRUE_ATTRS:
+        return {"fold_policy": "accrue"}
     if attribute in POLICY_STRUCTURAL_SET_VALUED:
         return {"structural": True, "arity": "set_valued"}
     if attribute in ARC_STRUCTURAL_ENUMS:
