@@ -422,6 +422,7 @@ class TurnTrace:
     conclusion_basis: str = ""  # one-line why, for the epilogue + debug surface
     learned_clues: list = field(default_factory=list)  # clue ids surfaced into the player frame this turn
     discovered: list = field(default_factory=list)  # off-scene cast ids whose whereabouts the player learned this turn
+    adapted: list = field(default_factory=list)  # (lane, pillar_id) the make-it-real doorway applied this turn (NARRATION-DISCIPLINE)
     weave_decision: str = ""    # story-governance: let_run|pepper_hook|deliver_card (CARD-WEAVING)
     weave_card: str = ""        # the card woven this turn (if any)
     floor_remaining: list = field(default_factory=list)  # floor-debt card ids still un-proposed
@@ -656,6 +657,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     needs_test, uncertain_of = False, ""
     commits, commitment = False, ""
     takes = ""
+    examines_target = ""  # the ONE specific detail the player closely investigates (make-it-real gate)
     asserts_or_reveals = True  # conservative default (TURN-LATENCY A-lite): keep extraction
     # A brief actor descriptor so `classify` can wave off a test for things this
     # character is plainly proficient at (ACTION-RESOLUTION §1). Cheap point reads.
@@ -678,6 +680,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         commits = bool(verdict.get("commits")) and kind in ("action", "declaration")
         commitment = (verdict.get("commitment") or "").strip() or player_input
         takes = (verdict.get("takes") or "").strip()
+        examines_target = (verdict.get("examines_target") or "").strip()
         # Default TRUE on absence (old stubs / schema-less classify) so extraction is never
         # silently skipped where a fact could be asserted (protected-key licensing depends on it).
         asserts_or_reveals = bool(verdict.get("asserts_or_reveals", True))
@@ -1083,6 +1086,77 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 except Exception as exc:  # discovery must not sink the turn
                     trace.dropped_cohorts.append(f"discover:{ref} ({exc})")
     trace.discovered = [ref for (ref, _loc) in discovered]
+
+    # ---- MAKE-IT-REAL: a PURSUED off-script thread becomes THE path (NARRATION-DISCIPLINE.md) -
+    # When the player pursued an investigative thread that delivered NO authored clue, and an
+    # unfilled required cause remains, judge (cheap) whether the pursuit can HONESTLY serve that
+    # cause. If so, REROUTE: write the cause's ALREADY-AUTHORED genuine clue through the same
+    # learn-clue doorway — the narrator frames it as discovered via the player's OWN detail, so
+    # the case solves by THEIR path, never railroaded back to the pre-written clue. Route-flex,
+    # NEVER answer-flex: the hidden answer is never minted here (the host derives the fact from
+    # the authored pillar; the cohort only ROUTES). Budgeted; fail-open. SKIPPED when the player
+    # is engaging an authored holder (that is a reveal-condition gate, not an un-authored thread)
+    # or nothing was authored to cover. The destructive lane is NOT here — a ruinous decisive act
+    # is the resolution deck + world-reaction path, never a make-it-real rescue (Cx 086).
+    adapt_directives: list[str] = []
+    # PURSUIT SIGNAL (Cx 087): the player CLOSELY investigated ONE specific detail — not a
+    # generic look-around. `examines_target` (from classify) carries it; empty = no make-it-real
+    # (avoids adapting every atmospheric mention into structure).
+    if (cast and kind == "action" and not learned and generate and arc.pillars
+            and examines_target):
+        try:
+            from construct.arc.adapt import (ADAPT_BUDGET, adaptations_used,
+                                             apply_adaptation)
+            from construct.cast import all_clues as _all_clues_ad
+            tgt_low = examines_target.lower()
+            _cast_tuple = tuple(cast.values()) if isinstance(cast, dict) else tuple(cast)
+            # If the pursued target IS an authored cast entity/holder, this is the ASK/EXAMINE
+            # channel (and possibly a not-yet-met reveal condition) — NOT an un-authored thread.
+            # Skip make-it-real so we never short-circuit an authored gate.
+            names_authored = any(
+                _names_entity(n.node_id, tgt_low,
+                              name=str(canon_table.get((n.node_id, "name")) or ""),
+                              role=getattr(n, "surface_role", ""))
+                for n in _cast_tuple)
+            summ = coverage_summary(live_reads, arc)
+            if (not names_authored and summ["unfilled"]
+                    and adaptations_used(live_reads) < ADAPT_BUDGET):
+                # unfilled pillar id -> its authored GENUINE clue fact (the reroute target —
+                # writing it satisfies the pillar's genuine_via, so the cause actually covers).
+                by_pillar: dict = {}
+                for c in _all_clues_ad(_cast_tuple):
+                    if (c.pillar_id in summ["unfilled"] and c.coverage_effect == "genuine"
+                            and not c.is_red_herring and c.pillar_id not in by_pillar):
+                        by_pillar[c.pillar_id] = c.surface_fact
+                labels = {pl.pillar_id: pl.label for pl in arc.pillars}
+                offer = [(pid, labels.get(pid, pid)) for pid in summ["unfilled"]
+                         if pid in by_pillar]
+                if offer:
+                    with _phase(trace, "adapt"):
+                        decision = cohorts.adapt_decision(
+                            provider, player_input, unfilled_pillars=offer, actor=actor)
+                    trace.cohort_calls.append("adapt:cheap")
+                    lane = (decision or {}).get("lane")
+                    pid = (decision or {}).get("pillar_id") or ""
+                    if lane == "genuine" and pid in by_pillar:
+                        e, a, v = by_pillar[pid]
+                        ar = apply_adaptation(
+                            world, {"lane": "genuine", "pillar_id": pid, "fact": [e, a, v],
+                                    "reason": (decision.get("reason") or "")},
+                            protagonist=arc.protagonist, turn=turn, reads=live_reads)
+                        if ar.get("applied"):
+                            trace.adapted.append((ar["lane"], pid))
+                            adapt_directives.append(
+                                "\nMAKE IT REAL (the player's OWN line of inquiry pays off — "
+                                "NARRATION-DISCIPLINE): their pursuit leads them, through their "
+                                "own observation and reasoning, to establish that "
+                                f"{_human_entity(a)} of {_human_entity(e)} is "
+                                f"{_human_entity(str(v))}. Render this as THEIR pursued detail "
+                                "genuinely yielding it — not a witness reciting it, and NEVER a "
+                                "redirect to some other object or person. "
+                                f"({(decision.get('reason') or '').strip()})")
+        except Exception as exc:  # make-it-real must never sink a turn
+            trace.dropped_cohorts.append(f"adapt ({exc})")
 
     # ---- STORY GOVERNANCE: weave a card, or serve the live path (CARD-WEAVING.md) -------
     # Supersedes the passive cast-threads nudge (Cx 039 #5). When there are un-played cards
@@ -1560,6 +1634,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "\nWHAT IS LEARNED THIS TURN (the questioned character discloses it now, in "
             "character — weave it into their reply, do not list or label it):\n"
             + "\n".join(reveal_lines))
+    if adapt_directives:
+        # make-it-real (NARRATION-DISCIPLINE.md): the player's pursued thread became the path
+        # to an unfilled cause. Render the reveal as their OWN deduction from the detail they
+        # chose — never a redirect back to the authored clue, never a witness lecture.
+        briefing_parts.extend(adapt_directives)
     if discovered:
         # Discovery affordance (§3c layer 3): the player now knows where to find these
         # off-scene people. Offer the route diegetically (the witness mentions where they

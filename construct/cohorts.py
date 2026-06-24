@@ -88,6 +88,13 @@ CLASSIFY_SCHEMA = {
                   "an action that plausibly alters or reveals state worth recording. FALSE for "
                   "pure looking/observing, asking, or plain talk with no claim, and for simple "
                   "movement/taking already captured by moves_to/takes. When UNSURE, say true."},
+        "examines_target": {"type": "string",
+                  "description": "if the player CLOSELY INVESTIGATES one SPECIFIC thing — "
+                  "scrutinizes/inspects/follows up on a particular object, mark, trace, or "
+                  "detail ('examine the wet ring', 'check the forced lock', 'study the torn "
+                  "page') — name that ONE specific target exactly as they referred to it. "
+                  "EMPTY for a generic look-around ('glance around the room', 'look about'), "
+                  "plain movement, talk, or any action not focused on inspecting one detail."},
     },
     "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of"],
 }
@@ -1572,9 +1579,69 @@ def classify(provider: Provider, player_input: str, actor: str = "") -> dict:
         f"and ordinary actions are NOT commitments.\n"
         f"Additionally: set `takes` to the object the player PICKS UP or takes into "
         f"possession this turn (grabs, lifts, pockets, tucks under arm), as named; empty "
-        f"if they take nothing.\n\n"
+        f"if they take nothing.\n"
+        f"Additionally: set `examines_target` to the ONE specific thing the player CLOSELY "
+        f"investigates this turn — a particular object, mark, trace, or detail they "
+        f"scrutinize/inspect/follow up on ('the wet ring', 'the forced lock') — named as they "
+        f"referred to it; EMPTY for a generic look-around, movement, talk, or anything not "
+        f"focused on inspecting one detail.\n\n"
         f"INPUT: {player_input}",
         CLASSIFY_SCHEMA, tier="cheap", task="cls")
+
+
+#: make-it-real (NARRATION-DISCIPLINE.md): the decision an off-script PURSUED thread maps to.
+#: The cohort only JUDGES the lane + which unfilled cause it serves; the HOST derives the
+#: actual fact from that pillar's authored genuine clue (route-flex, NEVER answer-flex — the
+#: cohort never sees or mints the hidden answer). `red_herring`/`plot_supersede` are reserved
+#: for `apply_adaptation` but NOT minted by this v1 cohort (genuine-reroute + decline only).
+ADAPT_DECISION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "lane": {"type": "string", "enum": ["genuine", "decline"],
+                 "description": "genuine = the pursuit can HONESTLY lead to one of the "
+                 "unfilled causes (make the player's chosen path pay off); decline = it is "
+                 "just atmosphere and serves no cause (stays inert; the player is not punished)."},
+        "pillar_id": {"type": "string",
+                      "description": "if genuine, EXACTLY one pillar id from the provided "
+                      "unfilled list that this pursuit plausibly serves; empty if decline."},
+        "reason": {"type": "string",
+                   "description": "one clause: how the pursued detail honestly leads to that "
+                   "cause ('a doctor's wet ring with no glass implies a poisoned drink was "
+                   "removed → the means')."},
+    },
+    "required": ["lane", "pillar_id", "reason"],
+}
+
+
+def adapt_decision(provider: Provider, pursued: str, *,
+                   unfilled_pillars: list[tuple[str, str]], actor: str = "") -> dict:
+    """make-it-real judgment (NARRATION-DISCIPLINE.md / [[improv-serves-the-destination]]):
+    the player PURSUED a thread the authored clues don't cover. Decide whether it can honestly
+    SERVE an unfilled cause (genuine reroute) or is mere atmosphere (decline). The cohort routes
+    ONLY — it never sees or invents the hidden answer; the host writes the chosen pillar's
+    authored genuine fact. `unfilled_pillars` is [(pillar_id, label)]. Cheap tier (a constrained
+    routing judgment, not the narrator). Fail-open at the call site."""
+    listing = "\n".join(f"- {pid}: {label}" for pid, label in unfilled_pillars) or "- (none)"
+    actor_note = (f"THE CHARACTER (judge what their expertise could plausibly deduce): {actor}\n"
+                  if actor else "")
+    return complete_sync(provider,
+        actor_note +
+        "In an interactive mystery, the player pursued a detail the pre-authored clues do "
+        "not cover. Your job is to decide whether their chosen path can HONESTLY be made to "
+        "pay off toward an UNFILLED cause of the story — so their initiative is rewarded "
+        "instead of dead-ending — or whether it is just atmosphere.\n\n"
+        f"THE PLAYER PURSUED: {pursued}\n\n"
+        f"UNFILLED CAUSES (still need coverage — route to AT MOST ONE):\n{listing}\n\n"
+        "Rules:\n"
+        "- If a competent character pursuing this detail could PLAUSIBLY and HONESTLY arrive "
+        "at one of these causes, set lane='genuine' and name that pillar_id. The world will "
+        "then make the player's OWN pursued detail genuinely reveal that cause — serving the "
+        "conclusion via THEIR path, never forcing them back to a pre-written clue.\n"
+        "- If the pursuit is just texture and cannot honestly serve any unfilled cause, set "
+        "lane='decline'. It stays atmosphere; nothing is minted (the player isn't punished).\n"
+        "- You only ROUTE an existing cause onto the player's path. NEVER invent or change the "
+        "culprit, the answer, or add a new cause. When in genuine doubt, decline.",
+        ADAPT_DECISION_SCHEMA, tier="cheap", task="adapt")
 
 
 #: The graded outcome space for a conclusory commitment (STORY-SHAPES.md win-model). The

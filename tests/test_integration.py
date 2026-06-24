@@ -1467,6 +1467,75 @@ def test_adapt_genuine_writes_clue_through_the_authorized_doorway(world):
     assert adaptations_used(rd) == 1
 
 
+def test_make_it_real_reroutes_a_pursued_thread_to_an_unfilled_pillar(world):
+    # NARRATION-DISCIPLINE.md slice 3 (Cx 087): the player CLOSELY pursues an UN-AUTHORED detail
+    # (examines_target set, names no cast holder). With an unfilled required pillar, the host
+    # reroutes — writes that pillar's authored GENUINE clue fact into the player frame and briefs
+    # the narrator to render it as the player's OWN deduction. Route-flex, never answer-flex.
+    import dataclasses
+    from construct.cast import CastNode, Clue
+    from construct.arc.grammar import Pillar
+    pillar = Pillar("pillar:means", "the means", required=True,
+                    genuine_via=InFrame(PLAYER_FRAME, "fact:means", "is", "vial_missing"))
+    arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "obj:bag", "attribute": "kind", "value": "object", "timeless": True},
+        {"entity": "obj:bag", "attribute": "in", "value": "place:study"},
+    ])
+    # the authored genuine clue lives on the bag (NO hook_text → weave governance is skipped)
+    cast = {"obj:bag": CastNode("obj:bag", "evidence", "the doctor's bag", holds_clues=(
+        Clue("clue:vial", "pillar:means", ("fact:means", "is", "vial_missing"),
+             coverage_effect="genuine", reveal_condition="scrutiny"),))}
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": "",
+         "examines_target": "the damp ring on the sideboard"},          # un-authored pursuit
+        {"lane": "genuine", "pillar_id": "pillar:means",                 # adapt_decision
+         "reason": "a damp ring with no glass implies a poured drink was removed → the means"},
+        {"prose": "You crouch by the sideboard; the ring is fresh, and you realize a glass "
+                  "stood here and was taken — something was administered."},               # narrate
+    ])
+    result = run_turn(world, arc, provider, "I examine the damp ring on the sideboard closely.",
+                      turn=4, cast=cast, scope=["obj:bag", PLAYER, "place:study"])
+    # the pursued thread became the path to the unfilled cause — the pillar's authored fact landed
+    assert ("genuine", "pillar:means") in result.trace.adapted
+    rd = PorcelainWorldReads(world)
+    assert rd.assertion_in_frame(PLAYER_FRAME, "fact:means", "is", "vial_missing")
+    # coverage actually advanced (the case can now land via the player's OWN route)
+    from construct.arc.executor import coverage_summary
+    assert "pillar:means" in coverage_summary(rd, arc)["genuine"]
+    # the narrator was briefed to render it as their own deduction (make-it-real directive present)
+    assert "MAKE IT REAL" in _narrate_prompt(provider)
+
+
+def test_make_it_real_skips_a_generic_look_around(world):
+    # Cx 087 guard: a generic look-around (no examines_target) must NOT trigger adaptation —
+    # we adapt PURSUIT of a specific detail, never every atmospheric glance.
+    import dataclasses
+    from construct.cast import CastNode, Clue
+    from construct.arc.grammar import Pillar
+    pillar = Pillar("pillar:means", "the means", required=True,
+                    genuine_via=InFrame(PLAYER_FRAME, "fact:means", "is", "vial_missing"))
+    arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+    seed_arc(world, arc)
+    cast = {"obj:bag": CastNode("obj:bag", "evidence", "the doctor's bag", holds_clues=(
+        Clue("clue:vial", "pillar:means", ("fact:means", "is", "vial_missing"),
+             coverage_effect="genuine", reveal_condition="scrutiny"),))}
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([                                            # NO examines_target
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": "", "examines_target": ""},
+        {"prose": "The study is quiet; shelves, a cold hearth, the desk by the window."},
+    ])
+    result = run_turn(world, arc, provider, "I glance around the study.", turn=2,
+                      cast=cast, scope=["obj:bag", PLAYER, "place:study"])
+    assert result.trace.adapted == []   # no adapt_decision call was made (queue not consumed)
+    assert not PorcelainWorldReads(world).assertion_in_frame(
+        PLAYER_FRAME, "fact:means", "is", "vial_missing")
+
+
 def test_adapt_red_herring_without_debunker_declines(world):
     # A false path WITHOUT a reachable debunker is the dead-end problem relabeled (Cx 087) → decline.
     from construct.arc.adapt import apply_adaptation
