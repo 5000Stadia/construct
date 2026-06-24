@@ -768,7 +768,38 @@ class TestFullTurn:
                           scope=["person:witness", PLAYER, "place:study"])
         npc_calls = [c for c in result.trace.cohort_calls if c.startswith("npc_")]
         assert npc_calls == ["npc_turn:person:witness:cheap"]
-        assert "person:witness: wants deflect" in _narrate_prompt(provider)
+        # present-cast briefing names the NPC (de-leaked id) + their want (Cx 091 #1)
+        assert "witness: wants deflect" in _narrate_prompt(provider)
+
+    def test_silent_present_npc_is_still_named_in_the_briefing(self, world):
+        # Cx 091 #1 (continuity): a present NPC who does NOT speak this turn must still be named
+        # as present, so the narrator can't erase them ("the doctor is the only one here") against
+        # the cold open. Two present people; one speaks, one is silent — BOTH appear.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "name", "value": "Hobbes", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+            {"entity": "person:silent", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:silent", "attribute": "name", "value": "Julian", "timeless": True},
+            {"entity": "person:silent", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "warn you",
+             "line_hint": ""},                                   # person:silent (1st in scope order)
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},  # witness silent
+            {"prose": "The study holds its breath."},
+        ])
+        result = run_turn(world, arc, provider, "I survey the study.", turn=2,
+                          scope=["person:silent", "person:witness", PLAYER, "place:study"])
+        prompt = _narrate_prompt(provider)
+        # BOTH present people are named — the silent one explicitly kept in the scene
+        assert "Hobbes" in prompt and "Julian" in prompt
+        assert "present, silent for now" in prompt  # the silent-NPC continuity guard fired
 
     def test_examine_delivery_surfaces_an_object_clue_into_the_player_frame(self, world):
         # EXAMINE-CHANNEL.md: closely INSPECTING a present clue-bearing OBJECT surfaces its

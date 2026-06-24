@@ -1150,11 +1150,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                             adapt_directives.append(
                                 "\nMAKE IT REAL (the player's OWN line of inquiry pays off — "
                                 "NARRATION-DISCIPLINE): their pursuit leads them, through their "
-                                "own observation and reasoning, to establish that "
-                                f"{_human_entity(a)} of {_human_entity(e)} is "
-                                f"{_human_entity(str(v))}. Render this as THEIR pursued detail "
-                                "genuinely yielding it — not a witness reciting it, and NEVER a "
-                                "redirect to some other object or person. "
+                                "own observation and reasoning RIGHT NOW, to a NEW realization — "
+                                f"that {_human_entity(a)} of {_human_entity(e)} is "
+                                f"{_human_entity(str(v))}. Render this as the detail they chose "
+                                "yielding THIS realization FRESHLY, this turn ('the ring tells you "
+                                "X', 'now you see that…') — NOT a witness reciting it, NEVER a "
+                                "redirect to another object/person. CRUCIAL: do NOT lean on facts "
+                                "the player has not actually established — never write 'as you "
+                                "already knew' / 'the timeline you already fixed' for anything not "
+                                "yet learned; the realization arises from THIS observation alone. "
                                 f"({(decision.get('reason') or '').strip()})")
         except Exception as exc:  # make-it-real must never sink a turn
             trace.dropped_cohorts.append(f"adapt ({exc})")
@@ -1780,9 +1784,28 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             f"\nREVEAL (render as the player's dawning recognition this turn): {pairs}. "
             f"Two figures the player took for separate are one. Dramatize the realization; "
             f"don't state it as a flat fact.")
-    if npc_intents:
-        briefing_parts.append("\nPRESENT CHARACTERS (play them by their wants):\n"
-                              + "\n".join(npc_intents))
+    if npcs:
+        # WHO IS PRESENT (continuity guard — Cx 091 #1): name EVERY present character, not just
+        # the ones who speak this turn. A silent present NPC (standing quietly, watching) was
+        # surfacing only as raw fact triples and the narrator could erase them ("the doctor is
+        # the only one here") — a coherence break against the cold open. Speakers carry their
+        # wants; the rest are simply named as present so they can't vanish.
+        present_lines = []
+        for n in npcs:
+            nm = str(canon_table.get((n, "name")) or _human_entity(n))
+            intent = npc_turn_results.get(n)
+            if intent and intent.get("speaks") and intent.get("intent"):
+                line = f"{nm}: wants {intent['intent']}"
+                if intent.get("line_hint"):
+                    line += f" (voice: {intent['line_hint']})"
+                present_lines.append(line)
+            else:
+                present_lines.append(f"{nm}: present, silent for now (do NOT remove them from "
+                                     f"the scene — they remain here unless they visibly leave)")
+        briefing_parts.append(
+            "\nPRESENT CHARACTERS (all of them are HERE right now — keep every one in the scene; "
+            "play the ones with wants, keep the rest present even if quiet):\n"
+            + "\n".join(present_lines))
     if nudge_directive:
         briefing_parts.append(f"\nPACING DIRECTIVE (weave in diegetically): {nudge_directive}")
     deflect_secret = False
