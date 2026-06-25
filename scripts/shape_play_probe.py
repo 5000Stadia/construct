@@ -81,6 +81,8 @@ def main() -> None:
             if tr is not None:
                 w(f"*trace: act={getattr(tr, 'act', '')} pacing={tr.pacing} "
                   f"learned={getattr(tr, 'learned_clues', []) or '-'} "
+                  f"events_fired={getattr(tr, 'events_fired', []) or '-'} "
+                  f"beats={getattr(tr, 'beats_achieved', []) or '-'} "
                   f"conclusion={getattr(tr, 'conclusion_shape', '') or '-'} "
                   f"bounced={getattr(tr, 'commitment_bounced', False)} "
                   f"terminal={getattr(tr, 'terminal', False)} time={tr.time_now!r}*\n")
