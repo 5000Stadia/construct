@@ -377,7 +377,18 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
         "the juice). It teases WHY the thread is worth pursuing WITHOUT stating the fact — so "
         "the story can propose each card and the player can choose informed. Make it solvable on the "
         "genuine clues alone, with every required genuine clue reachable by simply asking "
-        "or pressing." + fix,
+        "or pressing.\n\n"
+        "BEFORE YOU RETURN, VERIFY every item (a miss forces a costly re-author):\n"
+        "□ EXACTLY ONE member has is_culprit=true, and they are reachable (at_scene/nearby, or "
+        "offscene-but-named-by-a-reachable-clue);\n"
+        "□ EXACTLY ONE at_scene member has first_witness=true (they introduce the others);\n"
+        "□ at least TWO members are at_scene (the opening spoons them);\n"
+        "□ every REQUIRED pillar has a genuine clue with reveal_condition 'none' or 'pressure', "
+        "held by an at_scene or nearby member (never stranded on an unreachable holder);\n"
+        "□ at least ONE strong red herring exists (is_red_herring=true, coverage_effect 'false') "
+        "with a debunked_by clue that is itself 'none'/'pressure'-reachable;\n"
+        "□ CROSS-SUSPICION: at least two genuine clues' facts NAME another cast member (entity or "
+        "value is that member's id) — the suspects point at one another." + fix,
         AUTHOR_CAST_SCHEMA, tier="main", deliberate=True, task="cast")
 
 

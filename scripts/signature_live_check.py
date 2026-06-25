@@ -49,7 +49,8 @@ def main() -> None:
     cast, specs = cast_from_proposal(prop)
     req = [pid for pid, _l, r in specs if r]
     known = set(PEOPLE) | {PROT} | {c.surface_fact[0] for n in cast for c in n.holds_clues}
-    solv = check_solvability(req, cast, known_ids=known, require_staging=False)
+    # require_staging for deduction so this is a real ATTEMPT-1 check (the build gate uses it):
+    solv = check_solvability(req, cast, known_ids=known, require_staging=(shape == "deduction"))
     sig_problems = validate_signature_support([shape], cast)
 
     print(f"=== AUTHORED {len(specs)} pillars, {len(cast)} cast members ===")
