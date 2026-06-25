@@ -36,6 +36,12 @@ _TASK_CAT = {
     "skn": "knows_seeding", "itv": "interview", "gen": "generate_arc",
     "cls": "player_classify", "ndg": "nudge", "nar": "narrate", "npa": "npc",
     "npi": "npc", "ent": "host_chat",
+    # build-path authoring + host cohorts that were bucketing as "other" — so the cast
+    # RE-AUTHOR cost (the 3-attempt solvability/signature retry loop) is no longer hidden:
+    "cast": "cast_authoring", "cst": "cast_authoring", "prm": "premise", "gty": "game_type",
+    "gnr": "genre", "opn": "open_scene", "foy": "foyer", "ocr": "coref", "adapt": "make_it_real",
+    "jdg": "judge_commitment", "wve": "weave", "npt": "npc", "elp": "time_estimate",
+    "mem": "compact_memory", "fin": "finalize", "cnd": "conclude",
 }
 _ENGINE_PREFIX = [
     ("Extract world-state", "extraction"),
