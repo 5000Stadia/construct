@@ -670,6 +670,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              judgment_type: str = "claim-vs-fact",
              cost_disposition: str = "peril_redemption",
              reads_world_event: bool = False,
+             suspense: str = "general",
              cast: dict | None = None,
              side_arcs: list[Arc] | None = None,
              generate: bool = True) -> TurnResult:
@@ -1828,12 +1829,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # conclusion"): act-aware pull toward the climax + relocate-the-beat-to-the-
         # player. Only while the arc is live (not terminal, not concluded — those own
         # the close). Dramatic pull only; never reveals the answer.
-        # peril/thriller stories (high-stakes cost dispositions) amplify the suspense build-up;
-        # bond/farce (repair/fail_forward) get the gentler general mounting-stakes (founder:
-        # "especially stories with peril or thriller tension").
-        _peril = cost_disposition in ("peril_redemption", "sacrifice")
+        # peril/thriller stories amplify the suspense build-up; everything else gets the gentler
+        # general mounting-stakes (founder; Cx 113: a genre-HAZARD signal — survival/horror/combat
+        # → 'peril' — NOT cost_disposition, which over-fired for mastery/contest/discovery).
         _act, _conv = _convergence_directive(current_phase(live_reads, arc),
-                                             climax_ready(live_reads, arc), peril=_peril)
+                                             climax_ready(live_reads, arc),
+                                             peril=(suspense == "peril"))
         trace.act = _act
         if _conv:
             briefing_parts.append(_conv)

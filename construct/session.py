@@ -92,9 +92,12 @@ class Session:
         self._judgment_type = (_prof or {}).get("judgment_type", "claim-vs-fact")
         # The shape's cost_disposition — how pillar coverage is READ at the conclusion
         # (peril_redemption is the normal polarity; fail_forward inverts it for comedy).
-        from construct.story_shapes import conclusion_profile
+        from construct.story_shapes import conclusion_profile, suspense_profile
         _cprof = conclusion_profile(meta.get("game_type")) or {}
         self._cost_disposition = _cprof.get("cost_disposition", "peril_redemption")
+        # Suspense intensity for the pre-conclusion build-up (Cx 113): a genre-HAZARD signal
+        # (survival/horror/combat → 'peril' → amplified), not cost_disposition.
+        self._suspense = suspense_profile(meta.get("game_type"))
         # Whether this shape's conclusion reads an external world result (the scoreboard)
         # alongside coverage — Contest (proof-vs-standard + match outcome).
         self._reads_world_event = bool(_cprof.get("reads_world_event"))
@@ -567,6 +570,7 @@ class Session:
                               judgment_type=self._judgment_type,
                               cost_disposition=self._cost_disposition,
                               reads_world_event=self._reads_world_event,
+                              suspense=self._suspense,
                               cast=self._cast or None,
                               side_arcs=self._side_arcs)
         except Exception as exc:  # loud, but the session lives

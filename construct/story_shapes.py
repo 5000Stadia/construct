@@ -297,6 +297,29 @@ def conclusion_profile(game_types) -> dict | None:
     return SHAPE_CONCLUSION.get(prof["shape"])
 
 
+#: Genre families that carry inherent PERIL/THRILLER tension → the AMPLIFIED suspense build-up
+#: before the conclusion (founder; Cx 113: drive the amplifier off a genre-HAZARD signal, NOT
+#: cost_disposition, which over-fires for mastery/contest/discovery). Physical peril or thriller
+#: pressure; every other family gets the gentler GENERAL mounting-stakes clause.
+_PERIL_FAMILIES = frozenset({
+    "Survival, Scarcity & Endurance",
+    "Horror, Dread & the Uncanny",
+    "Action, Combat & Pursuit",
+})
+
+
+def suspense_profile(game_types) -> str:
+    """'peril' if ANY of the world's game-types is a peril/thriller family (→ the amplified
+    suspense build-up), else 'general' (the gentler default). Cx 113: a genre-hazard signal, not
+    the conclusion cost_disposition (which answers how coverage is READ, not suspense intensity)."""
+    from construct.play_styles import resolve
+    for k in (resolve(game_types) or []):
+        card = STYLE_CARDS.get(_norm(k))
+        if card and card.get("family") in _PERIL_FAMILIES:
+            return "peril"
+    return "general"
+
+
 def shape_directive(game_types) -> str:
     """The STORY-SHAPE briefing block for a world's game-type(s) — the per-shape
     'earn the payoff' discipline the narrator holds every turn (generalizes concealment

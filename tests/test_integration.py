@@ -2113,3 +2113,36 @@ def test_convergence_directive_builds_suspense_amplified_for_peril():
     assert _acti == "I" and "STAKES register" in peril_i
     # Act III hands off to the epilogue (no convergence directive)
     assert _convergence_directive(Phase.FALLING, ready=False, peril=True)[1] == ""
+
+
+def test_place_holder_self_edge_is_present_and_delivers_on_examine(world):
+    # Cx 113 #1: a place: HOLDER that authors its own id as location (self-edge) must still be
+    # PRESENT and deliver via EXAMINE. cast_location_plan anchors the self-edge to the scene, so
+    # _present() sees it and scrutiny surfaces its clue into knows:<protagonist>.
+    from construct.cast import CastNode, Clue, cast_location_plan
+    arc = make_arc()
+    seed_arc(world, arc)
+    # a Discovery-style site holder whose authored location IS itself (the self-edge bug)
+    cast = {"place:cisterns": CastNode("place:cisterns", "site", "the cisterns", presence="nearby",
+            location="place:cisterns", holds_clues=(
+        Clue("clue:purpose", "pillar:purpose", ("fact:purpose", "is", "memory_chambers"),
+             coverage_effect="genuine", reveal_condition="scrutiny"),))}
+    # stage via cast_location_plan (the fix anchors the self-edge to the scene place:study) + admit
+    # the holder as canon (kind), exactly as the session-zero path does
+    world.porcelain.ingest_structured(
+        cast_location_plan(tuple(cast.values()), "place:study"))
+    world.porcelain.ingest_structured(
+        [{"entity": "place:cisterns", "attribute": "kind", "value": "place", "timeless": True}])
+    # the anchor landed: the site is located within the scene (not a dropped self-edge)
+    assert world.porcelain.locate("place:cisterns")  # non-empty chain → present
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": "", "examines_target": "the cisterns"},
+        {"prose": "You crouch to the resonant water tanks and read the law-songs cut into them."},
+    ])
+    result = run_turn(world, arc, provider, "I study the cisterns closely.", turn=2,
+                      cast=cast, scope=["place:cisterns", PLAYER, "place:study"])
+    assert "clue:purpose" in result.trace.learned_clues
+    assert PorcelainWorldReads(world).assertion_in_frame(
+        PLAYER_FRAME, "fact:purpose", "is", "memory_chambers")

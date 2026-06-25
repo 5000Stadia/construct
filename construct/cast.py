@@ -283,6 +283,12 @@ def cast_location_plan(cast: tuple[CastNode, ...], scene_place: str
     places: set[str] = set()
     for node in cast:
         place = scene_place if node.presence == "at_scene" else node.location
+        # A place: HOLDER (a stratum/site the player EXAMINES — Discovery, Cx 113) can author its
+        # own id as its location; that self-edge (place:x in place:x) is dropped by PB, leaving it
+        # with no location chain → never PRESENT → EXAMINE delivery can't fire. Anchor it to the
+        # scene instead (a site can't contain itself; treat it as part of the scene the player is in).
+        if place == node.node_id:
+            place = scene_place
         if not place:
             continue
         items.append({"entity": node.node_id, "attribute": "in", "value": place,
