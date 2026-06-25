@@ -138,20 +138,39 @@ _ACT_OF = {
 }
 
 
-def _convergence_directive(phase: Phase, ready: bool) -> tuple[str, str]:
+def _convergence_directive(phase: Phase, ready: bool, peril: bool = False) -> tuple[str, str]:
     """The act label + a CONVERGENCE directive for the narrator (founder: "all roads
     should lead to the conclusion — gentle nudges, or relocate the conclusive scene to
-    where the story has gone"). Dramatic pull + staging only — NEVER informational, so
-    it never reveals the hidden answer (the concealment block still governs). Returns
-    ("" , "") in Act III, where the existing resolution/epilogue directives take over."""
+    where the story has gone") PLUS a rising-STAKES/SUSPENSE build-up toward the conclusive
+    scene (founder: "don't forget tension, raised stakes, suspense build-up before the
+    conclusive scene — especially peril/thriller"). Convergence is WHERE it ends; the build-up
+    is the RISING PRESSURE on the way. `peril` (a high-stakes/thriller story) amplifies the
+    suspense clause. Dramatic pull + staging only — NEVER informational, never reveals the
+    hidden answer. Returns ("" , "") in Act III, where the resolution/epilogue directives own it."""
     act = _ACT_OF.get(phase, "I")
     base = ("\nCONVERGENCE (this is live fiction with a destination — bend every road "
             "toward it, gently and diegetically; NEVER stall and NEVER railroad). ")
+    # The suspense curve: stakes and pressure should MOUNT as the conclusive scene nears — never
+    # coast flat into it. Amplified for peril/thriller (make the danger and the cost of failure
+    # felt; tighten the clock; build dread). This is dramatic PRESSURE, never the answer.
+    if peril:
+        build_i = (" Begin to let the STAKES register — what stands to be lost is real and "
+                   "the danger is not far off.")
+        build_ii = (" BUILD THE SUSPENSE: raise the stakes and tighten the screws as the climax "
+                    "nears — make the threat vivid and close, the clock louder, the cost of "
+                    "failure unmistakable; let dread and urgency mount turn over turn. Do NOT "
+                    "coast calmly into the conclusion — the player should FEEL the pressure crest.")
+    else:
+        build_i = (" Let the stakes begin to register — what matters here, and what it would "
+                   "cost to lose it.")
+        build_ii = (" Let the STAKES and significance MOUNT toward the conclusion — each beat "
+                    "weightier than the last, the pressure rising; the player should feel the "
+                    "story gathering to a head, not drifting to a stop.")
     if act == "I":
         return act, base + (
             "ACT I — establish the world and let it breathe, but keep a current under "
             "it: surface the hooks and let the central tension tug at the player. Plant, "
-            "don't push.")
+            "don't push." + build_i)
     if act == "II":
         relocate = (
             "If the player has wandered from where the pivotal beat was imagined, "
@@ -163,10 +182,10 @@ def _convergence_directive(phase: Phase, ready: bool) -> tuple[str, str]:
                 "ACT II, and the conclusion is AT HAND — steer every road into it now. "
                 + relocate + " Tighten toward the climax; let it feel inevitable, not "
                 "forced. Reveal nothing the player hasn't earned — converge the DRAMA, "
-                "never the answer.")
+                "never the answer." + build_ii)
         return act, base + (
             "ACT II — converge: every thread should bend toward the pivotal beat now, "
-            "pressure rising. " + relocate + " Converge the DRAMA, never the answer.")
+            "pressure rising. " + relocate + " Converge the DRAMA, never the answer." + build_ii)
     return act, ""  # Act III: resolution/epilogue directives own the close
 
 
@@ -1809,8 +1828,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # conclusion"): act-aware pull toward the climax + relocate-the-beat-to-the-
         # player. Only while the arc is live (not terminal, not concluded — those own
         # the close). Dramatic pull only; never reveals the answer.
+        # peril/thriller stories (high-stakes cost dispositions) amplify the suspense build-up;
+        # bond/farce (repair/fail_forward) get the gentler general mounting-stakes (founder:
+        # "especially stories with peril or thriller tension").
+        _peril = cost_disposition in ("peril_redemption", "sacrifice")
         _act, _conv = _convergence_directive(current_phase(live_reads, arc),
-                                             climax_ready(live_reads, arc))
+                                             climax_ready(live_reads, arc), peril=_peril)
         trace.act = _act
         if _conv:
             briefing_parts.append(_conv)

@@ -2094,3 +2094,22 @@ class TestGoalStatement:
             == "slay the dragon and free the vale"
         # but even the player's own framing can't spell out the discovered answer
         assert _player_goal(p, world, win_direction="prove the rival did it") == _DEFAULT_GOAL
+
+
+def test_convergence_directive_builds_suspense_amplified_for_peril():
+    # founder: "don't forget tension, raised stakes, suspense build-up before the conclusive
+    # scene — especially peril/thriller". Act II carries a rising-stakes clause; peril amplifies it.
+    from construct.turnloop import _convergence_directive
+    from construct.arc.grammar import Phase
+    _act, peril_ii = _convergence_directive(Phase.CRISIS, ready=False, peril=True)
+    assert _act == "II"
+    assert "BUILD THE SUSPENSE" in peril_ii and "tighten the screws" in peril_ii
+    assert "dread" in peril_ii  # the thriller amplification
+    _act2, calm_ii = _convergence_directive(Phase.CRISIS, ready=False, peril=False)
+    assert "MOUNT" in calm_ii and "gathering to a head" in calm_ii   # general build-up
+    assert "tighten the screws" not in calm_ii                       # not the peril amplifier
+    # Act I plants the stakes (a current under it), not the full build-up
+    _acti, peril_i = _convergence_directive(Phase.SETUP, ready=False, peril=True)
+    assert _acti == "I" and "STAKES register" in peril_i
+    # Act III hands off to the epilogue (no convergence directive)
+    assert _convergence_directive(Phase.FALLING, ready=False, peril=True)[1] == ""
