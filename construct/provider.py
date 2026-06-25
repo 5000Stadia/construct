@@ -32,7 +32,14 @@ Tier = Literal["main", "cheap"]
 #: cheap covers chunked extraction (large structured outputs on the
 #: mini model); main covers narration/invention.
 DEFAULT_TIMEOUTS: dict[str, float] = {"main": 300.0, "cheap": 180.0}
-HARD_BOUND_SECONDS = 600.0
+#: Absolute ceiling. Interactive calls stay at their snappy tier bound (300/180); only DELIBERATE
+#: build-time authoring (story/cast/arc/...) is allowed up to this. Raised 600→900 because
+#: `author_cast` — the heaviest single generation (5-10 cast members × clues/pillars/staging/
+#: signature, on the full ~6KB world digest) — was hitting the 600s tail on full builds and shipping
+#: the world pillar-less (cast authoring skipped). A build is a one-time wait; interactive turns are
+#: unaffected (tier-bounded). The structural latency win is parallelization (PB letter 083), not a
+#: bigger single call — this just stops the pillar-less fail-open on the slow tail.
+HARD_BOUND_SECONDS = 900.0
 
 #: The transport threshold that tips the Codex consumer backend into
 #: mid-stream timeouts (Kernos production finding). Enforced loudly.
