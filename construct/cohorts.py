@@ -1716,6 +1716,41 @@ def judge_commitment(provider: Provider, commitment: str, judgment_type: str,
         JUDGE_COMMITMENT_SCHEMA, tier="cheap", task="jdg")
 
 
+#: EVENT-OCCURS-FIRING (Cx 115): the CONSTRAINED detector — which of the arc's PENDING authored
+#: act-beat events (`event_occurs`) actually happened in the player's resolved action this turn.
+#: It does NOT invent vocabulary — it CHOOSES from the provided candidate kinds (or none).
+DETECT_EVENTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "occurred": {"type": "array", "items": {"type": "string"},
+                     "description": "the candidate event `kind`s (EXACT strings from the list) that "
+                     "genuinely HAPPENED in the player's action this turn — usually zero or one. "
+                     "Empty if none did. NEVER a kind not in the candidate list."},
+    },
+    "required": ["occurred"],
+}
+
+
+def detect_events(provider: Provider, action: str, outcome: str,
+                  candidates: list[dict]) -> dict:
+    """Did any AUTHORED act-beat event happen in the player's RESOLVED action this turn? Returns
+    {occurred: [kinds]} chosen ONLY from `candidates` (anti-fabrication — EVENT-OCCURS-FIRING,
+    Cx 115). `candidates` is [{"kind","what"}] (the authored event kind + a plain description of
+    the act it represents). `outcome` is the resolved tier (the act succeeded). Cheap tier; default
+    EMPTY when unsure — a beat must not fire on a near-miss or a thing the player merely intended."""
+    listing = "\n".join(f"- {c['kind']} :: {c['what']}" for c in candidates) or "- (none)"
+    return complete_sync(provider,
+        "In an interactive story, decide which (if any) of these AUTHORED story events just "
+        "HAPPENED as a result of the player's action this turn. Choose ONLY from the listed kinds "
+        "(use the EXACT kind string); choose NONE if the player merely talked about, approached, or "
+        "attempted-without-completing the act. Be strict — an event happens only when the player "
+        "actually DID the thing it describes and it took effect.\n\n"
+        f"THE PLAYER'S ACTION (resolved outcome: {outcome}): {action}\n\n"
+        f"CANDIDATE EVENTS (kind :: what the act is):\n{listing}\n\n"
+        "Return the kinds that genuinely occurred (usually zero or one).",
+        DETECT_EVENTS_SCHEMA, tier="cheap", task="evt")
+
+
 def npc_world_action(provider: Provider, npc_id: str, sheet: str, scene: str,
                      protagonist: str) -> dict:
     return complete_sync(provider,

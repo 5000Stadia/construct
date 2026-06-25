@@ -48,16 +48,39 @@ A per-turn check that writes the authored event when the player's action makes i
 3. **Write** a canon event of each occurred kind, `caused_by` the turn's action event, so
    `Occurred(kind=X)` evaluates true. `beat_pass` then achieves the beat and the arc advances.
 
-**Placement:** after classify + the resolution deck (the action + outcome are known), BEFORE
-`beat_pass` (so the event exists when beats are evaluated). Fail-open: a miss just doesn't advance
-the beat that turn (same as today), never sinks the turn.
+**Placement (Cx 115 #1 — resolution must bind FIRST):** today the resolution deck is drawn LATE
+(briefing assembly), AFTER `beat_pass`. The detector must see the RESOLVED OUTCOME, not the
+attempt — else it could canonize `Occurred` on a FAILED uncertain action and the narrator then
+renders failure against canon. So:
+- Draw the resolution outcome EARLY (after classify): `assured` when `needs_test == false`,
+  otherwise the drawn tier; persist/trace it ONCE.
+- The detector runs after that, BEFORE `beat_pass`, and fires an authored event only when the act
+  ACTUALLY happened — normally `assured`, `success_cost`, or `complete_success` (never on a
+  failure tier).
+- The narrator briefing REUSES the stored tier/directive (no second draw) AND includes the
+  fired-event result as a BINDING world fact for the turn, so prose cannot contradict the canon row.
+Fail-open: a miss just doesn't advance the beat that turn (same as today), never sinks the turn.
+
+**The `caused_by` anchor (Cx 115 #2):** there is not always a canonical action event today
+(`event:turn_N` is session bookkeeping written after render; movement/take are deterministic state
+writes). So mint a canon `event:action_<turn>` row (entity-typed `agent=protagonist`, provenance,
+valid time) and anchor the authored event's `caused_by` to it — never to a session-only marker.
 
 **Guards:**
 - Candidate kinds are ONLY the arc's pending authored `event_occurs` kinds — never arbitrary
   model-invented events into canon.
 - The event fires only when the act genuinely occurred (the detector defaults to "no" when unsure —
-  a beat should not achieve on a near-miss).
-- One canon event row per occurred kind, with `caused_by` provenance; no derived labels.
+  a beat should not achieve on a near-miss) AND the resolution tier is a success/cost tier (never a
+  failure tier — Cx 115 #1).
+- One canon event row per occurred kind, with `caused_by` the minted action event; no derived labels.
+- **Dedupe by beat status** (Cx 115): already-achieved beats offer no candidates and produce no
+  duplicate event rows.
+- **Global-kind collision (Cx 115):** event `kind` is global, so a generic slug could satisfy a
+  DIFFERENT arc's beat or a `failure_when`. Mitigate: require generated `event_occurs` kinds to be
+  arc/beat-specific (slug carries the arc/beat), and/or include `agent`/participants; +a collision
+  test. The detector only offers the CURRENT pending set, but the WRITTEN kind must be specific.
+- **Side arcs (Cx 115):** include active side arcs' pending `event_occurs` kinds in the sweep, else
+  side-act beats stay dead.
 - Convergence still pulls the player toward the pending beats (so they're reachable, not just
   fireable) — this fix makes them FIRE; convergence makes them REACHED.
 

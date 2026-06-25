@@ -29,6 +29,7 @@ from construct import resolution
 from construct.adapter import PorcelainWorldReads
 from construct.arc.executor import (
     LIFECYCLE_TERMINALS,
+    PLOT,
     SESSION,
     arc_concluded,
     arc_entities,
@@ -439,6 +440,7 @@ class TurnTrace:
     commitment_grade: str = ""  # vindicated|partial|wrong|pyrrhic — graded outcome (epilogue flavor)
     commitment_bounced: bool = False  # commit attempted but required coverage incomplete → non-terminal bounce (COMMITMENT-AS-EFFECT)
     main_fallout: list = field(default_factory=list)  # concrete canon consequences of a hollow/unjust main landing (caused_by the conclusion) — next-episode fuel
+    events_fired: list = field(default_factory=list)  # authored event_occurs kinds that fired this turn (EVENT-OCCURS-FIRING) — the act-beats that achieved
     conclusion_shape: str = ""  # OUTCOME_SHAPE from pillar coverage (the EFFECT — STORY-SHAPES §0a)
     conclusion_basis: str = ""  # one-line why, for the epilogue + debug surface
     learned_clues: list = field(default_factory=list)  # clue ids surfaced into the player frame this turn
@@ -647,6 +649,64 @@ def _conclusion_effect(reads: Any, arc: Arc, cost_disposition: str,
     world_event = _world_event(reads) if reads_world_event else None
     return conclusion_from_coverage(summary, cost_disposition=cost_disposition,
                                     world_event=world_event, cost_weight=cost_weight)
+
+
+def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Provider,
+                       action: str, tier: str, turn: int, trace: "TurnTrace",
+                       protagonist: str) -> list[str]:
+    """EVENT-OCCURS-FIRING (EVENT-OCCURS-FIRING.md, Cx 115): fire any authored `event_occurs`
+    act-beat whose act just HAPPENED in the player's RESOLVED action, so `beat_pass` achieves it
+    this turn (the fix for the arc-stall: nothing else writes arbitrary-kind canon events). Gathers
+    PENDING `Occurred`-kind candidates across the arcs (main + side), asks the CONSTRAINED detector
+    which occurred, and mints the canon event(s) + an action-event anchor (`caused_by`). Fail-open;
+    skipped (no cohort call) when there are no pending event_occurs kinds. Returns the fired kinds."""
+    from construct.arc.conditions import Occurred
+    cands: dict[str, str] = {}  # kind -> beat_id; PENDING beats only, deduped by kind
+    for arc in arcs:
+        for beat in getattr(arc, "beats", ()):
+            cond = beat.achievable_via
+            if not isinstance(cond, Occurred):
+                continue  # v1: direct Occurred beats (the generator's event_occurs shape)
+            try:
+                status = reads.state(beat.beat_id, "status", frame=PLOT)
+            except Exception:
+                status = None
+            if status not in (None, "pending"):
+                continue  # already achieved/closed → no candidate, no duplicate event
+            cands.setdefault(cond.kind, beat.beat_id)
+    if not cands:
+        return []
+    candidates = [{"kind": k, "what": k.replace("_", " ")} for k in cands]
+    try:
+        out = cohorts.detect_events(provider, action, tier, candidates)
+        trace.cohort_calls.append("detect_events:cheap")
+    except Exception as exc:  # never sink the turn on the detector
+        trace.dropped_cohorts.append(f"detect_events ({exc})")
+        return []
+    fired = [k for k in (out.get("occurred") or []) if k in cands]  # constrained to candidates
+    if not fired:
+        return []
+    # Mint a real canon ACTION event to anchor caused_by (Cx 115 #2 — not a session marker), then
+    # the authored event(s) it caused. events(kind=X) then sees them → Occurred(kind=X) is true.
+    action_eid = f"event:action_{turn}"
+    rows = [{"entity": action_eid, "attribute": "kind", "value": "player_action",
+             "valid_from": turn_time(turn)},
+            {"entity": action_eid, "attribute": "agent", "value": protagonist,
+             "value_type": "entity", "valid_from": turn_time(turn)}]
+    for k in fired:
+        eid = f"event:{k}_{turn}"
+        rows += [{"entity": eid, "attribute": "kind", "value": k,
+                  "caused_by": action_eid, "valid_from": turn_time(turn)},
+                 {"entity": eid, "attribute": "agent", "value": protagonist,
+                  "value_type": "entity", "valid_from": turn_time(turn)}]
+    try:
+        p.ingest_structured(rows)  # canon — a true world event; the membrane is unaffected
+    except Exception as exc:  # fail-open
+        trace.dropped_cohorts.append(f"event_fire ({exc})")
+        return []
+    trace.events_fired = fired
+    logger.info("event_occurs fired: %s (caused_by %s)", fired, action_eid)
+    return fired
 
 
 def terminal_outcome(reads: Any) -> str | None:
@@ -1289,6 +1349,24 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             trace.dropped_cohorts.append(f"weave_pick ({exc})")
 
     player_snap = _snap_or_empty(p, snap_scope, frame=player_frame)
+    # EVENT-OCCURS-FIRING (Cx 115): resolve the action outcome NOW (before beat_pass) so an authored
+    # `event_occurs` act-beat can fire on a SUCCESSFUL act and beat_pass achieves it THIS turn. The
+    # tier is drawn ONCE here (deterministic deck) and REUSED by the narrator briefing (no 2nd draw).
+    _resolved_tier = ""
+    if kind == "action":
+        if needs_test:
+            try:
+                _resolved_tier = resolution.draw_tier(live_reads, p)
+                trace.adjudication = f"test:{_resolved_tier}"
+            except Exception as exc:  # never sink a turn on a resolution hiccup
+                logger.warning("resolution draw failed: %s", exc)
+                trace.dropped_cohorts.append(f"resolution ({exc})")
+        else:
+            _resolved_tier = "assured"
+        # fire authored act-beats only on a SUCCESS tier (never a failure — Cx 115 #1)
+        if _resolved_tier in ("assured", "success_cost", "complete_success"):
+            _fire_event_occurs(world, p, live_reads, [arc, *side_arcs], provider,
+                               player_input, _resolved_tier, turn, trace, arc.protagonist)
     achieved, closed, revealed = beat_pass(world, arc, live_reads, turn)
     trace.beats_achieved, trace.beats_closed = achieved, closed
     trace.reveals = revealed
@@ -1948,17 +2026,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             f"Never a flat 'you can't say' for ordinary, knowable things; only a genuinely "
             f"SECRET answer is withheld (deflect diegetically). What you establish becomes "
             f"real (it will be remembered).")
-    # Uncertain action → draw the next outcome tier from the pre-rolled deck (no model
-    # call) and tell the narrator WHAT happens (succeed/fail + the twist); it improvises
-    # HOW. Assured actions never draw — they just succeed (ACTION-RESOLUTION.md).
-    if needs_test:
-        try:
-            tier = resolution.draw_tier(live_reads, p)
-            briefing_parts.append("\n" + resolution.directive(tier, uncertain_of))
-            trace.adjudication = f"test:{tier}"
-        except Exception as exc:  # never sink a turn on a resolution hiccup
-            logger.warning("resolution draw failed: %s", exc)
-            trace.dropped_cohorts.append(f"resolution ({exc})")
+    # Uncertain action → REUSE the tier drawn earlier (EVENT-OCCURS-FIRING reorder, Cx 115 — one
+    # draw per turn, bound BEFORE beat firing) and tell the narrator WHAT happens (succeed/fail +
+    # the twist); it improvises HOW. Assured actions never draw — they just succeed.
+    if needs_test and _resolved_tier and _resolved_tier != "assured":
+        briefing_parts.append("\n" + resolution.directive(_resolved_tier, uncertain_of))
+    if trace.events_fired:
+        # an authored act-beat fired this turn — it is now BINDING canon (Cx 115 #1); render it as
+        # having happened, never contradict it.
+        briefing_parts.append(
+            "\nWHAT JUST HAPPENED (binding — the player's action brought this about; render it as "
+            "real, do not walk it back): "
+            + "; ".join(k.replace("_", " ") for k in trace.events_fired))
     # CONCEALMENT = STRUCTURAL ABSENCE (Kernos 076 Q2 / Cx 023 blocking #1): the narrator
     # is NOT handed the arc's hidden answer. It is briefed ONLY from the player frame, so
     # it cannot leak what it never sees. (Replaces the old _concealment_directive, which

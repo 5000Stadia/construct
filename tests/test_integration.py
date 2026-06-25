@@ -2146,3 +2146,89 @@ def test_place_holder_self_edge_is_present_and_delivers_on_examine(world):
     assert "clue:purpose" in result.trace.learned_clues
     assert PorcelainWorldReads(world).assertion_in_frame(
         PLAYER_FRAME, "fact:purpose", "is", "memory_chambers")
+
+
+def _arc_with_occurred_beat(kind="deed_done"):
+    """make_arc() + one pending OPTIONAL Occurred(kind) act-beat (EVENT-OCCURS-FIRING tests)."""
+    import dataclasses
+    from construct.arc.grammar import Beat, Phase, Weight
+    from construct.arc.conditions import Occurred
+    base = make_arc()
+    od = Beat("beat:deed", Phase.RISING, Weight.OPTIONAL, achievable_via=Occurred(kind=kind))
+    return dataclasses.replace(base, beats=(*base.beats, od))
+
+
+def test_event_occurs_beat_fires_and_achieves_on_success(world):
+    # EVENT-OCCURS-FIRING (Cx 115): a successful action that the detector flags writes the authored
+    # canon event (caused_by an action event) → Occurred true → beat_pass achieves the beat THIS turn.
+    arc = _arc_with_occurred_beat()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"occurred": ["deed_done"]},                       # detect_events
+        {"prose": "You abandon the cargo; the party stays on the cord."},
+    ])
+    result = run_turn(world, arc, provider, "I cut the ore loose to keep us together.", turn=2,
+                      scope=[PLAYER, "place:study"])
+    assert result.trace.events_fired == ["deed_done"]
+    assert "detect_events:cheap" in result.trace.cohort_calls
+    assert "beat:deed" in result.trace.beats_achieved            # achieved same turn
+    rd = PorcelainWorldReads(world)
+    assert rd.events(kind="deed_done")                           # binding canon event
+    assert rd.events(kind="player_action")                       # the action-event anchor
+    assert "WHAT JUST HAPPENED" in _narrate_prompt(provider)     # surfaced as binding
+
+
+def test_event_occurs_no_fire_when_detector_says_none(world):
+    # near-miss: the detector returns nothing → no event, beat stays pending (fail-open).
+    arc = _arc_with_occurred_beat()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"occurred": []},                                  # detector: nothing happened
+        {"prose": "You consider cutting the ore loose, but don't."},
+    ])
+    result = run_turn(world, arc, provider, "I think about cutting the ore loose.", turn=2,
+                      scope=[PLAYER, "place:study"])
+    assert result.trace.events_fired == []
+    assert "beat:deed" not in result.trace.beats_achieved
+    assert not PorcelainWorldReads(world).events(kind="deed_done")
+
+
+def test_event_occurs_no_detector_call_without_candidates(world):
+    # no pending Occurred beat → no detector call at all (no added latency on deduction arcs).
+    arc = make_arc()  # no Occurred beats
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([                              # NO detect_events stub
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You look around."},
+    ])
+    result = run_turn(world, arc, provider, "I look around.", turn=2, scope=[PLAYER, "place:study"])
+    assert result.trace.events_fired == []
+    assert "detect_events:cheap" not in result.trace.cohort_calls
+
+
+def test_event_occurs_already_achieved_offers_no_candidate(world):
+    # dedupe by status: an already-achieved Occurred beat is not a candidate → no detector call.
+    from construct.arc.executor import turn_time
+    arc = _arc_with_occurred_beat()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured(
+        [{"entity": "beat:deed", "attribute": "status", "value": "achieved",
+          "valid_from": turn_time(1)}], frame="plot:main")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([                              # NO detect_events stub (no candidates)
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You act."},
+    ])
+    result = run_turn(world, arc, provider, "I cut the ore loose again.", turn=3,
+                      scope=[PLAYER, "place:study"])
+    assert "detect_events:cheap" not in result.trace.cohort_calls
+    assert result.trace.events_fired == []
