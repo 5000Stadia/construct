@@ -418,6 +418,7 @@ class TurnTrace:
     outcome: str | None = None  # arc_outcome this turn: won|lost|None
     commitment: str = ""        # the player's conclusory commitment this turn (if any)
     commitment_grade: str = ""  # vindicated|partial|wrong|pyrrhic — graded outcome (epilogue flavor)
+    commitment_bounced: bool = False  # commit attempted but required coverage incomplete → non-terminal bounce (COMMITMENT-AS-EFFECT)
     conclusion_shape: str = ""  # OUTCOME_SHAPE from pillar coverage (the EFFECT — STORY-SHAPES §0a)
     conclusion_basis: str = ""  # one-line why, for the epilogue + debug surface
     learned_clues: list = field(default_factory=list)  # clue ids surfaced into the player frame this turn
@@ -1372,7 +1373,22 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # A turn-1 accusation is too abrupt — it stays an ordinary action until then.
     earned = climax_ready(live_reads, arc) or turn >= _MIN_COMMIT_TURN
     commitment_grade = ""
+    commitment_bounced = False
     if commits and earned and terminal_outcome(live_reads) is None:
+        # COMMITMENT-AS-EFFECT slice 1 (Cx 105): a voluntary conclusive commitment LANDS only when
+        # the payoff is EARNED — for an arc with REQUIRED pillars, required coverage must be
+        # `complete` (genuine OR false; false counts, so a hollow case can still land). An INCOMPLETE
+        # attempt BOUNCES, non-terminal — BEFORE the judge and BEFORE any commitment rows: no judge
+        # call, no claim/grade, no event:commitment, no terminal; the narrator nudges "not yet
+        # proven" and play continues. Scoped to the VOLUNTARY-commitment path only — forced closes
+        # (clocks/refusal/scoreboard/arc_concluded) are untouched. No required pillars (legacy/
+        # optional-only) → keep the existing judge/terminate path (gate on `required`, not arc.pillars).
+        _csum = coverage_summary(live_reads, arc)
+        if _csum.get("required") and not _csum.get("complete"):
+            commitment_bounced = True
+            logger.info("commitment bounced (not yet proven): unfilled required pillars %s",
+                        _csum.get("unfilled"))
+    if commits and earned and not commitment_bounced and terminal_outcome(live_reads) is None:
         destination = _destination_facts(arc, live_reads)
         try:
             jv = cohorts.judge_commitment(provider, commitment, judgment_type, destination)
@@ -1405,6 +1421,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         ], frame=SESSION, classify="batch")  # commitment marker — bookkeeping
     trace.commitment = commitment if commits else ""
     trace.commitment_grade = commitment_grade
+    trace.commitment_bounced = commitment_bounced
 
     main_life = arc_lifecycle(live_reads, arc)
     trace.lifecycle = main_life
@@ -1661,6 +1678,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # to an unfilled cause. Render the reveal as their OWN deduction from the detail they
         # chose — never a redirect back to the authored clue, never a witness lecture.
         briefing_parts.extend(adapt_directives)
+    if commitment_bounced:
+        # COMMITMENT-AS-EFFECT slice 1: the player tried to force the finale before the causes are
+        # covered. The world DECLINES to conclude on it — NOT a failure, a "not yet": the authority
+        # won't act on what's unproven, the threads don't connect, the declaration rings premature.
+        # Render that diegetically and leave the player IN the story to keep working. Never end here.
+        briefing_parts.append(
+            "\nTHE COMMITMENT DOES NOT LAND (render this, do NOT end the story): the player has "
+            "moved to conclude — but they have NOT yet earned/proven it on what they've actually "
+            "established. Show the world declining, in-genre and without a lecture: the authority "
+            "won't act on so little, the case/claim doesn't hold up, the moment rings premature — "
+            "and the player is left to keep going (there is more to uncover/earn). This is 'not "
+            "yet,' NOT a defeat; do not narrate an ending or a verdict.")
     if discovered:
         # Discovery affordance (§3c layer 3): the player now knows where to find these
         # off-scene people. Offer the route diegetically (the witness mentions where they

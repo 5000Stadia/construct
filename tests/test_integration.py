@@ -630,6 +630,61 @@ class TestFullTurn:
         prompt = _narrate_prompt(provider)
         assert "EFFECT" in prompt and "triumph" in prompt
 
+    def test_commitment_bounces_on_incomplete_required_coverage(self, world):
+        # COMMITMENT-AS-EFFECT slice 1 (Cx 105): a voluntary conclusive commitment with a REQUIRED
+        # pillar still UNFILLED must BOUNCE — non-terminal, BEFORE the judge and any commitment rows.
+        import dataclasses
+        from construct.arc.grammar import Pillar
+        pillar = Pillar("pillar:culprit", "who did it", required=True,
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"))
+        arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+        seed_arc(world, arc)
+        # NOTE: the genuine fact is NOT in the player frame → coverage incomplete (unfilled).
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([                       # NO judge_commitment stub — bounce skips it
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
+            {"prose": "You point at the rival — but you have not shown how."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the rival.", turn=5,
+                          scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        # bounced: non-terminal, no judge, no grade, no commitment/terminal rows
+        assert result.trace.commitment_bounced is True
+        assert result.trace.terminal is False and not result.trace.outcome
+        assert result.trace.commitment_grade == ""
+        assert "judge_commitment:cheap" not in result.trace.cohort_calls
+        rd = PorcelainWorldReads(world)
+        assert rd.state("claim:person:player", "grade") is None     # no commitment row persisted
+        assert not rd.events(kind="commitment", frame="session:main")
+        # the narrator is told to render "not yet," never an ending
+        assert "DOES NOT LAND" in _narrate_prompt(provider)
+
+    def test_complete_coverage_still_lands_the_commitment(self, world):
+        # Guard the gate doesn't block VALID commitments: with the required pillar covered
+        # (complete), the same commitment LANDS (judges + terminates) as before.
+        import dataclasses
+        from construct.arc.grammar import Pillar
+        pillar = Pillar("pillar:culprit", "who did it", required=True,
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"))
+        arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            frame=PLAYER_FRAME)  # coverage now complete + sound
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
+            {"grade": "vindicated", "rationale": "matches"},
+            {"prose": "You name the rival; it holds."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the rival.", turn=5,
+                          scenario_mode="win_loss",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.commitment_bounced is False
+        assert result.trace.terminal is True and result.trace.outcome == "won"
+
     def test_sound_coverage_reconciles_a_wishy_washy_commitment_grade(self, world):
         # Cx 093: deterministic coverage is the source of truth. On a provably SOUND solve
         # (required pillar genuinely covered), a model judge returning the wishy-washy 'partial'
