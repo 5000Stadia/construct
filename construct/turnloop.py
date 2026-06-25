@@ -610,6 +610,25 @@ def _world_event(reads: Any) -> str | None:
     return val if val in ("win", "loss") else None
 
 
+def _conclusion_effect(reads: Any, arc: Arc, cost_disposition: str,
+                       reads_world_event: bool) -> dict | None:
+    """The coverage-derived conclusion EFFECT (`conclusion_from_coverage`) for a pillar arc, or
+    None when the arc declares no required pillars. The SINGLE source of truth shared by the
+    commitment grade (COMMITMENT-AS-EFFECT: the grade is the EFFECT, not an LLM judgment) and the
+    epilogue. `cost_weight` is the false-coverage cost integral for NORMAL polarity, 0 for
+    fail_forward (comedy: a false-fill is success, never a cost — Cx 027 blocker 3)."""
+    if not arc.pillars:
+        return None
+    summary = coverage_summary(reads, arc)
+    req = summary["required"] or []
+    if not req:
+        return None
+    cost_weight = 0.0 if cost_disposition == "fail_forward" else (len(summary["false"]) / len(req))
+    world_event = _world_event(reads) if reads_world_event else None
+    return conclusion_from_coverage(summary, cost_disposition=cost_disposition,
+                                    world_event=world_event, cost_weight=cost_weight)
+
+
 def terminal_outcome(reads: Any) -> str | None:
     """The recorded win/loss terminal of a `win_loss` scenario, or None if it
     hasn't ended (WIN-LOSS §10). Reads the SESSION receipt via `events()` (the
@@ -1389,24 +1408,33 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             logger.info("commitment bounced (not yet proven): unfilled required pillars %s",
                         _csum.get("unfilled"))
     if commits and earned and not commitment_bounced and terminal_outcome(live_reads) is None:
-        destination = _destination_facts(arc, live_reads)
-        try:
-            jv = cohorts.judge_commitment(provider, commitment, judgment_type, destination)
-            commitment_grade = jv.get("grade", "") or "partial"
-            trace.cohort_calls.append("judge_commitment:cheap")
-        except Exception as exc:  # never sink the turn on the judge
-            logger.warning("judge_commitment failed: %s", exc)
-            commitment_grade = "partial"
-            trace.dropped_cohorts.append(f"judge_commitment ({exc})")
-        # Cx 093 — deterministic coverage is the SOURCE OF TRUTH: on a provably SOUND solve (every
-        # required pillar GENUINELY covered) a wishy-washy 'partial' is normalized to 'vindicated'
-        # BEFORE it is persisted, so the receipt grade never contradicts a coverage triumph. A
-        # 'wrong' grade is preserved (it may signal a named conflicting target) — the receipt is
-        # kept off 'lost' below instead. Legacy pillar-less arcs are untouched (model judge owns).
-        if (commitment_grade == "partial" and arc.pillars
-                and coverage_summary(live_reads, arc).get("sound")):
-            commitment_grade = "vindicated"
-            logger.info("commitment grade 'partial' reconciled to 'vindicated' on sound coverage")
+        # COMMITMENT-AS-EFFECT slice 2 (Cx 105/107): for a PILLAR arc the grade IS the coverage
+        # EFFECT — computed ALGORITHMICALLY from `conclusion_from_coverage` (cost_disposition-aware),
+        # never an LLM judgment (the model did this rigid-criteria work and got it WRONG live). The
+        # accusation follows the evidence the player actually gathered, so coverage already encodes
+        # just-vs-hollow: `wrong_case` (a required cause covered by a FALSE clue — a red herring
+        # believed → an unjust/mistaken conviction) → 'wrong'; the intended/sound effect →
+        # 'vindicated'; otherwise 'partial'. fail_forward (comedy) is honored (a live blowup is
+        # effect-sound, never wrong_case). LEGACY pillar-less arcs keep the LLM judge — extracting a
+        # verdict from open language with no coverage to read is genuinely its job.
+        if _csum.get("required"):
+            _eff = _conclusion_effect(live_reads, arc, cost_disposition, reads_world_event)
+            if _eff and _eff.get("wrong_case"):
+                commitment_grade = "wrong"
+            elif _eff and _eff.get("effect_sound"):
+                commitment_grade = "vindicated"
+            else:
+                commitment_grade = "partial"
+        else:
+            destination = _destination_facts(arc, live_reads)
+            try:
+                jv = cohorts.judge_commitment(provider, commitment, judgment_type, destination)
+                commitment_grade = jv.get("grade", "") or "partial"
+                trace.cohort_calls.append("judge_commitment:cheap")
+            except Exception as exc:  # never sink the turn on the judge
+                logger.warning("judge_commitment failed: %s", exc)
+                commitment_grade = "partial"
+                trace.dropped_cohorts.append(f"judge_commitment ({exc})")
         p.ingest_structured([
             {"entity": f"claim:{arc.protagonist}", "attribute": "committed",
              "value": commitment[:300]},
@@ -1429,47 +1457,24 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if outcome is None and main_life in ("incompletable", "cancelled"):
         outcome = "lost"
     # The commitment IS the conclusion (convergence): it terminates regardless of the
-    # world_condition. The grade maps to the binary terminal receipt (wrong → lost; all
-    # else → won) while the grade itself flavors the epilogue.
+    # world_condition. The grade maps to the binary terminal receipt (wrong → lost; all else →
+    # won) while the EFFECT (conclusion_from_coverage) is what the player feels. For pillar arcs
+    # the grade is now derived FROM that effect (slice 2), so receipt + epilogue can't contradict:
+    # an unjust/hollow conviction → 'wrong' → lost → terminal → a wrong_case epilogue (the
+    # conviction still concluded, on a hollow note); a sound case → 'vindicated' → won → triumph.
     if commitment_grade and outcome is None:
         outcome = "lost" if commitment_grade == "wrong" else "won"
-    # Cx 093 — receipt hygiene: a provably SOUND solve must never write an arc_lost beside a
-    # coverage triumph. A preserved 'wrong' grade (a possible named conflicting target) flavors
-    # the epilogue but cannot force a loss when coverage is objectively sound.
-    if (outcome == "lost" and commitment_grade and arc.pillars
-            and coverage_summary(live_reads, arc).get("sound")):
-        logger.info("terminal outcome reconciled lost->won on sound coverage (grade %r)",
-                    commitment_grade)
-        outcome = "won"
     trace.outcome = outcome
     terminal = scenario_mode == "win_loss" and outcome is not None
     trace.terminal = terminal
-    # CONCLUSION AS EFFECT (STORY-SHAPES §0a): when the arc declares pillars, the
-    # conclusory scene's CHARACTER is the narrated effect of pillar COVERAGE, not a
-    # win/lost verdict. The won/lost receipt above stays as the "episode concluded, stop
-    # ticking" plumbing; this is what the player feels. cost_weight ties the ending's toll
-    # to the run — more false-filled (wrong) causes = a costlier close (the §0a integral).
+    # CONCLUSION AS EFFECT (STORY-SHAPES §0a): when the arc declares pillars, the conclusory
+    # scene's CHARACTER is the narrated effect of pillar COVERAGE, not a win/lost verdict. The
+    # won/lost receipt above stays as the "episode concluded, stop ticking" plumbing; this is what
+    # the player feels. Uses the SAME `_conclusion_effect` the commitment grade derives from (slice
+    # 2), so the receipt, the grade, and the epilogue can never disagree.
     conc = None
-    if arc.pillars and (terminal or (concluded and not endless)):
-        summary = coverage_summary(live_reads, arc)
-        req = summary["required"] or []
-        # cost_weight is a v1 placeholder for the run's cost integral. For NORMAL polarity a
-        # false-filled cause is a cost; for fail_forward (comedy) a false-fill is SUCCESS, so
-        # it must NOT count as cost — else warm comic triumph is unreachable (Cx 027 blocker
-        # 3). Until the real residue (collateral/ruptures/botched draws) is wired, comedy
-        # gets 0.0 (warm by default; comeuppance later from genuine collateral).
-        if cost_disposition == "fail_forward":
-            cost_weight = 0.0
-        else:
-            cost_weight = (len(summary["false"]) / len(req)) if req else 0.0
-        # An external result read ALONGSIDE coverage for shapes whose ending also reads a
-        # world EVENT (Cx 027 blocker 2 — Contest's scoreboard: sound coverage + a 'loss'
-        # = "proved himself, lost the decision"). The scoreboard is authored canon
-        # (`scoreboard:main / outcome / win|loss`), NOT the internal won/lost receipt —
-        # deriving it from the receipt would re-couple proof to score.
-        world_event = _world_event(live_reads) if reads_world_event else None
-        conc = conclusion_from_coverage(summary, cost_disposition=cost_disposition,
-                                        world_event=world_event, cost_weight=cost_weight)
+    if terminal or (concluded and not endless):
+        conc = _conclusion_effect(live_reads, arc, cost_disposition, reads_world_event)
         if conc:
             trace.conclusion_shape = conc["outcome"]
             trace.conclusion_basis = conc["basis"]

@@ -614,18 +614,19 @@ class TestFullTurn:
             frame=PLAYER_FRAME)
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
-        provider = StubProvider([
+        provider = StubProvider([                       # NO judge stub — pillar grade is effect-derived
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
-            {"grade": "vindicated", "rationale": "matches"},
             {"prose": "You name the rival; the truth lands."},
         ])
         result = run_turn(world, arc, provider, "I accuse the rival.", turn=5,
                           scenario_mode="win_loss",
                           scope=["fact:secret", "person:rival", PLAYER, "place:study"])
         assert result.trace.terminal is True
-        # the EFFECT of sound coverage — never a win/lose verdict
+        # the EFFECT of sound coverage — never a win/lose verdict; grade is the effect (slice 2)
         assert result.trace.conclusion_shape == "triumph"
+        assert result.trace.commitment_grade == "vindicated"
+        assert "judge_commitment:cheap" not in result.trace.cohort_calls
         assert result.trace.conclusion_basis
         prompt = _narrate_prompt(provider)
         assert "EFFECT" in prompt and "triumph" in prompt
@@ -662,7 +663,8 @@ class TestFullTurn:
 
     def test_complete_coverage_still_lands_the_commitment(self, world):
         # Guard the gate doesn't block VALID commitments: with the required pillar covered
-        # (complete), the same commitment LANDS (judges + terminates) as before.
+        # (complete + sound), the commitment LANDS — grade is the coverage EFFECT (vindicated),
+        # NO LLM judge call (slice 2), terminal won.
         import dataclasses
         from construct.arc.grammar import Pillar
         pillar = Pillar("pillar:culprit", "who did it", required=True,
@@ -673,10 +675,9 @@ class TestFullTurn:
             [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
             frame=PLAYER_FRAME)  # coverage now complete + sound
         world._extractions.extend([{"items": []}, {"items": []}])
-        provider = StubProvider([
+        provider = StubProvider([                       # NO judge stub — effect-derived grade
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
-            {"grade": "vindicated", "rationale": "matches"},
             {"prose": "You name the rival; it holds."},
         ])
         result = run_turn(world, arc, provider, "I accuse the rival.", turn=5,
@@ -684,74 +685,68 @@ class TestFullTurn:
                           scope=["fact:secret", "person:rival", PLAYER, "place:study"])
         assert result.trace.commitment_bounced is False
         assert result.trace.terminal is True and result.trace.outcome == "won"
+        assert result.trace.commitment_grade == "vindicated"
+        assert "judge_commitment:cheap" not in result.trace.cohort_calls
 
-    def test_sound_coverage_reconciles_a_wishy_washy_commitment_grade(self, world):
-        # Cx 093: deterministic coverage is the source of truth. On a provably SOUND solve
-        # (required pillar genuinely covered), a model judge returning the wishy-washy 'partial'
-        # is normalized to 'vindicated' and the receipt is 'won' — no grade/conclusion seam.
+    def test_sound_coverage_grades_vindicated_without_the_llm_judge(self, world):
+        # COMMITMENT-AS-EFFECT slice 2: a SOUND solve grades 'vindicated' DETERMINISTICALLY from
+        # coverage — no LLM judge call, and the persisted receipt agrees (no grade/conclusion seam).
+        # (Supersedes the old Cx-093 "reconcile a wishy-washy judge grade" path — the judge is gone.)
         import dataclasses
-        from construct.arc.executor import turn_time
         from construct.arc.grammar import Pillar
         pillar = Pillar("pillar:culprit", "who did it", required=True,
                         genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"))
         arc = dataclasses.replace(make_arc(), pillars=(pillar,))
         seed_arc(world, arc)
         world.porcelain.ingest_structured(
-            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
-              "valid_from": turn_time(3)}], frame="plot:main")
-        world.porcelain.ingest_structured(
             [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
             frame=PLAYER_FRAME)
         world._extractions.extend([{"items": []}, {"items": []}])
-        provider = StubProvider([
+        provider = StubProvider([                       # NO judge stub
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "names the killer"},
-            {"grade": "partial", "rationale": "judge was wishy-washy"},   # the spurious grade
             {"prose": "You lay out the case; the rival is named."},
         ])
         result = run_turn(world, arc, provider, "I lay out the case and name the killer.", turn=5,
                           scenario_mode="win_loss",
                           scope=["fact:secret", "person:rival", PLAYER, "place:study"])
         assert result.trace.conclusion_shape == "triumph"
-        assert result.trace.commitment_grade == "vindicated"   # reconciled from 'partial'
+        assert result.trace.commitment_grade == "vindicated"
         assert result.trace.outcome == "won" and result.trace.terminal is True
-        # the persisted receipt grade was rewritten too (no contradictory claim row)
+        assert "judge_commitment:cheap" not in result.trace.cohort_calls
         assert PorcelainWorldReads(world).state("claim:person:player", "grade") == "vindicated"
 
-    def test_sound_coverage_keeps_wrong_grade_but_never_loses(self, world):
-        # Cx 095 belt-and-suspenders: a 'wrong' grade on SOUND coverage is PRESERVED as flavor
-        # (it may signal a player-named conflicting target), but it must NOT force an arc_lost —
-        # the receipt reconciles lost->won so there's no loss beside a coverage triumph.
+    def test_complete_but_false_coverage_lands_hollow_wrong(self, world):
+        # COMMITMENT-AS-EFFECT slice 2 (Cx 107 hardening — a non-farce false-but-complete case):
+        # the player built the case on a RED HERRING (a required pillar covered FALSE). Coverage is
+        # complete (so it lands, not bounce) but UNSOUND → an unjust/mistaken conviction: grade
+        # 'wrong', conclusion_shape wrong_case, terminal — no LLM judge call. (peril_redemption
+        # polarity, NOT farce — false coverage is a wrong case here, not the comic engine.)
         import dataclasses
-        from construct.arc.executor import turn_time
         from construct.arc.grammar import Pillar
         pillar = Pillar("pillar:culprit", "who did it", required=True,
-                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"))
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"),
+                        false_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:clerk"))
         arc = dataclasses.replace(make_arc(), pillars=(pillar,))
         seed_arc(world, arc)
+        # the player believes the RED HERRING (false coverage), not the genuine cause:
         world.porcelain.ingest_structured(
-            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
-              "valid_from": turn_time(3)}], frame="plot:main")
-        world.porcelain.ingest_structured(
-            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:clerk"}],
             frame=PLAYER_FRAME)
         world._extractions.extend([{"items": []}, {"items": []}])
-        provider = StubProvider([
+        provider = StubProvider([                       # NO judge stub — effect-derived
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
-             "uncertain_of": "", "commits": True, "commitment": "accuses the butler"},
-            {"grade": "wrong", "rationale": "named a conflicting target"},   # preserved as flavor
-            {"prose": "You name the butler, though the evidence pointed elsewhere."},
+             "uncertain_of": "", "commits": True, "commitment": "accuses the clerk"},
+            {"prose": "You name the clerk; the order is signed — but it will not hold."},
         ])
-        result = run_turn(world, arc, provider, "I accuse the butler.", turn=5,
-                          scenario_mode="win_loss",
-                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
-        assert result.trace.conclusion_shape == "triumph"
-        assert result.trace.commitment_grade == "wrong"       # PRESERVED (not normalized)
-        assert result.trace.outcome == "won"                  # but reconciled off 'lost'
-        assert result.trace.terminal is True
-        # the won receipt was written; no arc_lost beside the triumph
-        from construct.turnloop import terminal_outcome
-        assert terminal_outcome(PorcelainWorldReads(world)) == "won"
+        result = run_turn(world, arc, provider, "I accuse the clerk.", turn=5,
+                          scenario_mode="win_loss", cost_disposition="peril_redemption",
+                          scope=["fact:secret", "person:clerk", "person:rival", PLAYER, "place:study"])
+        assert result.trace.commitment_bounced is False        # complete → it lands
+        assert result.trace.commitment_grade == "wrong"        # hollow/unjust (the wrong_case flag)
+        assert result.trace.conclusion_shape == "bittersweet"  # the hollow-conviction epilogue shape
+        assert result.trace.terminal is True and result.trace.outcome == "lost"
+        assert "judge_commitment:cheap" not in result.trace.cohort_calls
 
     def test_farce_all_false_concludes_warm_no_twist(self, world):
         # Cx 027 blocker 3: a fully-live FARCE (every required pillar false-filled) is a WARM
@@ -772,10 +767,9 @@ class TestFullTurn:
             [{"entity": "fact:mixup", "attribute": "live", "value": "true"}], frame=PLAYER_FRAME)
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
-        provider = StubProvider([
+        provider = StubProvider([                       # NO judge stub — effect-derived grade
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "plays along as the Duke"},
-            {"grade": "partial", "rationale": "the dinner lands chaotically"},
             {"prose": "The king roars with laughter; the pig is knighted."},
         ])
         result = run_turn(world, arc, provider, "I lean into the mix-up at dinner.", turn=5,
@@ -783,6 +777,9 @@ class TestFullTurn:
                           scope=["fact:mixup", PLAYER, "place:study"])
         assert result.trace.terminal is True
         assert result.trace.conclusion_shape == "triumph"  # warm, not costly_victory
+        # fail_forward honored: a live comic blowup is effect-sound → vindicated, never wrong_case
+        assert result.trace.commitment_grade == "vindicated"
+        assert "judge_commitment:cheap" not in result.trace.cohort_calls
         prompt = _narrate_prompt(provider)
         assert "THE TWIST" not in prompt  # a triumphant farce must not trip the wrong-case twist
 
@@ -808,10 +805,9 @@ class TestFullTurn:
             [{"entity": "scoreboard:main", "attribute": "outcome", "value": "loss"}])
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
-        provider = StubProvider([
+        provider = StubProvider([                       # NO judge stub — effect-derived grade
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "goes the distance"},
-            {"grade": "vindicated", "rationale": "stood the full bout"},
             {"prose": "The bell rings; you are still standing."},
         ])
         result = run_turn(world, arc, provider, "I go the distance.", turn=5,
@@ -819,6 +815,7 @@ class TestFullTurn:
                           scope=["fact:secret", "person:rival", PLAYER, "place:study"])
         assert result.trace.terminal is True
         assert result.trace.conclusion_shape == "costly_victory"  # proved himself, lost the bout
+        assert "judge_commitment:cheap" not in result.trace.cohort_calls
 
     def test_interview_delivery_surfaces_a_clue_into_the_player_frame(self, world):
         # STORY-SHAPES §8: questioning a PRESENT cast member surfaces its authorized clue
