@@ -21,13 +21,13 @@ from construct.session import Session
 
 # Shape-flavored input arcs — the player pursues each genre's signature toward its climax.
 _INPUTS = {
-    "endurance": [
-        "I take stock of the party, the supplies, and the weather.",
-        "I tend the injured and decide what we can carry and what we leave.",
-        "I push us toward the way down before the pass closes — every hour counts.",
-        "The conditions worsen; I press on through the cold and the failing light.",
-        "I make the hard call on the last of the supplies and drive us to the descent.",
-        "I commit to the final push for shelter, whatever it costs.",
+    "endurance": [  # trigger-aware: engage the cast (InFrame beats) + DO the acts (Occurred beats)
+        "I check on Elias and assess his injured leg.",
+        "I take a full inventory of everything that survived the wreck — supplies, gear, the ore.",
+        "I ask Elias the safe way down through the snow.",
+        "I tell Elias I mean to bring the ore down with us.",
+        "I cut the ore loose and abandon it to keep us both on the red cord.",
+        "I make the final descent along the cord toward shelter, whatever it costs.",
     ],
     "bond": [
         "I find a quiet moment with the one I keep circling and try, clumsily, to connect.",
