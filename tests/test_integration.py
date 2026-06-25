@@ -748,6 +748,40 @@ class TestFullTurn:
         assert result.trace.terminal is True and result.trace.outcome == "lost"
         assert "judge_commitment:cheap" not in result.trace.cohort_calls
 
+    def test_hollow_landing_writes_culprit_at_large_canon_fallout(self, world):
+        # COMMITMENT-AS-EFFECT slice 3 (Cx 105 #5): a hollow/unjust landing writes a CONCRETE canon
+        # consequence (the real culprit walks free) — next-episode fuel — and the protagonist's frame
+        # does NOT get it (the knowledge gap: they believe they convicted rightly).
+        import dataclasses
+        from construct.cast import CastNode
+        from construct.arc.grammar import Pillar
+        pillar = Pillar("pillar:culprit", "who did it", required=True,
+                        genuine_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival"),
+                        false_via=InFrame(PLAYER_FRAME, "fact:secret", "culprit", "person:clerk"))
+        arc = dataclasses.replace(make_arc(), pillars=(pillar,))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(   # the player believes the RED HERRING (false coverage)
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:clerk"}],
+            frame=PLAYER_FRAME)
+        # person:rival (the REAL culprit) is at place:flat in the fixture → not present (no npc_turn)
+        cast = {"person:rival": CastNode("person:rival", "suspect", "the rival", is_culprit=True)}
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "accuses the clerk"},
+            {"prose": "You name the clerk; the real one slips away."},
+        ])
+        result = run_turn(world, arc, provider, "I accuse the clerk.", turn=5, cast=cast,
+                          scenario_mode="win_loss", cost_disposition="peril_redemption",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert result.trace.terminal is True and result.trace.commitment_grade == "wrong"
+        # the concrete canon consequence: the real culprit walks free (next-episode fuel)
+        assert ("person:rival", "brought_to_justice", "false") in result.trace.main_fallout
+        rd = PorcelainWorldReads(world)
+        assert rd.state("person:rival", "brought_to_justice") == "false"  # CANON
+        # the knowledge gap: the protagonist's frame does NOT hold it (they think they won)
+        assert not rd.assertion_in_frame(PLAYER_FRAME, "person:rival", "brought_to_justice", "false")
+
     def test_farce_all_false_concludes_warm_no_twist(self, world):
         # Cx 027 blocker 3: a fully-live FARCE (every required pillar false-filled) is a WARM
         # comic triumph — NOT a costly comeuppance (false != cost here) and NOT a wrong-case

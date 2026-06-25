@@ -419,6 +419,7 @@ class TurnTrace:
     commitment: str = ""        # the player's conclusory commitment this turn (if any)
     commitment_grade: str = ""  # vindicated|partial|wrong|pyrrhic — graded outcome (epilogue flavor)
     commitment_bounced: bool = False  # commit attempted but required coverage incomplete → non-terminal bounce (COMMITMENT-AS-EFFECT)
+    main_fallout: list = field(default_factory=list)  # concrete canon consequences of a hollow/unjust main landing (caused_by the conclusion) — next-episode fuel
     conclusion_shape: str = ""  # OUTCOME_SHAPE from pillar coverage (the EFFECT — STORY-SHAPES §0a)
     conclusion_basis: str = ""  # one-line why, for the epilogue + debug surface
     learned_clues: list = field(default_factory=list)  # clue ids surfaced into the player frame this turn
@@ -1484,6 +1485,27 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              "value": f"arc_{outcome}", "valid_from": turn_time(turn)},
         ], frame=SESSION, classify="batch")  # terminal receipt — bookkeeping
         set_lifecycle(world, arc, main_life, turn)
+        # COMMITMENT-AS-EFFECT slice 3 (Cx 105 #5): a HOLLOW/unjust main landing writes a CONCRETE
+        # canon consequence — the fallout the next episode grows from — anchored via `caused_by` to
+        # the conclusion event. NOT a derived label ('hollow'/'irony'), NOT side-arc emit_fallout.
+        # Deduction worked example: the case convicted on a red herring → the REAL culprit was never
+        # brought to justice → they walk free (a true world fact, the book-2 hook). The protagonist-
+        # knowledge gap is STRUCTURAL: this is CANON (the world knows the culprit is at large);
+        # knows:<protagonist> does NOT get it — the protagonist believes they convicted rightly,
+        # unless/until it surfaces. Fail-open; never sinks the terminal turn.
+        if conc and conc.get("wrong_case") and cast:
+            _cast_items = cast.items() if isinstance(cast, dict) else [(n.node_id, n) for n in cast]
+            _culprit = next((cid for cid, n in _cast_items if getattr(n, "is_culprit", False)), None)
+            if _culprit:
+                try:
+                    p.ingest_structured([
+                        {"entity": _culprit, "attribute": "brought_to_justice", "value": "false",
+                         "caused_by": f"event:arc_outcome_{turn}", "valid_from": turn_time(turn)},
+                    ])  # canon (default frame) — the real culprit walks free; generator/next-episode fuel
+                    trace.main_fallout.append((_culprit, "brought_to_justice", "false"))
+                    logger.info("hollow landing: %s at large (caused_by the botched case)", _culprit)
+                except Exception as exc:  # fallout must never sink the terminal turn
+                    trace.dropped_cohorts.append(f"main_fallout ({exc})")
 
     # Side-arc lifecycle: classify each, and on the FIRST transition to a
     # terminal (guarded by the persisted lifecycle row so re-entry never re-fires)
