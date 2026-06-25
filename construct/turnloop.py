@@ -695,9 +695,12 @@ def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Pro
              "value_type": "entity", "valid_from": turn_time(turn)}]
     for k in fired:
         eid = f"event:{k}_{turn}"
-        rows += [{"entity": eid, "attribute": "kind", "value": k,
-                  "caused_by": action_eid, "valid_from": turn_time(turn)},
+        # caused_by must be an EVENT-ENTITY causality ROW (Cx 117) — item-level `caused_by` is PB
+        # row metadata that `events().caused_by` does not surface. Write the explicit row.
+        rows += [{"entity": eid, "attribute": "kind", "value": k, "valid_from": turn_time(turn)},
                  {"entity": eid, "attribute": "agent", "value": protagonist,
+                  "value_type": "entity", "valid_from": turn_time(turn)},
+                 {"entity": eid, "attribute": "caused_by", "value": action_eid,
                   "value_type": "entity", "valid_from": turn_time(turn)}]
     try:
         p.ingest_structured(rows)  # canon — a true world event; the membrane is unaffected
@@ -1363,9 +1366,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 trace.dropped_cohorts.append(f"resolution ({exc})")
         else:
             _resolved_tier = "assured"
-        # fire authored act-beats only on a SUCCESS tier (never a failure — Cx 115 #1)
+        # fire authored act-beats only on a SUCCESS tier (never a failure — Cx 115 #1). Skip
+        # TERMINAL side arcs (Cx 117): a dead side arc's pending Occurred beats offer no candidates.
         if _resolved_tier in ("assured", "success_cost", "complete_success"):
-            _fire_event_occurs(world, p, live_reads, [arc, *side_arcs], provider,
+            _live_arcs = [arc] + [sa for sa in side_arcs
+                                  if stored_lifecycle(live_reads, sa) not in LIFECYCLE_TERMINALS]
+            _fire_event_occurs(world, p, live_reads, _live_arcs, provider,
                                player_input, _resolved_tier, turn, trace, arc.protagonist)
     achieved, closed, revealed = beat_pass(world, arc, live_reads, turn)
     trace.beats_achieved, trace.beats_closed = achieved, closed

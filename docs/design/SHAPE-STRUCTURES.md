@@ -59,14 +59,16 @@ coverage:
 |---|---|---|---|
 | **ASK** | questions a present person | `InFrame(knows:player, …)` via `learn_clue_items` | YES (interview delivery — the only one built) |
 | **EXAMINE / EXPLORE** | inspects an object/site, reaches a place | `Located(...)` / `InFrame` from a look | mostly (movement + furnish; needs a "learn on examine" write) |
-| **ACT** | overcomes a trial, performs, survives, executes | `Occurred(event)` / `StateIs(...)` | YES (action resolution → events/state; beat_pass reads it) |
+| **ACT** | overcomes a trial, performs, survives, executes | `Occurred(event)` / `StateIs(...)` | YES (EVENT-OCCURS-FIRING: the per-turn detector writes the authored event on a successful act → `beat_pass` reads it). **Was the arc-stall root cause** (Cx 114/115/117) — nothing wrote `Occurred` kinds until this; now fixed. |
 | **RELATE** | shares a moment, meets/offers vulnerability, a gesture | `InFrame(knows:player, …)` from a relational beat | partial (dialogue exists; the beat-write is the gap) |
-| **CHOOSE** | commits / compounds / refuses under pressure | `Occurred` / the conclusory commitment | YES (commitment + classify `commits`) |
+| **CHOOSE** | commits / compounds / refuses under pressure | `Occurred` (act) / the conclusory commitment | YES — act-choices via EVENT-OCCURS-FIRING; verbal commitments via commitment + classify `commits`. |
 
 **The crucial realization:** `Pillar.genuine_via` is an arbitrary `Expr`, and the turn loop
-already fills beats/pillars through movement, action-resolution events, and the commitment. So
-**most channels need NO new delivery code** — the pillar condition just reads the state the
-normal turn already writes. The card-weaving's job for a non-people card is to **propose the
+fills beats/pillars through movement, cast-clue delivery, EVENT-OCCURS-FIRING (authored `Occurred`
+act-beats — the detector writes the event when the act lands), and the commitment. So **most
+channels need no new delivery code** — the pillar/beat condition reads the state the normal turn
+writes. (NOTE — corrected per Cx 117: `Occurred` beats did NOT fire on their own; nothing wrote
+arbitrary-kind events until EVENT-OCCURS-FIRING. That was the arc-stall root cause.) The card-weaving's job for a non-people card is to **propose the
 hook** (foreground the trial/place/temptation) and let the player ACT; coverage fills through
 the existing channel. The only explicit delivery write is ASK (interview); EXAMINE and RELATE
 need a small "learn on look / learn on relational beat" write analogous to `learn_clue_items`.

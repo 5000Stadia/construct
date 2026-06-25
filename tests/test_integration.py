@@ -2178,7 +2178,30 @@ def test_event_occurs_beat_fires_and_achieves_on_success(world):
     rd = PorcelainWorldReads(world)
     assert rd.events(kind="deed_done")                           # binding canon event
     assert rd.events(kind="player_action")                       # the action-event anchor
+    # the causality edge is visible through the EVENT LENS (Cx 117 — an event-entity row, not item metadata)
+    assert rd.events(kind="deed_done")[0].caused_by == ("event:action_2",)
     assert "WHAT JUST HAPPENED" in _narrate_prompt(provider)     # surfaced as binding
+
+
+def test_event_occurs_no_fire_on_failure_tier(world, monkeypatch):
+    # Cx 115/117: an uncertain action resolving to a FAILURE tier must NOT fire the beat — no
+    # detector call, no canon event (a failed attempt can't canonize the act).
+    from construct import resolution
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = _arc_with_occurred_beat()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([                              # NO detect_events stub — must not be called
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+         "uncertain_of": "the slope may give", "commits": False, "commitment": ""},
+        {"prose": "You reach to cut the ore loose, but the footing slides out from under you."},
+    ])
+    result = run_turn(world, arc, provider, "I try to cut the ore loose.", turn=2,
+                      scope=[PLAYER, "place:study"])
+    assert result.trace.adjudication == "test:terrible_failure"
+    assert result.trace.events_fired == []
+    assert "detect_events:cheap" not in result.trace.cohort_calls
+    assert not PorcelainWorldReads(world).events(kind="deed_done")
 
 
 def test_event_occurs_no_fire_when_detector_says_none(world):
