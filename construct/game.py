@@ -450,7 +450,12 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 # every required holder + the culprit must be reachable in play, with a
                 # spoon-fed opening (>=2 at_scene + a first_witness). A malformed whodunit
                 # cast must fail here (→ re-author / pillar-less), never be patched by improv.
-                _problems = check_solvability(_req, _cast, known_ids=set(known_ids),
+                # Admit authored HYBRID holders (obj:/place: sites/artifacts the player EXAMINES —
+                # GENRE-SIGNATURE-ELEMENTS / Discovery, Cx 109): they don't pre-exist in canon, but
+                # we seed them as reachable canon at staging below, so they're legal holders here.
+                _hybrid = {n.node_id for n in _cast
+                           if n.node_id.startswith(("obj:", "place:"))}
+                _problems = check_solvability(_req, _cast, known_ids=set(known_ids) | _hybrid,
                                               require_staging=(_shape == "deduction"))
                 # GENRE-SIGNATURE-ELEMENTS lint (Cx 097): the genre's hard signature promises
                 # must actually ship (e.g. a deduction cast needs a strong red herring + a
@@ -523,6 +528,17 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                     world.porcelain.ingest_structured(_loc_items)
                     logger.info("staged %d cast location fact(s) at scene %s",
                                 len(_loc_items), _scene_place)
+                # HYBRID holders (obj:/place: the player EXAMINES — Discovery, Cx 109): admit them
+                # as real canon entities (kind) so they're referable + present for the EXAMINE
+                # channel. Their `in` is staged above; their clue rides the player frame (no
+                # knows:<obj> frame — cast_seed_plan already skips non-person holders).
+                _hk = [{"entity": n.node_id, "attribute": "kind",
+                        "value": "object" if n.node_id.startswith("obj:") else "place",
+                        "timeless": True}
+                       for n in cast_nodes if n.node_id.startswith(("obj:", "place:"))]
+                if _hk:
+                    world.porcelain.ingest_structured(_hk)
+                    logger.info("admitted %d hybrid obj/place holder(s) as canon", len(_hk))
             else:
                 logger.warning("no resolved scene place for %s — cast staging skipped",
                                arc.protagonist)

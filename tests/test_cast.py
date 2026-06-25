@@ -585,6 +585,37 @@ def test_signature_support_requires_a_live_reachable_cross_edge():
     assert validate_signature_support(["deduction"], (live, b)) == []
 
 
+def test_hybrid_obj_place_holders_parse_and_are_solvable():
+    # Discovery hybrid nodes (Cx 109): a cast may hold clues on obj:/place: holders the player
+    # EXAMINES (examined/scrutiny), not only people. They parse, and are solvable when admitted
+    # as canon (the session-zero path admits authored obj/place holders into the allowlist).
+    from construct.cast import cast_from_proposal, check_solvability
+    prop = {
+        "pillars": [{"id": "pillar:purpose", "label": "the city's purpose", "required": True}],
+        "cast": [
+            {"id": "place:cisterns", "shape_role": "site/stratum", "presence": "nearby",
+             "location": "place:cisterns", "clues": [
+                {"clue_id": "clue:law-in-song", "pillar_id": "pillar:purpose",
+                 "fact": {"entity": "place:cisterns", "attribute": "use", "value": "public memory"},
+                 "coverage_effect": "genuine", "reveal_condition": "examined"}]},
+            {"id": "obj:ledger", "shape_role": "artifact", "presence": "nearby",
+             "location": "place:archive", "clues": [
+                {"clue_id": "clue:obligation", "pillar_id": "pillar:purpose",
+                 "fact": {"entity": "obj:ledger", "attribute": "records", "value": "heat-hour debts"},
+                 "coverage_effect": "genuine", "reveal_condition": "scrutiny"}]},
+        ],
+    }
+    cast, specs = cast_from_proposal(prop)
+    assert {n.node_id for n in cast} == {"place:cisterns", "obj:ledger"}
+    # examined/scrutiny are LIVE-reachable → the required pillar is genuine-reachable
+    req = [pid for pid, _l, r in specs if r]
+    admit = {"place:cisterns", "obj:ledger", "place:archive", PROT}
+    assert check_solvability(req, cast, known_ids=admit) == []
+    # without admitting the hybrid holders, they'd be rejected as phantom (the gate the session-
+    # zero path opens by seeding them as canon)
+    assert check_solvability(req, cast, known_ids={PROT}) != []
+
+
 def test_signature_support_noop_for_non_deduction_shapes():
     from construct.cast import validate_signature_support
     # a bond/romance world is prompt + live-acceptance only in v1 — no hard lint, no false flags

@@ -245,10 +245,15 @@ AUTHOR_CAST_SCHEMA = {
                            "pillars; every required pillar must have >=1 GENUINE clue, and "
                            "every strong red herring must name a reachable debunked_by clue.",
             "items": {"type": "object", "properties": {
-                "id": {"type": "string", "description": "person:<slug>, must exist in canon"},
+                "id": {"type": "string", "description": "USUALLY person:<slug> (a character). For "
+                       "DISCOVERY/exploration and physical-evidence shapes a holder may instead be "
+                       "obj:<slug> (an artifact/sign/inscription) or place:<slug> (a site/stratum/"
+                       "chamber) that the player EXAMINES rather than questions. A person must "
+                       "exist in canon; an obj:/place: holder you introduce is admitted as canon "
+                       "at staging (give it a clear location so it is reachable)."},
                 "shape_role": {"type": "string",
                                "description": "the shape's label: witness/suspect, rival/"
-                                              "mentor, guide/informant, etc."},
+                                              "mentor, guide/informant, site/stratum/artifact, etc."},
                 "surface_role": {"type": "string", "description": "their plain role in-world"},
                 "presence": {"type": "string", "enum": ["at_scene", "nearby", "offscene"],
                              "description": "where they are in PLAY so they can be reached: "
@@ -288,7 +293,14 @@ AUTHOR_CAST_SCHEMA = {
                     "reveal_mode": {"type": "string",
                                     "enum": ["volunteered", "pressed", "traded", "contradicted"]},
                     "reveal_condition": {"type": "string",
-                                         "enum": ["none", "trust", "pressure", "object_seen"]},
+                                         "enum": ["none", "trust", "pressure", "object_seen",
+                                                  "examined", "scrutiny"],
+                                         "description": "how the clue is earned. People: 'none' "
+                                         "(volunteered) / 'pressure' (pressed). OBJECT/SITE holders "
+                                         "(obj:/place:): 'examined' (a look) / 'scrutiny' (close "
+                                         "inspection) — the EXAMINE channel. A required genuine clue "
+                                         "must use a LIVE-reachable condition (none/pressure/"
+                                         "examined/scrutiny), never trust/object_seen."},
                     "debunked_by": {"type": "string",
                                     "description": "for a strong red herring: the clue_id that "
                                                    "corrects it; empty otherwise"},
@@ -337,6 +349,18 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
         "dwindling resource with felt stakes (the only dry matches, and the man who keeps "
         "counting them when he thinks no one sees); a HEIST card is a guard with a tell and a "
         "grudge. Particular, wounded, pulling the eye. Give EVERY card that texture.\n\n"
+        "HYBRID HOLDERS — when the EVIDENCE IS THE WORLD, not only people (binding for DISCOVERY/"
+        "exploration, and welcome wherever a physical clue fits): a holder may be an obj:<slug> "
+        "(an artifact, sign, inscription, instrument) or a place:<slug> (a site, stratum, chamber, "
+        "ruin-layer) that the player EXAMINES, with reveal_condition 'examined' (a look) or "
+        "'scrutiny' (close inspection) — NOT a person to question. For a DISCOVERY shape author the "
+        "PLACE AS A CHARACTER: layered strata/sites each carrying a genuine clue toward the cause; "
+        "ALSO give a guide/informant or two with COMPETING explanations (rival theories — one or "
+        "more 'false' cards with a reachable 'examined'/'scrutiny' debunker), and make UNDERSTANDING "
+        "COST something (a stratum that damages, a truth that unsettles). Mix people + sites freely; "
+        "every required genuine clue still needs a LIVE-reachable condition (none/pressure for people, "
+        "examined/scrutiny for obj/place). Give each obj/place holder a `location` (place:<slug>) so "
+        "it is reachable, and a vivid hook_text just like a person.\n\n"
         "First name 3-5 PILLARS — the CAUSES whose coverage will determine the conclusory "
         "scene (motive/means/the connection for a mystery; the shape's equivalent otherwise). "
         "Then build a cast of 5-10 people who each hold pieces. RULES (fairness, binding): "
