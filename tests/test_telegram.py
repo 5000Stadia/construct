@@ -8,6 +8,7 @@ offline loopback flow — all with a fake Session and no network.
 """
 
 import json
+import re
 import os
 import stat
 from types import SimpleNamespace
@@ -367,7 +368,10 @@ class TestRouting:
         # streamed progress: heads-up + a humanized stage line + a chunk counter
         assert BUILD_HEADS_UP in pings
         assert any("Ingesting it into the pattern-buffer" in p for p in pings)
-        assert any("into the pattern-buffer (2/5)" in p for p in pings)
+        # overall counter, not a chunk fraction: the populating phase shows once with [k/N]
+        assert any("Entering people, places & things into the pattern-buffer" in p for p in pings)
+        assert any(re.search(r"\[\d+/\d+\]", p) for p in pings)
+        assert not any("(2/5)" in p for p in pings)
         # entered the freshly-built per-player world; player repointed + started
         built = f"live_telegram_bld"
         assert registry.scenario_for(conn, "telegram", "bld") == built
@@ -907,9 +911,13 @@ class TestHumanizeStage:
             "Stage 1 · Ingesting prose → pattern-buffer")
         assert "Final checks" in _humanize_stage("Stage 7 · Viability gate · …")
 
-    def test_collapses_per_chunk_to_a_pattern_buffer_counter(self):
+    def test_collapses_per_chunk_to_one_populating_phase(self):
+        # The chunk fraction is gone — every chunk maps to ONE populating phase,
+        # so the OVERALL counter (applied by _StageProgress) advances by phase.
         assert _humanize_stage("   …chunk 3/7 extracted") == (
-            "· Entering people, places & things into the pattern-buffer (3/7)…")
+            "· Entering people, places & things into the pattern-buffer…")
+        assert _humanize_stage("   …chunk 1/7 extracted") == \
+            _humanize_stage("   …chunk 7/7 extracted")  # identical → collapses
 
     def test_internal_lines_stay_silent(self):
         # Truly-internal noise stays silent (the "bible" line honors the no-jargon directive).
@@ -923,6 +931,32 @@ class TestHumanizeStage:
             "· Classifying what's durable vs. fleeting…"
         assert _humanize_stage("Stage 3 · Declaring passability · RFC-003") == \
             "· Recording how the places connect…"
+
+
+class TestStageProgress:
+    def test_overall_counter_advances_by_distinct_phase(self):
+        from construct.transport_core import _BUILD_STEP_TOTAL, _StageProgress
+        prog = _StageProgress()
+        a = prog.line("Stage 1 · Ingesting prose → pattern-buffer")
+        b = prog.line("Stage 4 · Reconciling identity")
+        assert a == f"· [1/{_BUILD_STEP_TOTAL}] Ingesting it into the pattern-buffer…"
+        assert b == f"· [2/{_BUILD_STEP_TOTAL}] Reconciling identities (coreference)…"
+
+    def test_repeated_phase_shows_once_no_chunk_fraction(self):
+        from construct.transport_core import _StageProgress
+        prog = _StageProgress()
+        first = prog.line("   …chunk 1/7 extracted")
+        again = prog.line("   …chunk 5/7 extracted")
+        assert first is not None and "[1/" in first
+        assert "(1/7)" not in first and "/7" not in first  # no phase-local fraction
+        assert again is None                                # collapses — shown once
+
+    def test_internal_lines_never_consume_a_step(self):
+        from construct.transport_core import _StageProgress
+        prog = _StageProgress()
+        assert prog.line("   …hidden bible saved → /tmp/x") is None  # silent, no step
+        out = prog.line("Stage 7 · Viability gate · …")
+        assert out.startswith("· [1/")                      # still the first step
 
 
 # ---- chunking ------------------------------------------------------------
