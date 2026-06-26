@@ -43,8 +43,12 @@ def _author_scenario(path, world_id):
             return rule(prompt, schema)
         return {"items": []}
 
+    # Author with Construct's attribute-semantics hook (Cx 218) — production scenarios
+    # persist `attr:delta_type.structural` (etc.) from the first arc row, so a later
+    # production reopen + mid-story arc re-ingest doesn't try to declare it too late.
+    from construct.semantics import attribute_default
     w = World(path, world_id=world_id, model=StubModel(fallback=fallback),
-              stance="fiction", title="Session Test World")
+              stance="fiction", title="Session Test World", attribute_default=attribute_default)
     w.ingestor.cursor.advance(1.0)
     w.ingest_structured([
         {"entity": "place:study", "attribute": "kind", "value": "room", "timeless": True},
@@ -552,11 +556,6 @@ class TestEndlessMode:
         s.close()
 
 
-@pytest.mark.skip(reason="BLOCKED on a PB attribute-semantics conflict — conferring Cx (C-217): "
-                  "replan_main_arc re-ingests the arc's shape rows (delta_type, timeless), but "
-                  "Session.open already READ-FOLDED delta_type, so PB raises 'cannot declare "
-                  "semantics after folded data'. The reload CODE is correct; the blocker is the "
-                  "re-ingest path (also a live-proof risk). Un-skip once the ingest path is fixed.")
 def test_reload_arc_portfolio_swaps_the_session_main_arc(scenario, monkeypatch):
     """WORLD-CHANGING-AGENCY (Cx 215/216 #1): after a mid-story re-plan repoints the
     `arc:portfolio` manifest in PB, `Session._reload_arc_portfolio` must update the live
@@ -576,3 +575,32 @@ def test_reload_arc_portfolio_swaps_the_session_main_arc(scenario, monkeypatch):
     assert s._arc.arc_id == "arc:replan_9"             # the live session arc swapped
     assert all(a.arc_id != "arc:replan_9" for a in s._side_arcs)  # new arc is MAIN, not a side arc
     s.close()
+
+
+def test_raw_authored_world_without_semantics_hook_fails_arc_reingest(tmp_path, monkeypatch):
+    """Guard (Cx 218): the delta_type re-ingest raise is a FIXTURE/MIGRATION issue, not a
+    replan-algorithm bug. A world authored via raw World(...) WITHOUT Construct's
+    attribute_default never persists `attr:delta_type.structural`; once a production-style
+    reopen read-folds delta_type, a new arc_to_items ingest declares it too late and PB
+    correctly raises. Production scenarios (built via game._world) carry the declaration and
+    are unaffected — so the live proof is safe on properly-sealed worlds."""
+    from patternbuffer import World
+    from construct.semantics import attribute_default
+    _m = StubModel(fallback=lambda p, s: {"items": []})
+    # RAW author (no attribute_default) — a delta_type row, but no persisted structural declaration
+    raw = World(tmp_path / "raw.world", world_id="w:raw", model=_m, stance="fiction", title="Raw")
+    raw.ingestor.cursor.advance(1.0)
+    raw.porcelain.ingest_structured([
+        {"entity": "shape:main", "attribute": "delta_type", "value": "drive_inverted",
+         "timeless": True}], frame="plot:main")
+    raw.close()
+    # PRODUCTION-style reopen (WITH the semantics hook): read-fold delta_type, then a new arc's
+    # delta_type row tries to declare the structural semantics too late → PB correctly raises.
+    prod = World(tmp_path / "raw.world", world_id="w:raw", model=_m, stance="fiction",
+                 attribute_default=attribute_default)
+    prod.porcelain.state("shape:main", "delta_type", frame="plot:main")   # read-fold
+    with pytest.raises(ValueError, match="delta_type"):
+        prod.porcelain.ingest_structured([
+            {"entity": "shape:replan_3", "attribute": "delta_type", "value": "desire_at_cost",
+             "timeless": True}], frame="plot:main")
+    prod.close()
