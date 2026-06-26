@@ -139,6 +139,38 @@ def plan_from_proposal(proposal: dict, *, tier: str, action_event: str = "",
     )
 
 
+def _canonical_id(world: Any, eid: str) -> str:
+    """Resolve a (possibly bare/loose) entity id to the world's CANONICAL known id via
+    `world.refer` (Cx 226), so a reshape can't scatter one individual's state across
+    coreferent ids (`kestle` vs `person:thomas_kestle`). Fail-soft: an unresolvable id
+    (a genuinely new entity) is kept as-is."""
+    if not eid:
+        return eid
+    try:
+        res = world.refer(eid, frame="canon")
+        if getattr(res, "status", None) == "resolved" and getattr(res, "entity_id", None):
+            return res.entity_id
+    except Exception:
+        logger.debug("reshape canonicalize: refer(%r) failed; keeping as-is", eid)
+    return eid
+
+
+def canonicalize_plan(world: Any, plan: ReshapePlan) -> ReshapePlan:
+    """Rewrite the plan's committed-row entity ids (and `knows:<npc>` frame targets) to
+    the world's canonical ids before commit. Mutates and returns the plan."""
+    for rows in (plan.state_rows, plan.restage_rows, plan.consequence_rows):
+        for r in rows:
+            if r.get("entity"):
+                r["entity"] = _canonical_id(world, r["entity"])
+    for fr in plan.frame_rows:
+        if fr.get("entity"):
+            fr["entity"] = _canonical_id(world, fr["entity"])
+        frame = fr.get("frame", "")
+        if frame.startswith("knows:"):
+            fr["frame"] = "knows:" + _canonical_id(world, frame[len("knows:"):])
+    return plan
+
+
 def reshape_canon(world: Any, plan: ReshapePlan, *, turn: int) -> ReshapeResult:
     """Commit a sanctioned reshape to canon, UPSTREAM and deterministically.
 
@@ -218,6 +250,7 @@ def apply_reshape(world: Any, provider: Any, *, action: str, scene: str, canon: 
         plan = plan_from_proposal(proposal, tier=tier, turn=turn)
         if plan is None:
             return None
+        canonicalize_plan(world, plan)   # commit to ONE canonical id, not a bare alias (Cx 226)
         return reshape_canon(world, plan, turn=turn)
     except Exception:
         logger.exception("apply_reshape failed; the turn plays normally (no reshape)")

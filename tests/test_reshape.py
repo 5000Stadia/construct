@@ -41,6 +41,7 @@ def _world(path) -> World:
     w.ingest_structured([
         {"entity": "place:oil_store", "attribute": "kind", "value": "room", "timeless": True},
         {"entity": "person:angus", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:angus", "attribute": "name", "value": "Angus", "timeless": True},
         {"entity": "person:angus", "attribute": "alive", "value": "false", "valid_from": turn_time(0)},
     ])
     return w
@@ -231,6 +232,26 @@ def test_apply_reshape_enabled_commits_the_change(tmp_path):
     assert res is not None and res.landed is True
     assert res.summary == "Angus draws breath and lives."     # briefing directive for the narrator
     assert PorcelainWorldReads(w).state("person:angus", "alive") == "true"
+    w.close()
+
+
+def test_apply_reshape_canonicalizes_a_bare_target_id(tmp_path):
+    # Cx 226: the cohort may propose a BARE id ('angus') when the world's victim is the
+    # canonical 'person:angus'. apply_reshape must canonicalize via world.refer before
+    # commit, so the reshaped state lands on ONE id, not a coreferent alias.
+    from construct.provider import StubProvider
+    w = _world(tmp_path / "canon.world")
+    bare = dict(_REVIVE_PROPOSAL)
+    bare["target"] = {"entity": "angus", "attribute": "alive", "value": "true"}  # bare, no prefix
+    bare["restage"] = [{"entity": "angus", "attribute": "in", "value": "place:oil_store"}]
+    bare["frame_knowledge"] = []
+    res = apply_reshape(w, StubProvider([bare]), action="I revive him", scene="oil store",
+                        canon="person:angus.alive=false", tier="complete_success",
+                        turn=5, enabled=True)
+    assert res is not None and res.landed
+    reads = PorcelainWorldReads(w)
+    assert reads.state("person:angus", "alive") == "true"   # landed on the CANONICAL id
+    assert reads.state("angus", "alive") is None            # NOT on the bare alias
     w.close()
 
 
