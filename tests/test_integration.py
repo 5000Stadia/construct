@@ -2895,12 +2895,18 @@ class TestWorldReshape:
                         "value": "person:newculprit"},
              "restage": [], "frame_knowledge": [], "consequence": [],
              "summary": "Reality bends — the rival was never the one."},            # propose_reshape
+            # author_replan fires on the landed reshape; a beatless proposal → no_replacement,
+            # so the arc does NOT swap and the protected-key gate is exercised on arc:main.
+            {"protagonist": PLAYER, "delta_type": "desire_at_cost",
+             "tension": [PLAYER, "drive:comfort", "drive:truth"], "beats": [],
+             "hook": "nothing coherent to chase"},                                  # author_replan (gen)
             {"prose": "The world reshapes; it was person:newculprit all along."},   # narrate
         ])
         result = run_turn(world, arc, provider,
                           "I will the truth itself to change.", turn=1)
         trace = result.trace
         assert "bends" in trace.reshape                              # narrator briefed
+        assert trace.replanned == ""                                 # no_replacement → arc unchanged
         # the reshaped protected key COMMITTED to canon (append, current read flips)...
         assert world.porcelain.state(
             "fact:secret", "culprit")["fact"]["value"] == "person:newculprit"
@@ -2908,6 +2914,39 @@ class TestWorldReshape:
         # rather than being quarantined as an unearned protected-key assertion.
         assert ("fact:secret", "culprit") not in trace.quarantined
         assert ("fact:secret", "culprit") not in trace.contradictions
+
+    def test_flag_on_landed_reshape_replans_the_main_arc(self, world, monkeypatch):
+        # The full step-4 path: a landed reshape → author_replan returns a coherent arc →
+        # replan_main_arc swaps the live main arc mid-story (fresh id, no episode boundary).
+        from construct.arc import io as arc_io
+        monkeypatch.setenv("CONSTRUCT_WORLD_RESHAPE", "1")
+        monkeypatch.setattr("construct.resolution.draw_tier",
+                            lambda *a, **k: "complete_success")
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+             "uncertain_of": "whether the victim can be brought back"},             # classify
+            {"is_reshape": True, "slug": "victim_revived",
+             "target": {"entity": "person:rival", "attribute": "alive", "value": "true"},
+             "restage": [], "frame_knowledge": [], "consequence": [],
+             "summary": "The victim draws breath — the case is no longer a murder."},  # propose_reshape
+            {"protagonist": PLAYER, "delta_type": "desire_at_cost",
+             "tension": [PLAYER, "drive:doubt", "drive:resolve"],
+             "beats": [{"id": "beat:confront_attacker", "phase": "climax",
+                        "weight": "required", "kind": "event_occurs",
+                        "entity": "attacker_named", "attribute": "", "value": ""}],
+             "hook": "Now: who tried to kill him?"},                                # author_replan (gen)
+            {"prose": "He breathes. The question changes: who wanted him dead?"},    # narrate
+        ])
+        result = run_turn(world, arc, provider, "I pour everything into reviving him.", turn=1)
+        assert result.trace.replanned == "arc:replan_1"             # the arc re-aimed mid-story
+        # the new main arc is installed (mid-episode; no episode boundary)
+        reads = PorcelainWorldReads(world)
+        assert arc_io.main_arc_from_frame(reads) == "arc:replan_1"
+        assert not reads.events(kind="episode_start", frame="session:main")
 
     def test_flag_off_is_inert(self, world, monkeypatch):
         monkeypatch.setattr("construct.resolution.draw_tier",

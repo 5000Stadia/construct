@@ -468,6 +468,7 @@ class TurnTrace:
     contradictions: list = field(default_factory=list)  # narrator rows quarantined (changed established canon)
     quarantined: list = field(default_factory=list)  # narrator rows quarantined (unlicensed assertion of an arc key)
     reshape: str = ""  # WORLD-CHANGING AGENCY: the narrator directive for a canon reshape committed this turn (flag-gated)
+    replanned: str = ""  # the new main arc id if a reshape re-aimed the arc mid-story (flag-gated)
     timings: dict = field(default_factory=dict)  # per-section wall-clock (s) this turn — optimization surface
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
 
@@ -1579,6 +1580,36 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 _reshape_license.add((_row["entity"], _row["attribute"], _row["value"]))
             logger.info("world reshape committed: %s (%d visible rows licensed)",
                         _rr.event_id, len(_reshape_license))
+            # The reshape may have made the destination stale → re-aim the MAIN arc
+            # (first cut: re-evaluate on every LANDED reshape; the cohort judges staleness
+            # and can keep the through-line). Same-turn swap so beat_pass + briefing + gate +
+            # outcome all run from the new arc (Cx 210/212). Flag-gated via apply_reshape above.
+            if _rr.landed:
+                from construct.arc import io as arc_io
+                from construct.game import author_replan
+                _ro = author_replan(world, arc, provider, reshape_summary=_rr.summary, turn=turn)
+                if _ro.reason == "replanned" and _ro.arc is not None:
+                    arc_io.replan_main_arc(world, _ro.arc, turn=turn)
+                    arc = _ro.arc                       # swap the LIVE arc — all downstream uses it
+                    trace.replanned = arc.arc_id
+                    # refresh scope + snapshots from the NEW arc (a fresh PB read already
+                    # carries the committed reshape rows — no manual preservation needed).
+                    _new_scope = sorted(e for e in arc_entities(arc) if live_reads.has_entity(e))
+                    snap_scope = list(_new_scope) + ([scene] if scene else []) + scene_features
+                    canon_snap = _snap_or_empty(p, snap_scope)
+                    canon_table = _table(canon_snap)
+                    player_snap = _snap_or_empty(p, snap_scope, frame=player_frame)
+                    logger.info("arc re-planned mid-story -> %s", arc.arc_id)
+                elif _ro.reason == "no_replacement":
+                    # The old destination is gone and nothing coherent replaces it → EXPLICIT
+                    # old-main-arc fallout (never a silent stale arc, never a broken install).
+                    try:
+                        _fo = emit_fallout(world, arc, "incompletable", turn)
+                        trace.arc_fallout.append(arc.arc_id)
+                        trace.reshape = (trace.reshape + " " + _fo.directive).strip()
+                    except Exception:
+                        logger.exception("reshape no_replacement fallout failed")
+                # provider_error → keep the current arc + the committed reshape (fail-open)
     achieved, closed, revealed = beat_pass(world, arc, live_reads, turn)
     trace.beats_achieved, trace.beats_closed = achieved, closed
     trace.reveals = revealed
