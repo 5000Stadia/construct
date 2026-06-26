@@ -35,7 +35,16 @@ class PorcelainWorldReads:
         if st["status"] == "known":
             return st["fact"]["value"]
         if st["status"] == "conflicted":
-            # The engine's holding answer under an open TM flag.
+            # The engine's holding answer under an open TM flag. This is normally
+            # silent — fine for ordinary facts, but DANGEROUS for the host-control
+            # portfolio manifest: a conflicted `arc:portfolio` read silently serves
+            # the stale arc (the EP2 bug, Cx 167). Surface it loudly so a future
+            # mid-play writer that forgets to retract is caught (telemetry, not a fix).
+            if entity == "arc:portfolio":
+                logger.warning(
+                    "CONFLICTED read on arc:portfolio.%s — serving the holding value %r; "
+                    "a mid-play portfolio writer must retract the sealed rows before appending",
+                    attribute, st["fact"]["value"])
             return st["fact"]["value"]
         return None  # unknown/frontier — INDETERMINATE to the atoms
 

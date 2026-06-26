@@ -178,9 +178,10 @@ arc-gating **RED**, Story/Series collapse **YELLOW**, scope **YELLOW**. Correcti
 - **Conclusive detector = two gates, not one judgment.** (1) a **deterministic
   eligibility gate** first — Story contract, crisis/climax or refusal path, minimum
   arc progress, a candidate conclusive event/foreclosure present; only then (2) an
-  **LLM final-page judge** over world-state + Ledger + recent turns. Plus a
-  **post-climax adjudication window**: after K quiet post-climax turns, force a
-  "final beat or conclude" repair so we never miss the natural end. (Refines §3.)
+  **LLM final-page judge** over world-state + Ledger + recent turns. (No turn-count
+  post-climax window — RETIRED, founder ruling 2026-06-25 / Cx 173-178: turns never force a
+  close; readiness only surfaces the narrator nudge. A story ends on its decisive narrative
+  event — commitment, an authored deadline/loss, or explicit abandonment.) (Refines §3.)
 - **Epilogue mints no canon.** It may narrate only **committed facts**; any durable
   consequence is written through a terminal/transition **delta ingest**, not prose.
 - **Transition needs a structured `TransitionPlan`, not just prose** (§6.2): `{time_jump,

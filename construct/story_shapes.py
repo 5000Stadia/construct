@@ -128,17 +128,30 @@ _SHAPE_LINE: dict[str, str] = {
 #: read GENUINE coverage as the sound ending; `fail_forward` (comedy) INVERTS it (a
 #: false-filled engine pillar = the comic engine live = the desired blowup). Per-card
 #: profiles may override. Host-side control data, never canon.
+#: `terminal_owner` (Cx 141, the conclusion-mechanics fix): WHAT closes the story for this shape.
+#: `commitment` — the world_condition/climax beats make the arc CLIMAX-READY (ripe), but the
+#: player's conclusory COMMITMENT (the accusation/declaration/decisive act) owns the curtain; if the
+#: player never reckons, a post-climax window closes on refusal/aftermath. `world_event` — the
+#: decisive world event (survival/escape/deadline/blowup) ends the story directly, no speech needed.
+#: This stops a PROCEDURAL proof act from preempting the dramatic reckoning (the audit-office
+#: falter: seizing evidence ended the story before the accusation could land). Reckoning shapes are
+#: commitment-owned; physical/comic-deadline shapes are world-event-owned. Card-level overrides later.
 SHAPE_CONCLUSION: dict[str, dict] = {
-    "deduction":      {"trigger": "pillars",        "cost_disposition": "peril_redemption", "clock": "none"},
-    "bond":           {"trigger": "pillars",        "cost_disposition": "repair",           "clock": "none"},
-    "endurance":      {"trigger": "event_deadline", "cost_disposition": "sacrifice",        "clock": "soft"},
+    "deduction":      {"trigger": "pillars",        "cost_disposition": "peril_redemption", "clock": "none", "terminal_owner": "commitment"},
+    "bond":           {"trigger": "pillars",        "cost_disposition": "repair",           "clock": "none", "terminal_owner": "commitment"},
+    "endurance":      {"trigger": "event_deadline", "cost_disposition": "sacrifice",        "clock": "soft", "terminal_owner": "world_event"},
     "contest":        {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none",
-                       "reads_world_event": True},  # the scoreboard (finding 5)
-    "gambit":         {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none"},
-    "discovery":      {"trigger": "pillars",        "cost_disposition": "sacrifice",        "clock": "none"},
-    "mastery":        {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none"},
-    "farce":          {"trigger": "event_deadline", "cost_disposition": "fail_forward",     "clock": "soft"},
-    "transformation": {"trigger": "choice",         "cost_disposition": "peril_redemption", "clock": "soft"},
+                       "terminal_owner": "commitment",
+                       # Contest has a LITERAL external-result axis (the old "scoreboard", finding 5)
+                       # read alongside coverage. Now a marker only: the runtime reads declared canon
+                       # Occurred result-events via meta["result_events"] (letters 131/132), authored
+                       # per-arc in the #33 Contest pass — NOT a bespoke scoreboard. Dormant until then.
+                       "has_literal_result": True},
+    "gambit":         {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none", "terminal_owner": "commitment"},
+    "discovery":      {"trigger": "pillars",        "cost_disposition": "sacrifice",        "clock": "none", "terminal_owner": "commitment"},
+    "mastery":        {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none", "terminal_owner": "commitment"},
+    "farce":          {"trigger": "event_deadline", "cost_disposition": "fail_forward",     "clock": "soft", "terminal_owner": "world_event"},
+    "transformation": {"trigger": "choice",         "cost_disposition": "peril_redemption", "clock": "soft", "terminal_owner": "commitment"},
 }
 
 

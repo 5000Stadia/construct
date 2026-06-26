@@ -264,6 +264,121 @@ def test_duplicate_tension_blocked_across_sources(tmp_path):
     w.close()
 
 
+def test_locatable_people_excludes_unlocated_role(tmp_path):
+    # Cx 160 #3: the protagonist guard must require a LOCATED person, not mere existence.
+    # A generic extracted role (person:detective, kind row only, never staged) must NOT pass.
+    from construct.game import _locatable_people
+    w = _world(tmp_path / "loc.world")
+    w.ingest_structured([{"entity": "person:detective", "attribute": "kind",
+                          "value": "person", "timeless": True}])  # role shell, no `in`
+    known = ["person:player", "person:clerk", "person:detective"]
+    located = _locatable_people(w, known)
+    assert "person:player" in located and "person:clerk" in located
+    assert "person:detective" not in located            # exists, but unstaged → excluded
+    w.close()
+
+
+def test_fallback_protagonist_prefers_located(tmp_path):
+    # Cx 160 #2/#4: the fallback binds to a LOCATED person; play_as is only a tie-breaker,
+    # never a license to keep the unlocated role.
+    from construct.game import _fallback_protagonist
+    w = _world(tmp_path / "fb.world")
+    located = ["person:player", "person:clerk"]
+    assert _fallback_protagonist(w, located, "the clerk on the night shift") == "person:clerk"
+    assert _fallback_protagonist(w, located, "") in located         # no hint → a located person
+    assert _fallback_protagonist(w, [], "anything") is None         # nothing staged → None
+
+
+def test_build_arc_rebuild_rebinds_every_protagonist_gate(tmp_path):
+    # Cx 160 #1 — THE invariant: the fallback must REBUILD from the corrected proposal, never
+    # dataclasses.replace, because _build_arc bakes knows:<protagonist> into every player_learns
+    # beat (and failure_when/premise). Assert a rebuild leaves NO stale knows:person:detective.
+    from construct.game import _build_arc
+    from construct.arc.conditions import atoms_of, InFrame
+
+    def _frames(arc):
+        fs = set()
+        exprs = [b.achievable_via for b in arc.beats]
+        if arc.failure_when is not None:
+            exprs.append(arc.failure_when)
+        for e in exprs:
+            fs |= {a.frame for a in atoms_of(e) if isinstance(a, InFrame)}
+        return fs
+
+    proposal = {
+        "protagonist": "person:detective",
+        "delta_type": "drive_inverted",
+        "tension": ["person:detective", "drive:doubt", "drive:proof"],
+        "beats": [{"id": "beat:learn", "phase": "rising", "weight": "required",
+                   "kind": "player_learns", "entity": "fact:secret",
+                   "attribute": "culprit", "value": "person:clerk"},
+                  {"id": "beat:act", "phase": "climax", "weight": "required",
+                   "kind": "event_occurs", "entity": "confront", "attribute": "", "value": ""}],
+        "failure_when": {"kind": "player_learns", "entity": "fact:secret",
+                         "attribute": "blown", "value": "true"},
+    }
+    bad = _build_arc(proposal)
+    assert "knows:person:detective" in _frames(bad)         # the broken binding, as built
+
+    proposal["protagonist"] = "person:player"               # the fallback rewrite
+    good = _build_arc(proposal)                              # REBUILD (not replace)
+    assert good.protagonist == "person:player"
+    assert "knows:person:player" in _frames(good)
+    assert "knows:person:detective" not in _frames(good)    # NO stale gate survives the rebind
+
+
+def test_finalize_rejects_unstageable_protagonist(tmp_path):
+    # Cx 162 (blocking): a world with person:* kind rows but NO `in` rows (nobody located)
+    # must NOT publish through _finalize_scenario — the located-protagonist guard raises BEFORE
+    # cast authoring / arc_to_items, even on the ingest path (which skips _assess_viability).
+    import pytest
+    from construct.provider import StubProvider, task_of
+    from construct import game
+
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        return rule(prompt, schema) if prompt.startswith("Classify the lifetime") else {"items": []}
+
+    path = tmp_path / "uns.world"
+    w = World(path, world_id="w:uns", model=StubModel(fallback=fallback),
+              stance="fiction", title="Unstaged World")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([                                   # people exist but are NEVER located
+        {"entity": "place:office", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:a", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:b", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "fact:secret", "attribute": "kind", "value": "proposition", "timeless": True},
+    ])
+
+    proposal = {
+        "protagonist": "person:a", "delta_type": "drive_inverted",
+        "tension": ["person:a", "drive:doubt", "drive:proof"],
+        "goal_statement": "find the truth",
+        "beats": [{"id": "beat:learn", "phase": "climax", "weight": "required",
+                   "kind": "player_learns", "entity": "fact:secret",
+                   "attribute": "culprit", "value": "person:b"}],
+    }
+
+    class _ArcProvider(StubProvider):
+        def __init__(self):
+            super().__init__([])
+
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if task_of(prompt) == "arc":
+                return dict(proposal)
+            return {"items": []}
+
+    spath = tmp_path / "uns_scenario.world"
+    with pytest.raises(RuntimeError):                       # raises on the guard, never publishes
+        game._finalize_scenario(w, "uns", "Unstaged World", _ArcProvider(), spath,
+                                endless=False, play_as="person a")
+    assert not spath.with_suffix(".meta.json").exists()     # no sealed scenario meta
+    w.close()
+
+
 def test_preflight_rejects_unknown_referent(tmp_path):
     w = _world(tmp_path / "pf.world")
     bad = dict(VALID_PROPOSAL)

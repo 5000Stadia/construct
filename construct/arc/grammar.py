@@ -140,6 +140,35 @@ class Pin:
 
 
 @dataclass(frozen=True)
+class Gauge:
+    """A numeric quantity as a live dramatic constraint (GAUGE-PRIMITIVE.md): an
+    `accrue` total (`gauge_level` on `gauge:<slug>`) that drains/replenishes each
+    turn and, when it crosses its floor, ends the story. Host control data — the
+    engine reads only the folded number; "the tank is tense" is never stored.
+
+    Per turn the host appends a SIGNED delta = `base_delta` (the deterministic
+    drift) + every `action_modifiers` keyword present in the player's action (a
+    cheap substring match — running burns more air, resting buys some back). The
+    LM is consulted only for residual rate the table doesn't know (a later add).
+    `terminal_on_floor` folds `Quantity(<= floor)` into the arc's `failure_when`
+    (the LOSS path; the positive `world_condition` still wins a same-tick tie).
+    `costly_band` is the fraction of range below which a WIN colors as costly
+    (per-shape config overrides this default)."""
+
+    gauge_id: str           # "gauge:oxygen"
+    label: str              # "oxygen reserve" — narrator phrasing
+    baseline: float
+    floor: float
+    base_delta: float       # per-turn deterministic drift (signed)
+    ceiling: float | None = None
+    terminal_on_floor: bool = True
+    costly_band: float = 0.25
+    #: (keyword, signed_delta) — applied when the lowercased action contains the
+    #: keyword. Deterministic, table-known action modulation (no model call).
+    action_modifiers: tuple[tuple[str, float], ...] = ()
+
+
+@dataclass(frozen=True)
 class Arc:
     """The hidden authored destination, complete (§2.1)."""
 
@@ -166,6 +195,9 @@ class Arc:
     #: as the EFFECT of this coverage, not a win/loss verdict. Empty = the arc uses
     #: the legacy world_condition terminal only (backward compatible).
     pillars: tuple[Pillar, ...] = ()
+    #: Numeric dramatic constraints (GAUGE-PRIMITIVE.md): drained/replenished each
+    #: turn; a terminal gauge's floor folds into `failure_when`. Empty = none.
+    gauges: tuple[Gauge, ...] = ()
 
     def beat(self, beat_id: str) -> Beat:
         for b in self.beats:

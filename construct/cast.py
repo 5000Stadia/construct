@@ -231,6 +231,57 @@ def check_solvability(required_pillar_ids: list[str], cast: tuple[CastNode, ...]
     return problems
 
 
+def beat_delivery_targets(beats) -> list[dict]:
+    """The arc's InFrame (player_learns) beats expressed as cast DELIVERY targets
+    (BEAT-DELIVERY-COHERENCE.md, obs #3). An InFrame beat fires ONLY when its fact lands in
+    the player frame, which today happens ONLY through cast-clue delivery — so each such beat
+    needs a clue whose `surface_fact` matches it, or the rising-tension ladder can never fire
+    and the arc rushes its Occurred climax. Returns one target dict per InFrame beat
+    (entity/attribute/value + phase + required + beat_id), ordered as authored. Occurred (act)
+    beats are EXCLUDED — they fire through EVENT-OCCURS-FIRING, not clue delivery."""
+    from construct.arc.conditions import InFrame
+    from construct.arc.grammar import Weight
+    out: list[dict] = []
+    for b in beats:
+        av = getattr(b, "achievable_via", None)
+        if isinstance(av, InFrame):
+            out.append({"entity": av.entity, "attribute": av.attribute,
+                        "value": str(av.value), "phase": b.phase.value,
+                        "required": b.weight == Weight.REQUIRED,
+                        "beat_id": b.beat_id})
+    return out
+
+
+def validate_beat_delivery(beat_targets: list[dict],
+                           cast: tuple[CastNode, ...]) -> list[str]:
+    """BEAT-DELIVERY-COHERENCE lint (obs #3): every REQUIRED InFrame beat must have a cast
+    clue that surfaces its EXACT fact, live-reachable AND held by a physically reachable
+    member — otherwise the rising-tension beat can never fire (the arc skips its ladder and
+    rushes the climax; the suspense amplifier never engages). `beat_targets` from
+    `beat_delivery_targets`. Required-only, mirroring `check_solvability` (optional beats are
+    nice-to-have, never blocking). Returns problems (empty = every required rising beat is
+    deliverable). The fact-match is exact (str-normalised) — this also forces coreference
+    alignment between the arc author and the cast author (same canon entity id)."""
+    if not beat_targets:
+        return []
+    reachable = _reachable_nodes(cast)
+    problems: list[str] = []
+    for tgt in beat_targets:
+        if not tgt.get("required"):
+            continue
+        want = (str(tgt["entity"]), str(tgt["attribute"]), str(tgt["value"]))
+        ok = any(tuple(str(x) for x in c.surface_fact) == want
+                 and _live_reachable(c) and node.node_id in reachable
+                 for node in cast for c in node.holds_clues)
+        if not ok:
+            problems.append(
+                f"beat {tgt.get('beat_id', '?')} ({tgt['phase']}): no live-reachable cast clue "
+                f"surfaces its fact {want} — this rising beat can never fire; author a clue "
+                f"whose `fact` is EXACTLY this, held by a reachable member at reveal_condition "
+                f"'none'/'pressure'")
+    return problems
+
+
 def validate_signature_support(shapes, cast: tuple[CastNode, ...]) -> list[str]:
     """Light AUTHORING lint (GENRE-SIGNATURE-ELEMENTS.md, Cx 097): prove the genre's HARD
     signature promises actually shipped — author-insist via prompt can ASK, this CHECKS the

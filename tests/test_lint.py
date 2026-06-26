@@ -59,7 +59,8 @@ def make_arc() -> Arc:
               effects=({"event": "district_blackout", "caused_by": "process:conspiracy"},),
               bound_to="arc:main", rung=Rung.CONFRONT),
     )
-    refusal = Clock("clock:refusal", TurnsQuiet(12),
+    # Refusal is an EXPLICIT-ABANDONMENT clock (Cx 176), never a turn counter.
+    refusal = Clock("clock:refusal", Occurred("event:abandoned"),
                     effects=({"event": "conclude_refused", "caused_by": "process:conspiracy"},),
                     bound_to="arc:main", rung=Rung.REFUSAL)
     return Arc(
@@ -89,6 +90,19 @@ def test_check1_unknown_referent():
     assert any(f.check == "1-referents" for f in lint_arc(arc, make_world()))
 
 
+def test_check1_undeclared_gauge_referent():
+    # Cx 154 carry-forward: a Quantity over an unseeded/undeclared gauge must fail
+    # authoring-time (1-referents), not silently become runtime-INDETERMINATE.
+    from construct.arc.conditions import Quantity
+    arc = make_arc()
+    bad = Beat("beat:gauge", Phase.RISING, Weight.OPTIONAL,
+               achievable_via=Quantity("gauge:nonexistent", "gauge_level", "<=", 0.0))
+    arc = dataclasses.replace(arc, beats=arc.beats + (bad,))
+    findings = lint_arc(arc, make_world())
+    assert any(f.check == "1-referents" and "gauge:nonexistent" in f.message
+               for f in findings)
+
+
 def test_check2_no_disjoint_paths():
     arc = make_arc()
     shared = StateIs("obj:ledger", "examined", True)
@@ -107,21 +121,25 @@ def test_check3_required_beat_without_clock():
     assert any(f.check == "3-clocks" for f in lint_arc(arc, make_world()))
 
 
-def test_check4_refusal_clock_not_counter_only():
+def test_check4_counter_based_refusal_is_rejected():
+    # New doctrine (Cx 176): turns NEVER force a close, so a turn-counter refusal clock is an
+    # authoring error — it would fabricate a turn-count `refusal_conclusion`. Flag it.
     arc = make_arc()
-    bad_refusal = dataclasses.replace(
-        arc.refusal_clock,
-        fires_when=AllOf((TurnsQuiet(12), StateIs("obj:meter", "dark", True))),
-    )
-    arc = dataclasses.replace(arc, refusal_clock=bad_refusal)
+    bad = dataclasses.replace(arc.refusal_clock, fires_when=TurnsQuiet(12))
+    arc = dataclasses.replace(arc, refusal_clock=bad)
     assert any(f.check == "4-refusal" for f in lint_arc(arc, make_world()))
+    # ...even mixed with a non-counter atom: any counter in the refusal is rejected.
+    mixed = dataclasses.replace(
+        arc.refusal_clock, fires_when=AllOf((TurnsQuiet(12), StateIs("obj:meter", "dark", True))))
+    arc2 = dataclasses.replace(make_arc(), refusal_clock=mixed)
+    assert any(f.check == "4-refusal" for f in lint_arc(arc2, make_world()))
 
 
-def test_check4_refusal_threshold_beyond_budget():
+def test_check4_explicit_abandonment_refusal_lints_clean():
+    # The sanctioned shape: an explicit-abandonment Occurred refusal (the default make_arc uses
+    # it) lints clean on check 4 — it fires only when the player walks away, never on quiet turns.
     arc = make_arc()
-    far = dataclasses.replace(arc.refusal_clock, fires_when=TurnsQuiet(99))
-    arc = dataclasses.replace(arc, refusal_clock=far)
-    assert any(f.check == "4-refusal" for f in lint_arc(arc, make_world()))
+    assert not any(f.check == "4-refusal" for f in lint_arc(arc, make_world()))
 
 
 def test_check5_raw_plot_gating():
@@ -144,6 +162,21 @@ def test_check7_confront_depends_on_player_location():
                 bound_to="arc:main", rung=Rung.CONFRONT)
     arc = dataclasses.replace(arc, clocks=arc.clocks + (bad,))
     assert any(f.check == "7-confront" for f in lint_arc(arc, make_world()))
+
+
+def test_check8_self_referential_player_learns_is_flagged():
+    # self-referential-beats: a player_learns beat gating on the PROTAGONIST's own fact (in the
+    # player's own frame) is undeliverable — you can't interview yourself. Flagged + blocking.
+    arc = make_arc()
+    selfbeat = Beat(
+        "beat:self", Phase.RISING, Weight.REQUIRED,
+        achievable_via=InFrame("knows:person:player", "person:player", "realized", True),
+    )
+    arc = dataclasses.replace(arc, beats=arc.beats + (selfbeat,))
+    findings = lint_arc(arc, make_world())
+    assert any(f.check == "8-self-learn" for f in findings)
+    # the green arc (learns about fact:conspiracy / obj:ledger, not the protagonist) stays clean
+    assert not any(f.check == "8-self-learn" for f in lint_arc(make_arc(), make_world()))
 
 
 def test_check8_post_repair_novelty():

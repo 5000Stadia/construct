@@ -1,6 +1,17 @@
 # Diegetic time — the story's own clock (design)
 
-**Status:** DESIGN for founder alignment + a PB engine-boundary confer (2026-06-19).
+**Status:** DESIGN for founder alignment + a PB engine-boundary confer (2026-06-19); the clock
+itself SHIPPED (clock.py — `elapsed_minutes` accrue, per-world calendars, player jumps).
+
+**UPDATE 2026-06-25 — two independent axes (founder ruling):** time has TWO roles, and only the
+first is a deadline. (1) PRESSURE — a conclusion deadline — is OPT-IN per story (a bomb, the King's
+dinner) and authored as a `Quantity` over `time:elapsed.elapsed_minutes` in `failure_when`; a
+leisurely investigation authors NONE (time there is pedantic). Turns NEVER force a close. (2)
+TEXTURE — time-of-day governing APPROPRIATENESS and NPC availability — is ALWAYS on, never a limit
+(9 PM → the witness waits for morning; "get some rest" jumps to morning). See
+CONCLUSION-AND-OUTCOME.md ("the conclusion clock") and GAUGE-PRIMITIVE.md. The NPC
+availability-by-hour layer is the still-open follow-on.
+
 Founder direction: the engine must intuitively track in-world time by what's
 HAPPENING, not by turn count.
 

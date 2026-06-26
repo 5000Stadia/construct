@@ -55,12 +55,15 @@ last N turns. Output schema:
 The judge is prompted **conservative**: "default `is_final_page=false` unless the central
 tension is decisively resolved or foreclosed and continuing would be anticlimax." 
 
-**Post-climax adjudication window (anti-miss).** Persist `plot:main` row
-`arc:main.post_climax_turns` (accrue/int). Once `climax_ready` first holds, increment each
-turn the judge says "not yet". After `K_POSTCLIMAX` (default 4) quiet post-climax turns,
-`run_turn` injects a **"final beat or conclude" repair directive** into the briefing (the
-narrator steers toward the ending) and lowers the judge's bar. Never a hard auto-end —
-it *pushes*, the judge still rules.
+**Post-climax adjudication window — RETIRED (founder ruling 2026-06-25 / Cx 173-178).** Turns
+NEVER force a close: a no-deadline story stays climax-ready indefinitely until the player
+COMMITS. The old `K_POSTCLIMAX` turn-count window (which would force a `quiet_failure` after K
+quiet post-climax turns) is gone — it was a mechanic on top of the narrative, exactly what the
+founder rejects. Readiness still surfaces the **"THE RECKONING IS AT HAND" narrator nudge** every
+ready turn (the narrator escalates the invitation to conclude), but it is a nudge, never a
+countdown. A story concludes only on the narrative's DECISIVE event — a player commitment, an
+AUTHORED diegetic deadline/loss (`failure_when` = `Quantity` over `time:elapsed.elapsed_minutes`,
+or a loss event), or explicit abandonment. See `diegetic-time-is-the-only-clock` (memory).
 
 ### 1.2 Outcome shape (retire the binary)
 `outcome_shape ∈` a small controlled vocabulary (host enum, not engine — Cx Q-S1):

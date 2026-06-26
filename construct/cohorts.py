@@ -95,6 +95,14 @@ CLASSIFY_SCHEMA = {
                   "page') — name that ONE specific target exactly as they referred to it. "
                   "EMPTY for a generic look-around ('glance around the room', 'look about'), "
                   "plain movement, talk, or any action not focused on inspecting one detail."},
+        "asks_targets": {"type": "array", "items": {"type": "string"},
+                  "description": "ONLY when the player QUESTIONS/PRESSES a present character "
+                  "and ASK CANDIDATES are listed below: the candidate id(s) (e.g. 'ask_2') "
+                  "whose subject the player's question is actually pursuing — match on TOPIC, "
+                  "not who holds it (asking 'how is Eli bearing the cold?' targets the "
+                  "candidate about Eli's condition). List the most specific match(es); EMPTY "
+                  "when the question is generic, the input is not questioning anyone, or no "
+                  "candidate fits. The ASK channel twin of examines_target."},
     },
     "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of"],
 }
@@ -314,18 +322,45 @@ AUTHOR_CAST_SCHEMA = {
 
 def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
                 protagonist: str, people: list[str], feedback: str = "",
-                signature_directive: str = "") -> dict:
+                signature_directive: str = "",
+                beat_targets: list[dict] | None = None) -> dict:
     """Author the populated cast (STORY-SHAPES §8): the pillars (causes) + the people who
     hold the clues that fill them. Returns the raw proposal; the caller parses it
     (`cast.cast_from_proposal`), VALIDATES solvability (`cast.is_solvable`), and derives the
     pillars (`cast.build_pillars`). Genre-faithful (FICTION_CRAFT); fair-by-construction.
     `feedback` (prior solvability problems) is fed back on a re-author retry.
     `signature_directive` (GENRE-SIGNATURE-ELEMENTS.md author-insist block) names the genre's
-    fundamental elements the cast MUST establish."""
+    fundamental elements the cast MUST establish.
+    `beat_targets` (BEAT-DELIVERY-COHERENCE.md, obs #3) are the arc's InFrame rising beats the
+    cast MUST make deliverable — each is a fact the protagonist comes to know on the way to the
+    climax, and it fires ONLY when a cast clue surfaces it. Without a clue per required target
+    the rising-tension ladder is dead and the story rushes its ending. The LM authors the clue
+    (which member holds it, the hook, the juice); we only insist the fact ships."""
     fix = (f"\n\nYOUR PRIOR ATTEMPT FAILED THE FAIRNESS CHECK: {feedback}\nFix EXACTLY those "
            f"problems — most often a required pillar needs a genuine clue revealable with "
            f"reveal_condition 'none' or 'pressure'.\n" if feedback else "")
     sig = (f"\n\n{signature_directive}\n" if signature_directive else "")
+    beats_block = ""
+    if beat_targets:
+        _lines = [f"  - ({t['entity']}, {t['attribute']}, {t['value']})  "
+                  f"[{t['phase']} beat · {'REQUIRED' if t.get('required') else 'optional'}]"
+                  for t in beat_targets]
+        beats_block = (
+            "\n\nTHE ARC'S RISING-TENSION BEATS NEED DELIVERY (binding — BEAT-DELIVERY-"
+            "COHERENCE). The story turns on the protagonist COMING TO KNOW these specific facts, "
+            "in roughly this order, on the way to the climax — each is a dramatic beat that "
+            "fires ONLY when the player surfaces that fact in play, and the ONLY way a fact "
+            "reaches the player is through a clue one of your cast members holds. So for each "
+            "REQUIRED target below you MUST author at least one clue whose `fact` is EXACTLY that "
+            "(entity, attribute, value), held by a reachable member at a LIVE-reachable "
+            "reveal_condition ('none'/'pressure' for a person to ask, 'examined'/'scrutiny' for "
+            "an object/site to inspect). Weave them into the juicy cast you build — a beat fact "
+            "can ride the same "
+            "vivid card as a pillar clue, and SHOULD feel like a natural step in the mounting "
+            "drama (the leg that won't hold, the warning spoken, the route given). Use the EXACT "
+            "entity ids shown (they are the canon characters/objects the arc names — do not "
+            "rename them). Miss one required target and that beat is dead, the ladder collapses, "
+            "and the story lurches to its climax with no build-up:\n" + "\n".join(_lines))
     return complete_sync(provider,
         FICTION_CRAFT + sig +
         f"Author the POPULATED CAST for this story. This is a '{shape_label}' shape.\n"
@@ -412,7 +447,11 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
         "□ at least ONE strong red herring exists (is_red_herring=true, coverage_effect 'false') "
         "with a debunked_by clue that is itself 'none'/'pressure'-reachable;\n"
         "□ CROSS-SUSPICION: at least two genuine clues' facts NAME another cast member (entity or "
-        "value is that member's id) — the suspects point at one another." + fix,
+        "value is that member's id) — the suspects point at one another.\n"
+        "□ BEAT DELIVERY: every REQUIRED rising-tension target (if any were given above) has a "
+        "clue whose `fact` matches it EXACTLY (same entity/attribute/value), held by a reachable "
+        "member at a LIVE-reachable reveal_condition ('none'/'pressure' to ask, 'examined'/"
+        "'scrutiny' to inspect)." + beats_block + fix,
         AUTHOR_CAST_SCHEMA, tier="main", deliberate=True, task="cast")
 
 
@@ -1276,7 +1315,7 @@ GEN_ARC_SCHEMA = {
 
 def generate_arc(provider: Provider, *, trigger: str, fuel: str,
                  available_ids: list[str], style: str,
-                 present_characters: str) -> dict:
+                 present_characters: str, protagonist: str = "") -> dict:
     """The opportunistic DM (LIVING-WORLD-GENERATOR P2): from the world's standing
     tensions — a dead arc's fallout, an NPC's unaddressed drive, what the player
     just changed — propose ONE fresh side thread as a small arc (the same shape
@@ -1306,9 +1345,14 @@ def generate_arc(provider: Provider, *, trigger: str, fuel: str,
         f"eras; colonial survival, a fever, a wary envoy, a mutiny. Match THIS "
         f"world's kind of story and the shape of ITS stakes; never import a beat "
         f"from a different genre. When unsure, mirror the voice and premises exactly.\n"
-        f"From the FUEL below, propose ONE new side thread as a small arc whose "
-        f"PROTAGONIST is an NPC already in play (not the player): a `delta_type` (the "
-        f"CHARACTER-change shape, genre-neutral), a `tension` [entity_id, "
+        + (f"From the FUEL below, author the NEXT CHAPTER for the CONTINUING PLAYER "
+           f"CHARACTER — the `protagonist` MUST be {protagonist} (the same person the "
+           f"player has been; this is their next case, NOT an NPC's side thread): a "
+           f"`delta_type` (the CHARACTER-change shape, genre-neutral), a `tension` [entity_id, "
+           if protagonist else
+           f"From the FUEL below, propose ONE new side thread as a small arc whose "
+           f"PROTAGONIST is an NPC already in play (not the player): a `delta_type` (the "
+           f"CHARACTER-change shape, genre-neutral), a `tension` [entity_id, ") +
         f"stronger_drive, weaker_drive], 1-2 path-independent `beats`, and a "
         f"one-sentence diegetic `hook` (how it ARRIVES in the scene, in voice, no "
         f"entity ids, no system-speak).\n"
@@ -1562,14 +1606,30 @@ def player_constraint(protagonist: str) -> str:
     )
 
 
-def classify(provider: Provider, player_input: str, actor: str = "") -> dict:
-    """Returns {kind, moves_to, requires, needs_test, uncertain_of} — movement intent
+def classify(provider: Provider, player_input: str, actor: str = "",
+             ask_candidates: list = ()) -> dict:
+    """Returns {kind, moves_to, requires, needs_test, uncertain_of, ...} — movement intent
     AND the assured-vs-uncertain resolution judgment ride the same cheap call (no extra
     latency; letter 026 + ACTION-RESOLUTION.md). `actor` is the protagonist's
-    role/proficiency, so a competent character's commonplace actions skip the test."""
+    role/proficiency, so a competent character's commonplace actions skip the test.
+    `ask_candidates` (BEAT-DELIVERY half 2, Cx 125): the present clue-bearing cast's
+    pursuable disclosures as `(opaque_id, non_spoiling_descriptor)` pairs; when given, the
+    classifier matches the player's QUESTION to the candidate(s) it pursues (`asks_targets`),
+    the ASK twin of `examines_target`. Opaque ids only (clue ids can embed the answer); the
+    HOST still gates eligibility (reveal-condition/presence) — this only PICKS the topic."""
     actor_note = (f"\nTHE CHARACTER (judge proficiency against this — what they should "
                   f"plainly be able to do needs NO test): {actor}\n" if actor else "")
+    ask_note = ""
+    if ask_candidates:
+        _lines = "\n".join(f"  {oid}: {desc}" for oid, desc in ask_candidates)
+        ask_note = (
+            "\nASK CANDIDATES — disclosures a present character could be drawn on if the "
+            "player's question pursues their subject. If (and only if) the input QUESTIONS or "
+            "PRESSES someone present, set `asks_targets` to the id(s) whose SUBJECT the "
+            "question is after (topic match, not holder); empty otherwise. These are hints for "
+            "matching only — never quote them, never treat them as facts:\n" + _lines + "\n")
     return complete_sync(provider,
+        ask_note +
         actor_note +
         f"Classify this player input from an interactive-fiction session "
         f"by INTENT, not punctuation. The player is INSIDE the story unless they "

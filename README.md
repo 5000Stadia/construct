@@ -45,7 +45,10 @@ The Construct is a **host** over pattern-buffer — it orchestrates the engine, 
 
 - **The turn loop** — a serial mutation spine (classify the player's action → commit it → advance clocks → evaluate the arc) followed by a parallel assembly fan-out (compose the narrator's grounded briefing from the world's truth) and a single render. Writes go first; the narrator sees the *final* world.
 - **A six-cohort architecture** (the [Kernos](https://github.com/5000Stadia/Kernos) pattern): classify, ingest, scene-assembler, navigator, beat-evaluator, and per-character NPC engines — small, single-purpose, fail-open. Only the narrator and characters use the expensive model; everything upstream is cheap or deterministic.
-- **The arc layer** — a story's destination authored into a hidden `plot:` frame the player can't see, navigated by a pacing ladder with anti-railroading guards. The arc pushes the world *at* you; it cannot move *you*.
+- **The arc layer** — a story's destination authored into a hidden `plot:` frame the player can't see, navigated by a pacing ladder with anti-railroading guards. The arc pushes the world *at* you; it cannot move *you*. Its conclusion is shaped per-genre (a deduction's accusation, a bond's reconciliation), and lands as an *effect* — the epilogue's tone (triumph, costly, bittersweet) is improvised from what coverage the play actually earned, never a computed win/loss verdict.
+- **The conclusion clock** — a story ends on its own *decisive event* — "IT" — authored from what that story is about: name the killer, the protectee falls, the bomb's hour passes. **Turns never force a close.** A detective can study a clue for three hundred turns; the case ends when it's whole and the player says so. Time is a *per-story thread* — a soft diegetic deadline (the King's dinner, the bomb) authored only when time genuinely belongs to the story; a leisurely mystery has none, and the in-world clock still governs only *texture* (it's 9 PM, so the witness keeps till morning).
+- **Numeric constraints (gauges)** — when the drama is a number moving toward a line (oxygen draining, a speed floor, fuel burning), a gauge folds a live total from signed per-turn deltas and a threshold condition ends or colors the story when it's crossed — surfaced as mounting pressure, never a HUD.
+- **Episodic continuation** — a concluded story offers the next chapter: same protagonist and world, the whole prior adventure as the lead-in, a reputation callback ("you made a name on that one"), and a fresh hidden arc woven over the carried-forward world.
 - **A provider-agnostic model interface** — bring any LLM; ships with a zero-credit ChatGPT-subscription default.
 
 The hardest problems each got solved by the same move — **structural absence over instruction**: characters can't leak secrets because the secrets were never in their window; the narrator can't spoil the arc because the plot frame is never in its briefing; the story can't puppet your character because your character is never handed to it as a scene entity.
@@ -54,6 +57,10 @@ The hardest problems each got solved by the same move — **structural absence o
 
 - **[docs/CONCEPT.md](docs/CONCEPT.md)** — the founding brief: vision, session-zero, host architecture, the arc layer.
 - **[docs/design/ARC-LAYER.md](docs/design/ARC-LAYER.md)** — pacing-as-navigation: the hidden-arc design and its anti-railroading guards.
+- **[docs/design/CONCLUSION-AND-OUTCOME.md](docs/design/CONCLUSION-AND-OUTCOME.md)** — the conclusion clock: "IT closes the story," turns never force a close, time as a per-story thread, conclusion-as-effect.
+- **[docs/design/STORY-SHAPES.md](docs/design/STORY-SHAPES.md)** — the nine genre shapes and how each earns its payoff; **[GAME-TYPE-TAXONOMY.md](docs/design/GAME-TYPE-TAXONOMY.md)** — the play-style cards.
+- **[docs/design/DIEGETIC-TIME.md](docs/design/DIEGETIC-TIME.md)** — the story clock (pressure vs. texture); **[GAUGE-PRIMITIVE.md](docs/design/GAUGE-PRIMITIVE.md)** — numeric constraints as a live dramatic axis.
+- **[docs/design/EPISODIC-CONTINUATION.md](docs/design/EPISODIC-CONTINUATION.md)** — concluding a story and continuing to the next chapter.
 - **[docs/design/TURN-LOOP.md](docs/design/TURN-LOOP.md)** · **[SESSION-ZERO.md](docs/design/SESSION-ZERO.md)** · **[PROVIDER-INTERFACE.md](docs/design/PROVIDER-INTERFACE.md)** · **[CLI.md](docs/design/CLI.md)**
 - **[docs/DISCORD.md](docs/DISCORD.md)** — play from your phone over an outbound-only Discord bot (setup guide).
 - **[docs/LEXICON.md](docs/LEXICON.md)** — the working vocabulary.
@@ -104,15 +111,21 @@ construct import --watch                    # watch the import/ folder; ingest d
 construct new --interview "a drowned harbor town with a harbor-master's secret"  # build LIVE from a brief
 ```
 
-You can also just **DM a `.txt`/`.md` to the Discord bot** and it ingests into the library the same way. Either path narrates its progress as six stages, each naming the pattern-buffer layer being exercised — both a progress bar and a live window into how the engine projects prose into a world:
+You can also just **DM a `.txt`/`.md` to the Discord bot** and it ingests into the library the same way. Either path narrates its progress in plain, evocative stages — a progress bar that reads like the world coming into being, not engine jargon:
 
 ```
-Stage 1 · Ingesting prose → pattern-buffer · model extraction → assertions, provenance-tracked (9 chunks)
-Stage 2 · Reconciling identity · cross-chunk coreference recall + structured-triage residue
-Stage 3 · Declaring passability · RFC-003 traversal policy for route()
-Stage 4 · Authoring the hidden arc over canon
-Stage 5 · Seeding character knowledge · frame-scoped secrecy (knows:<id>, P4)
-Stage 6 · Sealing the scenario
+· Dreaming up the story…
+· Bringing the world into being…
+· Populating the world (1/7…7/7)…
+· Reconciling who's who…
+· Mapping how the world connects…
+· Weaving your hidden path…
+· Teaching the characters what they know…
+· Writing your way in…
+· Settling what's true and lasting…
+· Setting the tone and texture…
+· Sealing the world…
+· Final checks before the doors open…
 ```
 
 ### Play from your phone (Discord)

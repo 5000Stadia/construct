@@ -14,6 +14,7 @@ persists every turn to the player's slot.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -62,6 +63,17 @@ class Session:
         self._side_arcs = meta.get("_side_arcs") or []
         self._provider = provider
         self._scope = meta.get("arc_scope") or None
+        # Prefer the PER-PLAYER episode scope persisted in THIS slot's session frame (written by
+        # game.continue_episode on a CONCLUDE→CONTINUE) over the shared, build-time scenario meta
+        # (Cx 191): the live reopen reloads the stale scenario .meta.json, so without this EP2 would
+        # cold-open with EP1's scope (the old cast + any polluted aliases). Mirrors the entry_epoch fix.
+        try:
+            _slot_scope = PorcelainWorldReads(self._world).state(
+                "session:episode", "arc_scope", frame="session:main")
+            if _slot_scope:
+                self._scope = json.loads(_slot_scope) if isinstance(_slot_scope, str) else _slot_scope
+        except Exception:
+            logger.exception("episode scope read failed; falling back to scenario meta")
         self._mode = meta.get("mode", "pure")
         # The PLAYER's chosen experience (session-zero interview) overrides the
         # scenario's authored default. Three states:
@@ -95,12 +107,19 @@ class Session:
         from construct.story_shapes import conclusion_profile, suspense_profile
         _cprof = conclusion_profile(meta.get("game_type")) or {}
         self._cost_disposition = _cprof.get("cost_disposition", "peril_redemption")
+        # Who CLOSES the story (Cx 141): 'commitment' shapes (reckoning — deduction/contest/…) reach
+        # climax-READY on world_condition but the player's conclusory commitment owns the curtain;
+        # 'world_event' shapes (endurance/farce) end on the decisive event directly. Default
+        # world_event so legacy/unmapped arcs are byte-for-byte unchanged.
+        self._terminal_owner = _cprof.get("terminal_owner", "world_event")
         # Suspense intensity for the pre-conclusion build-up (Cx 113): a genre-HAZARD signal
         # (survival/horror/combat → 'peril' → amplified), not cost_disposition.
         self._suspense = suspense_profile(meta.get("game_type"))
-        # Whether this shape's conclusion reads an external world result (the scoreboard)
-        # alongside coverage — Contest (proof-vs-standard + match outcome).
-        self._reads_world_event = bool(_cprof.get("reads_world_event"))
+        # The LITERAL external-result axis (Contest's "scoreboard", Cx 027) read ALONGSIDE
+        # coverage — now expressed as declared canon Occurred result-events, not a bespoke
+        # scoreboard entity (letters 131/132). `result_events` = {win:(kinds,), loss:(kinds,),
+        # participants:(ids,)} authored per-arc; None for shapes with no literal-result axis.
+        self._result_events = meta.get("result_events")
         # The populated cast (STORY-SHAPES §8), rebuilt once from the seal for interview
         # delivery (node_id → CastNode). Absent → a pillar-less world (legacy path).
         self._cast: dict = {}
@@ -112,6 +131,24 @@ class Session:
                 self._cast = {n.node_id: n for n in _nodes}
             except Exception:  # a bad cast blob must never break the session
                 self._cast = {}
+        # The scenario entry epoch (obs #3 half 3): the live-play time origin, ABOVE every
+        # pre-play valid_from. Re-established on the executor contextvar at every turn so
+        # turn_time (staging supersession + pacing fold) sits on the entry axis. Absent →
+        # TURN_EPOCH (one-timeframe / legacy worlds — unchanged behavior).
+        from construct.arc.executor import TURN_EPOCH, set_entry_epoch
+        # Prefer the PER-PLAYER episode epoch persisted in THIS slot's session frame (written by
+        # game.continue_episode on a CONCLUDE→CONTINUE) over the shared, build-time scenario meta
+        # (Cx 138 #2): a continued episode raised the epoch for its boundary, and turns must stamp
+        # ABOVE it or terminal_outcome (scoped since the episode_start) won't see the new ending.
+        _slot_epoch = None
+        try:
+            _slot_epoch = PorcelainWorldReads(self._world).state(
+                "session:episode", "entry_epoch", frame="session:main")
+        except Exception:
+            logger.exception("episode epoch read failed; falling back to scenario meta")
+        self._entry_epoch = float(_slot_epoch if _slot_epoch is not None
+                                  else (meta.get("entry_epoch", TURN_EPOCH) or TURN_EPOCH))
+        set_entry_epoch(self._entry_epoch)
         self._meta = meta
         self._closed = False
 
@@ -349,6 +386,12 @@ class Session:
         style = self._meta.get("style", "")
         if style:
             brief.insert(0, f"VOICE (write in this): {style}")
+        # CONCLUDE→CONTINUE: a continued episode opens on time-pass + the protagonist's earned
+        # reputation for the last case ("you made a name on that one…"), THEN the new case
+        # surfaces (founder). One-shot: consumed and cleared so it never re-frames a later open.
+        cont = (self._meta.pop("continuation_intro", "") or "").strip()
+        if cont:
+            brief.append(cont)
         if intro:
             brief.append(f"THEMATIC FRAME (the stakes — do not quote verbatim):\n{intro}")
         if anchors:
@@ -444,8 +487,16 @@ class Session:
                     facts_acc.extend(one.get("facts", []))
             snap = {"facts": facts_acc}
         facts = snap.get("facts", [])
-        names = {f["entity"]: str(f["value"]) for f in facts
-                 if f["attribute"] in ("name", "alias", "title")}
+        # Display name: prefer an explicit `name` over any `alias`/`title`, regardless of fact order
+        # (Cx 189 #3). The old last-wins comprehension let a LATE descriptive alias (a narrator-origin
+        # phrase like "with his name cleared") override the real name on the cold-open screen. A
+        # `name` always wins; an alias/title only fills in when no name is present.
+        names: dict[str, str] = {}
+        for f in facts:
+            if f["attribute"] not in ("name", "alias", "title"):
+                continue
+            if f["attribute"] == "name" or f["entity"] not in names:
+                names[f["entity"]] = str(f["value"])
 
         def disp(x):
             s = str(x)
@@ -553,6 +604,10 @@ class Session:
         a long-lived transport (REPL/bot) survives the turn."""
         if self._closed:
             raise RuntimeError("session is closed")
+        # Re-establish the scenario entry epoch on the contextvar for THIS turn's context
+        # (obs #3 half 3) — turn_time stamping must sit above all pre-play valid_from.
+        from construct.arc.executor import set_entry_epoch
+        set_entry_epoch(self._entry_epoch)
         # Only a WIN_LOSS scenario ends; endless/freeplay never short-circuits
         # (a stale terminal receipt from a prior mode must not freeze open play).
         if self._scenario_mode == "win_loss":
@@ -569,7 +624,8 @@ class Session:
                               play_style=self._play_style,
                               judgment_type=self._judgment_type,
                               cost_disposition=self._cost_disposition,
-                              reads_world_event=self._reads_world_event,
+                              result_events=self._result_events,
+                              terminal_owner=self._terminal_owner,
                               suspense=self._suspense,
                               cast=self._cast or None,
                               side_arcs=self._side_arcs)

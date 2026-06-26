@@ -12,7 +12,7 @@ from dataclasses import fields
 
 from construct.arc import conditions as C
 from construct.arc.grammar import (
-    Arc, Beat, Clock, ConclusionShape, Phase, Pillar, Pin, Rung, Weight,
+    Arc, Beat, Clock, ConclusionShape, Gauge, Phase, Pillar, Pin, Rung, Weight,
 )
 
 #: The pin fields persisted as plot rows / cache keys (one row per field).
@@ -31,6 +31,7 @@ _JSON_BLOB_ATTRS = frozenset({
     "world_condition", "premise", "achievable_via", "unreachable_if",
     "correlates", "fires_when", "effects", "beat_index", "clock_index",
     "pin_index", "arc_ids", "pillar_index", "genuine_via", "false_via",
+    "gauge_index", "action_modifiers",
 })
 
 #: The portfolio manifest entity — one row listing the active `arc:*` ids plus
@@ -55,7 +56,7 @@ _ATOM_TYPES = {
     "state_is": C.StateIs, "located": C.Located, "in_frame": C.InFrame,
     "occurred": C.Occurred, "beat_achieved": C.BeatAchieved,
     "clock_fired": C.ClockFired, "turns_elapsed": C.TurnsElapsed,
-    "turns_quiet": C.TurnsQuiet,
+    "turns_quiet": C.TurnsQuiet, "quantity": C.Quantity,
 }
 _TYPE_NAMES = {v: k for k, v in _ATOM_TYPES.items()}
 
@@ -161,6 +162,8 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
         items += pin_to_items(pin, arc.arc_id)
     for pillar in arc.pillars:
         items += pillar_to_items(pillar, arc.arc_id)
+    for gauge in arc.gauges:
+        items += gauge_to_items(gauge, arc.arc_id)
     return _with_frame_and_types(items, frame)
 
 
@@ -202,6 +205,53 @@ def pin_to_items(pin: Pin, arc_id: str) -> list[dict]:
     return items
 
 
+def gauge_to_items(gauge: Gauge, arc_id: str) -> list[dict]:
+    """A gauge as plot rows (host control data; never canon). These rows are the
+    arc's DECLARATION of the gauge; the live `gauge_level` accrue total is seeded
+    on the same `gauge:<slug>` entity AT RUNTIME (gauge.ensure_gauges), never at
+    build — a build-time accrue baseline loses fold_policy across reopen."""
+    items = [
+        {"entity": gauge.gauge_id, "attribute": "kind", "value": "gauge_decl",
+         "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "part_of", "value": arc_id, "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "label", "value": gauge.label,
+         "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "baseline", "value": gauge.baseline,
+         "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "floor", "value": gauge.floor,
+         "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "base_delta", "value": gauge.base_delta,
+         "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "terminal_on_floor",
+         "value": "true" if gauge.terminal_on_floor else "false", "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "costly_band", "value": gauge.costly_band,
+         "timeless": True},
+        {"entity": gauge.gauge_id, "attribute": "action_modifiers",
+         "value": json.dumps([list(m) for m in gauge.action_modifiers]), "timeless": True},
+    ]
+    if gauge.ceiling is not None:
+        items.append({"entity": gauge.gauge_id, "attribute": "ceiling",
+                      "value": gauge.ceiling, "timeless": True})
+    return items
+
+
+def _gauge_from_reads(get, gauge_id: str) -> Gauge:
+    """Reconstruct one Gauge from its plot-declaration rows."""
+    mods_raw = get(gauge_id, "action_modifiers")
+    mods = tuple((kw, float(d)) for kw, d in json.loads(mods_raw)) if mods_raw else ()
+    return Gauge(
+        gauge_id=gauge_id,
+        label=get(gauge_id, "label") or "",
+        baseline=_as_float(get(gauge_id, "baseline")) or 0.0,
+        floor=_as_float(get(gauge_id, "floor")) or 0.0,
+        base_delta=_as_float(get(gauge_id, "base_delta")) or 0.0,
+        ceiling=_as_float(get(gauge_id, "ceiling")),
+        terminal_on_floor=(get(gauge_id, "terminal_on_floor") or "true") != "false",
+        costly_band=_as_float(get(gauge_id, "costly_band")) or 0.25,
+        action_modifiers=mods,
+    )
+
+
 def _pin_from_reads(get, pin_id: str) -> Pin:
     """Reconstruct one Pin from its plot rows."""
     return Pin(
@@ -223,19 +273,19 @@ def _as_float(v) -> float | None:
 
 
 def _synth_refusal(arc_id: str) -> Clock:
-    """The canonical refusal-clock backstop (mirrors `game._build_arc`): a
-    quiescence ender that always exists, used when the stored refusal rows
-    can't be read back. Keeps a world ALWAYS able to conclude. The id is
-    per-arc (only the main arc uses the bare `clock:refusal`) so a synthesized
-    side-arc backstop never collides with the main refusal clock in the shared
-    `plot:main` frame (LIVING-WORLD-GENERATOR P1 — the multi-arc collision fix
-    applied to the fallback path too)."""
+    """The canonical refusal-clock fallback (mirrors `game._build_arc`), used when the
+    stored refusal rows can't be read back. It is an EXPLICIT-ABANDONMENT clock (founder
+    ruling 2026-06-25 / Cx 176): it fires only on an `event:abandoned_<arc>` occurrence
+    (the player decisively walks away), NEVER on quiet turns — turns never force a close,
+    and a quiet-turn refusal would fabricate a `refusal_conclusion` in canon. The id is
+    per-arc so a synthesized side-arc clock never collides with the main one in `plot:main`."""
     is_main = arc_id == "arc:main"
     slug = arc_id.split(":", 1)[1]
     cid = "clock:refusal" if is_main else f"clock:refusal_{slug}"
     concludes = "event:world_concludes" if is_main else f"event:world_concludes_{slug}"
+    abandon = "event:abandoned" if is_main else f"event:abandoned_{slug}"
     return Clock(
-        clock_id=cid, fires_when=C.TurnsQuiet(15),
+        clock_id=cid, fires_when=C.Occurred(abandon),
         effects=({"entity": concludes, "attribute": "kind",
                   "value": "refusal_conclusion"},),
         bound_to=arc_id, rung=Rung.REFUSAL)
@@ -380,6 +430,8 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
     pins = tuple(_pin_from_reads(get, pid) for pid in pin_ids)
     pillar_ids = json.loads(get(arc_id, "pillar_index") or "[]")
     pillars = tuple(_pillar_from_reads(get, pid) for pid in pillar_ids)
+    gauge_ids = json.loads(get(arc_id, "gauge_index") or "[]")
+    gauges = tuple(_gauge_from_reads(get, gid) for gid in gauge_ids)
     return Arc(
         arc_id=arc_id,
         protagonist=get(arc_id, "protagonist"),
@@ -394,6 +446,7 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
         failure_when=expr_from_obj(json.loads(failure_raw)) if failure_raw else None,
         pins=pins,
         pillars=pillars,
+        gauges=gauges,
     )
 
 
@@ -449,6 +502,12 @@ def arc_to_cache(arc: Arc) -> dict:
             "genuine_via": expr_to_obj(p.genuine_via) if p.genuine_via else None,
             "false_via": expr_to_obj(p.false_via) if p.false_via else None,
         } for p in arc.pillars],
+        "gauges": [{
+            "gauge_id": g.gauge_id, "label": g.label, "baseline": g.baseline,
+            "floor": g.floor, "base_delta": g.base_delta, "ceiling": g.ceiling,
+            "terminal_on_floor": g.terminal_on_floor, "costly_band": g.costly_band,
+            "action_modifiers": [list(m) for m in g.action_modifiers],
+        } for g in arc.gauges],
     }
 
 
@@ -499,6 +558,13 @@ def arc_from_cache(d: dict) -> Arc:
             genuine_via=expr_from_obj(p["genuine_via"]) if p.get("genuine_via") else None,
             false_via=expr_from_obj(p["false_via"]) if p.get("false_via") else None,
         ) for p in d.get("pillars", [])),
+        gauges=tuple(Gauge(
+            gauge_id=g["gauge_id"], label=g.get("label", ""), baseline=g["baseline"],
+            floor=g["floor"], base_delta=g["base_delta"], ceiling=g.get("ceiling"),
+            terminal_on_floor=g.get("terminal_on_floor", True),
+            costly_band=g.get("costly_band", 0.25),
+            action_modifiers=tuple(tuple(m) for m in g.get("action_modifiers", [])),
+        ) for g in d.get("gauges", [])),
     )
 
 
@@ -509,9 +575,14 @@ def portfolio_items(arc_ids: list[str], main_arc_id: str = "arc:main",
     Two rows on `arc:portfolio`. `arc_ids` is a JSON list (pinned `literal` via
     `_JSON_BLOB_ATTRS` — the same mis-classification hazard as the discovery
     indexes). A world without this row is a single-arc world (see
-    `arc_ids_from_frame`). Session-zero writes them `timeless`; a mid-play UPDATE
-    (the P2 generator adding an arc) passes `valid_from` so the new list
-    SUPERSEDES the sealed one on the timeline."""
+    `arc_ids_from_frame`). Session-zero writes them `timeless`.
+
+    CAUTION on mid-play UPDATES (Cx 167): `valid_from` does NOT reliably supersede a
+    sealed row — the durability classifier often marks these host-control rows
+    CONSTITUTIVE, and a constitutive fold serves the EARLIEST visible row (marking
+    the key conflicted), so a later `valid_from`/timeless write is silently ignored
+    after reopen. A mid-play writer MUST `world.porcelain.retract(...)` the visible
+    `arc:portfolio` rows first, THEN append (see `game.continue_episode`)."""
     if valid_from is None:
         meta = {"timeless": True}
     else:
@@ -590,4 +661,8 @@ def index_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
         # the arc's causal pillars from here, never a frame scan.
         {"entity": arc.arc_id, "attribute": "pillar_index",
          "value": json.dumps([p.pillar_id for p in arc.pillars]), "timeless": True},
+        # The gauge declaration index (GAUGE-PRIMITIVE.md): the turn loop reads the
+        # arc's gauges from here to drain/surface/terminate them.
+        {"entity": arc.arc_id, "attribute": "gauge_index",
+         "value": json.dumps([g.gauge_id for g in arc.gauges]), "timeless": True},
     ], frame)

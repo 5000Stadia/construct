@@ -10,6 +10,7 @@ host-owned frames.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 from dataclasses import dataclass
@@ -34,11 +35,61 @@ SESSION = "session:main"
 #: engine's simultaneity guard correctly refuses to fake supersession
 #: on ties). Authoring uses small coordinates (chapters 1..n); play
 #: starts at the epoch.
+#:
+#: STAGING-AFTERMATH-SCATTER fix (obs #3 half 3, Cx 127): a source fiction that
+#: narrates the whole arc lets Stage-1 extraction stamp rows at CALENDAR YEARS
+#: (e.g. 1974.0) — ABOVE this default epoch — so an aftermath `in` ("Jack in
+#: Providence Hospital") folds as the CURRENT location and the opening cast is
+#: scattered. The fix is a per-SCENARIO entry epoch computed ABOVE every pre-play
+#: `valid_from` (`compute_entry_epoch`), set on a contextvar so `turn_time` (and the
+#: pacing fold) put opening staging + every live turn unambiguously on top. Default
+#: stays TURN_EPOCH (one-timeframe worlds — anchor/deduction — are a byte-for-byte
+#: no-op; the contextvar is only raised when a world is built/opened with a stored
+#: `entry_epoch`). All `turn_time` stamping is main-thread (the concurrent npc phase
+#: only runs MODEL calls; commits are serial), so the contextvar is read consistently.
 TURN_EPOCH = 1000.0
+
+#: Margin above the highest pre-play `valid_from` (headroom so the first turns never tie).
+ENTRY_MARGIN = 1000.0
+
+_ENTRY_EPOCH: contextvars.ContextVar[float] = contextvars.ContextVar(
+    "construct_entry_epoch", default=TURN_EPOCH)
+
+
+def current_epoch() -> float:
+    """The live-play time origin for this context (the scenario entry epoch, or
+    TURN_EPOCH when none is set)."""
+    return _ENTRY_EPOCH.get()
+
+
+def set_entry_epoch(epoch: float):
+    """Raise the live-play time origin for this context so opening staging + every live
+    turn sit ABOVE all pre-play canon `valid_from` (obs #3 half 3). Returns the contextvar
+    token (pass to `_ENTRY_EPOCH.reset` to restore). Idempotent; never lowers below
+    TURN_EPOCH."""
+    return _ENTRY_EPOCH.set(max(TURN_EPOCH, float(epoch)))
+
+
+def compute_entry_epoch(world: Any) -> float:
+    """The scenario entry epoch: strictly above every pre-play canon `valid_from` so the
+    opening dossier/staging and all live turns win the containment fold over aftermath rows
+    the source prose narrates (obs #3 half 3, Cx 127). Reads the append-log directly. Falls
+    back to TURN_EPOCH when nothing exceeds it (one-timeframe worlds → a no-op)."""
+    try:
+        marks = [r.valid_from for r in world.buffer.all_rows()
+                 if getattr(r, "valid_from", None) is not None]
+    except Exception:  # never let the epoch computation sink a build
+        logger.exception("compute_entry_epoch: all_rows read failed; using TURN_EPOCH")
+        marks = []
+    hi = max(marks) if marks else 0.0
+    # When TURN_EPOCH already sits above every authored row (the normal case — small chapter
+    # coordinates 1..n), keep it EXACTLY (a true no-op for one-timeframe worlds). Only raise
+    # when a row reaches/exceeds the epoch (the calendar-year leak), clearing it by the margin.
+    return TURN_EPOCH if hi < TURN_EPOCH else hi + ENTRY_MARGIN
 
 
 def turn_time(turn: int) -> float:
-    return TURN_EPOCH + float(turn)
+    return current_epoch() + float(turn)
 
 
 @dataclass
@@ -56,8 +107,9 @@ def counters_from_session(reads: Any, arc: Arc) -> PacingCounters:
     elapsed = len(turns)
     marks = [e.at for e in reads.events(kind="beat_achieved", frame=SESSION)]
     marks += [e.at for e in reads.events(kind="arc_touch", frame=SESSION)]
-    last_mark_turn = max((m - TURN_EPOCH for m in marks
-                          if m is not None and m >= TURN_EPOCH), default=0)
+    _epoch = current_epoch()
+    last_mark_turn = max((m - _epoch for m in marks
+                          if m is not None and m >= _epoch), default=0)
     quiet = max(0, elapsed - int(last_mark_turn))
     return PacingCounters(turns_elapsed=elapsed, turns_quiet=quiet)
 
@@ -74,6 +126,18 @@ def clock_pass(world: Any, arc: Arc, reads: Any, counters: PacingCounters,
         verdict = evaluate(clock.fires_when, reads, counters)
         if verdict is not Truth.TRUE:
             continue
+        # Runtime guard (founder ruling 2026-06-25 / Cx 178): a REFUSAL clock NEVER fires on a
+        # turn counter. Turns don't close stories, and emitting its effect would fabricate a
+        # `refusal_conclusion` in canon. The source authors abandonment-`Occurred` refusals, but
+        # this defends a PERSISTED or hand-authored old-shape (`TurnsQuiet`) refusal that reaches
+        # here — the guarantee is "no quiet-turn conclusion can EVER be emitted", not just authored.
+        if clock.rung is Rung.REFUSAL:
+            from construct.arc.conditions import COUNTER_ATOMS, atoms_of
+            if any(isinstance(a, COUNTER_ATOMS) for a in atoms_of(clock.fires_when)):
+                logger.warning(
+                    "suppressed counter-based REFUSAL clock %s (turns never force a close)",
+                    clock.clock_id)
+                continue
         firing_id = f"event:{clock.clock_id.split(':', 1)[1]}_fired_{turn}"
         effects = [dict(item) for item in clock.effects]
         for item in effects:
@@ -376,13 +440,13 @@ class ConclusiveCandidate:
     turn loop assembles from its tick trace — the explicit candidate Gate A needs
     (reading only `reads` would lose the 'just this turn' distinction — Cx C1#3)."""
     climax_beat_achieved: bool = False       # a climax_ready_beat was achieved this tick
-    refusal_or_deadline_fired: bool = False  # a refusal/deadline clock fired this tick
+    refusal_or_deadline_fired: bool = False  # an abandonment/authored-deadline clock fired this tick
     required_beat_foreclosed: bool = False   # a required beat closed this tick
-    post_climax_window_expired: bool = False  # K quiet post-climax turns elapsed (C1#4)
+    # (post_climax_window_expired removed 2026-06-25 / Cx 176 — turns never force a close)
 
     def any(self) -> bool:
         return (self.climax_beat_achieved or self.refusal_or_deadline_fired
-                or self.required_beat_foreclosed or self.post_climax_window_expired)
+                or self.required_beat_foreclosed)
 
 
 def conclusive_eligible(reads: Any, arc: Arc, *, contract: str,

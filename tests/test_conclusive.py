@@ -121,12 +121,6 @@ def test_eligible_requires_a_candidate_event():
                                    candidate=ConclusiveCandidate())
 
 
-def test_post_climax_window_is_a_candidate_without_a_fresh_event():
-    # C1#4: the quiet-window expiry alone makes it eligible (no new event needed).
-    cand = ConclusiveCandidate(post_climax_window_expired=True)
-    assert conclusive_eligible(_ready_reads(), _arc(), contract="story", candidate=cand)
-
-
 def test_refusal_fired_path_is_eligible():
     arc, r = _arc(), FakeReads()
     r.fired.add("clock:refusal")                  # the tragedy-of-absence path

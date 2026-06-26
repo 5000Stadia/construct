@@ -54,7 +54,7 @@ ARC_STRUCTURAL_ENUMS = frozenset({
 #: elapsed time is the textbook case (Kernos steer 074): each turn appends
 #: `+N minutes`. A distinctive attribute name (never a plain `minutes`) so no
 #: ordinary literal accidentally inherits accrue folding.
-ACCRUE_ATTRS = frozenset({"elapsed_minutes"})
+ACCRUE_ATTRS = frozenset({"elapsed_minutes", "gauge_level"})
 
 
 def attribute_default(attribute: str) -> dict | None:

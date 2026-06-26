@@ -263,6 +263,22 @@ class TestSession:
         assert next_turn_number(w) >= 2  # turn_0 + the played turn
         w.close()
 
+    def test_continuation_slot_scope_preferred_over_stale_meta(self, scenario):
+        # Cx 191/192: continue_episode persists the NEW episode's scope per-slot as
+        # session:episode.arc_scope. Session.open must PREFER it over the shared, stale scenario meta
+        # arc_scope — else EP2 cold-opens with EP1's cast. Also guards the json import (the read
+        # decodes a JSON blob; a missing import would silently fall back to the stale meta scope).
+        s1 = Session.open(scenario, player_id="u1", provider=_provider())
+        assert s1._scope != ["person:ep2_only"]                    # baseline: the scenario-meta scope
+        s1._world.porcelain.ingest_structured(
+            [{"entity": "session:episode", "attribute": "arc_scope",
+              "value": json.dumps(["person:ep2_only"]), "value_type": "literal"}],
+            frame="session:main")
+        s1.close()
+        s2 = Session.open(scenario, player_id="u1", provider=_provider())
+        assert s2._scope == ["person:ep2_only"]                    # the slot scope wins on reopen
+        s2.close()
+
     def test_turn_failure_is_survivable(self, scenario):
         s = Session.open(scenario, player_id="u1", provider=StubProvider([]))
         reply = s.turn("I do something")   # provider queue empty → turn raises inside

@@ -12,9 +12,9 @@ from patternbuffer.testing import StubModel, rule_classifier_fallback
 
 from construct.adapter import PorcelainWorldReads
 from construct.arc import io as arc_io
-from construct.arc.conditions import InFrame, TurnsQuiet
+from construct.arc.conditions import InFrame, Occurred, TurnsQuiet
 from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
-from construct.provider import StubProvider
+from construct.provider import StubProvider, task_of
 from construct.turnloop import run_turn
 
 PLAYER = "person:player"
@@ -84,7 +84,8 @@ def make_arc() -> Arc:
                   effects=({"entity": "event:pressure", "attribute": "kind",
                             "value": "pressure"},),
                   bound_to="beat:discover", rung=Rung.SURFACE)
-    refusal = Clock("clock:refusal", TurnsQuiet(15),
+    # Explicit-abandonment refusal (Cx 176/178) — the production shape; never a turn counter.
+    refusal = Clock("clock:refusal", Occurred("event:abandoned"),
                     effects=({"entity": "event:world_concludes", "attribute": "kind",
                               "value": "refusal_conclusion"},),
                     bound_to="arc:main", rung=Rung.REFUSAL)
@@ -817,10 +818,11 @@ class TestFullTurn:
         prompt = _narrate_prompt(provider)
         assert "THE TWIST" not in prompt  # a triumphant farce must not trip the wrong-case twist
 
-    def test_rocky_sound_coverage_plus_scoreboard_loss_live(self, world):
-        # Cx 027 blocker 2: Contest reads the scoreboard (a world EVENT) ALONGSIDE coverage.
-        # Sound proof + a scoreboard LOSS must render as costly_victory ("proved himself,
-        # lost the decision") — reachable in live play via reads_world_event, not just units.
+    def test_rocky_sound_coverage_plus_result_event_loss_live(self, world):
+        # Cx 027 blocker 2 + the 131/132 CONSOLIDATION: Contest reads the LITERAL result ALONGSIDE
+        # coverage — now a declared canon Occurred RESULT-EVENT (not a bespoke scoreboard entity).
+        # Sound proof + a LOSS result-event must render costly_victory ("proved himself, lost the
+        # decision"). This is the proof of the new `_literal_result` event-reader.
         import dataclasses
         from construct.arc.executor import turn_time
         from construct.arc.grammar import Pillar
@@ -834,9 +836,12 @@ class TestFullTurn:
         world.porcelain.ingest_structured(
             [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
             frame=PLAYER_FRAME)
-        # the scoreboard says the match was lost (authored canon, not the won/lost receipt)
+        # the LITERAL result: a canon Occurred event of the arc's declared LOSS kind (the match was
+        # lost) — ordinary canon, read via the event log, never the internal won/lost receipt.
         world.porcelain.ingest_structured(
-            [{"entity": "scoreboard:main", "attribute": "outcome", "value": "loss"}])
+            [{"entity": "event:bout_main", "attribute": "kind", "value": "bout_lost_main",
+              "valid_from": turn_time(4)}])
+        result_events = {"win": ("bout_won_main",), "loss": ("bout_lost_main",)}
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([                       # NO judge stub — effect-derived grade
@@ -845,7 +850,7 @@ class TestFullTurn:
             {"prose": "The bell rings; you are still standing."},
         ])
         result = run_turn(world, arc, provider, "I go the distance.", turn=5,
-                          scenario_mode="win_loss", reads_world_event=True,
+                          scenario_mode="win_loss", result_events=result_events,
                           scope=["fact:secret", "person:rival", PLAYER, "place:study"])
         assert result.trace.terminal is True
         assert result.trace.conclusion_shape == "costly_victory"  # proved himself, lost the bout
@@ -885,6 +890,148 @@ class TestFullTurn:
         # the narrator was briefed to deliver it in character this turn
         prompt = _narrate_prompt(provider)
         assert "LEARNED THIS TURN" in prompt
+
+    # ---- TOPIC-AWARE interview delivery (BEAT-DELIVERY half 2, Cx 125) -------------------
+    def _witness_two_clues(self, world):
+        """A present witness holding TWO fresh genuine clues: a decoy (authored FIRST) and
+        the secret the make_arc CLIMAX beat gates on (authored SECOND). Returns the cast."""
+        from construct.cast import CastNode, Clue
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        return {"person:witness": CastNode("person:witness", "witness", "the witness",
+                holds_clues=(
+            Clue("clue:decoy", "pillar:motive", ("fact:other", "is", "noise"),
+                 coverage_effect="genuine", reveal_condition="none"),
+            Clue("clue:secret", "pillar:motive", ("fact:secret", "culprit", "person:rival"),
+                 coverage_effect="genuine", reveal_condition="none")))}
+
+    def test_topic_aware_delivery_picks_the_questioned_clue_and_fires_the_beat(self, world):
+        # The holder has two fresh eligible clues; the classifier's asks_targets picks the one
+        # the question pursues (the secret, authored SECOND) — NOT the authored-first decoy — and
+        # the CLIMAX beat gated on that fact fires the SAME turn.
+        arc = make_arc(); seed_arc(world, arc)
+        cast = self._witness_two_clues(world)
+        world._extractions.append({"items": []}); world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "asks_targets": ["ask_1"]},   # ask_1 = the secret (2nd clue)
+            {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
+            {"prose": "Pressed on who is behind it, the witness names the rival."},
+        ])
+        result = run_turn(world, arc, provider,
+                          "I press the witness about who is really behind this.",
+                          turn=2, cast=cast, scope=["person:witness", PLAYER, "place:study"])
+        assert result.trace.learned_clues == ["clue:secret"]   # questioned one, not the decoy
+        R = PorcelainWorldReads(world)
+        assert R.assertion_in_frame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival")
+        assert not R.assertion_in_frame(PLAYER_FRAME, "fact:other", "is", "noise")
+        assert "beat:discover" in result.trace.beats_achieved  # the gated beat fired this turn
+
+    def test_empty_asks_targets_keeps_legacy_authored_order(self, world):
+        # No asks_targets (generic question / old schema) → today's first-by-rank behavior:
+        # the authored-FIRST clue (the decoy) is delivered, unchanged.
+        arc = make_arc(); seed_arc(world, arc)
+        cast = self._witness_two_clues(world)
+        world._extractions.append({"items": []}); world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},                               # no asks_targets at all
+            {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
+            {"prose": "The witness offers what they will."},
+        ])
+        result = run_turn(world, arc, provider, "I talk to the witness.",
+                          turn=2, cast=cast, scope=["person:witness", PLAYER, "place:study"])
+        assert result.trace.learned_clues == ["clue:decoy"]    # legacy authored-first, unchanged
+
+    def test_pressure_gate_stays_authoritative_over_asks_targets(self, world):
+        # The classifier may TARGET a pressure-gated clue, but a non-pressing interaction must
+        # not deliver it — the deterministic reveal gate stays authoritative (Cx 125 blocker 1).
+        from construct.cast import CastNode, Clue
+        arc = make_arc(); seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        cast = {"person:witness": CastNode("person:witness", "witness", "the witness",
+                holds_clues=(
+            Clue("clue:secret", "pillar:motive", ("fact:secret", "culprit", "person:rival"),
+                 coverage_effect="genuine", reveal_condition="pressure"),))}
+        world._extractions.append({"items": []}); world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "asks_targets": ["ask_0"]},    # targets the pressure clue...
+            {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
+            {"prose": "You exchange pleasantries with the witness."},
+        ])
+        result = run_turn(world, arc, provider, "I nod politely and settle in.",  # NOT pressing
+                          turn=2, cast=cast, scope=["person:witness", PLAYER, "place:study"])
+        assert result.trace.learned_clues == []                # gate withheld it
+        assert "beat:discover" not in result.trace.beats_achieved
+
+    def test_already_learned_target_falls_back_to_next_fresh(self, world):
+        # If the targeted clue is already in the player frame, it's filtered by the gate; the
+        # selection then falls back to the next fresh eligible clue (Cx 125: skip learned → next).
+        from construct.cast import CastNode, Clue
+        arc = make_arc(); seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+        ])
+        # pre-seed the FIRST clue's fact into the player frame (already learned)
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:seen", "attribute": "is", "value": "prior"}], frame=PLAYER_FRAME)
+        cast = {"person:witness": CastNode("person:witness", "witness", "the witness",
+                holds_clues=(
+            Clue("clue:seen", "pillar:motive", ("fact:seen", "is", "prior"),
+                 coverage_effect="genuine", reveal_condition="none"),
+            Clue("clue:secret", "pillar:motive", ("fact:secret", "culprit", "person:rival"),
+                 coverage_effect="genuine", reveal_condition="none")))}
+        world._extractions.append({"items": []}); world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "asks_targets": ["ask_0"]},    # targets the ALREADY-LEARNED clue
+            {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
+            {"prose": "The witness goes on."},
+        ])
+        result = run_turn(world, arc, provider, "I ask the witness about what they saw.",
+                          turn=2, cast=cast, scope=["person:witness", PLAYER, "place:study"])
+        assert result.trace.learned_clues == ["clue:secret"]   # skipped learned → next fresh
+
+    def test_move_and_ask_in_one_turn_falls_back_to_legacy_order(self, world):
+        # v1 semantics (Cx 125): candidates are assembled from the ENTRY scene, before movement.
+        # A same-turn "go to X and ask them" therefore cannot be topic-steered — the moved-to
+        # holder wasn't a candidate — so delivery falls back to authored order. Documented, not
+        # accidental: even with asks_targets set, the authored-FIRST clue is delivered.
+        from construct.cast import CastNode, Clue
+        arc = make_arc(); seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:pantry", "attribute": "kind", "value": "room",
+             "timeless": True, "aliases": ["the pantry"]},
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:pantry"},
+        ])
+        cast = {"person:witness": CastNode("person:witness", "witness", "the witness",
+                holds_clues=(
+            Clue("clue:decoy", "pillar:motive", ("fact:other", "is", "noise"),
+                 coverage_effect="genuine", reveal_condition="none"),
+            Clue("clue:secret", "pillar:motive", ("fact:secret", "culprit", "person:rival"),
+                 coverage_effect="genuine", reveal_condition="none")))}
+        world._extractions.append({"items": []}); world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the pantry", "requires": [], "needs_test": False,
+             "uncertain_of": "", "asks_targets": ["ask_1"]},    # would WANT the secret...
+            {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
+            {"prose": "You find the witness in the pantry; they say their piece."},
+        ])
+        result = run_turn(world, arc, provider,
+                          "I go to the pantry and ask the witness who is behind this.",
+                          turn=2, cast=cast,
+                          scope=["person:witness", PLAYER, "place:study", "place:pantry"])
+        # moved + delivered, but NOT topic-steered (the moved-to holder had no entry candidate)
+        assert world.porcelain.locate(PLAYER)[0] == "place:pantry"
+        assert result.trace.learned_clues == ["clue:decoy"]    # legacy authored-first
 
     def test_npc_turn_returns_combined_shape(self):
         # TURN-LATENCY Lever 4: the folded cohort returns the union of the old
@@ -1456,6 +1603,158 @@ def test_author_flavor_cohort():
     assert prov.calls[0][2] == "main"  # authoring tier
 
 
+# ---- STAGING-AFTERMATH-SCATTER / entry-epoch (obs #3 half 3, Cx 127) ----------------------
+
+def test_compute_entry_epoch_above_aftermath_and_noop_when_low():
+    from construct.arc.executor import TURN_EPOCH, compute_entry_epoch
+
+    class _Row:
+        def __init__(self, vf): self.valid_from = vf
+
+    class _Buf:
+        def __init__(self, vfs): self._vfs = vfs
+        def all_rows(self): return [_Row(v) for v in self._vfs]
+
+    class _W:
+        def __init__(self, vfs): self.buffer = _Buf(vfs)
+
+    # an aftermath calendar-year row (1974) → epoch strictly above it
+    assert compute_entry_epoch(_W([1.0, 5.0, 1974.0])) > 1974.0
+    # one-timeframe world (all rows below TURN_EPOCH) → no-op at TURN_EPOCH
+    assert compute_entry_epoch(_W([1.0, 5.0, None])) == TURN_EPOCH
+    assert compute_entry_epoch(_W([])) == TURN_EPOCH
+
+
+def test_turn_time_honors_entry_epoch_contextvar():
+    from construct.arc import executor
+    from construct.arc.executor import TURN_EPOCH, set_entry_epoch, turn_time
+    assert turn_time(0) == TURN_EPOCH          # default — unchanged
+    tok = executor._ENTRY_EPOCH.set(TURN_EPOCH)  # capture to restore
+    try:
+        set_entry_epoch(3000.0)
+        assert turn_time(0) == 3000.0 and turn_time(2) == 3002.0
+        set_entry_epoch(500.0)                 # never lowers below TURN_EPOCH
+        assert turn_time(0) == TURN_EPOCH
+    finally:
+        executor._ENTRY_EPOCH.reset(tok)
+
+
+def test_entry_epoch_staging_wins_over_aftermath_and_live_supersedes(world):
+    # The obs #3 scatter repro: an aftermath `in` row exists at a calendar-year valid_from;
+    # opening staging committed on the entry axis WINS the current fold; a live turn still
+    # supersedes the opening. (Default-epoch reads here would serve the aftermath.)
+    from construct.arc import executor
+    from construct.arc.executor import (
+        TURN_EPOCH, compute_entry_epoch, set_entry_epoch, turn_time,
+    )
+    world.ingest_structured([
+        {"entity": "place:scene", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:hospital", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:trail", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:guide", "attribute": "kind", "value": "person", "timeless": True},
+        # AFTERMATH: the source prose narrated the guide ending up in hospital, at a calendar year
+        {"entity": "person:guide", "attribute": "in", "value": "place:hospital",
+         "value_type": "entity", "valid_from": 1974.0},
+    ])
+    assert world.porcelain.locate("person:guide")[0] == "place:hospital"  # aftermath currently wins
+    tok = executor._ENTRY_EPOCH.set(TURN_EPOCH)
+    try:
+        epoch = compute_entry_epoch(world)
+        assert epoch > 1974.0
+        set_entry_epoch(epoch)
+        # opening staging on the entry axis
+        world.ingest_structured([
+            {"entity": "person:guide", "attribute": "in", "value": "place:scene",
+             "value_type": "entity", "valid_from": turn_time(0)},
+        ])
+        assert world.porcelain.locate("person:guide")[0] == "place:scene"  # staging wins
+        # a live turn still supersedes the opening (the world can reach the aftermath in play)
+        world.ingest_structured([
+            {"entity": "person:guide", "attribute": "in", "value": "place:trail",
+             "value_type": "entity", "valid_from": turn_time(1)},
+        ])
+        assert world.porcelain.locate("person:guide")[0] == "place:trail"
+    finally:
+        executor._ENTRY_EPOCH.reset(tok)
+
+
+def test_literal_result_reads_declared_result_events(world):
+    # Consolidation (131/132): the Contest literal result is a declared canon Occurred EVENT,
+    # read via the event log — no bespoke scoreboard entity. None when nothing is declared.
+    from construct.adapter import PorcelainWorldReads
+    from construct.turnloop import _literal_result
+    R = PorcelainWorldReads(world)
+    assert _literal_result(R, None) is None                       # no axis declared
+    re = {"win": ("bout_won",), "loss": ("bout_lost",)}
+    assert _literal_result(R, re) is None                         # declared, but nothing fired yet
+    world.porcelain.ingest_structured(
+        [{"entity": "event:b1", "attribute": "kind", "value": "bout_lost", "valid_from": 1100.0}])
+    assert _literal_result(R, re) == "loss"
+    world.porcelain.ingest_structured(
+        [{"entity": "event:b2", "attribute": "kind", "value": "bout_won", "valid_from": 1200.0}])
+    assert _literal_result(R, re) == "win"                        # most-recent wins on no tie
+
+
+def test_literal_result_participant_scoping_is_collision_proof():
+    # Cx 132 #4 / 134: a global event `kind` must be scoped by participants (ALL-of across
+    # agents∪patients). A same-kind event for a DIFFERENT contestant must not cross-fire.
+    from construct.arc.conditions import EventRow
+    from construct.turnloop import _literal_result
+    from tests.fixtureworld import FixtureWorld
+    re = {"win": ("bout_won",), "loss": ("bout_lost",), "participants": ("person:rocky",)}
+    # rocky lost his bout — scoped match
+    w_match = FixtureWorld(event_log={"canon": [
+        EventRow("event:b1", "bout_lost", agents=("person:rocky",), at=1)]})
+    assert _literal_result(w_match, re) == "loss"
+    # a same-kind loss for a DIFFERENT fighter must NOT register as rocky's result
+    w_other = FixtureWorld(event_log={"canon": [
+        EventRow("event:b9", "bout_lost", agents=("person:clubber",), at=1)]})
+    assert _literal_result(w_other, re) is None
+    # participant as a patient also counts (agents ∪ patients)
+    w_patient = FixtureWorld(event_log={"canon": [
+        EventRow("event:b2", "bout_won", patients=("person:rocky",), at=2)]})
+    assert _literal_result(w_patient, re) == "win"
+
+
+def test_pacing_fold_is_epoch_invariant_under_raised_epoch(world):
+    # The riskiest seam of the entry-epoch surgery: counters_from_session folds turns
+    # RELATIVE to current_epoch() (turns_elapsed = #turn events; turns_quiet = turns since
+    # the last beat/arc-touch mark). Under a RAISED epoch the absolute stamps are large; the
+    # fold must still produce the same relative counts as at the default epoch.
+    from construct.arc import executor
+    from construct.arc.executor import (
+        SESSION, TURN_EPOCH, counters_from_session, set_entry_epoch, turn_time,
+    )
+    arc = make_arc()
+
+    def _stamp(epoch_label):
+        # 3 turn events + a beat_achieved mark at turn 2, all on the active epoch axis
+        for n in (1, 2, 3):
+            world.ingest_structured(
+                [{"entity": f"event:turn_{epoch_label}_{n}", "attribute": "kind",
+                  "value": "turn", "valid_from": turn_time(n)}], frame=SESSION)
+        world.ingest_structured(
+            [{"entity": f"event:beat_{epoch_label}", "attribute": "kind",
+              "value": "beat_achieved", "valid_from": turn_time(2)}], frame=SESSION)
+
+    tok = executor._ENTRY_EPOCH.set(TURN_EPOCH)
+    try:
+        # baseline at the default epoch
+        _stamp("base")
+        base = counters_from_session(PorcelainWorldReads(world), arc)
+        assert base.turns_elapsed == 3 and base.turns_quiet == 1  # last mark at turn 2 of 3
+        # raise the epoch far above any calendar year; the SAME relative shape must hold
+        set_entry_epoch(50000.0)
+        _stamp("hi")
+        hi = counters_from_session(PorcelainWorldReads(world), arc)
+        # 6 turn events now (3 base + 3 hi); last mark is the hi beat at hi-epoch turn 2,
+        # so turns_quiet folds against the CURRENT epoch (the base marks are below it).
+        assert hi.turns_elapsed == 6
+        assert hi.turns_quiet == 4  # 6 elapsed - last hi mark at relative turn 2
+    finally:
+        executor._ENTRY_EPOCH.reset(tok)
+
+
 def test_clean_prose_strips_leaked_json_meta_tail():
     # The play harness caught the model spilling its JSON wrapper + reasoning into the
     # prose value. _clean_prose truncates at the first control/meta marker; clean prose
@@ -1583,6 +1882,256 @@ def test_terminal_epilogue_names_cast_and_reveals(world):
     assert "EPILOGUE" in narrate_prompt
     assert "person:rival" in narrate_prompt   # the cast (a fate for each)
     assert "THE TRUTH" in narrate_prompt       # concealment lifts at the curtain
+    # E2 (Cx 139 #2 / 141): on a close turn the epilogue OWNS the render — the player's act FOLDS
+    # into the denouement, it does NOT compete via "render exactly this, no more" (which beat the
+    # epilogue and left the curtain unrendered).
+    assert "render exactly this, no more" not in narrate_prompt
+    assert "FOLDS INTO" in narrate_prompt      # the final-act-folds-into-the-close directive
+
+
+def test_commitment_owned_climax_is_ready_not_terminal(world):
+    # Cx 141 (E1): for a COMMITMENT-owned shape (deduction/contest/…), achieving world_condition is
+    # READINESS for the reckoning, NOT the close — the procedural climax must not terminate; the
+    # player's conclusory commitment owns the curtain. (The audit-office falter.)
+    from construct.turnloop import terminal_outcome
+    arc = make_arc()
+    seed_arc(world, arc)
+    # world_condition (fact:secret culprit=rival) is MET — but the player has not reckoned.
+    world.porcelain.ingest_structured(
+        [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+        frame=PLAYER_FRAME)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},   # NOT a reckoning
+        {"prose": "You lay the evidence out on the table; the room reads what it means."}])
+    r = run_turn(world, arc, provider, "I lay out all the evidence on the table.", turn=3,
+                 scenario_mode="win_loss", terminal_owner="commitment",
+                 scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+    assert r.trace.terminal is False                       # readiness, NOT the close
+    assert r.trace.concluded is False                      # no premature conclusion marker
+    assert terminal_outcome(PorcelainWorldReads(world)) is None
+    assert "DECISIVE MOMENT IS WITHIN REACH" in _narrate_prompt(provider)  # steered toward the curtain
+    # now the player RECKONS → the commitment owns the curtain → terminal
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider2 = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
+        {"grade": "vindicated", "rationale": "the evidence matches"},   # judge_commitment
+        {"prose": "You name the rival; the truth lands and the case closes."}])
+    r2 = run_turn(world, arc, provider2, "I accuse the rival, naming them the culprit.", turn=4,
+                  scenario_mode="win_loss", terminal_owner="commitment",
+                  scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+    assert r2.trace.terminal is True                       # the accusation closes it
+
+
+def test_no_deadline_ready_arc_never_force_concludes(world):
+    # Founder ruling 2026-06-25 / Cx 173: turns are FREE. A commitment-owned arc with NO authored
+    # deadline that is READY (sound proof) but uncommitted NEVER force-concludes — not after 2 turns,
+    # not after 30, not after 300. Only the player's commitment (or an authored deadline) closes it.
+    # (Replaces the retired post-climax-expiry / missed-reckoning behavior.)
+    from construct.turnloop import terminal_outcome
+
+    class _Steady(StubProvider):
+        # A resilient stub that answers by prompt shape (never a fixed queue to desync over N
+        # turns): the player keeps NOT committing, every turn.
+        def __init__(self):
+            super().__init__([])
+
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if task_of(prompt) == "cls":
+                return {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                        "uncertain_of": "", "commits": False, "commitment": ""}
+            if task_of(prompt) == "nar":
+                return {"prose": "You turn the pieces over once more, in no hurry."}
+            if task_of(prompt) == "ndg":
+                return {"thread": "", "directive": ""}
+            return {"items": []}   # extraction and any other cohort
+
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured(
+        [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+        frame=PLAYER_FRAME)   # world_condition MET → readiness, but the player won't reckon
+    prov = _Steady()
+    world._extractions.extend([{"items": []}] * 40)   # engine extraction queue (2/turn)
+    # Many non-commitment turns while ready — the noir detective thinking it over, well past BOTH
+    # the retired K=4 post-climax window AND the old TurnsQuiet(15) refusal window. None may close it.
+    for t in range(3, 22):
+        r = run_turn(world, arc, prov, "I study the evidence again and say nothing yet.", turn=t,
+                     scenario_mode="win_loss", terminal_owner="commitment",
+                     scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        assert r.trace.terminal is False, f"turn {t} force-concluded — turns must never close the arc"
+        assert r.trace.outcome is None
+        assert "clock:refusal" not in (r.trace.clocks_fired or [])   # never fires on quiet turns
+    assert terminal_outcome(PorcelainWorldReads(world)) is None   # still open after 19 ready turns
+    # Cx 178: inspect the RAW append log, not just the folded state — a fabricated turn-count
+    # `refusal_conclusion` would breach the mesh invariant even if the fold reads `unknown`. Assert
+    # NO refusal firing event and NO `event:world_concludes` row was ever appended.
+    raw = list(world.buffer.visible())
+    assert not [row for row in raw if row.entity == "event:world_concludes"], \
+        "a refusal_conclusion was fabricated into canon on quiet turns"
+    assert not [row for row in raw
+                if row.entity.startswith("event:refusal_fired")], "the refusal clock fired on turns"
+
+
+def test_decisive_loss_event_concludes_without_commitment(world):
+    # Founder ruling 2026-06-25 ("IT closes it"): a story ends on its NARRATIVE decisive event,
+    # authored per-story — not a mechanic. The BODYGUARD case: "IT" = the protectee's life. The
+    # player leaves; the world causes the death (an authored `failure_when` Occurred event); that
+    # closes the arc in failure WITHOUT any commitment, no time, no investigation to continue.
+    # Proves the decisive-event model works for a NON-time, NON-investigation story via existing
+    # failure_when + the 1a commitment-owned-evaluates-failure_when-directly change.
+    import dataclasses as _dc
+    from construct.arc.executor import turn_time
+    arc = _dc.replace(make_arc(),
+                      failure_when=Occurred("protectee_killed"))   # Occurred matches by event KIND
+    seed_arc(world, arc)
+    # The world causes the decisive loss (the unmasked killer strikes after the player walked away):
+    # a canon event of the authored loss KIND.
+    world.porcelain.ingest_structured(
+        [{"entity": "event:the_killing", "attribute": "kind", "value": "protectee_killed",
+          "valid_from": turn_time(2)}])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},   # NOT a commitment
+        {"prose": "Too late — the shot has already been fired."}])
+    r = run_turn(world, arc, provider, "I step out into the corridor for air.", turn=2,
+                 scenario_mode="win_loss", terminal_owner="commitment",
+                 scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+    assert r.trace.terminal is True              # the decisive loss event closes it — no commitment
+    assert r.trace.outcome == "lost"
+
+
+def test_build_arc_lowers_time_deadline_proposal():
+    # Cx 182 #1: a model proposal carrying a time_deadline must survive _build_arc into
+    # Arc.failure_when as the diegetic-clock Quantity (the authoring path, not just the lowerer).
+    from construct.game import _build_arc
+    from construct.arc.conditions import Quantity
+    proposal = {
+        "protagonist": "person:p", "delta_type": "drive_inverted",
+        "tension": ["person:p", "drive:haste", "drive:care"],
+        "beats": [{"id": "beat:ready", "phase": "climax", "weight": "required",
+                   "kind": "event_occurs", "entity": "feast_served", "attribute": "", "value": ""}],
+        "failure_when": {"kind": "time_deadline", "deadline_minutes": 60},
+    }
+    arc = _build_arc(proposal)
+    assert arc.failure_when == Quantity("time:elapsed", "elapsed_minutes", ">=", 60.0)
+
+
+def test_time_deadline_arc_advances_clock_before_conclusion():
+    # Cx 173 #3: a time-deadline arc must advance diegetic time BEFORE the conclusion check (so a
+    # big-jump wait crosses same-turn); a non-deadline arc keeps the post-render estimate. This gate
+    # (_has_time_deadline) is what routes it — assert it detects only time-deadline failure_when.
+    import dataclasses as _dc
+    from construct.turnloop import _has_time_deadline
+    from construct.game import _failure_expr
+    time_arc = _dc.replace(make_arc(),
+                           failure_when=_failure_expr({"kind": "time_deadline",
+                                                       "deadline_minutes": 60}, PLAYER_FRAME))
+    assert _has_time_deadline(time_arc) is True           # → early advance (same-turn crossing)
+    event_arc = _dc.replace(make_arc(), failure_when=Occurred("protectee_killed"))
+    assert _has_time_deadline(event_arc) is False         # event loss → post-render, unchanged
+    assert _has_time_deadline(make_arc()) is False         # no failure_when → unchanged
+
+
+def test_authored_time_deadline_concludes_lost(world):
+    # Increment 2 (King's dinner / Batman): when a story authored time as part of its thread, the
+    # deadline is a `Quantity` over the diegetic clock (time:elapsed.elapsed_minutes) in
+    # `failure_when`. Once in-world time crosses it, the commitment-owned arc concludes LOST — the
+    # fiction's clock ran out, the decisive moment passed. (Crossed-deadline conclusion; the
+    # same-turn commit ORDERING is increment 2b.)
+    import dataclasses as _dc
+    from construct.game import _failure_expr
+    deadline = _failure_expr({"kind": "time_deadline", "deadline_minutes": 60}, PLAYER_FRAME)
+    arc = _dc.replace(make_arc(), failure_when=deadline)
+    seed_arc(world, arc)
+    # In-world time has passed the deadline (a long wait / the King has arrived). Seed with the
+    # kind row the production clock now writes, so time:elapsed is a known entity for Quantity.
+    world.porcelain.ingest_structured(
+        [{"entity": "time:elapsed", "attribute": "kind", "value": "clock", "timeless": True},
+         {"entity": "time:elapsed", "attribute": "elapsed_minutes", "value": 90,
+          "value_type": "literal"}])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "The hour has come and gone; it is too late now."}])
+    r = run_turn(world, arc, provider, "I keep fussing with the table settings.", turn=4,
+                 scenario_mode="win_loss", terminal_owner="commitment",
+                 scope=[PLAYER, "place:study"])
+    assert r.trace.terminal is True       # the diegetic deadline closed it
+    assert r.trace.outcome == "lost"
+
+
+def test_epilogue_prose_mints_no_canon_aliases(world):
+    # Cx 189 #1/#4: on a TERMINAL/curtain turn the narrator's fate-summary prose ("...walks back into
+    # the rain with his name cleared") must NOT be promoted into canon — that pollution became EP2
+    # character NAMES ("With His Name Cleared"). The post-render gate drops all promotion on an
+    # epilogue turn. The damning-alias extraction is staged but never reaches canon.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured(
+        [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+        frame=PLAYER_FRAME)   # ready → the accusation will conclude
+    world._extractions.append({"items": []})                       # player-input extraction
+    world._extractions.append({"items": [                          # post-render epilogue extraction
+        {"entity": "person:rival", "attribute": "alias", "value": "with his name cleared"}]})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
+        {"grade": "vindicated", "rationale": "the evidence matches"},
+        {"prose": "You name the rival; they are taken out into the rain with their name cleared."}])
+    r = run_turn(world, arc, provider, "I accuse the rival, naming them the culprit.", turn=4,
+                 scenario_mode="win_loss", terminal_owner="commitment",
+                 scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+    assert r.trace.terminal is True
+    # the epilogue's descriptive alias was NOT canonized
+    st = world.porcelain.state("person:rival", "alias")
+    assert st["status"] == "unknown" or st.get("fact", {}).get("value") != "with his name cleared"
+    assert not [row for row in world.buffer.visible(frame="canon")
+                if row.entity == "person:rival" and row.attribute == "alias"
+                and row.value == "with his name cleared"]
+
+
+def test_counter_refusal_clock_suppressed_at_runtime(world):
+    # Cx 178 defense-in-depth: a PERSISTED / hand-authored old-shape TurnsQuiet REFUSAL clock must
+    # NOT fire at runtime — clock_pass suppresses it so no fabricated `refusal_conclusion` ever
+    # enters canon, even for worlds authored before the explicit-abandonment reshape.
+    import dataclasses as _dc
+    from construct.arc.conditions import PacingCounters
+    from construct.arc.executor import clock_pass
+    old_refusal = Clock("clock:refusal", TurnsQuiet(1),
+                        effects=({"entity": "event:world_concludes", "attribute": "kind",
+                                  "value": "refusal_conclusion"},),
+                        bound_to="arc:main", rung=Rung.REFUSAL)
+    arc = _dc.replace(make_arc(), refusal_clock=old_refusal)
+    seed_arc(world, arc)
+    fired = clock_pass(world, arc, PorcelainWorldReads(world),
+                       PacingCounters(turns_elapsed=9, turns_quiet=9), turn=9)
+    assert "clock:refusal" not in fired                       # the counter refusal is suppressed
+    assert world.porcelain.state("event:world_concludes", "kind")["status"] == "unknown"
+    assert not [r for r in world.buffer.visible() if r.entity == "event:world_concludes"]
+
+
+def test_world_event_owned_still_terminates_on_world_condition(world):
+    # Cx 141 #3: the per-shape split must NOT regress world-event-owned / legacy arcs — a
+    # world_event terminal_owner (the default) still ends directly on world_condition.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": [
+        {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"prose": "The world tips into its ending."}])
+    r = run_turn(world, arc, provider, "I trip the final mechanism.", turn=2,
+                 scenario_mode="win_loss", terminal_owner="world_event")  # the default
+    assert r.trace.terminal is True                        # world event ends directly — unchanged
 
 
 def test_names_protagonist_guard():
@@ -2183,6 +2732,55 @@ def test_event_occurs_beat_fires_and_achieves_on_success(world):
     assert "WHAT JUST HAPPENED" in _narrate_prompt(provider)     # surfaced as binding
 
 
+def test_fire_event_occurs_only_kinds_restricts_candidates(world):
+    # Result-event minting (131/132 Contest half): the failure-tier path restricts minting to the
+    # declared loss-kinds via `only_kinds`, so an ordinary Occurred beat the detector also flags is
+    # NOT canonized (ordinary beats keep the success-only rule; only the declared result-event mints).
+    import dataclasses
+    from construct.arc.conditions import Occurred
+    from construct.arc.grammar import Beat, Phase, Weight
+    from construct.turnloop import TurnTrace, _fire_event_occurs
+    base = make_arc()
+    arc = dataclasses.replace(base, beats=(*base.beats,
+        Beat("beat:loss", Phase.CLIMAX, Weight.OPTIONAL, achievable_via=Occurred("bout_lost")),
+        Beat("beat:other", Phase.RISING, Weight.OPTIONAL, achievable_via=Occurred("other_deed"))))
+    seed_arc(world, arc)
+    provider = StubProvider([{"occurred": ["bout_lost", "other_deed"]}])  # detector flags BOTH
+    trace = TurnTrace(turn=2)
+    fired = _fire_event_occurs(world, world.porcelain, PorcelainWorldReads(world), [arc],
+                               provider, "the final blow lands against me", "terrible_failure", 2,
+                               trace, PLAYER, only_kinds={"bout_lost"})
+    assert fired == ["bout_lost"]                                # only the declared loss-kind
+    R = PorcelainWorldReads(world)
+    assert R.events(kind="bout_lost") and not R.events(kind="other_deed")
+
+
+def test_result_event_loss_not_minted_before_result_moment(world, monkeypatch):
+    # Cx 132 #2: a failure-tier loss result-event must NOT canonize EARLY — gated to the active
+    # result moment (a conclusory commit, or the arc's late phase). An early failed action with the
+    # arc still in SETUP and no commit must not mint the declared loss.
+    import dataclasses
+    from construct import resolution
+    from construct.arc.conditions import Occurred
+    from construct.arc.grammar import Beat, Phase, Weight
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    base = make_arc()
+    arc = dataclasses.replace(base, beats=(*base.beats,
+        Beat("beat:loss", Phase.CLIMAX, Weight.OPTIONAL, achievable_via=Occurred("bout_lost_main"))))
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([                       # NO detect_events stub — the gate must block it
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+         "uncertain_of": "risky", "commits": False, "commitment": ""},
+        {"prose": "You swing early and miss; the bout is far from decided."}])
+    result = run_turn(world, arc, provider, "I throw an early jab.", turn=2,
+                      result_events={"win": ("bout_won_main",), "loss": ("bout_lost_main",)},
+                      scope=[PLAYER, "place:study"])
+    assert result.trace.adjudication == "test:terrible_failure"
+    assert "bout_lost_main" not in (result.trace.events_fired or [])
+    assert not PorcelainWorldReads(world).events(kind="bout_lost_main")  # gate blocked the early loss
+
+
 def test_event_occurs_no_fire_on_failure_tier(world, monkeypatch):
     # Cx 115/117: an uncertain action resolving to a FAILURE tier must NOT fire the beat — no
     # detector call, no canon event (a failed attempt can't canonize the act).
@@ -2255,3 +2853,18 @@ def test_event_occurs_already_achieved_offers_no_candidate(world):
                       scope=[PLAYER, "place:study"])
     assert "detect_events:cheap" not in result.trace.cohort_calls
     assert result.trace.events_fired == []
+
+
+def test_terminal_outcome_scoped_past_episode_boundary():
+    # CONCLUDE→CONTINUE: a prior episode's win/loss receipt must not freeze the next episode.
+    # terminal_outcome reads receipts only SINCE the latest episode_start boundary marker.
+    from construct.arc.conditions import EventRow
+    from construct.turnloop import terminal_outcome
+    from tests.fixtureworld import FixtureWorld
+    S = "session:main"
+    w = FixtureWorld(event_log={S: [EventRow("event:o1", "arc_won", at=5.0)]})
+    assert terminal_outcome(w) == "won"            # episode 1 ended (no boundary yet)
+    w.event_log[S].append(EventRow("event:ep2", "episode_start", at=10.0))
+    assert terminal_outcome(w) is None             # episode 2 live — prior receipt behind boundary
+    w.event_log[S].append(EventRow("event:o2", "arc_lost", at=14.0))
+    assert terminal_outcome(w) == "lost"           # episode 2's own ending counts

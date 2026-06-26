@@ -890,9 +890,17 @@ class TestHumanizeStage:
             "· Populating the world (3/7)…")
 
     def test_internal_lines_stay_silent(self):
+        # Truly-internal noise stays silent (the "bible" line honors the no-jargon directive).
         assert _humanize_stage("   …hidden bible saved → /tmp/x") is None
-        assert _humanize_stage("Stage 6.2 · Classifying durability · BATCHED") is None
         assert _humanize_stage("") is None
+
+    def test_long_stages_are_surfaced_not_silent(self):
+        # The build's longest stage (durability classification) is now surfaced so the player isn't
+        # left staring at one line through the silent bottleneck (founder build-display ask).
+        assert _humanize_stage("Stage 6.2 · Classifying durability · BATCHED") == \
+            "· Settling what's true and lasting…"
+        assert _humanize_stage("Stage 3 · Declaring passability · RFC-003") == \
+            "· Mapping how the world connects…"
 
 
 # ---- chunking ------------------------------------------------------------

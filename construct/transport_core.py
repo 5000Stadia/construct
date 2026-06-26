@@ -151,6 +151,9 @@ class TransportCore:
         # Players mid-original-restart who still owe the notes keep/wipe answer.
         # pid -> {"keep_character": bool}
         self._pending_restart_notes: dict[str, dict] = {}
+        # Players whose story just CONCLUDED — their next message is the continue? yes/no
+        # (CONCLUDE→CONTINUE: a new episode/case for the same protagonist).
+        self._pending_continue: set[str] = set()
         self._session_factory = session_factory or _default_session_factory
         self._log_dir = Path(log_dir) if log_dir is not None else DEFAULT_LOG_DIR
         self._feedback_dir = (Path(feedback_dir) if feedback_dir is not None
@@ -200,6 +203,16 @@ class TransportCore:
         if pid in self._pending_restart:
             self._pending_restart.discard(pid)
             out = self._do_restart(pid, ev, low)  # already an Outbound
+            self._log(ev, "BOT", "\n".join(out.chunks))
+            return out
+        if pid in self._pending_continue:
+            # CONCLUDE→CONTINUE: the story ended; this message is the continue? yes/no.
+            self._pending_continue.discard(pid)
+            if _affirmative(low):
+                out = self._do_continue(pid, ev)
+            else:
+                out = self._reply(ev, "Then the story rests here — a good place to leave it. "
+                                      "Say /restart to play again, or start something new anytime.")
             self._log(ev, "BOT", "\n".join(out.chunks))
             return out
         if pid in self._pending_exit:
@@ -790,7 +803,51 @@ class TransportCore:
                     registry.set_last_status(self._conn, ev.platform, ev.external_id, line)
             except Exception:
                 logger.exception("status header failed for %s", pid)
+        if getattr(reply, "ended", False):
+            # CONCLUDE→CONTINUE (founder): the story just landed — always OFFER the next
+            # chapter (a dangling thread continues, OR a fresh case finds the now-renowned
+            # protagonist). Their next message is the yes/no.
+            self._pending_continue.add(pid)
+            prose = (prose.rstrip() + "\n\n— — —\nThe case is closed, and word of it will "
+                     "travel. **Continue to the next chapter?** (yes / no)")
         return self._reply(ev, prose)
+
+    def _do_continue(self, pid: str, ev: InboundEvent) -> Outbound:
+        """CONCLUDE→CONTINUE: author + enter the NEXT episode over the evolved world — the same
+        protagonist, their reputation and the prior case's wake carried forward. A real (shorter)
+        build; progress streams via the notify channel in narrative phrasing."""
+        from construct.game import continue_episode
+        scenario = registry.scenario_for(self._conn, ev.platform, ev.external_id)
+        if not scenario:
+            return self._reply(ev, "(there's no story here to continue)")
+        self._notify(ev, "Carrying your story forward — a new chapter is being written. It's "
+                         "quicker than a fresh world; I'll call out each step.")
+        try:
+            meta = continue_episode(
+                scenario, self._provider(), player_id=pid,
+                on_stage=lambda m: self._notify(ev, _humanize_stage(m) or f"· {m}…"))
+        except Exception as exc:
+            logger.exception("continue_episode failed for %s", pid)
+            return self._reply(ev, f"(couldn't carry the story forward: {exc})")
+        # Reopen the in-place-advanced slot (NOT a pristine recopy) and render the continuation
+        # cold open — the new main arc is read from the plot frame continue_episode just wrote.
+        self._sessions.pop(pid, None)
+        try:
+            session = self._sessions[pid] = self._session_factory(
+                scenario=scenario, player_id=pid, fresh=False)
+        except Exception as exc:
+            logger.exception("reopen after continue failed for %s", pid)
+            return self._reply(ev, f"(couldn't open the next chapter: {exc})")
+        if meta.get("continuation_intro"):  # per-player, transient — frames this opening only
+            try:
+                session._meta["continuation_intro"] = meta["continuation_intro"]
+            except Exception:
+                logger.exception("continuation note injection failed for %s", pid)
+        try:
+            return self._reply(ev, session.opening())
+        except Exception as exc:
+            logger.exception("continuation opening failed for %s", pid)
+            return self._reply(ev, f"(the next chapter opened, but its scene didn't render: {exc})")
 
     # -- the Atrium: the Construct dialogue (session-zero over chat) --------
     def _atrium(self, pid: str, ev: InboundEvent, text: str) -> Outbound:
@@ -1248,8 +1305,14 @@ _STAGE_LINES = (
     ("Authoring the hidden source story", "· Dreaming up the story…"),
     ("Ingesting prose", "· Bringing the world into being…"),
     ("Reconciling identity", "· Reconciling who's who…"),
+    ("Declaring passability", "· Mapping how the world connects…"),
     ("Authoring the hidden arc", "· Weaving your hidden path…"),
     ("Seeding character knowledge", "· Teaching the characters what they know…"),
+    ("thematic introduction", "· Writing your way in…"),
+    ("back-of-the-book premise", "· Writing your way in…"),
+    # The build's LONGEST stage (~most of the wall-clock — hundreds of serial classify calls):
+    # surface it so the player isn't left staring at one line through the silent bottleneck.
+    ("Classifying durability", "· Settling what's true and lasting…"),
     ("Distilling narrative flavor", "· Setting the tone and texture…"),
     ("Sealing the scenario", "· Sealing the world…"),
     ("Viability gate", "· Final checks before the doors open…"),

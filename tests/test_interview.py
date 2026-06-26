@@ -39,7 +39,11 @@ class _InterviewStub(StubProvider):
                     {"entity": PROT, "attribute": "role", "value": "harbor master"},
                     {"entity": PROT, "attribute": "drive", "value": "protect the town"},
                     {"entity": PROT, "attribute": "fear", "value": "the water rising"},
+                    # The protagonist (and cast) must be STAGED somewhere — an unlocated
+                    # protagonist is unstageable and now fails the build guard (Cx 160/162).
+                    {"entity": PROT, "attribute": "in", "value": "place:harbor"},
                     {"entity": "person:rook", "attribute": "kind", "value": "person"},
+                    {"entity": "person:rook", "attribute": "in", "value": "place:lighthouse"},
                     {"entity": SECRET, "attribute": "kind", "value": "proposition"},
                     {"entity": SECRET, "attribute": "culprit", "value": "person:rook"},
                 ],

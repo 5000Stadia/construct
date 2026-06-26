@@ -228,6 +228,14 @@ def commit_elapsed(world, delta_minutes: int) -> None:
     if not delta_minutes or delta_minutes <= 0:
         return
     p = world.porcelain
+    # Ensure `time:elapsed` is a KNOWN entity (a `kind` row), INDEPENDENTLY of the baseline — an
+    # authored time-deadline `Quantity("time:elapsed", "elapsed_minutes", >=, N)` reads
+    # INDETERMINATE (never fires) if has_entity() is false for lack of a kind row. Checked
+    # separately so an OLD world that already has elapsed minutes but no kind row is BACKFILLED
+    # (Cx 182 #2 — the compatibility path), not just fresh worlds.
+    if _state_value(p, ELAPSED_ENTITY, "kind") is None:
+        p.ingest_structured([{"entity": ELAPSED_ENTITY, "attribute": "kind",
+                              "value": "clock", "timeless": True}])
     if _state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) is None:
         p.ingest_structured([{"entity": ELAPSED_ENTITY, "attribute": ELAPSED_ATTR,
                               "value": 0, "value_type": "literal"}])

@@ -27,6 +27,9 @@ from typing import Any
 from construct import cohorts
 from construct import resolution
 from construct.adapter import PorcelainWorldReads
+from construct.gauge import (
+    apply_gauge_terminals, gauge_coloring, gauge_lines, gauge_pass,
+)
 from construct.arc.executor import (
     LIFECYCLE_TERMINALS,
     PLOT,
@@ -393,6 +396,10 @@ _COMPACT_BATCH = max(1, int(_os.getenv("CONSTRUCT_COMPACT_BATCH", "4")))
 #: this many turns in, OR the arc is climax-ready. (Guards turn-1 abruptness WITHOUT
 #: requiring the engine to have put the answer in the player frame — the card model.)
 _MIN_COMMIT_TURN = max(1, int(_os.getenv("CONSTRUCT_MIN_COMMIT_TURN", "3")))
+#: (Retired 2026-06-25, founder ruling / Cx 173: turns never force a conclusion. The post-climax
+#: turn-count window `K_POSTCLIMAX` and the `session:reckoning_ready` turn-stamp are gone — a
+#: commitment-owned arc stays ready indefinitely; only a landed commitment or an AUTHORED
+#: diegetic-time/loss `failure_when` closes it. `_reckoning_ready` survives as a narrator nudge only.)
 _TRANSCRIPT = "session:transcript"
 _MEMORY = "session:narrative_memory"
 #: The narrator's prose is staged here, NOT canon, so the ingest gate can
@@ -456,9 +463,11 @@ class TurnTrace:
     time_now: str = ""       # diegetic clock shown this turn (e.g. "Day 2, dusk")
     time_advanced: int = 0   # in-world minutes this turn consumed (DIEGETIC-TIME)
     pins: list = field(default_factory=list)  # (pin_id, scope_kind, salience) surfaced this turn
+    gauge_levels: dict = field(default_factory=dict)  # gauge_id -> folded level after this turn's drain (GAUGE)
     contradictions: list = field(default_factory=list)  # narrator rows quarantined (changed established canon)
     quarantined: list = field(default_factory=list)  # narrator rows quarantined (unlicensed assertion of an arc key)
     timings: dict = field(default_factory=dict)  # per-section wall-clock (s) this turn — optimization surface
+    briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -622,18 +631,47 @@ def _conclusion_recorded(reads: Any) -> bool:
     return bool(reads.events(kind="conclusion", frame=SESSION))
 
 
-#: The conventional canon source of a shape's external result (the scoreboard), read
-#: ALONGSIDE pillar coverage by shapes whose profile sets `reads_world_event` (Contest).
-#: Authored as ordinary canon when the contest resolves (`scoreboard:main / outcome /
-#: win|loss`); host reads it, never the internal won/lost receipt (which would re-couple
-#: proof to score — Cx 027 blocker 2). None until/unless authored.
-def _world_event(reads: Any) -> str | None:
-    val = reads.state("scoreboard:main", "outcome", frame="canon")
-    return val if val in ("win", "loss") else None
+#: A shape's LITERAL external result — the Contest "scoreboard" axis (Cx 027), read ALONGSIDE
+#: pillar coverage. CONSOLIDATED (letters 131/132): the result is an ordinary canon Occurred EVENT
+#: (declared win/loss kinds), minted by EVENT-OCCURS like any beat — the bespoke `scoreboard:main`
+#: entity + `_world_event` state read + `reads_world_event` flag are RETIRED. `result_events` =
+#: {"win": (kinds,), "loss": (kinds,), "participants": (ids,)} declared per-arc (None/empty → no
+#: literal-result axis, the common case). Collision-proofed by participant filtering (event `kind`
+#: is global — EVENT-OCCURS-FIRING.md). Reads canon events, NEVER the internal won/lost receipt
+#: (which would re-couple proof to score — Cx 027 blocker 2). Loss binds over win on a tie (the
+#: real result the world delivered); otherwise most-recent by valid time.
+def _literal_result(reads: Any, result_events: dict | None) -> str | None:
+    if not result_events:
+        return None
+    parts = set(result_events.get("participants") or ())
+
+    def _last_at(kinds) -> float | None:
+        # Scope by participants ALL-of (matching PB's porcelain participant filter): the event must
+        # involve EVERY declared scoping entity, across agents ∪ patients — EventRow exposes those,
+        # NOT a `participants` attr (the v1 bug Cx 134 caught). Empty parts → unscoped. This is the
+        # collision-proofing for the global event `kind` (Cx 132 #4).
+        ats = []
+        for k in (kinds or ()):
+            for e in reads.events(kind=k):
+                if e.at is None:
+                    continue
+                ev = set(getattr(e, "agents", ()) or ()) | set(getattr(e, "patients", ()) or ())
+                if not parts or parts <= ev:
+                    ats.append(e.at)
+        return max(ats) if ats else None
+
+    win_at, loss_at = _last_at(result_events.get("win")), _last_at(result_events.get("loss"))
+    if win_at is None and loss_at is None:
+        return None
+    if loss_at is None:
+        return "win"
+    if win_at is None:
+        return "loss"
+    return "loss" if loss_at >= win_at else "win"
 
 
 def _conclusion_effect(reads: Any, arc: Arc, cost_disposition: str,
-                       reads_world_event: bool) -> dict | None:
+                       result_events: dict | None) -> dict | None:
     """The coverage-derived conclusion EFFECT (`conclusion_from_coverage`) for a pillar arc, or
     None when the arc declares no required pillars. The SINGLE source of truth shared by the
     commitment grade (COMMITMENT-AS-EFFECT: the grade is the EFFECT, not an LLM judgment) and the
@@ -646,14 +684,14 @@ def _conclusion_effect(reads: Any, arc: Arc, cost_disposition: str,
     if not req:
         return None
     cost_weight = 0.0 if cost_disposition == "fail_forward" else (len(summary["false"]) / len(req))
-    world_event = _world_event(reads) if reads_world_event else None
+    world_event = _literal_result(reads, result_events)
     return conclusion_from_coverage(summary, cost_disposition=cost_disposition,
                                     world_event=world_event, cost_weight=cost_weight)
 
 
 def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Provider,
                        action: str, tier: str, turn: int, trace: "TurnTrace",
-                       protagonist: str) -> list[str]:
+                       protagonist: str, only_kinds: set | None = None) -> list[str]:
     """EVENT-OCCURS-FIRING (EVENT-OCCURS-FIRING.md, Cx 115): fire any authored `event_occurs`
     act-beat whose act just HAPPENED in the player's RESOLVED action, so `beat_pass` achieves it
     this turn (the fix for the arc-stall: nothing else writes arbitrary-kind canon events). Gathers
@@ -673,6 +711,8 @@ def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Pro
                 status = None
             if status not in (None, "pending"):
                 continue  # already achieved/closed → no candidate, no duplicate event
+            if only_kinds is not None and cond.kind not in only_kinds:
+                continue  # restricted pass (failure-tier result-event minting — see caller)
             cands.setdefault(cond.kind, beat.beat_id)
     if not cands:
         return []
@@ -712,17 +752,73 @@ def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Pro
     return fired
 
 
+def _episode_since(reads: Any) -> float | None:
+    """The valid-time of the latest EPISODE boundary, or None for a first/only episode.
+    Written by `game.continue_episode` when a concluded story continues into the next
+    episode (CONCLUDE→CONTINUE). Scopes `terminal_outcome` so a PRIOR episode's win/loss
+    receipt doesn't freeze the new one (PB is append-only — we can't delete the old
+    receipt, so we read only receipts SINCE the boundary)."""
+    starts = reads.events(kind="episode_start", frame=SESSION)
+    ats = [e.at for e in starts if e.at is not None]
+    return max(ats) if ats else None
+
+
 def terminal_outcome(reads: Any) -> str | None:
     """The recorded win/loss terminal of a `win_loss` scenario, or None if it
     hasn't ended (WIN-LOSS §10). Reads the SESSION receipt via `events()` (the
     same pattern as `_conclusion_recorded` — SESSION event rows are read by kind,
     not folded by `state()`); the outcome is encoded in the kind. Lets a
-    transport stop ticking an ended story instead of re-rendering aftermath."""
-    if reads.events(kind="arc_won", frame=SESSION):
+    transport stop ticking an ended story instead of re-rendering aftermath.
+    Scoped to the CURRENT episode (CONCLUDE→CONTINUE): only receipts since the latest
+    episode boundary count, so a continued story isn't frozen by its prior ending."""
+    since = _episode_since(reads)
+    if reads.events(kind="arc_won", frame=SESSION, since=since):
         return "won"
-    if reads.events(kind="arc_lost", frame=SESSION):
+    if reads.events(kind="arc_lost", frame=SESSION, since=since):
         return "lost"
     return None
+
+
+def _has_time_deadline(arc: Arc) -> bool:
+    """True if the arc authored a DIEGETIC-TIME deadline — a `Quantity` over
+    `time:elapsed.elapsed_minutes` in `failure_when` (King's dinner, the bomb). Only such arcs
+    need diegetic time advanced BEFORE the terminal check (Cx 173 #3); every other turn keeps the
+    post-render time estimate (with narration) byte-for-byte unchanged."""
+    fw = getattr(arc, "failure_when", None)
+    if fw is None:
+        return False
+    from construct.arc.conditions import Quantity, atoms_of
+    from construct.clock import ELAPSED_ATTR, ELAPSED_ENTITY
+    return any(isinstance(a, Quantity) and a.entity == ELAPSED_ENTITY
+               and a.attribute == ELAPSED_ATTR for a in atoms_of(fw))
+
+
+def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "TurnTrace",
+                           provider: Provider, *, narration: str) -> None:
+    """Estimate how much in-world time this turn consumed and APPEND it to the accrue counter
+    (DIEGETIC-TIME.md). Deterministic for ordinary turns (skips the model call); the model
+    `estimate_elapsed` only for explicit temporal language (a wait/jump/rest/montage). Best-effort:
+    time never sinks a turn. Called EARLY for time-deadline arcs (narration unavailable → "") so the
+    deadline crosses same-turn; otherwise POST-RENDER with the narration for a richer estimate."""
+    try:
+        from construct.clock import commit_elapsed, delta_from_estimate, deterministic_elapsed
+        with _phase(trace, "time_estimate"):
+            _moved = trace.movement_status in ("clear", "obscured")
+            est = deterministic_elapsed(player_input, moved=_moved)
+            if est is None:
+                est = cohorts.estimate_elapsed(
+                    provider, now=clock.render(),
+                    hours_per_day=clock.calendar.hours_per_day,
+                    phases=clock.calendar.phase_names,
+                    action=player_input, narration=narration)
+                trace.cohort_calls.append("estimate_elapsed")
+            else:
+                trace.cohort_calls.append("time_estimate:deterministic")
+        trace.time_advanced = delta_from_estimate(clock, est)
+        commit_elapsed(world, trace.time_advanced)
+    except Exception as exc:  # noqa: BLE001 — time never sinks a turn
+        logger.warning("diegetic-time estimate failed: %s", exc)
+        trace.dropped_cohorts.append(f"estimate_elapsed ({exc})")
 
 
 def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
@@ -732,10 +828,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              play_style: str = "",
              judgment_type: str = "claim-vs-fact",
              cost_disposition: str = "peril_redemption",
-             reads_world_event: bool = False,
+             result_events: dict | None = None,
              suspense: str = "general",
              cast: dict | None = None,
              side_arcs: list[Arc] | None = None,
+             terminal_owner: str = "world_event",
              generate: bool = True) -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
@@ -749,6 +846,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     classified per-arc, and on a non-won terminal emit FALLOUT + a diegetic
     acknowledgment; they NEVER end the scenario."""
     side_arcs = side_arcs or []
+    # Fold any terminal gauge floors into failure_when (GAUGE §5): the gauge
+    # declaration is the source of truth; the loss terminal is derived each load.
+    arc = apply_gauge_terminals(arc)
     p = world.porcelain
     live_reads = PorcelainWorldReads(world)
     trace = TurnTrace(turn=turn)
@@ -773,9 +873,46 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             or proto.split(":")[-1].replace("_", " ")
     except Exception:
         actor = arc.protagonist.split(":")[-1].replace("_", " ")
+    # BEAT-DELIVERY half 2 (topic-aware ASK delivery, Cx 125): assemble the ENTRY-scene
+    # present clue-bearing cast's pursuable disclosures as OPAQUE candidates so `classify`
+    # can match the player's QUESTION to the right one (the ASK twin of examines_target).
+    # Opaque ids (clue ids can embed the answer); descriptor = the non-spoiling hook_text
+    # (fallback: holder role). The deterministic reveal gate + presence stay authoritative at
+    # delivery below — this only PICKS the topic. Pre-move (entry scene): a same-turn move+ask
+    # falls back to authored order (Cx 125 v1 semantics).
+    ask_candidates: list = []
+    _ask_by_oid: dict = {}
+    if cast:
+        try:
+            _entry_chain = p.locate(arc.protagonist)
+            _entry_scene = _entry_chain[0] if _entry_chain else None
+        except Exception:
+            _entry_chain, _entry_scene = [], None
+        if _entry_scene:
+            _citer = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
+            for _nid, _node in _citer:
+                if not _nid.startswith("person:") or _nid == arc.protagonist:
+                    continue
+                _hc = getattr(_node, "holds_clues", ()) or ()
+                if not _hc:
+                    continue
+                try:
+                    _ncolocated = _colocated(p.locate(_nid), _entry_scene, _entry_chain)
+                except Exception:
+                    _ncolocated = False
+                if not _ncolocated:
+                    continue
+                for _clue in _hc:
+                    _oid = f"ask_{len(_ask_by_oid)}"
+                    _desc = (getattr(_clue, "hook_text", "") or "").strip() \
+                        or (getattr(_node, "surface_role", "") or _nid.split(":")[-1])
+                    ask_candidates.append((_oid, _desc))
+                    _ask_by_oid[_oid] = _clue
+    asks_targets: list = []
     try:
         with _phase(trace, "classify"):
-            verdict = cohorts.classify(provider, player_input, actor=actor)
+            verdict = cohorts.classify(provider, player_input, actor=actor,
+                                       ask_candidates=ask_candidates)
         kind = verdict["kind"]
         moves_to = verdict.get("moves_to", "") or ""
         requires = [r for r in verdict.get("requires", []) if r]
@@ -785,6 +922,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         commitment = (verdict.get("commitment") or "").strip() or player_input
         takes = (verdict.get("takes") or "").strip()
         examines_target = (verdict.get("examines_target") or "").strip()
+        asks_targets = [t for t in (verdict.get("asks_targets") or []) if t]
         # Default TRUE on absence (old stubs / schema-less classify) so extraction is never
         # silently skipped where a fact could be asserted (protected-key licensing depends on it).
         asserts_or_reveals = bool(verdict.get("asserts_or_reveals", True))
@@ -1030,6 +1168,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #    old cost is retired — and reading live is more correct (clocks
     #    and beats see this turn's own commits). Snapshots below are kept
     #    only where a materialized fact LIST is needed (briefing, mirror).
+    # Gauge drain FIRST (GAUGE §3, Cx 150): commit each gauge's signed per-turn
+    # delta before clocks/beats/outcome so a crossed floor is visible to terminal
+    # and Quantity-driven-clock evaluation THIS turn (not the post-render time slot).
+    trace.gauge_levels = gauge_pass(world, arc, player_input)
+    # For a TIME-DEADLINE arc only (Cx 173 #3): advance diegetic time HERE — before clocks/beats/
+    # outcome — so a single big-jump action ("I wait three hours", "I go watch the movie") crosses
+    # the authored deadline (`failure_when` = Quantity over time:elapsed) on the SAME turn it's taken
+    # (obviously the bomb goes off). The render's `trace.time_now` was read pre-advance and is left
+    # unchanged, so the narration's time-of-day is unaffected; only the terminal check sees it. Every
+    # NON-deadline turn keeps the richer post-render estimate (with narration), byte-for-byte as before.
+    _time_committed = False
+    if _clock is not None and _has_time_deadline(arc):
+        _advance_diegetic_time(world, _clock, player_input, trace, provider, narration="")
+        _time_committed = True
     counters = counters_from_session(live_reads, arc)
     trace.clocks_fired = clock_pass(world, arc, live_reads, counters, turn)
     # Side arcs tick on the same shared pacing counters (whole-scene property,
@@ -1113,6 +1265,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         low = player_input.lower()
         pressing = _is_pressing(low, needs_test=needs_test)
         only_one = len(npcs) == 1
+        # Topic-aware selection (BEAT-DELIVERY half 2, Cx 125): the clue ids the classifier
+        # judged the player's question to be PURSUING (mapped back from opaque ask_* ids). The
+        # deterministic reveal gate below stays authoritative — `asks_targets` only PICKS among
+        # already-eligible+fresh clues; empty/irrelevant → today's authored-order behavior.
+        _target_clue_ids = {getattr(_ask_by_oid[o], "clue_id", None)
+                            for o in asks_targets if o in _ask_by_oid}
         for npc in npcs:
             node = cast.get(npc)
             _name = str(canon_table.get((npc, "name")) or "")
@@ -1120,17 +1278,21 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if node is None or not (only_one or _names_entity(npc, low, name=_name,
                                                               role=_role)):
                 continue
-            for clue in revealable_clues(node, pressure=pressing):
-                e, a, v = clue.surface_fact
-                if live_reads.assertion_in_frame(player_frame, e, a, v):
-                    continue  # already learned — don't re-surface
-                try:
-                    p.ingest_structured(learn_clue_items(clue), frame=player_frame,
-                                        classify="batch")
-                    learned.append((npc, clue))
-                except Exception as exc:  # one clue must not sink the turn
-                    trace.dropped_cohorts.append(f"learn_clue:{clue.clue_id} ({exc})")
-                break  # one fresh clue per NPC per turn (an earned trickle, not a dump)
+            # Eligible = gate-passing (none always; pressure/examine when the lever is present)
+            # AND not already in the player frame. The gate is the rigid, algorithmic filter.
+            eligible = [c for c in revealable_clues(node, pressure=pressing)
+                        if not live_reads.assertion_in_frame(player_frame, *c.surface_fact)]
+            if not eligible:
+                continue
+            # Prefer an eligible clue the classifier flagged as the question's target; else
+            # fall back to the first by genuine-first rank (legacy). One fresh clue per NPC.
+            clue = next((c for c in eligible if c.clue_id in _target_clue_ids), eligible[0])
+            try:
+                p.ingest_structured(learn_clue_items(clue), frame=player_frame,
+                                    classify="batch")
+                learned.append((npc, clue))
+            except Exception as exc:  # one clue must not sink the turn
+                trace.dropped_cohorts.append(f"learn_clue:{clue.clue_id} ({exc})")
 
     # ---- EXAMINE DELIVERY (EXAMINE-CHANNEL.md) -----------------------------------------
     # Inspecting a present clue-bearing OBJECT/SITE surfaces its evidentiary fact into the
@@ -1373,6 +1535,22 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                   if stored_lifecycle(live_reads, sa) not in LIFECYCLE_TERMINALS]
             _fire_event_occurs(world, p, live_reads, _live_arcs, provider,
                                player_input, _resolved_tier, turn, trace, arc.protagonist)
+        elif (_resolved_tier in ("failure_opportunity", "terrible_failure")
+              and result_events and result_events.get("loss")
+              and (commits or current_phase(live_reads, arc)
+                   in (Phase.CRISIS, Phase.CLIMAX, Phase.FALLING))):
+            # The LOSS half of a literal-result axis (Contest, letters 131/132 + Cx 132 #2): a
+            # FAILURE at the active RESULT MOMENT IS the loss — mint the declared loss-kind
+            # result-event. Gated to the result moment (a conclusory commit, OR the arc in its
+            # late CRISIS/CLIMAX/FALLING phase — NOT climax_ready, which would deadlock since the
+            # loss-beat can't both BE a climax beat and require climax already-achieved) so an
+            # early failed action can't canonize the loss; RESTRICTED to the declared loss-kinds
+            # (`only_kinds`) so ordinary beats keep the success-only rule. Main arc only (the
+            # literal result is the protagonist's). The gate's exact shape is validated against a
+            # real Contest arc in the #33 pass; dormant until an arc declares result_events.
+            _fire_event_occurs(world, p, live_reads, [arc], provider,
+                               player_input, _resolved_tier, turn, trace, arc.protagonist,
+                               only_kinds=set(result_events.get("loss") or ()))
     achieved, closed, revealed = beat_pass(world, arc, live_reads, turn)
     trace.beats_achieved, trace.beats_closed = achieved, closed
     trace.reveals = revealed
@@ -1466,7 +1644,34 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # aftermath once the arc reaches its destination — the navigator
     # stops pushing toward an end already reached. Endless worlds note
     # the milestone but keep their pressure/clocks running indefinitely.
+    # TERMINAL OWNER (Cx 141): for COMMITMENT-owned shapes (deduction/contest/…), world_condition
+    # being met is READINESS for the reckoning, NOT the conclusion — the player's conclusory
+    # commitment owns the curtain (the audit-office falter: seizing evidence ended the story before
+    # the accusation could land). Such an arc concludes only on (a) refusal, (b) a landed commitment
+    # [below], or (c) the post-climax window expiring (the reckoning never came). WORLD-EVENT-owned
+    # shapes (endurance/farce) keep the direct world_condition terminal — unchanged.
+    from construct.arc.conditions import Truth as _Truth
+    from construct.arc.conditions import evaluate as _evaluate
+    _commitment_owned = terminal_owner == "commitment"
+    # DIEGETIC-CLOCK CONCLUSION (founder ruling 2026-06-25; Cx 173): turns are FREE — NO turn-count
+    # ever forces a conclusion. A commitment-owned arc with no authored deadline stays READY forever;
+    # it concludes ONLY on the player's commitment [below] or a crossed AUTHORED `failure_when`
+    # (a fiction deadline = Quantity over time:elapsed, or an authored loss event). `_reckoning_ready`
+    # remains, but ONLY as the narrator nudge ("THE RECKONING IS AT HAND") — never a countdown.
+    # Gated on win_loss too (story-agnostic scoping): the nudge steers toward a CONCLUSORY move,
+    # which only exists when the story has a win/loss destination. An endless/sandbox story (idle
+    # family dynamics, open-ended romance, slice-of-life) has no conclusion to steer toward, so it
+    # never gets the nudge — it just plays on.
+    _reckoning_ready = _commitment_owned and scenario_mode == "win_loss" and (
+        climax_ready(live_reads, arc)
+        or _evaluate(arc.shape.world_condition, live_reads) is _Truth.TRUE)
+    _authored_failure = (arc.failure_when is not None
+                         and _evaluate(arc.failure_when, live_reads) is _Truth.TRUE)
     concluded = arc_concluded(live_reads, arc)
+    if _commitment_owned:
+        # world_condition is READINESS, not a conclusion. The only forced close is an authored
+        # failure (deadline/loss event); the commitment's own terminal is handled below.
+        concluded = _authored_failure
     trace.concluded = concluded
     if concluded and not _conclusion_recorded(live_reads):
         p.ingest_structured([
@@ -1523,7 +1728,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # effect-sound, never wrong_case). LEGACY pillar-less arcs keep the LLM judge — extracting a
         # verdict from open language with no coverage to read is genuinely its job.
         if _csum.get("required"):
-            _eff = _conclusion_effect(live_reads, arc, cost_disposition, reads_world_event)
+            _eff = _conclusion_effect(live_reads, arc, cost_disposition, result_events)
             if _eff and _eff.get("wrong_case"):
                 commitment_grade = "wrong"
             elif _eff and _eff.get("effect_sound"):
@@ -1559,6 +1764,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     main_life = arc_lifecycle(live_reads, arc)
     trace.lifecycle = main_life
     outcome = arc_outcome(live_reads, arc)
+    if _commitment_owned:
+        # For a commitment shape, `world_condition` is READINESS, not victory, so don't let
+        # arc_outcome's won-first mask an authored deadline (Cx 173 #4): evaluate `failure_when`
+        # DIRECTLY. Only an authored failure (a crossed fiction deadline / loss event) can close a
+        # ready arc; turn-count refusal/post-climax expiry no longer terminate. The commitment
+        # [below] owns the win.
+        outcome = "lost" if _authored_failure else None
     if outcome is None and main_life in ("incompletable", "cancelled"):
         outcome = "lost"
     # The commitment IS the conclusion (convergence): it terminates regardless of the
@@ -1579,7 +1791,27 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # 2), so the receipt, the grade, and the epilogue can never disagree.
     conc = None
     if terminal or (concluded and not endless):
-        conc = _conclusion_effect(live_reads, arc, cost_disposition, reads_world_event)
+        conc = _conclusion_effect(live_reads, arc, cost_disposition, result_events)
+        if _commitment_owned and _authored_failure and not commitment_grade:
+            # AUTHORED DEADLINE/FAILURE closed a ready arc with no commitment (Cx 173): the fiction's
+            # clock ran out (or its loss event fired) before the player drew the curtain. Force a
+            # quiet-failure close — NOT the positive coverage effect — so the rendered shape matches
+            # the `lost` receipt. (Only fires when the story AUTHORED a deadline/failure; a
+            # no-deadline arc never reaches here — it just stays ready.)
+            conc = {"outcome": "quiet_failure", "sound": False, "effect_sound": False,
+                    "wrong_case": False,
+                    # Agnostic basis: an authored failure_when fired with no commitment — a missed
+                    # deadline (King's dinner), a decisive loss event (the protectee killed), etc.
+                    # The narrator's epilogue renders the SPECIFIC event from world-state; this is the
+                    # neutral fallback so it fits any story's "IT", not just a time deadline.
+                    "basis": "the story's decisive turn came and went unmet"}
+        # GAUGE coloring (GAUGE §5): a WIN earned on the last of the reserve is a COSTLY
+        # victory, not a clean triumph — the gauge supplies the number, the shape the meaning.
+        if conc and outcome == "won" and conc.get("outcome") == "triumph" \
+                and gauge_coloring(arc, world) == "costly":
+            conc = dict(conc, outcome="costly_victory",
+                        basis=conc.get("basis", "") +
+                        " — but it was won on the last of the reserve, at the edge of disaster")
         if conc:
             trace.conclusion_shape = conc["outcome"]
             trace.conclusion_basis = conc["basis"]
@@ -1789,6 +2021,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "\nPINNED AWARENESS (foreground these — what is true and pressing "
             "here, ordered by urgency; weave in diegetically, do not list):\n"
             + "\n".join(pin_lines))
+    # GAUGE surfacing (GAUGE §4): the live numeric constraint IS the tension. Urgency is
+    # derived this turn from the folded level vs the floor (distance_to_floor/range, Cx 150)
+    # — never stored. Ordered most-urgent first; the narrator dramatizes it, never prints a HUD.
+    _glines = sorted(gauge_lines(arc, world), key=lambda t: t[2])
+    if _glines:
+        def _phrase(u: float) -> str:
+            return ("all but gone — act now" if u <= 0.1 else "critical" if u <= 0.25
+                    else "running low" if u <= 0.5 else "holding")
+        briefing_parts.append(
+            "\nLIVE PRESSURE (foreground this mounting constraint diegetically — let it "
+            "tighten the scene; do NOT print a number/HUD unless the fiction shows a gauge):\n"
+            + "\n".join(f"- {g.label}: {int(round(lvl))} ({_phrase(u)})"
+                        for g, lvl, u in _glines))
     if weave_directive:
         # Story governance (CARD-WEAVING.md): weave the chosen card at its seam. Replaces
         # the passive cast-threads nudge; on 'let_run' there is no directive (serve the path).
@@ -1922,6 +2167,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         trace.act = _act
         if _conv:
             briefing_parts.append(_conv)
+        if _reckoning_ready:
+            # THE DECISIVE MOMENT IS AT HAND (Cx 141; tone made story-agnostic): this commitment-
+            # owned arc is ripe — what it was building toward is reachable now — but the CURTAIN is
+            # the player's conclusory move, WHATEVER this story's "IT" is: a deduction's accusation,
+            # a romance's confession, a bond's reconciliation, a choice owned or renounced. Phrase it
+            # in THIS story's register, not a thriller's. Steer toward it without forcing or revealing.
+            briefing_parts.append(
+                "\nTHE DECISIVE MOMENT IS WITHIN REACH — what this story has been building toward is "
+                "now available to the player; what remains is THEIR conclusory move (in this story's "
+                "own register: a declaration, a confession, a choice, naming a truth, the decisive "
+                "act). Bring the moment to a head and make it FEEL available and weighty — but do NOT "
+                "make it for them, and do not reveal anything hidden. The curtain is theirs to draw.")
     if fallout_directives:
         # A side arc died/resolved this turn (LIVING-WORLD-GENERATOR §3): the
         # world acknowledges it as a real beat in the wake — never a silent stall,
@@ -1942,8 +2199,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if you_lines:
         briefing_parts.append("\nYOU (the player character; never a third party):\n"
                               + "\n".join(you_lines))
-    briefing_parts.append(f"\nTHE PLAYER JUST DID (render exactly this, no more): "
-                          f"{player_input}")
+    if terminal or (concluded and not endless):
+        # CLOSE TURN (Cx 139 #2): the epilogue/aftermath directive above OWNS the render. The
+        # player's act is the FINAL beat folding INTO the close — NOT "render exactly this, no
+        # more", which fought and beat the epilogue (the narrator rendered the action, never the
+        # curtain). Fold it in so the denouement is what lands.
+        briefing_parts.append(
+            f"\nTHE PLAYER'S LAST ACT (the move that brings the curtain down — render it as the "
+            f"final beat that FOLDS INTO the epilogue/aftermath above, not as the whole turn; the "
+            f"close owns the scene): {player_input}")
+    else:
+        briefing_parts.append(f"\nTHE PLAYER JUST DID (render exactly this, no more): "
+                              f"{player_input}")
     if trace.movement_obstruction:
         seg = trace.movement_obstruction
         if trace.movement_status == "blocked":
@@ -2073,6 +2340,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         if dest:
             briefing_parts.append(dest)
     briefing = "\n".join(briefing_parts)
+    trace.briefing = briefing  # captured for the mechanics log (the directives → the prose)
 
     # ---- RENDER (loud-fail) ----------------------------------------------
     with _phase(trace, "narrate"):
@@ -2145,6 +2413,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         r["entity"] for r in staged
         if ":" in r["entity"] and not r["entity"].startswith(("a:", "attr:"))})
     proposed_vals = _table(_snap_or_empty(p, staged_entities, frame=_PROPOSED))
+
+    # EPILOGUE-NO-CANON (Cx 189): on a TERMINAL / conclusion-curtain turn the narrator renders
+    # FATE/SUMMARY prose ("walks back into the rain with his name cleared", "keeps his pride but not
+    # his clean hands") — it must mint NOTHING into canon. Promoting it canonized descriptive ALIASES
+    # onto the cast, which the next episode then surfaced as character NAMES ("With His Name Cleared").
+    # The prose is still archived in session:main (the transcript below); any real consequence is
+    # written BEFORE narration via the explicit conclusion/consequence paths, never mined back out of
+    # curtain prose. So drop all promotion candidates on the epilogue turn.
+    if trace.terminal or (trace.concluded and not endless):
+        proposed_vals = {}
 
     protected_keys = arc_protected_keys(arc)  # the arc's load-bearing (hidden) facts
     promote: list[dict] = []
@@ -2260,40 +2538,61 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
          "valid_from": turn_time(turn)},
     ], frame=SESSION, classify="batch")  # transcript literal — no durability
 
-    # Advance diegetic time by what happened (DIEGETIC-TIME.md): estimate how much
-    # in-world time this turn consumed (relative to the events, honoring this
-    # world's day length + player waits) and APPEND it to the accrue counter.
-    # Best-effort + after the render, so it never blocks or breaks a turn.
-    if _clock is not None:
-        try:
-            from construct.clock import (
-                commit_elapsed,
-                delta_from_estimate,
-                deterministic_elapsed,
-            )
-            with _phase(trace, "time_estimate"):
-                # TURN-LATENCY Lever C (Cx 077): most turns advance time predictably by action
-                # kind — use a DETERMINISTIC estimate and skip the ~6s model call. Fall back to
-                # the model `estimate_elapsed` ONLY when the input carries explicit temporal
-                # language (a wait/jump/rest/montage that may cross a phase/day boundary).
-                _moved = trace.movement_status in ("clear", "obscured")
-                est = deterministic_elapsed(player_input, moved=_moved)
-                if est is None:
-                    est = cohorts.estimate_elapsed(
-                        provider, now=_clock.render(),
-                        hours_per_day=_clock.calendar.hours_per_day,
-                        phases=_clock.calendar.phase_names,
-                        action=player_input, narration=prose)
-                    trace.cohort_calls.append("estimate_elapsed")
-                else:
-                    trace.cohort_calls.append("time_estimate:deterministic")
-            trace.time_advanced = delta_from_estimate(_clock, est)
-            commit_elapsed(world, trace.time_advanced)
-        except Exception as exc:  # noqa: BLE001 — time never sinks a turn
-            logger.warning("diegetic-time estimate failed: %s", exc)
-            trace.dropped_cohorts.append(f"estimate_elapsed ({exc})")
+    # Advance diegetic time POST-RENDER for the normal case (richer estimate — it can use the
+    # narration), UNLESS a time-deadline arc already advanced it early (Cx 173 #3) so the deadline
+    # could cross same-turn. Best-effort; never blocks or breaks a turn.
+    if _clock is not None and not _time_committed:
+        _advance_diegetic_time(world, _clock, player_input, trace, provider, narration=prose)
 
+    _write_mechanics_log(arc, turn, player_input, prose, trace)
     return TurnResult(prose=prose, trace=trace)
+
+
+def _write_mechanics_log(arc: Arc, turn: int, player_input: str, prose: str,
+                         trace: "TurnTrace") -> None:
+    """Per-turn MECHANICS LOG (founder: read the machinery, not just the fiction — anticipate how
+    each shape SHOULD behave). Env-gated by CONSTRUCT_MECHANICS_LOG (a path, or "1" → logs/
+    mechanics-<arc>.md). Dumps, per turn: the classify→tick→arc→governance signals, which cohorts
+    fired, and — the key — the FULL assembled BRIEFING (the directives that produced the prose) +
+    the prose itself, so the mechanics→prose link is legible. OFF by default; never sinks a turn."""
+    import os
+    dest = os.environ.get("CONSTRUCT_MECHANICS_LOG")
+    if not dest:
+        return
+    try:
+        from pathlib import Path
+        slug = arc.arc_id.replace(":", "_")
+        path = (Path("logs") / f"mechanics-{slug}.md") if dest in ("1", "true", "yes") else Path(dest)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        d = trace.to_dict() if hasattr(trace, "to_dict") else {}
+        def _g(k, default=""):
+            return d.get(k, getattr(trace, k, default))
+        lines = [
+            f"\n\n{'='*78}\n## Turn {turn} — {player_input!r}",
+            f"- classify: kind={_g('classified')}  pacing={_g('pacing')}  "
+            f"resolution_tier={_g('adjudication')}",
+            f"- delivery: learned={_g('learned_clues') or '-'}  discovered={_g('discovered') or '-'}",
+            f"- world tick: clocks_fired={_g('clocks_fired') or '-'}  beats_achieved="
+            f"{_g('beats_achieved') or '-'}  beats_closed={_g('beats_closed') or '-'}  "
+            f"events_fired={_g('events_fired') or '-'}  reveals={_g('reveals') or '-'}",
+            f"- arc: act={_g('act')}  lifecycle={_g('lifecycle')}  concluded={_g('concluded')}  "
+            f"conclusion={_g('conclusion_shape') or '-'}  terminal={_g('terminal')}  "
+            f"outcome={_g('outcome') or '-'}  bounced={_g('commitment_bounced')}",
+            f"- governance: weave={_g('weave_decision') or '-'}/{_g('weave_card') or '-'}  "
+            f"adapted={_g('adapted') or '-'}  fallout={_g('arc_fallout') or '-'}  "
+            f"generated={_g('generated') or '-'}",
+            f"- cohorts fired: {_g('cohort_calls') or '-'}",
+            f"- dropped: {_g('dropped_cohorts') or '-'}",
+            f"- time: {_g('time_now')} (+{_g('time_advanced')}m)  "
+            f"pins={_g('pins') or '-'}  quarantined={_g('quarantined') or '-'}",
+            f"- timings(s): {_g('timings') or '-'}",
+            "\n### BRIEFING (the directives that drove the prose)\n" + (trace.briefing or "(none)"),
+            "\n### PROSE\n" + (prose or "(empty)"),
+        ]
+        with path.open("a") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception:  # a debug log must NEVER affect a turn
+        logger.exception("mechanics log write failed")
 
 
 run_turn_sync = run_turn  # the v0 loop is synchronous end to end

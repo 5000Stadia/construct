@@ -152,6 +152,59 @@ def test_portfolio_roundtrip(tmp_path):
     w.close()
 
 
+def test_continuation_portfolio_survives_reopen_under_constitutive(tmp_path):
+    # Cx 167 regression — the REAL EP2-insta-terminate failure (the prior valid_from test was a
+    # FALSE GREEN: its stub classified the portfolio rows STATE, where valid_from supersedes; the
+    # live build classified them CONSTITUTIVE, which does NOT recency-supersede — PB serves the
+    # earliest + marks the key conflicted, so the reopened episode silently ran the OLD arc).
+    # continue_episode now RETRACTS the old portfolio rows then appends. This forces CONSTITUTIVE
+    # and closes/reopens to prove the continuation read survives.
+    rule = rule_classifier_fallback()
+
+    def fb(prompt, schema):
+        if prompt.startswith("Classify the lifetime"):
+            if any(k in prompt for k in ("arc:portfolio", "main_arc", "arc_ids")):
+                return {"durability": "CONSTITUTIVE", "confidence": 0.95}
+            return rule(prompt, schema)
+        return {"items": []}
+
+    path = tmp_path / "cont.world"
+
+    def _open():
+        return World(path, world_id="w:cont", model=StubModel(fallback=fb),
+                     stance="fiction", title="Continuation World")
+
+    w = _open()
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:study", "attribute": "kind", "value": "room", "timeless": True},
+    ])
+    w.porcelain.ingest_structured(
+        arc_io.portfolio_items(["arc:main"], main_arc_id="arc:main"), frame="plot:main")
+    w.close()
+
+    # The continuation update, the way continue_episode now does it: RETRACT the visible
+    # portfolio rows, THEN append the replacement (a bare append would lose to the constitutive
+    # earliest-row fold).
+    w2 = _open()
+    for row in w2.buffer.visible(frame="plot:main"):
+        if row.entity == "arc:portfolio" and row.attribute in ("arc_ids", "main_arc"):
+            w2.porcelain.retract(row.id, "continuation: superseding the portfolio manifest")
+    w2.porcelain.ingest_structured(
+        arc_io.portfolio_items(["arc:main", "arc:ep_7"], main_arc_id="arc:ep_7",
+                               valid_from=turn_time(8)), frame="plot:main")
+    w2.close()
+
+    # Reopen AGAIN (the EP2 session) — the new manifest must read clean, no conflict.
+    w3 = _open()
+    reads = PorcelainWorldReads(w3)
+    assert arc_io.main_arc_from_frame(reads) == "arc:ep_7"      # survives reopen (was arc:main)
+    assert set(arc_io.arc_ids_from_frame(reads)) == {"arc:main", "arc:ep_7"}
+    assert w3.porcelain.state("arc:portfolio", "main_arc",
+                              frame="plot:main")["status"] == "known"   # not "conflicted"
+    w3.close()
+
+
 def test_pillars_roundtrip_frame_and_cache(tmp_path):
     """Cx 027 blocker 1: Arc.pillars must persist through BOTH load paths. Build an arc
     with pillars (genuine + false Exprs), serialize to the frame and to the cache, and

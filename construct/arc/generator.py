@@ -32,8 +32,8 @@ from construct.arc.conditions import Truth, atoms_of, evaluate
 from construct.arc.executor import (
     PLOT,
     SESSION,
-    TURN_EPOCH,
     Fallout,
+    current_epoch,
     stored_lifecycle,
     turn_time,
 )
@@ -62,7 +62,8 @@ def _last_try_turn(reads: Any) -> int:
     (Codex review: declines were previously unpaced)."""
     marks = [e.at for e in reads.events(kind="generation_attempt", frame=SESSION)]
     marks += [e.at for e in reads.events(kind="generation_declined", frame=SESSION)]
-    return max((int(m - TURN_EPOCH) for m in marks if m is not None and m >= TURN_EPOCH),
+    _epoch = current_epoch()
+    return max((int(m - _epoch) for m in marks if m is not None and m >= _epoch),
                default=-(10 ** 9))
 
 

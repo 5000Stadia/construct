@@ -86,7 +86,44 @@ where the conclusive act never happens ("the chance passed" — its own ending).
 - Living-world P1/P2: fallout/regeneration unchanged (a concluded arc still emits
   fallout); the judged outcome flavors the diegetic acknowledgment + epilogue.
 
-## Not built
-Direction only. Likely a mesh round-robin (it touches the arc layer + the engine
-boundary for conclusive-event detection) before building. Connects to:
-WIN-LOSS-CONDITIONS, LIVING-WORLD-GENERATOR, the born-won guard (model-tiers memory).
+## SHIPPED — the conclusion clock (founder ruling 2026-06-25; Cx 141–187)
+
+The "is the story over?" question is now answered the way the founder sharpened it: **"IT"
+closes the story — the narrative's own DECISIVE event — and the fiction authors that trigger,
+always. Never a mechanic bolted on top, and NEVER the turn count.**
+
+**Turns are free.** Nothing about how many turns a player takes ever forces a conclusion. A
+detective can contemplate a clue for 300 turns; 30 one-sentence exchanges might be 5 in-world
+minutes. The old turn-count terminals are RETIRED: `K_POSTCLIMAX` (post-climax expiry) and the
+`TurnsQuiet(15)` refusal clock no longer end anything. The refusal clock is now an
+**explicit-abandonment** `Occurred(event:abandoned_<arc>)` — it fires only when the player
+decisively walks away, never on quiet turns (and a runtime guard in `clock_pass` suppresses any
+counter-based refusal so no fabricated `refusal_conclusion` can enter canon — the mesh invariant).
+
+**A story concludes only on its decisive event, authored per-story from what the story is about:**
+- **Player commitment** (commitment-owned shapes — deduction/bond/…): the accusation, the
+  confession, the choice. `world_condition` being met is READINESS, not the close; readiness only
+  surfaces the "decisive moment is within reach" narrator nudge (tone-agnostic, gated to win_loss).
+- **An authored failure** (`Arc.failure_when`): a decisive loss EVENT (the bodyguard's protectee
+  killed, the alarm raised → `Occurred`), or a **time deadline** *when time is genuinely part of
+  this story's thread* (the bomb, the King's dinner → `Quantity("time:elapsed","elapsed_minutes",
+  ">=",N)`). A leisurely investigation authors NO deadline — time there is pedantic. The diegetic
+  clock advances by what each action consumes (contemplation ≈ minutes; "I wait three hours" ≈
+  hours), and for a deadline arc it is committed BEFORE the terminal check so a big-jump wait
+  crosses the deadline the SAME turn.
+- **Explicit abandonment** (the refusal clock) — the player walking away as an in-world act.
+- **World-event-owned shapes** (endurance/farce) still close directly on their `world_condition`.
+
+**Two independent time concepts:** PRESSURE (a deadline — opt-in per story) vs TEXTURE (time-of-day
+governs appropriateness/availability — always on; 9 PM means the witness waits for morning). See
+DIEGETIC-TIME.md. A no-deadline story "takes exactly as long as it takes to become thorough &
+complete" — coverage (CONCLUSION-AS-EFFECT) is "thoroughness"; the player concludes when ready.
+
+**Story-agnostic:** a casual/endless/sandbox card (idle family dynamics, open romance, slice-of-
+life) is untouched — it runs `endless`, never force-concludes, never gets a dramatic nudge.
+
+Implementation: `turnloop.run_turn` (`_has_time_deadline`/`_advance_diegetic_time`,
+`_authored_failure`), `game._failure_expr` (the `time_deadline` → Quantity lowering + ARC_SCHEMA),
+`game._build_arc`/`io._synth_refusal` (abandonment refusal), `arc/lint.py` check 4. Connects to:
+GAUGE-PRIMITIVE (a deadline IS a Quantity over the clock), CONVERGENCE-TO-CONCLUSION,
+WIN-LOSS-CONDITIONS, LIVING-WORLD-GENERATOR.

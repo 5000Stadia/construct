@@ -24,10 +24,30 @@ Evaluation semantics (ARC-LAYER §2.3, Codex r1 finding 2):
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, field
 from typing import Protocol, Union, runtime_checkable
 
 from construct.arc.truth import Truth, t_all, t_any, t_at_least, t_not
+
+#: Comparators a `Quantity` atom may use against a folded gauge total.
+_QUANTITY_OPS = {
+    ">=": operator.ge, ">": operator.gt, "<=": operator.le,
+    "<": operator.lt, "==": operator.eq, "!=": operator.ne,
+}
+
+
+def _as_number(v: object) -> float | None:
+    """Coerce a folded state value to float, or None if it is not numeric
+    (an accrue total folds to int/float; defend against a stray string)."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(str(v))
+    except (TypeError, ValueError):
+        return None
 
 
 class _Unresolved:
@@ -162,6 +182,28 @@ class TurnsQuiet:
 
 
 @dataclass(frozen=True)
+class Quantity:
+    """A numeric-threshold atom (GAUGE-PRIMITIVE.md): TRUE when the folded
+    `accrue` total on (entity, attribute) satisfies `op` against `value`. The
+    one condition that lets a beat/clock/world_condition/refusal fire on a live
+    GAUGE crossing a line — the continuous-constraint register (oxygen at 0,
+    speed below 50, fuel dry). Reads the running total straight off `state()`
+    (an accrue attribute folds its baseline+deltas into `fact.value`, exactly as
+    `clock.read_clock` reads `elapsed_minutes`); no new porcelain surface — the
+    engine already folds the number (PB ADOPTION §Numeric quantities).
+
+    INDETERMINATE where the gauge is unknown/frontier or holds a non-number, so
+    a gauge that was never seeded never spuriously trips a terminal."""
+
+    entity: str
+    attribute: str
+    cmp: str  # ">=" | ">" | "<=" | "<" | "==" | "!="  (field name avoids the IO
+    #          serialization envelope's own "op" key — io.expr_to_obj collision)
+    value: float
+    frame: str = "canon"
+
+
+@dataclass(frozen=True)
 class Not:
     operand: "Expr"
 
@@ -184,7 +226,7 @@ class AtLeast:
 
 Atom = Union[
     StateIs, Located, InFrame, Occurred, BeatAchieved, ClockFired,
-    TurnsElapsed, TurnsQuiet,
+    TurnsElapsed, TurnsQuiet, Quantity,
 ]
 Expr = Union[Atom, Not, AllOf, AnyOf, AtLeast]
 
@@ -265,5 +307,19 @@ def evaluate(
         if counters is None:
             return Truth.INDETERMINATE
         return Truth.TRUE if counters.turns_quiet >= expr.at_least else Truth.FALSE
+
+    if isinstance(expr, Quantity):
+        if not world.has_entity(expr.entity):
+            return Truth.INDETERMINATE
+        raw = world.state(expr.entity, expr.attribute, frame=expr.frame)
+        if raw is UNRESOLVED or raw is None:
+            return Truth.INDETERMINATE
+        n = _as_number(raw)
+        if n is None:
+            return Truth.INDETERMINATE
+        op = _QUANTITY_OPS.get(expr.cmp)
+        if op is None:
+            raise ValueError(f"Quantity: unknown comparator {expr.cmp!r}")
+        return Truth.TRUE if op(n, float(expr.value)) else Truth.FALSE
 
     raise TypeError(f"unknown expression node: {expr!r}")

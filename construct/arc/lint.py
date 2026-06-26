@@ -19,6 +19,7 @@ from construct.arc.conditions import (
     InFrame,
     Located,
     Occurred,
+    Quantity,
     StateIs,
     Truth,
     WorldReads,
@@ -46,6 +47,8 @@ def _entity_referents(atom: object) -> list[str]:
         return [atom.entity]
     if isinstance(atom, Occurred):
         return list(atom.participants)
+    if isinstance(atom, Quantity):
+        return [atom.entity]
     return []
 
 
@@ -103,26 +106,20 @@ def lint_arc(arc: Arc, world: WorldReads, session_length_turns: int | None = Non
             findings.append(LintFinding(
                 "3-clocks", f"required beat {beat.beat_id} has no bound escalation clock"))
 
-    # Check 4 — the refusal clock: exists, counter-only condition,
-    # threshold reachable within the total phase budget.
+    # Check 4 — the refusal clock is tagged REFUSAL and is an EXPLICIT-ABANDONMENT condition,
+    # NOT a turn counter (founder ruling 2026-06-25 / Cx 176: turns NEVER force a close, and a
+    # counter-based refusal would even fabricate a turn-count `refusal_conclusion` in canon). The
+    # refusal fires only when the player decisively walks away (an `Occurred` abandonment event).
     refusal = arc.refusal_clock
     if refusal.rung is not Rung.REFUSAL:
         findings.append(LintFinding("4-refusal", "refusal clock not tagged rung=REFUSAL"))
-    non_counter = [a for a in atoms_of(refusal.fires_when) if not isinstance(a, COUNTER_ATOMS)]
-    if non_counter:
+    counter = [a for a in atoms_of(refusal.fires_when) if isinstance(a, COUNTER_ATOMS)]
+    if counter:
         findings.append(LintFinding(
             "4-refusal",
-            f"refusal clock condition must be counter-only; found {non_counter!r}",
+            f"refusal clock must NOT be a turn counter — turns never force a conclusion; use an "
+            f"explicit-abandonment Occurred condition instead. Found counter atoms: {counter!r}",
         ))
-    if arc.phase_budget:
-        total_budget = sum(arc.phase_budget.values())
-        thresholds = [a.at_least for a in atoms_of(refusal.fires_when)
-                      if isinstance(a, COUNTER_ATOMS)]
-        if thresholds and min(thresholds) > total_budget:
-            findings.append(LintFinding(
-                "4-refusal",
-                "refusal threshold exceeds the total phase budget — unreachable",
-            ))
 
     # Check 5 — no beat gates on raw plot: facts (only the sanctioned
     # BeatAchieved / ClockFired forms).
@@ -165,6 +162,24 @@ def lint_arc(arc: Arc, world: WorldReads, session_length_turns: int | None = Non
                 findings.append(LintFinding(
                     "7-confront",
                     f"clock {clock.clock_id} effect references the protagonist",
+                ))
+
+    # Check 8 — no SELF-REFERENTIAL player_learns beat (self-referential-beats finding,
+    # 2026-06-25). A `player_learns`/InFrame beat gates on a fact landing in the player's own
+    # frame; if that fact is ABOUT the protagonist themselves, it is structurally undeliverable
+    # — the interview/EXAMINE channels surface OTHER entities' facts, and the player asserting a
+    # self-fact is not a learn-write, so the beat can never fire. Self-realization is an ACT:
+    # route it to `event_occurs` / a CHOOSE-commitment instead.
+    player_frame = f"knows:{arc.protagonist}"
+    for beat in arc.beats:
+        for atom in atoms_of(beat.achievable_via):
+            if isinstance(atom, InFrame) and str(getattr(atom, "frame", "")) == player_frame \
+                    and atom.entity == arc.protagonist:
+                findings.append(LintFinding(
+                    "8-self-learn",
+                    f"beat {beat.beat_id}: player_learns gates on the protagonist's OWN fact "
+                    f"({atom.entity}.{atom.attribute}) — undeliverable (you can't interview "
+                    f"yourself); use event_occurs or a commitment for self-realization",
                 ))
 
     return findings

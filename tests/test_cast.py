@@ -477,16 +477,19 @@ def test_author_cast_cohort_roundtrips_through_the_parser():
 
 def test_conclusion_profile_handoff_for_contest_and_farce():
     # Cx 029 non-blocking: pin the game_type → conclusion_profile handoff that Session reads
-    # into cost_disposition / reads_world_event (the polarity + scoreboard switches).
+    # into cost_disposition / the literal-result axis. Post 131/132, Contest carries the
+    # `has_literal_result` marker (the old `reads_world_event` scoreboard flag retired — the
+    # runtime now reads declared canon result-events via meta["result_events"]).
     from construct.story_shapes import conclusion_profile, shapes_for
     contest = conclusion_profile("tactical_combat")
     assert shapes_for("tactical_combat")["shape"] == "contest"
     assert contest["cost_disposition"] == "peril_redemption"
-    assert contest["reads_world_event"] is True  # Contest reads the scoreboard
+    assert contest["has_literal_result"] is True  # Contest has the literal-result (scoreboard) axis
+    assert "reads_world_event" not in contest      # the bespoke scoreboard flag is retired
     farce = conclusion_profile("mistaken_identity")
     assert shapes_for("mistaken_identity")["shape"] == "farce"
     assert farce["cost_disposition"] == "fail_forward"  # comedy inverts coverage polarity
-    assert not farce.get("reads_world_event")
+    assert not farce.get("has_literal_result")
 
 
 def test_end_to_end_cast_to_arc_coverage():
@@ -622,3 +625,77 @@ def test_signature_support_noop_for_non_deduction_shapes():
     cast = _deduction_cast_with_signature()  # cast content irrelevant for non-deduction
     assert validate_signature_support(["bond"], cast) == []
     assert validate_signature_support([], cast) == []
+
+
+# --- BEAT-DELIVERY-COHERENCE (obs #3): the arc's InFrame rising beats must be deliverable ---
+
+def _beats():
+    """Two InFrame rising beats (one REQUIRED, one OPTIONAL) + one Occurred climax beat."""
+    from construct.arc.conditions import InFrame, Occurred
+    from construct.arc.grammar import Beat, Phase, Weight
+    return (
+        Beat("beat:learn_leg", Phase.SETUP, Weight.REQUIRED,
+             InFrame(FRAME, "person:elias", "leg_condition", "injured")),
+        Beat("beat:learn_route", Phase.RISING, Weight.OPTIONAL,
+             InFrame(FRAME, "person:elias", "gave_directions", "event:route")),
+        Beat("beat:cut_the_ore", Phase.CLIMAX, Weight.REQUIRED,
+             Occurred("cargo_abandoned")),
+    )
+
+
+def test_beat_delivery_targets_extracts_only_inframe_beats():
+    from construct.cast import beat_delivery_targets
+    tgts = beat_delivery_targets(_beats())
+    # the Occurred climax beat is excluded (it fires via EVENT-OCCURS-FIRING, not clue delivery)
+    assert [t["beat_id"] for t in tgts] == ["beat:learn_leg", "beat:learn_route"]
+    leg = tgts[0]
+    assert (leg["entity"], leg["attribute"], leg["value"]) == \
+        ("person:elias", "leg_condition", "injured")
+    assert leg["required"] is True and tgts[1]["required"] is False
+
+
+def test_validate_beat_delivery_passes_when_a_reachable_clue_surfaces_the_fact():
+    from construct.cast import beat_delivery_targets, validate_beat_delivery
+    tgts = beat_delivery_targets(_beats())
+    # a reachable (at_scene) member holds a live clue whose fact == the REQUIRED beat fact
+    cast = (CastNode("person:elias", "guide", "injured guide", presence="at_scene",
+                     holds_clues=(
+        Clue("clue:leg", "pillar:cord", ("person:elias", "leg_condition", "injured"),
+             coverage_effect="genuine", reveal_condition="none"),)),)
+    assert validate_beat_delivery(tgts, cast) == []
+
+
+def test_validate_beat_delivery_flags_required_beat_with_no_clue():
+    from construct.cast import beat_delivery_targets, validate_beat_delivery
+    tgts = beat_delivery_targets(_beats())
+    # the cast fills a pillar but NEVER surfaces the required beat fact (the obs #3 disconnect:
+    # elias_baptiste's clues fill pillars while the beat reads person:elias.leg_condition)
+    cast = (CastNode("person:elias_baptiste", "guide", "guide", presence="at_scene",
+                     holds_clues=(
+        Clue("clue:route", "pillar:cord", ("person:elias_baptiste", "recommended_route", "low"),
+             coverage_effect="genuine", reveal_condition="pressure"),)),)
+    problems = validate_beat_delivery(tgts, cast)
+    assert any("beat:learn_leg" in p for p in problems)
+    # the OPTIONAL rising beat is never blocking
+    assert not any("beat:learn_route" in p for p in problems)
+
+
+def test_validate_beat_delivery_requires_live_and_reachable_holder():
+    from construct.cast import beat_delivery_targets, validate_beat_delivery
+    tgts = beat_delivery_targets(_beats())
+    fact = ("person:elias", "leg_condition", "injured")
+    # right fact, but gated behind 'trust' (NOT live-reachable today) → still dead
+    not_live = (CastNode("person:elias", presence="at_scene", holds_clues=(
+        Clue("clue:leg", "pillar:cord", fact, coverage_effect="genuine",
+             reveal_condition="trust"),)),)
+    assert any("beat:learn_leg" in p for p in validate_beat_delivery(tgts, not_live))
+    # right fact + live condition, but the holder is offscene with no naming chain → unreachable
+    stranded = (CastNode("person:elias", presence="offscene", location="", holds_clues=(
+        Clue("clue:leg", "pillar:cord", fact, coverage_effect="genuine",
+             reveal_condition="none"),)),)
+    assert any("beat:learn_leg" in p for p in validate_beat_delivery(tgts, stranded))
+
+
+def test_validate_beat_delivery_empty_targets_is_noop():
+    from construct.cast import validate_beat_delivery
+    assert validate_beat_delivery([], _cast()) == []
