@@ -46,3 +46,10 @@ Notable changes to The Construct. Pre-1.0; dates are development milestones, not
 - `continuation_intro` is a one-shot injected after reopen (a cold process break between conclude and
   the next opening would lose the framing note — same durability class as the per-slot scope/epoch).
 - Identity-closure: a renderer pass to collapse `maybe_same_as` duplicates into one display identity.
+- EP2 cast anchoring: the persisted next-episode `arc_scope` is narrow (the new arc's referents +
+  protagonist), so a cold open's cast is partly carried from existing canon rather than a broad
+  structured scope — adequate today, a candidate to strengthen if a future opening needs firmer
+  cast anchoring (Cx 196).
+- Source-to-live role drift: ingest can leave a residual adaptation oddity (a source-prose
+  protagonist surviving as a secondary name when live play re-centers on a different protagonist) —
+  locally coherent, tracked near identity-closure / ingest-fidelity (Cx 196).
