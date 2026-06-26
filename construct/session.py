@@ -633,9 +633,31 @@ class Session:
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
             return Reply(prose=f"(the turn could not complete: {exc})",
                          trace=None, ok=False)
+        # WORLD-CHANGING AGENCY (Cx 215 #1): a mid-story reshape may have RE-PLANNED the main
+        # arc in PB this turn. run_turn swapped only its local arc; reload the live portfolio so
+        # the NEXT turn enters run_turn with the new main arc + scope, not the stale ones held
+        # since open — else "revive → re-aim → the case keeps going" breaks across turns.
+        if result.trace and getattr(result.trace, "replanned", ""):
+            self._reload_arc_portfolio()
         return Reply(prose=result.prose, trace=result.trace,
                      ended=bool(result.trace and result.trace.terminal),
                      exit_requested=getattr(result, "exit_requested", False))
+
+    def _reload_arc_portfolio(self) -> None:
+        """Refresh the live arc portfolio from PB after a mid-story re-plan, so subsequent
+        turns run the new main arc. Best-effort: a reload hiccup keeps the current arc."""
+        from construct.arc import io as arc_io
+        from construct.arc.executor import arc_entities
+        try:
+            reads = PorcelainWorldReads(self._world)
+            main_id = arc_io.main_arc_from_frame(reads)
+            portfolio = arc_io.portfolio_from_frame(reads)
+            self._arc = next((a for a in portfolio if a.arc_id == main_id), self._arc)
+            self._side_arcs = [a for a in portfolio if a.arc_id != main_id]
+            self._scope = sorted({e for e in arc_entities(self._arc) if reads.has_entity(e)})
+            logger.info("session arc reloaded after replan: main=%s", self._arc.arc_id)
+        except Exception:
+            logger.exception("arc portfolio reload after replan failed; keeping current arc")
 
     def close(self) -> None:
         if not self._closed:

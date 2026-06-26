@@ -1592,10 +1592,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     arc_io.replan_main_arc(world, _ro.arc, turn=turn)
                     arc = _ro.arc                       # swap the LIVE arc — all downstream uses it
                     trace.replanned = arc.arc_id
-                    # refresh scope + snapshots from the NEW arc (a fresh PB read already
-                    # carries the committed reshape rows — no manual preservation needed).
-                    _new_scope = sorted(e for e in arc_entities(arc) if live_reads.has_entity(e))
-                    snap_scope = list(_new_scope) + ([scene] if scene else []) + scene_features
+                    # Refresh scope + snapshots from the NEW arc. CRUCIAL (Cx 215 #2): also
+                    # include the VISIBLE committed reshape entities (landed state/restage/
+                    # consequence rows, not the event anchor) — a coherent replacement arc may
+                    # not reference a restaged entity (e.g. a revived NPC) via arc_entities, and
+                    # a fresh PB read only carries rows whose entities are in the requested scope.
+                    _reshaped_ents = [r["entity"] for r in _rr.canon_rows
+                                      if r["entity"] != _rr.event_id and live_reads.has_entity(r["entity"])]
+                    _new_scope = sorted(set(e for e in arc_entities(arc) if live_reads.has_entity(e))
+                                        | set(_reshaped_ents))
+                    snap_scope = _new_scope + ([scene] if scene else []) + scene_features
                     canon_snap = _snap_or_empty(p, snap_scope)
                     canon_table = _table(canon_snap)
                     player_snap = _snap_or_empty(p, snap_scope, frame=player_frame)

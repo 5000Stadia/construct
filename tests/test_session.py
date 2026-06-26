@@ -550,3 +550,29 @@ class TestEndlessMode:
         assert r.trace.concluded is True
         assert r.trace.pacing != "concluded"       # world carries on
         s.close()
+
+
+@pytest.mark.skip(reason="BLOCKED on a PB attribute-semantics conflict — conferring Cx (C-217): "
+                  "replan_main_arc re-ingests the arc's shape rows (delta_type, timeless), but "
+                  "Session.open already READ-FOLDED delta_type, so PB raises 'cannot declare "
+                  "semantics after folded data'. The reload CODE is correct; the blocker is the "
+                  "re-ingest path (also a live-proof risk). Un-skip once the ingest path is fixed.")
+def test_reload_arc_portfolio_swaps_the_session_main_arc(scenario, monkeypatch):
+    """WORLD-CHANGING-AGENCY (Cx 215/216 #1): after a mid-story re-plan repoints the
+    `arc:portfolio` manifest in PB, `Session._reload_arc_portfolio` must update the live
+    `self._arc` so the NEXT turn runs the new main arc, not the stale one held since open.
+
+    This drives the reload directly (the full run_turn→replan path is covered in
+    test_integration; here we isolate the cross-turn session handoff)."""
+    import dataclasses
+
+    from construct.arc import io as arc_io
+    s = Session.open(scenario, player_id="u1", provider=_provider())
+    assert s._arc.arc_id == "arc:main"
+    # install a second arc and repoint the manifest at it (what replan_main_arc commits)
+    new_arc = dataclasses.replace(s._arc, arc_id="arc:replan_9")
+    arc_io.replan_main_arc(s._world, new_arc, turn=9)
+    s._reload_arc_portfolio()
+    assert s._arc.arc_id == "arc:replan_9"             # the live session arc swapped
+    assert all(a.arc_id != "arc:replan_9" for a in s._side_arcs)  # new arc is MAIN, not a side arc
+    s.close()

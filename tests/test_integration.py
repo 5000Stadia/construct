@@ -2907,6 +2907,7 @@ class TestWorldReshape:
         trace = result.trace
         assert "bends" in trace.reshape                              # narrator briefed
         assert trace.replanned == ""                                 # no_replacement → arc unchanged
+        assert "arc:main" in trace.arc_fallout                       # explicit old-main-arc fallout fired
         # the reshaped protected key COMMITTED to canon (append, current read flips)...
         assert world.porcelain.state(
             "fact:secret", "culprit")["fact"]["value"] == "person:newculprit"
@@ -2932,6 +2933,9 @@ class TestWorldReshape:
             {"is_reshape": True, "slug": "victim_revived",
              "target": {"entity": "person:rival", "attribute": "alive", "value": "true"},
              "restage": [], "frame_knowledge": [], "consequence": [],
+             # restage the revived NPC — an entity the replacement arc below does NOT reference,
+             # so the scope refresh (Cx 215/216 #2) must pull it in from the committed rows.
+             "restage": [{"entity": "person:rival", "attribute": "in", "value": "place:study"}],
              "summary": "The victim draws breath — the case is no longer a murder."},  # propose_reshape
             {"protagonist": PLAYER, "delta_type": "desire_at_cost",
              "tension": [PLAYER, "drive:doubt", "drive:resolve"],
@@ -2947,6 +2951,9 @@ class TestWorldReshape:
         reads = PorcelainWorldReads(world)
         assert arc_io.main_arc_from_frame(reads) == "arc:replan_1"
         assert not reads.events(kind="episode_start", frame="session:main")
+        # the restaged revived NPC is committed + locatable (carried by the refreshed scope)
+        assert world.porcelain.state("person:rival", "alive")["fact"]["value"] == "true"
+        assert "place:study" in (reads.location_chain("person:rival") or [])
 
     def test_flag_off_is_inert(self, world, monkeypatch):
         monkeypatch.setattr("construct.resolution.draw_tier",
