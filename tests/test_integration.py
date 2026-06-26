@@ -2926,3 +2926,33 @@ class TestWorldReshape:
         assert result.trace.reshape == ""                            # no reshape fired
         assert world.porcelain.state(
             "fact:secret", "culprit")["fact"]["value"] == "person:rival"  # untouched
+
+    def test_flag_on_failure_tier_commits_consequence_without_flipping_target(self, world, monkeypatch):
+        # Cx 207 note #1: integrated proof that a FAILURE tier commits a concrete
+        # consequence but does NOT flip the target fact ("however it lands").
+        monkeypatch.setenv("CONSTRUCT_WORLD_RESHAPE", "1")
+        monkeypatch.setattr("construct.resolution.draw_tier",
+                            lambda *a, **k: "terrible_failure")
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+             "uncertain_of": "whether the truth can be rewritten"},               # classify
+            {"is_reshape": True, "slug": "culprit_rewritten",
+             "target": {"entity": "fact:secret", "attribute": "culprit",
+                        "value": "person:newculprit"},
+             "restage": [], "frame_knowledge": [],
+             "consequence": [{"entity": "person:rival", "attribute": "mood",
+                              "value": "rattled"}],
+             "summary": "The truth resists — but the rival is rattled by the attempt."},  # propose_reshape
+            {"prose": "You strain; nothing changes, but the rival looks rattled."},        # narrate
+        ])
+        result = run_turn(world, arc, provider, "I will the truth to change.", turn=1)
+        assert result.trace.reshape                                  # the attempt happened
+        # target NOT flipped (failure tier)...
+        assert world.porcelain.state(
+            "fact:secret", "culprit")["fact"]["value"] == "person:rival"
+        # ...but the concrete consequence DID commit upstream
+        assert world.porcelain.state("person:rival", "mood")["fact"]["value"] == "rattled"
