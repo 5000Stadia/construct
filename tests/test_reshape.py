@@ -12,7 +12,18 @@ from patternbuffer.testing import StubModel, rule_classifier_fallback
 
 from construct.adapter import PorcelainWorldReads
 from construct.arc.executor import turn_time
-from construct.reshape import ReshapePlan, plan_from_proposal, reshape_canon
+from construct.reshape import (
+    ReshapePlan, apply_reshape, plan_from_proposal, reshape_canon)
+
+
+_REVIVE_PROPOSAL = {
+    "is_reshape": True, "slug": "angus_revived",
+    "target": {"entity": "person:angus", "attribute": "alive", "value": "true"},
+    "restage": [{"entity": "person:angus", "attribute": "in", "value": "place:oil_store"}],
+    "frame_knowledge": [{"npc": "person:angus", "entity": "fact:attacker",
+                         "attribute": "identity", "value": "person:niall"}],
+    "consequence": [], "summary": "Angus draws breath and lives.",
+}
 
 
 def _world(path) -> World:
@@ -195,6 +206,57 @@ def test_propose_reshape_cohort_flows_through_to_a_commit(tmp_path):
     reads = PorcelainWorldReads(w)
     assert reads.state("person:angus", "alive") == "true"
     assert reads.state("fact:attacker", "identity", frame="knows:person:angus") == "person:niall"
+    w.close()
+
+
+def test_apply_reshape_off_by_default_is_a_no_op(tmp_path):
+    # Flag off → no reshape, regardless of what the (unused) provider would say.
+    from construct.provider import StubProvider
+    w = _world(tmp_path / "off.world")
+    res = apply_reshape(w, StubProvider([_REVIVE_PROPOSAL]),
+                        action="I revive him", scene="oil store",
+                        canon="angus dead", tier="complete_success", turn=5, enabled=False)
+    assert res is None
+    assert PorcelainWorldReads(w).state("person:angus", "alive") == "false"  # untouched
+    w.close()
+
+
+def test_apply_reshape_enabled_commits_the_change(tmp_path):
+    from construct.provider import StubProvider
+    w = _world(tmp_path / "on.world")
+    res = apply_reshape(w, StubProvider([_REVIVE_PROPOSAL]),
+                        action="I pour everything into reviving him", scene="oil store",
+                        canon="person:angus.alive = false", tier="complete_success",
+                        turn=5, enabled=True)
+    assert res is not None and res.landed is True
+    assert res.summary == "Angus draws breath and lives."     # briefing directive for the narrator
+    assert PorcelainWorldReads(w).state("person:angus", "alive") == "true"
+    w.close()
+
+
+def test_apply_reshape_returns_none_when_cohort_declines(tmp_path):
+    from construct.provider import StubProvider
+    w = _world(tmp_path / "decline.world")
+    res = apply_reshape(w, StubProvider([{"is_reshape": False, "slug": "", "target": {},
+                                          "restage": [], "frame_knowledge": [],
+                                          "consequence": [], "summary": ""}]),
+                        action="I look around", scene="oil store", canon="",
+                        tier="complete_success", turn=5, enabled=True)
+    assert res is None
+    assert PorcelainWorldReads(w).state("person:angus", "alive") == "false"
+    w.close()
+
+
+def test_apply_reshape_fails_open_on_a_provider_error(tmp_path):
+    class _Boom:
+        def complete(self, *a, **k):
+            raise RuntimeError("model down")
+    w = _world(tmp_path / "boom.world")
+    # a provider that raises must not sink the turn — returns None, world untouched
+    res = apply_reshape(w, _Boom(), action="I revive him", scene="oil store",
+                        canon="", tier="complete_success", turn=5, enabled=True)
+    assert res is None
+    assert PorcelainWorldReads(w).state("person:angus", "alive") == "false"
     w.close()
 
 

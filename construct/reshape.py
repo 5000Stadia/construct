@@ -23,12 +23,21 @@ builds a plan (a later step), so adding it changes no shipped behaviour.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from typing import Any
 
 from construct.arc.executor import turn_time
 
 logger = logging.getLogger(__name__)
+
+#: World-changing agency is OFF by default — a normal mystery plays byte-for-byte
+#: as today. Enable per the founder's flag once the trigger is reviewed.
+_FLAG_ENV = "CONSTRUCT_WORLD_RESHAPE"
+
+
+def reshape_enabled() -> bool:
+    return os.getenv(_FLAG_ENV, "").strip().lower() in ("1", "true", "yes", "on")
 
 #: Resolution tiers that LAND the target reshape. The other two tiers commit a
 #: consequence WITHOUT flipping the target ("however it lands" — every tier writes
@@ -63,6 +72,7 @@ class ReshapeResult:
     landed: bool
     canon_rows: list[dict]
     frame_rows: list[dict]
+    summary: str = ""   # the narrator directive (prose must match the landing); never stored
 
 
 def _slug(text: str) -> str:
@@ -180,4 +190,35 @@ def reshape_canon(world: Any, plan: ReshapePlan, *, turn: int) -> ReshapeResult:
     logger.info("canon reshape: %s tier=%s landed=%s (%d canon rows, %d frame rows) caused_by %s",
                 event_id, plan.tier, plan.landed, len(canon), len(committed_frames), plan.action_event)
     return ReshapeResult(event_id=event_id, landed=plan.landed,
-                         canon_rows=canon, frame_rows=committed_frames)
+                         canon_rows=canon, frame_rows=committed_frames, summary=plan.summary)
+
+
+def apply_reshape(world: Any, provider: Any, *, action: str, scene: str, canon: str,
+                  tier: str, turn: int, narration: str = "",
+                  enabled: bool | None = None) -> ReshapeResult | None:
+    """Flag-gated turn-time orchestration (the seam the turn loop calls). If
+    world-reshaping is enabled and the reshape cohort judges this an earned,
+    miraculous, story-improving attempt, it proposes → types → COMMITS the change
+    upstream (pre-render), returning the `ReshapeResult` whose `.summary` the caller
+    injects into the narrator briefing so prose matches the committed landing.
+
+    Returns None — and the turn plays exactly as today — when the flag is off, the
+    cohort declines (`is_reshape` false), the proposal has no concrete target, or
+    anything errors. Fail-open by construction: world-changing never sinks a turn."""
+    if enabled is None:
+        enabled = reshape_enabled()
+    if not enabled:
+        return None
+    try:
+        from construct import cohorts
+        proposal = cohorts.propose_reshape(provider, action=action, scene=scene,
+                                           canon=canon, outcome=tier, narration=narration)
+        if not isinstance(proposal, dict) or not proposal.get("is_reshape"):
+            return None
+        plan = plan_from_proposal(proposal, tier=tier, turn=turn)
+        if plan is None:
+            return None
+        return reshape_canon(world, plan, turn=turn)
+    except Exception:
+        logger.exception("apply_reshape failed; the turn plays normally (no reshape)")
+        return None
