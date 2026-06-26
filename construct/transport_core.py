@@ -67,7 +67,7 @@ HELP = ("Just type what you want to do — no commands needed; the story respond
 GREETING = (
     "📽️ Welcome to the Construct Projector — online and ready.\n\n"
     "Pick a path:\n"
-    "🆕 New — describe any world and I'll build it\n"
+    "🆕 New — create a new world\n"
     "📂 Browse — say “list” to see the ready-made worlds\n"
     "▶️ Resume — pick up a saved game where you left off\n\n"
     "What'll it be?")
