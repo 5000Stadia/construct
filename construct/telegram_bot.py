@@ -18,6 +18,7 @@ Exactly-once discipline (Codex spec review):
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Callable
 
@@ -29,6 +30,27 @@ logger = logging.getLogger(__name__)
 PLATFORM = "telegram"
 MSG_LIMIT = 4096          # Telegram's hard per-message limit
 LONG_POLL_SECONDS = 25    # getUpdates long-poll window
+TYPING_REFRESH_SECONDS = 4.0   # Telegram shows "typing…" ~5s — refresh under that
+TYPING_MAX_SECONDS = 90.0      # cover model-call waits (chiefly the architect's
+#                                final turn before a build), not the whole multi-
+#                                minute build (which streams its own [k/N] progress)
+
+
+def _keep_typing(client, chat_id: str, stop: threading.Event) -> None:
+    """Best-effort 'typing…' presence so a model-call wait isn't dead silence —
+    chiefly the architect's final turn between the player's last answer and the
+    build's heads-up. Refreshed under Telegram's ~5s action window and capped, so
+    it never runs the whole build. Swallows everything: a presence ping must not
+    affect the turn or its exactly-once delivery."""
+    waited = 0.0
+    try:
+        while waited < TYPING_MAX_SECONDS:
+            client.send_chat_action(chat_id, "typing")
+            if stop.wait(TYPING_REFRESH_SECONDS):
+                return
+            waited += TYPING_REFRESH_SECONDS
+    except Exception:
+        return
 
 
 class TelegramClient:
@@ -70,6 +92,15 @@ class TelegramClient:
         if not ok or status >= 400:
             raise RuntimeError(self._redact(f"sendMessage failed (status={status})"))
 
+    def send_chat_action(self, chat_id: str, action: str = "typing") -> None:
+        """Best-effort presence signal ('typing…'). NEVER raises — a failed
+        presence ping must not affect the turn or its exactly-once delivery."""
+        try:
+            self._http.get(f"{self._base}/sendChatAction",
+                           params={"chat_id": chat_id, "action": action})
+        except Exception:
+            logger.debug("telegram sendChatAction failed (ignored)")
+
 
 def _event_from_update(update: dict) -> InboundEvent | None:
     """Normalize a Telegram update into an InboundEvent, or None to ignore
@@ -110,7 +141,18 @@ def process_updates(conn, core: TransportCore, client: TelegramClient,
         uid = int(update["update_id"])
         ev = _event_from_update(update)
         if ev is not None and registry.claim_update(conn, PLATFORM, uid):
-            out = core.handle(ev, now=now_fn())
+            # A 'typing…' presence covers the model-call wait (the architect's
+            # final turn, a play turn) so the stretch before the reply/heads-up
+            # isn't dead silence. Daemon thread, best-effort, stopped + joined.
+            stop = threading.Event()
+            typer = threading.Thread(target=_keep_typing, args=(client, ev.chat_id, stop),
+                                     daemon=True, name="typing")
+            typer.start()
+            try:
+                out = core.handle(ev, now=now_fn())
+            finally:
+                stop.set()
+                typer.join(timeout=2.0)
             registry.record_outbox(conn, PLATFORM, uid, out.chat_id, out.chunks)
         _send_pending(conn, client, uid)  # raises on failure → offset NOT advanced
         offset = max(offset, uid + 1)

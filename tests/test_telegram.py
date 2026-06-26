@@ -984,9 +984,13 @@ def _msg(uid, frm, text, chat_type="private"):
 class _FakeTG:
     def __init__(self):
         self.sent = []
+        self.actions = []
 
     def send_message(self, chat_id, text):
         self.sent.append((chat_id, text))
+
+    def send_chat_action(self, chat_id, action="typing"):
+        self.actions.append((chat_id, action))
 
 
 class TestTelegramAdapter:
@@ -1002,6 +1006,20 @@ class TestTelegramAdapter:
         telegram_bot.process_updates(conn, core, client, upd, now_fn=lambda: NOW)  # redelivery
         assert f.sessions["telegram:42"].turns == ["I wait"]   # ran exactly once
         assert registry.get_offset(conn, "telegram") == 11
+
+    def test_typing_presence_sent_while_handling_a_turn(self, conn):
+        # A 'typing…' action covers the model-call wait so the stretch before the
+        # reply (chiefly the architect's final turn before a build) isn't silent.
+        code = registry.mint_invite(conn, "telegram", "anchor", now=NOW)
+        registry.claim_invite(conn, code, "telegram", "42", now=NOW)
+        registry.mark_started(conn, "telegram", "42")
+        f = _Factory()
+        core = _core(conn, f)
+        client = _FakeTG()
+        telegram_bot.process_updates(conn, core, client, [_msg(10, 42, "I wait")],
+                                     now_fn=lambda: NOW)
+        assert ("1042", "typing") in client.actions   # presence sent for the handled turn
+        assert f.sessions["telegram:42"].turns == ["I wait"]  # turn still ran normally
 
     def test_non_message_and_group_updates_advance_without_session(self, conn):
         f = _Factory()
