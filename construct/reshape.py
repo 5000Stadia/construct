@@ -65,6 +65,70 @@ class ReshapeResult:
     frame_rows: list[dict]
 
 
+def _slug(text: str) -> str:
+    keep = [c if (c.isalnum() or c == "_") else "_" for c in (text or "").lower()]
+    return "".join(keep).strip("_") or "reshape"
+
+
+def plan_from_proposal(proposal: dict, *, tier: str, action_event: str = "",
+                       turn: int = 0) -> ReshapePlan | None:
+    """Bridge a reshape-proposal cohort's output to a typed `ReshapePlan` (the
+    deterministic layer between the model call and `reshape_canon`, mirroring
+    `cast.cast_from_proposal`). Fail-soft: a proposal with no usable target state
+    change returns None (the turn then plays normally — no reshape); malformed
+    optional rows are dropped, never crash.
+
+    Expected proposal shape (the cohort fills it; all fail-soft)::
+
+        {"slug": "angus_revived",
+         "target": {"entity": "person:angus", "attribute": "alive", "value": "true"},
+         "restage": [{"entity": "person:angus", "attribute": "in", "value": "place:oil_store"}],
+         "frame_knowledge": [{"npc": "person:angus", "entity": "fact:attacker",
+                              "attribute": "identity", "value": "person:niall"}],
+         "consequence": [{"entity": "person:angus", "attribute": "condition", "value": "fading"}],
+         "summary": "Angus draws breath and lives."}
+    """
+    if not isinstance(proposal, dict):
+        return None
+    tgt = proposal.get("target") or {}
+    e, a, v = tgt.get("entity"), tgt.get("attribute"), tgt.get("value")
+    if not (e and a and v is not None):
+        return None  # no concrete target state change → not a reshape; play normally
+
+    def _rows(items: object) -> list[dict]:
+        out: list[dict] = []
+        for it in (items or []):
+            if not isinstance(it, dict):
+                continue
+            re_, ra, rv = it.get("entity"), it.get("attribute"), it.get("value")
+            if re_ and ra and rv is not None:
+                out.append({"entity": re_, "attribute": ra, "value": str(rv)})
+        return out
+
+    frame_rows: list[dict] = []
+    for fk in (proposal.get("frame_knowledge") or []):
+        if not isinstance(fk, dict):
+            continue
+        npc = fk.get("npc") or fk.get("frame")
+        fe, fa, fv = fk.get("entity"), fk.get("attribute"), fk.get("value")
+        if not (npc and fe and fa and fv is not None):
+            continue
+        frame = npc if str(npc).startswith("knows:") else f"knows:{npc}"
+        frame_rows.append({"frame": frame, "entity": fe, "attribute": fa, "value": str(fv)})
+
+    slug = _slug(proposal.get("slug") or f"{e}_{a}")
+    return ReshapePlan(
+        slug=slug,
+        action_event=action_event or (f"event:action_{turn}" if turn else ""),
+        tier=tier,
+        state_rows=[{"entity": e, "attribute": a, "value": str(v)}],
+        restage_rows=_rows(proposal.get("restage")),
+        consequence_rows=_rows(proposal.get("consequence")),
+        frame_rows=frame_rows,
+        summary=(proposal.get("summary") or "").strip(),
+    )
+
+
 def reshape_canon(world: Any, plan: ReshapePlan, *, turn: int) -> ReshapeResult:
     """Commit a sanctioned reshape to canon, UPSTREAM and deterministically.
 
