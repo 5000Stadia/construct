@@ -79,12 +79,8 @@ GREETING = (
 #: Sent the moment a build begins (the long generate-then-ingest). The per-phase
 #: pings follow via the notify channel (INGEST-PROGRESS-NOTIFICATIONS.md).
 BUILD_HEADS_UP = (
-    "Building your world now — and it's worth the wait. Plan on about twenty "
-    "minutes (sometimes a little more); a whole living world is being made, not "
-    "loaded. Here's the journey: I dream up the hidden story, bring the world into "
-    "being, reconcile who's who, weave your secret path beneath the surface, teach "
-    "each character what they know, set the tone, and run the final checks. I'll "
-    "call out every step as it happens, and tell you the moment the doors open.")
+    "🌐 Constructing your world — the initial build may take ~20 minutes. "
+    "I'll tell you the moment the doors open.")
 
 
 @dataclass(frozen=True)
