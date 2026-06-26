@@ -2932,10 +2932,10 @@ class TestWorldReshape:
              "uncertain_of": "whether the victim can be brought back"},             # classify
             {"is_reshape": True, "slug": "victim_revived",
              "target": {"entity": "person:rival", "attribute": "alive", "value": "true"},
-             "restage": [], "frame_knowledge": [], "consequence": [],
              # restage the revived NPC — an entity the replacement arc below does NOT reference,
              # so the scope refresh (Cx 215/216 #2) must pull it in from the committed rows.
              "restage": [{"entity": "person:rival", "attribute": "in", "value": "place:study"}],
+             "frame_knowledge": [], "consequence": [],
              "summary": "The victim draws breath — the case is no longer a murder."},  # propose_reshape
             {"protagonist": PLAYER, "delta_type": "desire_at_cost",
              "tension": [PLAYER, "drive:doubt", "drive:resolve"],

@@ -604,3 +604,53 @@ def test_raw_authored_world_without_semantics_hook_fails_arc_reingest(tmp_path, 
             {"entity": "shape:replan_3", "attribute": "delta_type", "value": "desire_at_cost",
              "timeless": True}], frame="plot:main")
     prod.close()
+
+
+class _FullReshapeProvider(_RoutingProvider):
+    """Routes cls(needs_test)+rsh(reshape w/ restage)+gen(replan arc)+nar so a full
+    Session.turn() can land a reshape and re-aim, exercising the cross-turn scope handoff."""
+
+    async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+        from construct.provider import task_of
+        if task_of(prompt) == "cls":
+            self.calls.append((prompt, schema, tier))
+            return {"kind": "action", "moves_to": "", "requires": [],
+                    "needs_test": True, "uncertain_of": "whether the dead can be revived"}
+        if task_of(prompt) == "rsh":
+            self.calls.append((prompt, schema, tier))
+            if "reviv" in prompt.lower():
+                return {"is_reshape": True, "slug": "rival_revived",
+                        "target": {"entity": "person:rival", "attribute": "alive", "value": "true"},
+                        "restage": [{"entity": "person:rival", "attribute": "in", "value": "place:study"}],
+                        "frame_knowledge": [], "consequence": [],
+                        "summary": "The rival draws breath — no longer the victim."}
+            return {"is_reshape": False, "slug": "", "target": {}, "restage": [],
+                    "frame_knowledge": [], "consequence": [], "summary": ""}
+        if task_of(prompt) == "gen":
+            self.calls.append((prompt, schema, tier))
+            # a coherent replacement arc that does NOT reference person:rival
+            return {"protagonist": PLAYER, "delta_type": "desire_at_cost",
+                    "tension": [PLAYER, "drive:doubt", "drive:resolve"],
+                    "beats": [{"id": "beat:confront", "phase": "climax", "weight": "required",
+                               "kind": "event_occurs", "entity": "attacker_named",
+                               "attribute": "", "value": ""}],
+                    "hook": "Now: who tried to kill him?"}
+        return await super().complete(prompt, schema, tier=tier, deliberate=deliberate)
+
+
+def test_replan_carries_restaged_entity_into_next_turn_scope(scenario, monkeypatch):
+    """WORLD-CHANGING-AGENCY (Cx 221): a full Session.turn() reshape re-aims the arc; the
+    REVIVED/restaged NPC — which the replacement arc does NOT reference — must stay in the
+    open session's NEXT-turn scope, not drop out of scene awareness."""
+    monkeypatch.setenv("CONSTRUCT_WORLD_RESHAPE", "1")
+    monkeypatch.setattr("construct.resolution.draw_tier", lambda *a, **k: "complete_success")
+    s = Session.open(scenario, player_id="u1", provider=_FullReshapeProvider())
+    reply = s.turn("I pour everything into reviving the dead rival.")
+    assert reply.ok and reply.trace.replanned == "arc:replan_1"   # re-aimed this turn
+    assert s._arc.arc_id == "arc:replan_1"
+    # the replacement arc doesn't reference person:rival, but the reshape restaged it →
+    # it must be carried into the next-turn scope so the witness stays in scene awareness.
+    assert "person:rival" in (s._scope or [])
+    reply2 = s.turn("I ask the revived rival who attacked him.")
+    assert reply2.ok
+    s.close()

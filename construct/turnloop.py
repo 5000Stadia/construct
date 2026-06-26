@@ -469,6 +469,7 @@ class TurnTrace:
     quarantined: list = field(default_factory=list)  # narrator rows quarantined (unlicensed assertion of an arc key)
     reshape: str = ""  # WORLD-CHANGING AGENCY: the narrator directive for a canon reshape committed this turn (flag-gated)
     replanned: str = ""  # the new main arc id if a reshape re-aimed the arc mid-story (flag-gated)
+    reshape_entities: list = field(default_factory=list)  # visible committed reshape entity ids (carried into next-turn scope)
     timings: dict = field(default_factory=dict)  # per-section wall-clock (s) this turn — optimization surface
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
 
@@ -1578,6 +1579,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     continue  # the reshape EVENT anchor, not a player-visible world fact
                 canon_table[(_row["entity"], _row["attribute"])] = _row["value"]
                 _reshape_license.add((_row["entity"], _row["attribute"], _row["value"]))
+            # Carry the visible reshape entities so the Session can keep them in NEXT-turn
+            # scope (Cx 221): a revived NPC the replacement arc doesn't reference must not
+            # drop out of scene awareness after the re-plan.
+            trace.reshape_entities = sorted({r["entity"] for r in _rr.canon_rows
+                                             if r["entity"] != _rr.event_id})
             logger.info("world reshape committed: %s (%d visible rows licensed)",
                         _rr.event_id, len(_reshape_license))
             # The reshape may have made the destination stale → re-aim the MAIN arc

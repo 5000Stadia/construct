@@ -638,14 +638,17 @@ class Session:
         # the NEXT turn enters run_turn with the new main arc + scope, not the stale ones held
         # since open — else "revive → re-aim → the case keeps going" breaks across turns.
         if result.trace and getattr(result.trace, "replanned", ""):
-            self._reload_arc_portfolio()
+            self._reload_arc_portfolio(
+                extra_scope=getattr(result.trace, "reshape_entities", None))
         return Reply(prose=result.prose, trace=result.trace,
                      ended=bool(result.trace and result.trace.terminal),
                      exit_requested=getattr(result, "exit_requested", False))
 
-    def _reload_arc_portfolio(self) -> None:
+    def _reload_arc_portfolio(self, extra_scope: list | None = None) -> None:
         """Refresh the live arc portfolio from PB after a mid-story re-plan, so subsequent
-        turns run the new main arc. Best-effort: a reload hiccup keeps the current arc."""
+        turns run the new main arc. `extra_scope` carries the visible reshaped/restaged
+        entities (Cx 221) so a revived NPC the replacement arc doesn't reference stays in
+        NEXT-turn scene scope. Best-effort: a reload hiccup keeps the current arc."""
         from construct.arc import io as arc_io
         from construct.arc.executor import arc_entities
         try:
@@ -654,8 +657,10 @@ class Session:
             portfolio = arc_io.portfolio_from_frame(reads)
             self._arc = next((a for a in portfolio if a.arc_id == main_id), self._arc)
             self._side_arcs = [a for a in portfolio if a.arc_id != main_id]
-            self._scope = sorted({e for e in arc_entities(self._arc) if reads.has_entity(e)})
-            logger.info("session arc reloaded after replan: main=%s", self._arc.arc_id)
+            scope = set(arc_entities(self._arc)) | set(extra_scope or [])
+            self._scope = sorted(e for e in scope if reads.has_entity(e))
+            logger.info("session arc reloaded after replan: main=%s (+%d reshape entities)",
+                        self._arc.arc_id, len(extra_scope or []))
         except Exception:
             logger.exception("arc portfolio reload after replan failed; keeping current arc")
 
