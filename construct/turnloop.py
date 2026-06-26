@@ -30,6 +30,7 @@ from construct.adapter import PorcelainWorldReads
 from construct.gauge import (
     apply_gauge_terminals, gauge_coloring, gauge_lines, gauge_pass,
 )
+from construct.reshape import apply_reshape
 from construct.arc.executor import (
     LIFECYCLE_TERMINALS,
     PLOT,
@@ -466,6 +467,7 @@ class TurnTrace:
     gauge_levels: dict = field(default_factory=dict)  # gauge_id -> folded level after this turn's drain (GAUGE)
     contradictions: list = field(default_factory=list)  # narrator rows quarantined (changed established canon)
     quarantined: list = field(default_factory=list)  # narrator rows quarantined (unlicensed assertion of an arc key)
+    reshape: str = ""  # WORLD-CHANGING AGENCY: the narrator directive for a canon reshape committed this turn (flag-gated)
     timings: dict = field(default_factory=dict)  # per-section wall-clock (s) this turn — optimization surface
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
 
@@ -1551,6 +1553,32 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _fire_event_occurs(world, p, live_reads, [arc], provider,
                                player_input, _resolved_tier, turn, trace, arc.protagonist,
                                only_kinds=set(result_events.get("loss") or ()))
+    # WORLD-CHANGING AGENCY (flag-gated, default OFF — WORLD-CHANGING-AGENCY.md): an
+    # earned, uncertain act may RESHAPE canon. Commit PRE-beat_pass (so the arc reacts
+    # THIS turn) through the host doorway, then patch the local materialization the
+    # post-render gate reads (canon_table is a stale snapshot — Cx 204/205 #1) and
+    # license the exact sanctioned rows so the narrator may restate them past the
+    # protected-key gate (Cx 204/205 #2). Inert when off: apply_reshape returns None →
+    # no patch, no license, no briefing change. Private witness frames are NOT licensed.
+    _reshape_license: set[tuple[str, str, str]] = set()
+    if kind == "action" and needs_test and _resolved_tier not in ("", "assured"):
+        _snap = set(snap_scope)
+        _scene_facts = "; ".join(
+            f"{e.split(':', 1)[-1]}.{a}={v}"
+            for (e, a), v in list(canon_table.items()) if e in _snap)[:1200]
+        _rr = apply_reshape(world, provider, action=player_input,
+                            scene=(scene or arc.protagonist),
+                            canon=f"{uncertain_of}. {_scene_facts}".strip(),
+                            tier=_resolved_tier, turn=turn)
+        if _rr is not None:
+            trace.reshape = _rr.summary
+            for _row in _rr.canon_rows:
+                if _row["entity"] == _rr.event_id:
+                    continue  # the reshape EVENT anchor, not a player-visible world fact
+                canon_table[(_row["entity"], _row["attribute"])] = _row["value"]
+                _reshape_license.add((_row["entity"], _row["attribute"], _row["value"]))
+            logger.info("world reshape committed: %s (%d visible rows licensed)",
+                        _rr.event_id, len(_reshape_license))
     achieved, closed, revealed = beat_pass(world, arc, live_reads, turn)
     trace.beats_achieved, trace.beats_closed = achieved, closed
     trace.reveals = revealed
@@ -2304,6 +2332,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # the twist); it improvises HOW. Assured actions never draw — they just succeed.
     if needs_test and _resolved_tier and _resolved_tier != "assured":
         briefing_parts.append("\n" + resolution.directive(_resolved_tier, uncertain_of))
+    if trace.reshape:
+        # The act reshaped the world (committed pre-render). Tell the narrator the new
+        # truth so prose matches canon; the sanctioned rows are licensed past the gate.
+        briefing_parts.append(
+            "\nWHAT THE ACT CHANGED (binding — the player's action reshaped the world; "
+            "render this as real and match it exactly): " + trace.reshape)
     if trace.events_fired:
         # an authored act-beat fired this turn — it is now BINDING canon (Cx 115 #1); render it as
         # having happened, never contradict it.
@@ -2450,7 +2484,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # handing over the solution. So a protected key the player didn't earn this turn
         # is QUARANTINED — new OR same-value. A legitimately discovered arc fact is in
         # the player frame → licensed_strict → promotes normally (discovery still works).
-        licensed_strict = key in pre_keys or key in briefing_keys
+        licensed_strict = (key in pre_keys or key in briefing_keys
+                           or (entity, attribute, newv) in _reshape_license)
         # Promoted rows carry their narrator PROVENANCE (Cx 022 non-blocking): the
         # promote path is structured-ingest, which drops the `source` the staging
         # ingest stamped — re-stamp via `source_doc` so a promoted improv fact is

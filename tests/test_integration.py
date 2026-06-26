@@ -2868,3 +2868,61 @@ def test_terminal_outcome_scoped_past_episode_boundary():
     assert terminal_outcome(w) is None             # episode 2 live — prior receipt behind boundary
     w.event_log[S].append(EventRow("event:o2", "arc_lost", at=14.0))
     assert terminal_outcome(w) == "lost"           # episode 2's own ending counts
+
+
+class TestWorldReshape:
+    """WORLD-CHANGING AGENCY (flag-gated): an earned, uncertain act reshapes canon
+    pre-render; the sanctioned rows promote past the protected-key gate; flag-off is
+    fully inert. (docs/design/WORLD-CHANGING-AGENCY.md; Cx 204/205.)"""
+
+    def test_flag_on_commits_and_licenses_a_protected_key(self, world, monkeypatch):
+        from construct.arc.executor import arc_protected_keys
+        monkeypatch.setenv("CONSTRUCT_WORLD_RESHAPE", "1")
+        monkeypatch.setattr("construct.resolution.draw_tier",
+                            lambda *a, **k: "complete_success")
+        arc = make_arc()
+        assert ("fact:secret", "culprit") in arc_protected_keys(arc)  # the target IS protected
+        seed_arc(world, arc)
+        # the narrator's prose restates the reshaped (protected) fact → it must PROMOTE
+        world._extractions.append({"items": [
+            {"entity": "fact:secret", "attribute": "culprit", "value": "person:newculprit"}]})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+             "uncertain_of": "whether the truth itself can be rewritten"},          # classify
+            {"is_reshape": True, "slug": "culprit_rewritten",
+             "target": {"entity": "fact:secret", "attribute": "culprit",
+                        "value": "person:newculprit"},
+             "restage": [], "frame_knowledge": [], "consequence": [],
+             "summary": "Reality bends — the rival was never the one."},            # propose_reshape
+            {"prose": "The world reshapes; it was person:newculprit all along."},   # narrate
+        ])
+        result = run_turn(world, arc, provider,
+                          "I will the truth itself to change.", turn=1)
+        trace = result.trace
+        assert "bends" in trace.reshape                              # narrator briefed
+        # the reshaped protected key COMMITTED to canon (append, current read flips)...
+        assert world.porcelain.state(
+            "fact:secret", "culprit")["fact"]["value"] == "person:newculprit"
+        # ...and the narrator's restatement PROMOTED past the protected gate (licensed),
+        # rather than being quarantined as an unearned protected-key assertion.
+        assert ("fact:secret", "culprit") not in trace.quarantined
+        assert ("fact:secret", "culprit") not in trace.contradictions
+
+    def test_flag_off_is_inert(self, world, monkeypatch):
+        monkeypatch.setattr("construct.resolution.draw_tier",
+                            lambda *a, **k: "complete_success")
+        # no CONSTRUCT_WORLD_RESHAPE → apply_reshape returns None; the turn is normal.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+             "uncertain_of": "whether the truth can be rewritten"},               # classify
+            {"prose": "You strain against the truth, but it is what it is."},      # narrate
+        ])
+        result = run_turn(world, arc, provider, "I will the truth to change.", turn=1)
+        assert result.trace.reshape == ""                            # no reshape fired
+        assert world.porcelain.state(
+            "fact:secret", "culprit")["fact"]["value"] == "person:rival"  # untouched
