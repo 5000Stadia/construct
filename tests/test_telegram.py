@@ -629,6 +629,27 @@ class TestRouting:
         out2 = core.handle(_ev("telegram", "dc", code), now=NOW)
         assert out2.chunks[0].startswith(GREETING)
 
+    def test_reboot_replies_then_reexecs_original_argv(self, conn, monkeypatch):
+        # /reboot re-execs the process so freshly-deployed code takes effect. The
+        # test MUST patch os.execv (otherwise it would replace the test runner).
+        # The confirmation is returned first; a daemon thread then re-execs the
+        # ORIGINAL command line (sys.orig_argv), re-reading source + .env.
+        import sys as _sys
+
+        from construct import transport_core as _tc
+        self._admit(conn, ext="rb")
+        f = _Factory()
+        core = _core(conn, f)
+        calls = []
+        monkeypatch.setattr(os, "execv", lambda path, argv: calls.append((path, list(argv))))
+        monkeypatch.setattr(_tc, "REBOOT_DELAY_S", 0.0)  # don't actually wait
+        out = core.handle(_ev("telegram", "rb", "/reboot"), now=NOW)
+        assert "reboot" in out.chunks[0].lower()              # confirmation sent first
+        core._reboot_thread.join(timeout=5)                    # let the re-exec fire
+        assert calls == [(_sys.orig_argv[0], list(_sys.orig_argv))]  # exact relaunch
+        # Non-destructive: the claim survives a reboot.
+        assert registry.player_for(conn, "telegram", "rb") == "telegram:rb"
+
     def test_two_players_get_separate_player_ids(self, conn):
         self._admit(conn, ext="a")
         self._admit(conn, ext="b")

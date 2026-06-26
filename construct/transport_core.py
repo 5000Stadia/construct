@@ -40,6 +40,10 @@ DEFAULT_FEEDBACK_DIR = Path("dev_inbox")
 #: mid-session (founder). Leaving a story happens only on an explicit `/exit` or a
 #: confirmed out-of-character "let's do a new story" request.
 
+#: Delay before the `/reboot` re-exec, so the confirmation reply is actually sent
+#: before the process is replaced. Module-level so tests can zero it.
+REBOOT_DELAY_S = 1.5
+
 
 def _affirmative(text: str) -> bool:
     """A yes-ish answer to the 'leave the story?' confirm."""
@@ -249,6 +253,8 @@ class TransportCore:
             out = self._reply(ev, self._wipe(pid, ev, now=now))
         elif low == "/disconnect":
             out = self._reply(ev, self._disconnect(pid, ev))
+        elif low == "/reboot":
+            out = self._reply(ev, self._reboot(ev))
         elif low.startswith("/dump"):
             out = self._reply(ev, self._dump(ev))
         elif low == "/exit":
@@ -458,6 +464,35 @@ class TransportCore:
         registry.forget_player(self._conn, ev.platform, ev.external_id)
         return ("Disconnected — data wiped and you're un-claimed. To return, mint a "
                 "fresh code locally with `construct invite` and send it here.")
+
+    def _reboot(self, ev: InboundEvent) -> str:
+        """HIDDEN operator command (`/reboot`, not in HELP): re-exec the bot
+        process so freshly-deployed code takes effect WITHOUT a shell. The
+        confirmation goes out first; then a short-delay daemon thread re-execs
+        the original command line (`sys.orig_argv`), re-reading source and
+        `.env`. Non-destructive — saved games live on disk; only the in-memory
+        process is replaced (and any in-flight pending-confirm state is cleared).
+        Named `/reboot`, not `/restart` (which restarts the player's STORY). If
+        the re-exec raises, the current process keeps running on the old code
+        (logged), so a botched reboot never takes the bot offline."""
+        import os
+        import sys
+        import threading
+        import time
+        logger.warning("operator /reboot from %s:%s — re-exec in %.1fs via %r",
+                       ev.platform, ev.external_id, REBOOT_DELAY_S, sys.orig_argv)
+
+        def _exec() -> None:
+            time.sleep(REBOOT_DELAY_S)
+            try:
+                os.execv(sys.orig_argv[0], sys.orig_argv)
+            except Exception:
+                logger.exception("/reboot re-exec failed; staying on current code")
+
+        self._reboot_thread = threading.Thread(target=_exec, daemon=True, name="reboot")
+        self._reboot_thread.start()
+        return ("♻️ Rebooting the Construct — reloading the latest code. Give me a few "
+                "seconds, then send any message (e.g. “new”, “list”, or /help).")
 
     def _exit(self, pid: str, ev: InboundEvent) -> str:
         """Leave the current scenario for the start menu — clear `started` (so the
