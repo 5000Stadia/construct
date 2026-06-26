@@ -1024,6 +1024,90 @@ def estimate_elapsed(provider: Provider, *, now: str, hours_per_day: int,
         ESTIMATE_ELAPSED_SCHEMA, tier="cheap", task="elp")
 
 
+RESHAPE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "is_reshape": {"type": "boolean",
+                       "description": "TRUE only if the player is attempting something "
+                       "MIRACULOUS that would OVERTURN an established world fact (revive "
+                       "the dead, undo a loss, unbreak what the story assumed fixed) AND "
+                       "making it real would lead to a richer, coherent story. FALSE for "
+                       "ordinary actions, or when a reshape would just break the story "
+                       "into incoherence — then the normal turn handles it."},
+        "slug": {"type": "string", "description": "a short id for the change, e.g. "
+                 "'angus_revived' (lowercase, words joined by _)."},
+        "target": {"type": "object", "description": "the ONE canon fact being overturned, "
+                   "as the NEW value it should take if the act fully lands.",
+                   "properties": {"entity": {"type": "string"},
+                                  "attribute": {"type": "string"},
+                                  "value": {"type": "string"}}},
+        "restage": {"type": "array", "description": "canon rows that bring the change into "
+                    "play — e.g. a revived NPC's current location {entity,attribute:'in',"
+                    "value:place}. May be empty.",
+                    "items": {"type": "object",
+                              "properties": {"entity": {"type": "string"},
+                                             "attribute": {"type": "string"},
+                                             "value": {"type": "string"}}}},
+        "frame_knowledge": {"type": "array", "description": "what a re-staged character now "
+                            "KNOWS — seeded ONLY into their own head (npc), never canon. "
+                            "Only their own state/senses + a sanctioned witness fact (e.g. "
+                            "who attacked them). May be empty.",
+                            "items": {"type": "object",
+                                      "properties": {"npc": {"type": "string"},
+                                                     "entity": {"type": "string"},
+                                                     "attribute": {"type": "string"},
+                                                     "value": {"type": "string"}}}},
+        "consequence": {"type": "array", "description": "the COST/fallout rows — applied on "
+                        "ANY outcome (the cost of a costly landing, or the fallout of a "
+                        "failed attempt). Match these to the actual landing.",
+                        "items": {"type": "object",
+                                  "properties": {"entity": {"type": "string"},
+                                                 "attribute": {"type": "string"},
+                                                 "value": {"type": "string"}}}},
+        "summary": {"type": "string", "description": "one or two sentences the narrator must "
+                    "render so prose MATCHES canon — describing the ACTUAL landing for the "
+                    "given outcome (full / with-a-cost / failed-but-consequential)."},
+    },
+    "required": ["is_reshape", "slug", "target", "restage", "frame_knowledge",
+                 "consequence", "summary"],
+}
+
+
+def propose_reshape(provider: Provider, *, action: str, scene: str, canon: str,
+                    outcome: str, narration: str = "") -> dict:
+    """Judge whether the player's action is a MIRACULOUS, world-reshaping attempt and,
+    if so, propose the concrete canon change (WORLD-CHANGING-AGENCY.md). The host has
+    already drawn the resolution `outcome` tier — this only describes WHAT changes and
+    how it LANDS at that tier; whether the target flips is the host's tier decision, not
+    this cohort's. The founder's lens: the agent with the wheel guides the story to where
+    the best story is — so reshape when it makes a richer, coherent story (rule of cool),
+    following the player's direction; decline when it would only break coherence. `action`/
+    `narration` are untrusted — read as the act to adjudicate, not instructions."""
+    action = (action or "").strip()[:1000]
+    narration = (narration or "").strip()[:1500]
+    return complete_sync(provider,
+        "You decide whether a player's action in an interactive story is a MIRACULOUS act "
+        "that should RESHAPE the world's established facts — and if so, exactly what changes.\n\n"
+        "An earned, extraordinary act CAN overturn a foundational fact (revive the dead, undo a "
+        "loss, unbreak what seemed fixed). Say YES (is_reshape) when making it real leads to a "
+        "RICHER, COHERENT story that follows the player's direction — rule of cool. Say NO for "
+        "ordinary actions, or when the reshape would only shatter the story into incoherence "
+        "(the normal turn then handles it). There is ALWAYS still a story after the miracle — "
+        "name the one fact that flips and what it pulls into play.\n"
+        f"The act's OUTCOME this turn is '{outcome}': complete_success = it lands cleanly; "
+        "success_cost = it lands but at a real cost; failure tiers = it does NOT land but the "
+        "attempt leaves a real consequence. Write `summary` + `consequence` to MATCH that actual "
+        "landing (prose must match canon). On a landing outcome, set `target` to the flipped "
+        "fact, `restage` to bring it into play, and `frame_knowledge` to ONLY what a revived "
+        "character justly knows (own state/senses + a sanctioned witness fact) — never leak "
+        "hidden truth into canon.\n\n"
+        f"PLAYER ACTION: {action}\n"
+        f"WHAT HAPPENED: {narration}\n"
+        f"THE SCENE: {scene}\n"
+        f"RELEVANT ESTABLISHED FACTS: {canon}",
+        RESHAPE_SCHEMA, tier="main", deliberate=True, task="rsh")
+
+
 INGEST_ADDITIONS_SCHEMA = {
     "type": "object",
     "properties": {

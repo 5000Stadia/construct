@@ -171,6 +171,33 @@ def test_plan_from_proposal_returns_none_without_a_concrete_target():
     assert plan_from_proposal("not a dict", tier="complete_success") is None
 
 
+def test_propose_reshape_cohort_flows_through_to_a_commit(tmp_path):
+    # The cohort proposes a structured reshape; it must flow cleanly through
+    # plan_from_proposal -> reshape_canon (the model→typed→canon chain).
+    from construct import cohorts
+    from construct.provider import StubProvider
+    p = StubProvider([{
+        "is_reshape": True, "slug": "angus_revived",
+        "target": {"entity": "person:angus", "attribute": "alive", "value": "true"},
+        "restage": [{"entity": "person:angus", "attribute": "in", "value": "place:oil_store"}],
+        "frame_knowledge": [{"npc": "person:angus", "entity": "fact:attacker",
+                             "attribute": "identity", "value": "person:niall"}],
+        "consequence": [], "summary": "Angus draws a ragged breath and lives.",
+    }])
+    proposal = cohorts.propose_reshape(
+        p, action="I pour everything into reviving him", scene="the oil store",
+        canon="person:angus.alive = false", outcome="complete_success")
+    assert proposal["is_reshape"] is True
+    plan = plan_from_proposal(proposal, tier="complete_success", turn=5)
+    assert plan is not None and plan.slug == "angus_revived"
+    w = _world(tmp_path / "c.world")
+    reshape_canon(w, plan, turn=5)
+    reads = PorcelainWorldReads(w)
+    assert reads.state("person:angus", "alive") == "true"
+    assert reads.state("fact:attacker", "identity", frame="knows:person:angus") == "person:niall"
+    w.close()
+
+
 def test_plan_from_proposal_drops_malformed_optional_rows():
     proposal = {
         "target": {"entity": "person:angus", "attribute": "alive", "value": "true"},
