@@ -110,9 +110,10 @@ but a consequence is committed either way.
   gate change is reviewed; the contradiction-quarantine default is unchanged when the flag
   is off. (Likely promote to genre/tone-aware default once proven.)
 - **No fiat.** Requires the earned + plausible + host-committed trinity above.
-- **Coherence preserved.** All changes fold cleanly (retract-then-append under the
-  constitutive regime — the lesson from the EP2 portfolio fix); as-of queries before/after
-  stay correct; the membrane stays clean (derived tension is never stored).
+- **Coherence preserved.** Lived-canon state changes are **appended** (never retracted), so
+  as-of queries before/after stay correct. Only `plot:`/control rows are superseded by
+  retract-then-append (the EP2 portfolio lesson) — that discipline applies to the arc manifest
+  in `replan_main_arc`, NOT to lived canon. The membrane stays clean (derived tension is never stored).
 - **Narrator stays leashed** — no new durable-write authority; it only *renders* the
   host-committed change.
 

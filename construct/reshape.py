@@ -136,7 +136,19 @@ def reshape_canon(world: Any, plan: ReshapePlan, *, turn: int) -> ReshapeResult:
     still serve the prior truth); mints the canon reshape event + an explicit
     `caused_by` row; re-stages + seeds scoped frames. On a NON-landing tier the
     target state/restage/frame rows are skipped — only `consequence_rows` commit
-    (the attempt still shaped the world)."""
+    (the attempt still shaped the world).
+
+    Fail-closed (Cx 200): every `frame_row` MUST carry a scoped `knows:<npc>` frame.
+    A missing/None frame would let PB write the seeded knowledge to canon (a hidden
+    fact leaking out of the witness's head). The whole plan is validated BEFORE any
+    commit, so an invalid plan can never partially write."""
+    for fr in plan.frame_rows:
+        frame = fr.get("frame")
+        if not frame or not str(frame).startswith("knows:"):
+            raise ValueError(
+                "reshape_canon: every frame_row must carry a scoped 'knows:<npc>' frame; "
+                f"got {frame!r}. Refusing to commit — scoped witness knowledge must never "
+                "leak to canon.")
     vf = turn_time(turn)
     event_id = f"event:reshaped_{plan.slug}"
     canon: list[dict] = [

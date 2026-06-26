@@ -6,6 +6,7 @@ mapping (success lands; failure commits a consequence without flipping the targe
 Deterministic — no model, no prose.
 """
 
+import pytest
 from patternbuffer import World
 from patternbuffer.testing import StubModel, rule_classifier_fallback
 
@@ -56,8 +57,12 @@ def test_reshape_appends_new_state_without_retracting_lived_canon(tmp_path):
     reshape_canon(w, _revive_plan(), turn=5)
     reads = PorcelainWorldReads(w)
     assert reads.state("person:angus", "alive") == "true"           # current truth flipped
-    # APPEND, not retract (Cx 198 #2): the original 'dead' row must still be in the
-    # log, so a historical as-of read before turn 5 still folds to dead.
+    # APPEND, not retract (Cx 198 #2): a historical as-of read BEFORE the reshape
+    # turn still folds to dead; only the current read is alive.
+    assert w.porcelain.state("person:angus", "alive",
+                             as_of=turn_time(0))["fact"]["value"] == "false"
+    assert w.porcelain.state("person:angus", "alive")["fact"]["value"] == "true"
+    # and the original 'dead' row is still physically in the log (not retracted).
     dead_rows = [r for r in w.buffer.all_rows()
                  if getattr(r, "attribute", None) == "alive"
                  and getattr(r, "value", None) == "false"]
@@ -140,6 +145,22 @@ def test_plan_from_proposal_builds_a_typed_plan_end_to_end(tmp_path):
     w = _world(tmp_path / "p.world")
     reshape_canon(w, plan, turn=5)
     assert PorcelainWorldReads(w).state("person:angus", "alive") == "true"
+    w.close()
+
+
+def test_reshape_fails_closed_on_an_unscoped_frame_row_committing_nothing(tmp_path):
+    # Cx 200: a frame_row missing its scoped 'knows:<npc>' frame must NOT leak the
+    # hidden fact to canon — the helper rejects the whole plan before any commit.
+    w = _world(tmp_path / "rf.world")
+    plan = _revive_plan()
+    plan.frame_rows = [{"entity": "fact:attacker", "attribute": "identity",
+                        "value": "person:niall"}]  # no 'frame' → would default to canon
+    with pytest.raises(ValueError):
+        reshape_canon(w, plan, turn=5)
+    reads = PorcelainWorldReads(w)
+    assert reads.state("fact:attacker", "identity") is None          # NOT leaked to canon
+    assert reads.state("person:angus", "alive") == "false"           # nothing committed at all
+    assert not reads.events(kind="canon_reshape")                    # no partial write
     w.close()
 
 
