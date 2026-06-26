@@ -400,15 +400,15 @@ def test_author_replan_builds_a_fresh_main_arc_same_protagonist(tmp_path):
     w = _world(tmp_path / "replan.world")
     old = _build_arc({**VALID_PROPOSAL, "protagonist": PLAYER}, arc_id="arc:main")
     prov = _GenProvider()  # the "gen" cohort returns VALID_PROPOSAL (protagonist=CLERK)
-    new_arc = author_replan(w, old, prov,
-                            reshape_summary="the dead victim drew breath again", turn=7)
-    assert new_arc is not None
-    assert new_arc.arc_id == "arc:replan_7"            # fresh id, no collision with arc:main
-    assert new_arc.protagonist == PLAYER               # same player enforced (not the cohort's CLERK)
-    assert new_arc.beats                               # coherent (has beats)
+    out = author_replan(w, old, prov,
+                        reshape_summary="the dead victim drew breath again", turn=7)
+    assert out.ok and out.reason == "replanned"
+    assert out.arc.arc_id == "arc:replan_7"            # fresh id, no collision with arc:main
+    assert out.arc.protagonist == PLAYER               # same player enforced (not the cohort's CLERK)
+    assert out.arc.beats                               # coherent (has beats)
 
 
-def test_author_replan_fails_open_on_provider_error(tmp_path):
+def test_author_replan_tags_provider_error_for_fail_open(tmp_path):
     from construct.game import _build_arc, author_replan
 
     class _Boom(StubProvider):
@@ -420,5 +420,17 @@ def test_author_replan_fails_open_on_provider_error(tmp_path):
 
     w = _world(tmp_path / "boom.world")
     old = _build_arc({**VALID_PROPOSAL, "protagonist": PLAYER}, arc_id="arc:main")
-    # a provider hiccup must not sink the turn — None → the caller keeps the current arc
-    assert author_replan(w, old, _Boom(), reshape_summary="x", turn=7) is None
+    # a transient provider hiccup → provider_error (caller keeps the current arc), NOT fallout
+    out = author_replan(w, old, _Boom(), reshape_summary="x", turn=7)
+    assert out.reason == "provider_error" and out.arc is None and not out.ok
+
+
+def test_author_replan_tags_no_replacement_for_a_beatless_result(tmp_path):
+    from construct.game import _build_arc, author_replan
+    w = _world(tmp_path / "empty.world")
+    old = _build_arc({**VALID_PROPOSAL, "protagonist": PLAYER}, arc_id="arc:main")
+    # the cohort proposes nothing coherent (no beats) → no_replacement (route old-arc fallout),
+    # distinct from a provider error.
+    prov = _GenProvider(proposal={**VALID_PROPOSAL, "beats": []})
+    out = author_replan(w, old, prov, reshape_summary="x", turn=7)
+    assert out.reason == "no_replacement" and out.arc is None and not out.ok

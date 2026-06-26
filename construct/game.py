@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from patternbuffer import World
 
@@ -1400,17 +1400,30 @@ def _fallback_protagonist(world: Any, located: list[str], play_as: str) -> str |
     return sorted(located)[0]  # stable: the first located person
 
 
+class ReplanOutcome(NamedTuple):
+    """The result of a mid-story re-plan attempt, tagged so the turn-loop caller can
+    route the three cases distinctly (Cx 212): `replanned` (install `arc`),
+    `provider_error` (fail-open — keep the current arc + the committed reshape), and
+    `no_replacement` (a coherent 'nothing good to pursue' — route OLD-main-arc fallout,
+    never install a broken arc nor silently leave a stale one)."""
+    reason: str               # "replanned" | "provider_error" | "no_replacement"
+    arc: Arc | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.reason == "replanned" and self.arc is not None
+
+
 def author_replan(world: Any, arc: Arc, provider: Provider, *,
-                  reshape_summary: str, turn: int) -> Arc | None:
+                  reshape_summary: str, turn: int) -> ReplanOutcome:
     """WORLD-CHANGING-AGENCY step 4: after a reshape made the old destination stale,
     author the BEST coherent NEW main arc from the reshaped world — the prior arc is
     FUEL, not a rail (the founder's "guide it to where the best story is; there is
     always still a story"). Mid-story: NOT a new chapter (no episode boundary) and NOT
     a side thread. Reuses the arc-authoring cohort, enforces the SAME protagonist, and
     builds with a fresh `arc:replan_<turn>` id so beat/clock ids never collide with the
-    old main arc. Returns the new Arc, or None when no coherent replacement could be
-    built (the caller routes main-arc fallout). Fail-open: a provider hiccup → None and
-    the caller keeps the current arc + the reshape both intact."""
+    old main arc. Returns a tagged `ReplanOutcome` (Cx 212) so the caller can tell a
+    transient provider failure (fail-open) from a true no-replacement (route fallout)."""
     from construct import cohorts
     known_ids = sorted(e for e in _canon_entity_ids(world)
                        if e.startswith(("person:", "fact:", "obj:", "place:")))
@@ -1429,15 +1442,26 @@ def author_replan(world: Any, arc: Arc, provider: Provider, *,
             provider, trigger=trigger, fuel=fuel, available_ids=known_ids, style="",
             present_characters=", ".join(_known_people(world)) or "(carry the cast)",
             protagonist=arc.protagonist)
-        proposal["protagonist"] = arc.protagonist  # hard invariant: same player (Cx 138)
+    except Exception:
+        logger.exception("author_replan: provider error — fail-open (keep current arc)")
+        return ReplanOutcome("provider_error")
+    # A coherent "nothing to pursue" (no beats proposed) is a NO_REPLACEMENT (route fallout),
+    # distinct from a transient failure — and checked BEFORE _build_arc (which can't build a
+    # beatless arc). This is the only path that should trip the old-main-arc fallout.
+    if not (isinstance(proposal, dict) and proposal.get("beats")):
+        logger.warning("author_replan: no coherent replacement proposed — route fallout")
+        return ReplanOutcome("no_replacement")
+    proposal["protagonist"] = arc.protagonist  # hard invariant: same player (Cx 138)
+    try:
         new_arc = _build_arc(proposal, arc_id=f"arc:replan_{turn}")
     except Exception:
-        logger.exception("author_replan failed; caller keeps the current arc")
-        return None
+        # A build glitch on an otherwise-populated proposal is a transient fault, not a
+        # narrative "no replacement" — fail-open rather than fabricate a story consequence.
+        logger.exception("author_replan: build error — fail-open (keep current arc)")
+        return ReplanOutcome("provider_error")
     if not new_arc.beats:
-        logger.warning("author_replan produced a beatless arc; routing main-arc fallout")
-        return None
-    return new_arc
+        return ReplanOutcome("no_replacement")
+    return ReplanOutcome("replanned", new_arc)
 
 
 def _build_arc(proposal: dict, arc_id: str = "arc:main") -> Arc:
