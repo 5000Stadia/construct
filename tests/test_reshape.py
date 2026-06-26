@@ -43,6 +43,8 @@ def _world(path) -> World:
         {"entity": "person:angus", "attribute": "kind", "value": "person", "timeless": True},
         {"entity": "person:angus", "attribute": "name", "value": "Angus", "timeless": True},
         {"entity": "person:angus", "attribute": "alive", "value": "false", "valid_from": turn_time(0)},
+        {"entity": "person:niall", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:niall", "attribute": "name", "value": "Niall", "timeless": True},
     ])
     return w
 
@@ -252,6 +254,26 @@ def test_apply_reshape_canonicalizes_a_bare_target_id(tmp_path):
     reads = PorcelainWorldReads(w)
     assert reads.state("person:angus", "alive") == "true"   # landed on the CANONICAL id
     assert reads.state("angus", "alive") is None            # NOT on the bare alias
+    w.close()
+
+
+def test_apply_reshape_canonicalizes_a_bare_relation_value(tmp_path):
+    # Cx 228: a relation VALUE that names an existing entity (a bare witness 'niall')
+    # is canonicalized too — not just the row subject — so the reference can't scatter
+    # onto an alias. A literal state value ('true') resolves to no entity → kept as-is.
+    from construct.provider import StubProvider
+    w = _world(tmp_path / "val.world")
+    prop = dict(_REVIVE_PROPOSAL)
+    prop["frame_knowledge"] = [{"npc": "person:angus", "entity": "fact:attacker",
+                                "attribute": "identity", "value": "niall"}]  # bare value
+    res = apply_reshape(w, StubProvider([prop]), action="I revive him", scene="oil store",
+                        canon="", tier="complete_success", turn=5, enabled=True)
+    assert res is not None and res.landed
+    reads = PorcelainWorldReads(w)
+    assert reads.state("person:angus", "alive") == "true"   # literal value kept (not canonicalized)
+    # the witness fact's VALUE is canonicalized to the real person id, not the bare alias
+    assert reads.state("fact:attacker", "identity",
+                       frame="knows:person:angus") == "person:niall"
     w.close()
 
 

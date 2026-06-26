@@ -156,15 +156,23 @@ def _canonical_id(world: Any, eid: str) -> str:
 
 
 def canonicalize_plan(world: Any, plan: ReshapePlan) -> ReshapePlan:
-    """Rewrite the plan's committed-row entity ids (and `knows:<npc>` frame targets) to
-    the world's canonical ids before commit. Mutates and returns the plan."""
+    """Rewrite the plan's committed-row entity ids to the world's canonical ids before
+    commit. Covers row SUBJECTS, `knows:<npc>` frame targets, AND entity-valued row
+    VALUES (Cx 228): a relation value like a bare `in`-location or a `culprit`/`identity`
+    that names an existing entity is canonicalized too, so a reshape can't scatter a
+    reference onto an alias. `_canonical_id` is fail-soft — a literal value (`alive`,
+    `fading`) that resolves to no entity is left exactly as-is."""
     for rows in (plan.state_rows, plan.restage_rows, plan.consequence_rows):
         for r in rows:
             if r.get("entity"):
                 r["entity"] = _canonical_id(world, r["entity"])
+            if r.get("value"):
+                r["value"] = _canonical_id(world, str(r["value"]))
     for fr in plan.frame_rows:
         if fr.get("entity"):
             fr["entity"] = _canonical_id(world, fr["entity"])
+        if fr.get("value"):
+            fr["value"] = _canonical_id(world, str(fr["value"]))
         frame = fr.get("frame", "")
         if frame.startswith("knows:"):
             fr["frame"] = "knows:" + _canonical_id(world, frame[len("knows:"):])
