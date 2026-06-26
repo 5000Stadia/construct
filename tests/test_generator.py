@@ -391,3 +391,34 @@ def test_preflight_rejects_unknown_referent(tmp_path):
     assert any("lint" in e.event_id for e in
                PorcelainWorldReads(w).events(kind="generation_declined", frame=SESSION))
     w.close()
+
+
+def test_author_replan_builds_a_fresh_main_arc_same_protagonist(tmp_path):
+    """WORLD-CHANGING-AGENCY step 4: author_replan re-authors the MAIN arc mid-story
+    after a reshape, with a fresh id and the SAME protagonist enforced."""
+    from construct.game import _build_arc, author_replan
+    w = _world(tmp_path / "replan.world")
+    old = _build_arc({**VALID_PROPOSAL, "protagonist": PLAYER}, arc_id="arc:main")
+    prov = _GenProvider()  # the "gen" cohort returns VALID_PROPOSAL (protagonist=CLERK)
+    new_arc = author_replan(w, old, prov,
+                            reshape_summary="the dead victim drew breath again", turn=7)
+    assert new_arc is not None
+    assert new_arc.arc_id == "arc:replan_7"            # fresh id, no collision with arc:main
+    assert new_arc.protagonist == PLAYER               # same player enforced (not the cohort's CLERK)
+    assert new_arc.beats                               # coherent (has beats)
+
+
+def test_author_replan_fails_open_on_provider_error(tmp_path):
+    from construct.game import _build_arc, author_replan
+
+    class _Boom(StubProvider):
+        def __init__(self):
+            super().__init__([])
+
+        async def complete(self, *a, **k):
+            raise RuntimeError("model down")
+
+    w = _world(tmp_path / "boom.world")
+    old = _build_arc({**VALID_PROPOSAL, "protagonist": PLAYER}, arc_id="arc:main")
+    # a provider hiccup must not sink the turn — None → the caller keeps the current arc
+    assert author_replan(w, old, _Boom(), reshape_summary="x", turn=7) is None

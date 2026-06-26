@@ -1400,6 +1400,46 @@ def _fallback_protagonist(world: Any, located: list[str], play_as: str) -> str |
     return sorted(located)[0]  # stable: the first located person
 
 
+def author_replan(world: Any, arc: Arc, provider: Provider, *,
+                  reshape_summary: str, turn: int) -> Arc | None:
+    """WORLD-CHANGING-AGENCY step 4: after a reshape made the old destination stale,
+    author the BEST coherent NEW main arc from the reshaped world — the prior arc is
+    FUEL, not a rail (the founder's "guide it to where the best story is; there is
+    always still a story"). Mid-story: NOT a new chapter (no episode boundary) and NOT
+    a side thread. Reuses the arc-authoring cohort, enforces the SAME protagonist, and
+    builds with a fresh `arc:replan_<turn>` id so beat/clock ids never collide with the
+    old main arc. Returns the new Arc, or None when no coherent replacement could be
+    built (the caller routes main-arc fallout). Fail-open: a provider hiccup → None and
+    the caller keeps the current arc + the reshape both intact."""
+    from construct import cohorts
+    known_ids = sorted(e for e in _canon_entity_ids(world)
+                       if e.startswith(("person:", "fact:", "obj:", "place:")))
+    trigger = (
+        "THE WORLD JUST CHANGED THIS TURN — a player's act reshaped an established "
+        "truth, so the story's old destination may now be stale. This is NOT a new "
+        "chapter and NOT a side thread: author the BEST, most engaging COHERENT MAIN "
+        "arc to pursue FROM HERE given what just changed. The prior destination is "
+        "fuel, not a rail — follow the change to where the best story now lives, in "
+        "the player's direction. There is always still a story.")
+    fuel = (f"WHAT JUST CHANGED THIS TURN: {reshape_summary}\n"
+            f"THE PRIOR DESTINATION (now possibly moot — reuse what still serves): "
+            f"{arc.shape.delta_type} / {getattr(arc.shape, 'premise', '')}")
+    try:
+        proposal = cohorts.generate_arc(
+            provider, trigger=trigger, fuel=fuel, available_ids=known_ids, style="",
+            present_characters=", ".join(_known_people(world)) or "(carry the cast)",
+            protagonist=arc.protagonist)
+        proposal["protagonist"] = arc.protagonist  # hard invariant: same player (Cx 138)
+        new_arc = _build_arc(proposal, arc_id=f"arc:replan_{turn}")
+    except Exception:
+        logger.exception("author_replan failed; caller keeps the current arc")
+        return None
+    if not new_arc.beats:
+        logger.warning("author_replan produced a beatless arc; routing main-arc fallout")
+        return None
+    return new_arc
+
+
 def _build_arc(proposal: dict, arc_id: str = "arc:main") -> Arc:
     """Build an Arc from an authoring proposal. `arc_id` defaults to the main
     arc; a non-main (side) arc gets a per-arc refusal-clock id so two arcs never
