@@ -1,0 +1,107 @@
+"""World-changing agency — the pure canon-reshape commit helper.
+
+When an EARNED, sanctioned, miraculous player act reshapes the world (revive the
+dead, undo a loss), the host commits the change UPSTREAM through the ingest
+doorway — the narrator never writes it (see `docs/design/WORLD-CHANGING-AGENCY.md`).
+This module is the pure commit: given a `ReshapePlan` (assembled pre-render from
+classify + resolution tier + plausibility, in a later flag-gated step), it
+
+  • APPENDS the new current state — it never RETRACTS lived canon (Cx 198 #2:
+    retraction hides a row even from historical as-of reads, which is wrong for a
+    fact that was true in lived play; the prior truth must still fold for reads
+    before this turn);
+  • mints a canon reshape EVENT with an explicit `caused_by` causality row;
+  • re-stages any entity the change brings into play (a revived NPC becomes
+    locatable);
+  • seeds ONLY scoped, justified knowledge into the entity's `knows:<npc>` frame
+    (never a blanket mirror of hidden truth).
+
+It reads no prose and calls no model — deterministic. It is inert until a trigger
+builds a plan (a later step), so adding it changes no shipped behaviour.
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from typing import Any
+
+from construct.arc.executor import turn_time
+
+logger = logging.getLogger(__name__)
+
+#: Resolution tiers that LAND the target reshape. The other two tiers commit a
+#: consequence WITHOUT flipping the target ("however it lands" — every tier writes
+#: a real consequence, none is a flat refusal; ACTION-RESOLUTION.md).
+LANDING_TIERS = frozenset({"complete_success", "success_cost"})
+
+
+@dataclass
+class ReshapePlan:
+    """A sanctioned canon reshape, assembled BEFORE narration. Carries only
+    structured rows — the helper never reads prose. `state_rows`/`restage_rows`/
+    `frame_rows` apply only when the drawn tier LANDS; `consequence_rows` apply on
+    any tier (the cost of a costly landing, or the fallout of a failure)."""
+
+    slug: str                                                    # → event:reshaped_<slug>
+    action_event: str = ""                                       # caused_by anchor (event:action_N)
+    tier: str = "complete_success"                               # the drawn resolution tier
+    state_rows: list[dict] = field(default_factory=list)         # APPENDED new current state
+    restage_rows: list[dict] = field(default_factory=list)       # canon re-staging (location, …)
+    consequence_rows: list[dict] = field(default_factory=list)   # adverse/cost rows (any tier)
+    frame_rows: list[dict] = field(default_factory=list)         # scoped knowledge; each has "frame"
+    summary: str = ""                                            # host directive (prose must match); never stored
+
+    @property
+    def landed(self) -> bool:
+        return self.tier in LANDING_TIERS
+
+
+@dataclass
+class ReshapeResult:
+    event_id: str
+    landed: bool
+    canon_rows: list[dict]
+    frame_rows: list[dict]
+
+
+def reshape_canon(world: Any, plan: ReshapePlan, *, turn: int) -> ReshapeResult:
+    """Commit a sanctioned reshape to canon, UPSTREAM and deterministically.
+
+    APPENDS the reshaped current state at `turn_time(turn)` (historical as-of reads
+    still serve the prior truth); mints the canon reshape event + an explicit
+    `caused_by` row; re-stages + seeds scoped frames. On a NON-landing tier the
+    target state/restage/frame rows are skipped — only `consequence_rows` commit
+    (the attempt still shaped the world)."""
+    vf = turn_time(turn)
+    event_id = f"event:reshaped_{plan.slug}"
+    canon: list[dict] = [
+        {"entity": event_id, "attribute": "kind", "value": "canon_reshape", "valid_from": vf},
+    ]
+    if plan.action_event:
+        # Explicit causality ROW (Cx 117): item-level `caused_by` isn't surfaced by
+        # events().caused_by, so the event→action link is written as its own row.
+        canon.append({"entity": event_id, "attribute": "caused_by", "value": plan.action_event,
+                      "value_type": "entity", "valid_from": vf})
+    body = (plan.state_rows + plan.restage_rows if plan.landed else []) + plan.consequence_rows
+    for row in body:
+        r = dict(row)
+        r.setdefault("valid_from", vf)
+        r.setdefault("caused_by", event_id)
+        canon.append(r)
+    world.porcelain.ingest_structured(canon)
+
+    committed_frames: list[dict] = []
+    if plan.landed:
+        for fr in plan.frame_rows:
+            frame = fr.get("frame")
+            item = {k: v for k, v in fr.items() if k != "frame"}
+            item.setdefault("valid_from", vf)
+            item.setdefault("caused_by", event_id)
+            world.porcelain.ingest_structured([item], frame=frame)
+            committed_frames.append({**item, "frame": frame})
+
+    logger.info("canon reshape: %s tier=%s landed=%s (%d canon rows, %d frame rows) caused_by %s",
+                event_id, plan.tier, plan.landed, len(canon), len(committed_frames), plan.action_event)
+    return ReshapeResult(event_id=event_id, landed=plan.landed,
+                         canon_rows=canon, frame_rows=committed_frames)
