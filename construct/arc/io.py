@@ -8,6 +8,7 @@ expressions serialize to JSON strings stored as assertion values.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import fields
 
 from construct.arc import conditions as C
@@ -39,6 +40,8 @@ _JSON_BLOB_ATTRS = frozenset({
 #: rows in `plot:main`", NOT a per-arc frame (every beat/clock/pin already
 #: namespaces by `arc_id` and statuses key by globally-unique entity id, so N
 #: arcs coexist in one frame). Absent → a single-arc world (backward compat).
+logger = logging.getLogger(__name__)
+
 _PORTFOLIO = "arc:portfolio"
 
 
@@ -605,6 +608,35 @@ def portfolio_add_items(reads, arc_id: str, frame: str = "plot:main",
         ids = ids + [arc_id]
     return portfolio_items(ids, main_arc_id=main_arc_from_frame(reads, frame=frame),
                            frame=frame, valid_from=valid_from)
+
+
+def replan_main_arc(world, new_arc, *, turn: int, frame: str = "plot:main") -> str:
+    """Mid-episode arc RE-PLAN (WORLD-CHANGING-AGENCY step 4): install `new_arc` as
+    the MAIN arc after a canon reshape made the old destination stale — WITHOUT an
+    episode boundary. It does NOT write `event:episode_start`, checkpoint, or reset
+    the terminal receipt (those belong to `game.continue_episode`); the world, the
+    player, and lived canon all carry on. Supersedes the sealed `arc:portfolio`
+    control rows via retract-then-append (Cx 167: a `valid_from` write alone is
+    silently ignored under the constitutive fold), installs the new arc's rows +
+    indexes, and points the manifest at it. Returns the new arc id; the caller
+    refreshes scene scope from the new arc's entities (the snap_scope item, Cx 207)."""
+    from construct.adapter import PorcelainWorldReads
+    from construct.arc.executor import turn_time
+    vf = turn_time(turn)
+    new_id = new_arc.arc_id
+    ids = arc_ids_from_frame(PorcelainWorldReads(world), frame=frame)
+    if new_id not in ids:
+        ids = ids + [new_id]
+    world.porcelain.ingest_structured(
+        arc_to_items(new_arc, frame=frame) + index_items(new_arc, frame=frame), frame=frame)
+    for row in world.buffer.visible(frame=frame):
+        if row.entity == _PORTFOLIO and row.attribute in ("arc_ids", "main_arc"):
+            world.porcelain.retract(
+                row.id, "reshape replan: superseding the portfolio manifest")
+    world.porcelain.ingest_structured(
+        portfolio_items(ids, main_arc_id=new_id, frame=frame, valid_from=vf), frame=frame)
+    logger.info("replan_main_arc: main arc -> %s (mid-episode, no boundary)", new_id)
+    return new_id
 
 
 def arc_ids_from_frame(reads, frame: str = "plot:main") -> list[str]:

@@ -410,3 +410,52 @@ def test_main_arc_terminal_still_ends_scenario(tmp_path):
     from construct.turnloop import terminal_outcome
     assert terminal_outcome(PorcelainWorldReads(w)) == "won"
     w.close()
+
+
+def test_replan_main_arc_reaims_mid_episode_without_a_boundary(tmp_path):
+    """WORLD-CHANGING-AGENCY step 4: after a reshape makes the old destination stale,
+    replan_main_arc installs a NEW main arc MID-EPISODE — superseding the portfolio
+    (survives reopen under the constitutive fold) with NO episode boundary."""
+    rule = rule_classifier_fallback()
+
+    def fb(prompt, schema):
+        if prompt.startswith("Classify the lifetime"):
+            if any(k in prompt for k in ("arc:portfolio", "main_arc", "arc_ids")):
+                return {"durability": "CONSTITUTIVE", "confidence": 0.95}
+            return rule(prompt, schema)
+        return {"items": []}
+
+    path = tmp_path / "replan.world"
+
+    def _open():
+        return World(path, world_id="w:replan", model=StubModel(fallback=fb),
+                     stance="fiction", title="Replan World")
+
+    w = _open()
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:study", "attribute": "kind", "value": "room", "timeless": True}])
+    main = _main_arc()
+    w.porcelain.ingest_structured(arc_io.arc_to_items(main) + arc_io.index_items(main))
+    w.porcelain.ingest_structured(
+        arc_io.portfolio_items([main.arc_id], main_arc_id=main.arc_id), frame="plot:main")
+    w.close()
+
+    # The reshape made the old destination stale → re-aim mid-episode.
+    import dataclasses
+    w2 = _open()
+    reshaped = dataclasses.replace(_main_arc(), arc_id="arc:reshaped")
+    new_id = arc_io.replan_main_arc(w2, reshaped, turn=8)
+    assert new_id == "arc:reshaped"
+    # NO episode boundary written — that belongs to continue_episode, not a mid-story re-plan.
+    assert not PorcelainWorldReads(w2).events(kind="episode_start", frame="session:main")
+    w2.close()
+
+    # Reopen — the new manifest reads clean and points at the reshaped arc.
+    w3 = _open()
+    reads = PorcelainWorldReads(w3)
+    assert arc_io.main_arc_from_frame(reads) == "arc:reshaped"
+    assert set(arc_io.arc_ids_from_frame(reads)) == {"arc:main", "arc:reshaped"}
+    assert w3.porcelain.state("arc:portfolio", "main_arc",
+                              frame="plot:main")["status"] == "known"   # not conflicted
+    w3.close()
