@@ -136,19 +136,26 @@ but a consequence is committed either way.
 
 ## Build order (all behind the flag; Cx 198 "build shape I would green")
 
-1. Typed `ReshapePlan` / `ReshapeResult` + pure `reshape_canon` helper — writes the reshape event,
-   explicit `caused_by`, **appended** current-state rows, scoped re-stage + narrow frame rows;
-   never mines prose. (Cx-greenlit to start now.)
-2. Pre-render detection + sanctioning behind the flag: success tiers commit the reshaped state
-   before beat eval/narration; failure tiers commit the attempt/fallout without flipping the target.
-3. Post-render allowlisting against the plan (exact plan matches harmless; off-plan overwrites stay
-   quarantined).
-4. `replan_main_arc` mid-episode op: supersede `plot:` control rows, author the best new arc, **no**
-   `episode_start`, no checkpoint, no terminal reset.
-5. Focused guardrail tests: flag-off revive stays quarantined; `success_cost` → current=alive /
-   as-of-before=dead / reshape event has `caused_by`; failure tiers write consequences but don't
-   flip the target; off-plan narrator overwrites still quarantine; replan writes no `episode_start`
-   and resurrects no old terminal receipt; revived NPC is locatable with only scoped justified
-   knowledge.
-6. Live proof: the lighthouse revive lands, Angus becomes a questionable witness, the story finds
+1. **DONE / Cx-GREEN (202):** Typed `ReshapePlan`/`ReshapeResult` + pure `reshape_canon` — appended
+   current-state rows, explicit `caused_by` event, fail-closed scoped frames; `plan_from_proposal`
+   bridge; never mines prose.
+2. **DONE / Cx-GREEN (202):** `propose_reshape` cohort (rule-of-cool judge) + `apply_reshape`
+   orchestration + the `CONSTRUCT_WORLD_RESHAPE` flag (default off, fail-open).
+3. **DONE / Cx-GREEN (207):** `run_turn` trigger wiring — pre-`beat_pass` commit; `canon_table`
+   patched from the committed rows; exact `(entity,attribute,value)` license on `licensed_strict`
+   so a reshaped PROTECTED key promotes while private witness frames stay unlicensed; narrator
+   briefed with the summary. Integration tests: protected-key commit+promote, failure-tier
+   consequence-without-flip, flag-off inert.
+4. **NEXT — `replan_main_arc`** mid-episode op: supersede `plot:` control rows, AUTHOR the best new
+   arc from the reshaped world + the player's direction (founder's "the agent guides it to where the
+   best story is"), **no** `episode_start`, no checkpoint, no terminal reset. Safety net: a reshape
+   that can't yield a coherent arc degrades to the `incompletable`/fallout pathway, never a dead end.
+5. Live proof: the lighthouse revive lands, Angus becomes a questionable witness, the story finds
    its best next shape — logged transcript to the founder.
+
+### Open item for step 4 / live proof (Cx 207 note #2)
+The trigger patches `canon_table` but does NOT expand `snap_scope`. Fine today (the narrator is driven
+by `trace.reshape` and the gate uses an exact license), but if a reshape **introduces or restages an
+entity that was outside the original scene scope** (a revived NPC who wasn't staged), ordinary scene
+listing / name resolution may need an explicit `snap_scope` refresh. Handle in `replan_main_arc` (it
+re-stages) or as a scope-refresh after a non-None reshape.
