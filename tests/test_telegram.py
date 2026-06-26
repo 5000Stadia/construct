@@ -366,8 +366,8 @@ class TestRouting:
         assert "a space-station noir" in builds[0]["seed"]
         # streamed progress: heads-up + a humanized stage line + a chunk counter
         assert BUILD_HEADS_UP in pings
-        assert any("Bringing the world into being" in p for p in pings)
-        assert any("Populating the world (2/5)" in p for p in pings)
+        assert any("Ingesting it into the pattern-buffer" in p for p in pings)
+        assert any("into the pattern-buffer (2/5)" in p for p in pings)
         # entered the freshly-built per-player world; player repointed + started
         built = f"live_telegram_bld"
         assert registry.scenario_for(conn, "telegram", "bld") == built
@@ -899,16 +899,17 @@ class TestInterpretMode:
 
 
 class TestHumanizeStage:
-    def test_maps_known_stages_to_warm_lines(self):
-        assert "Dreaming up the story" in _humanize_stage(
+    def test_maps_known_stages_to_pattern_buffer_lines(self):
+        # The progress lines now SHOWCASE the pattern-buffer under the hood (founder).
+        assert "Authoring the source story" in _humanize_stage(
             "Stage 0 · Authoring the hidden source story · prose-first")
-        assert "Bringing the world into being" in _humanize_stage(
+        assert "pattern-buffer" in _humanize_stage(
             "Stage 1 · Ingesting prose → pattern-buffer")
         assert "Final checks" in _humanize_stage("Stage 7 · Viability gate · …")
 
-    def test_collapses_per_chunk_to_a_counter(self):
+    def test_collapses_per_chunk_to_a_pattern_buffer_counter(self):
         assert _humanize_stage("   …chunk 3/7 extracted") == (
-            "· Populating the world (3/7)…")
+            "· Entering people, places & things into the pattern-buffer (3/7)…")
 
     def test_internal_lines_stay_silent(self):
         # Truly-internal noise stays silent (the "bible" line honors the no-jargon directive).
@@ -919,9 +920,9 @@ class TestHumanizeStage:
         # The build's longest stage (durability classification) is now surfaced so the player isn't
         # left staring at one line through the silent bottleneck (founder build-display ask).
         assert _humanize_stage("Stage 6.2 · Classifying durability · BATCHED") == \
-            "· Settling what's true and lasting…"
+            "· Classifying what's durable vs. fleeting…"
         assert _humanize_stage("Stage 3 · Declaring passability · RFC-003") == \
-            "· Mapping how the world connects…"
+            "· Recording how the places connect…"
 
 
 # ---- chunking ------------------------------------------------------------

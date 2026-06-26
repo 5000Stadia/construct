@@ -1333,19 +1333,19 @@ def _safe(s: str) -> str:
 #: stream during a build. Lines with no mapping are internal and stay silent
 #: (the per-chunk "extracted" lines are collapsed into one rolling counter).
 _STAGE_LINES = (
-    ("Authoring the hidden source story", "· Dreaming up the story…"),
-    ("Ingesting prose", "· Bringing the world into being…"),
-    ("Reconciling identity", "· Reconciling who's who…"),
-    ("Declaring passability", "· Mapping how the world connects…"),
-    ("Authoring the hidden arc", "· Weaving your hidden path…"),
-    ("Seeding character knowledge", "· Teaching the characters what they know…"),
-    ("thematic introduction", "· Writing your way in…"),
-    ("back-of-the-book premise", "· Writing your way in…"),
+    ("Authoring the hidden source story", "· Authoring the source story…"),
+    ("Ingesting prose", "· Ingesting it into the pattern-buffer…"),
+    ("Reconciling identity", "· Reconciling identities (coreference)…"),
+    ("Declaring passability", "· Recording how the places connect…"),
+    ("Authoring the hidden arc", "· Weaving the hidden arc into a private frame…"),
+    ("Seeding character knowledge", "· Seeding each character's knowledge frame…"),
+    ("thematic introduction", "· Composing your way in…"),
+    ("back-of-the-book premise", "· Composing your way in…"),
     # The build's LONGEST stage (~most of the wall-clock — hundreds of serial classify calls):
     # surface it so the player isn't left staring at one line through the silent bottleneck.
-    ("Classifying durability", "· Settling what's true and lasting…"),
-    ("Distilling narrative flavor", "· Setting the tone and texture…"),
-    ("Sealing the scenario", "· Sealing the world…"),
+    ("Classifying durability", "· Classifying what's durable vs. fleeting…"),
+    ("Distilling narrative flavor", "· Distilling tone & texture…"),
+    ("Sealing the scenario", "· Sealing the world snapshot…"),
     ("Viability gate", "· Final checks before the doors open…"),
 )
 
@@ -1358,7 +1358,8 @@ def _humanize_stage(msg: str) -> str | None:
     text = (msg or "").strip()
     m = re.search(r"chunk (\d+)/(\d+) extracted", text)
     if m:
-        return f"· Populating the world ({m.group(1)}/{m.group(2)})…"
+        return (f"· Entering people, places & things into the pattern-buffer "
+                f"({m.group(1)}/{m.group(2)})…")
     for needle, line in _STAGE_LINES:
         if needle in text:
             return line
