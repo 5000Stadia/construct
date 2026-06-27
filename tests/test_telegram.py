@@ -1271,3 +1271,40 @@ class TestSceneImageDelivery:
         out = core.handle(_ev("telegram", "wi", code), now=NOW)
         assert sent and sent[0].endswith("welcome.png")          # image first
         assert "Welcome to the Construct Projector" in out.chunks[0]  # then the menu
+
+    def test_opening_splits_framing_then_picture_then_room(self, conn, tmp_path):
+        # Founder layout: framing message → location picture → the localized room.
+        img = tmp_path / "scene.png"
+        img.write_bytes(b"\x89PNG fake")
+        notes, photos = [], []
+
+        class _S:
+            scenario = "latch"
+
+            def opening_parts(self):
+                return ("FRAMING — the premise", "ROOM — you stand in the office")
+
+            def pending_image(self, timeout=75.0):
+                return SimpleNamespace(asset_path=str(img))
+
+        core = _core(conn, _Factory(),
+                     photo=lambda c, p, cap="": photos.append(p),
+                     notify=lambda c, t: notes.append(t))
+        out = core._opening_reply(_ev("telegram", "ox", "x"), "telegram:ox", _S())
+        assert notes == ["FRAMING — the premise"]            # 1: framing (out of band)
+        assert photos == [str(img)]                          # 2: the picture
+        assert out.chunks[0] == "ROOM — you stand in the office"  # 3: the room
+
+    def test_opening_without_picture_is_one_combined_message(self, conn):
+        class _S:
+            scenario = "latch"
+
+            def opening_parts(self):
+                return ("FRAMING", "ROOM")
+
+            def pending_image(self, timeout=75.0):
+                return None  # nothing rendered → no split
+
+        core = _core(conn, _Factory(), photo=lambda c, p, cap="": None)
+        out = core._opening_reply(_ev("telegram", "oy", "x"), "telegram:oy", _S())
+        assert out.chunks[0] == "FRAMING\n\nROOM"  # combined, no awkward fragmentation

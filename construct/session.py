@@ -318,38 +318,34 @@ class Session:
         goal = self._meta.get("goal_statement")
         return str(goal) if goal else None
 
-    def opening(self) -> str:
-        """The cold open the player steps into — an ELEGANT NARRATED scene, not a
-        structure dump. The establishing facts ('the world at rest') are anchors
-        the narrator renders FROM, in the world's voice and by name; they are never
-        shown raw (founder: this front end is live fiction, not pattern-buffer
-        retrieval). Layout: title · the authored thematic intro · the narrated cold
-        open. NO forced 'aim'/objective banner — the call to action arises in the
-        fiction (founder). Falls back to a clean (id-free, triple-free) banner only
-        if narration is unavailable."""
+    def opening_parts(self) -> tuple[str, str]:
+        """The cold open SPLIT for the founder's scene-image layout: `(framing, scene)`.
+        `framing` = title + the thematic intro (the back-of-book setup), shown BEFORE
+        the picture; `scene` = the localized cold-open ROOM narration ('you stand in
+        your office…'), shown AFTER the picture so the painting introduces the room and
+        the prose then walks you into it. Starts the scene-image render UP FRONT so it
+        generates while the (slow) narration is composed. NO forced 'aim'/objective
+        banner — the call to action arises in the fiction (founder)."""
         title = self.title
         intro = (self._meta.get("intro") or "").strip()
-        # SCENE-IMAGERY: the opening needs an image too. `furnish_scene` normally mints
-        # the place description only DURING a turn, so mint it here first and START the
-        # render NOW — BEFORE the (slow) opening narration — so the picture generates in
-        # parallel with the prose and is ready for the bounded delivery join.
+        # SCENE-IMAGERY: furnish + START the render now (furnish otherwise runs only
+        # during a turn), before narration, so the picture renders in parallel.
         self._ensure_scene_description()
         self._note_scene_image()
         scene = self._opening_narration(intro)
-        parts = [title]
-        if intro:
-            parts.append(intro)
-        if scene:
-            parts.append(scene)
-        elif not intro:  # clean last resort — never raw triples/ids
+        if not scene and not intro:  # clean last resort — never raw triples/ids
             who = self._display_name(self._arc.protagonist)
             where = self._display_name(self.location())
-            parts.append(f"You are {who}" + (f", at {where}." if where else "."))
-        # NO forced 'aim'/objective banner (founder 2026-06-22: "no forced goal —
-        # the fiction needs to carry it"). The call to action ARISES diegetically
-        # over the cold open + first beats, like a detective story that begins
-        # before the case lands — never a game-y objective line stapled on top.
-        return "\n\n".join(p for p in parts if p)
+            scene = f"You are {who}" + (f", at {where}." if where else ".")
+        framing = "\n\n".join(p for p in (title, intro) if p)
+        return framing, scene
+
+    def opening(self) -> str:
+        """The cold open as ONE string (CLI / non-image transports / tests): framing +
+        scene joined. Image-capable transports use :meth:`opening_parts` to place the
+        picture between the framing and the room."""
+        framing, scene = self.opening_parts()
+        return "\n\n".join(p for p in (framing, scene) if p)
 
     def _display_name(self, entity) -> str:
         """An entity's established name/alias/title (player frame, then canon), else

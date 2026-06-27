@@ -403,9 +403,7 @@ class TransportCore:
         registry.clear_chargen(self._conn, ev.platform, ev.external_id)
         registry.mark_started(self._conn, ev.platform, ev.external_id)
         self._checkpoint_episode(ev, pid)  # the fresh playable start
-        opening = session.opening()
-        self._deliver_scene_image(ev, pid)  # opening scene image, in parallel
-        return self._reply(ev, f"{preamble}\n\n{opening}" if preamble else opening)
+        return self._opening_reply(ev, pid, session, preamble=preamble)
 
     def _drop_slot(self, scenario: str, pid: str) -> None:
         try:
@@ -889,9 +887,7 @@ class TransportCore:
             except Exception:
                 logger.exception("continuation note injection failed for %s", pid)
         try:
-            opening = session.opening()
-            self._deliver_scene_image(ev, pid)  # the new chapter's opening scene image
-            return self._reply(ev, opening)
+            return self._opening_reply(ev, pid, session)
         except Exception as exc:
             logger.exception("continuation opening failed for %s", pid)
             return self._reply(ev, f"(the next chapter opened, but its scene didn't render: {exc})")
@@ -998,9 +994,7 @@ class TransportCore:
 
         registry.mark_started(self._conn, ev.platform, ev.external_id)
         registry.clear_chargen(self._conn, ev.platform, ev.external_id)
-        opening = session.opening()
-        self._deliver_scene_image(ev, pid)  # opening scene image, in parallel
-        return self._reply(ev, f"{preamble}\n\n{opening}" if preamble else opening)
+        return self._opening_reply(ev, pid, session, preamble=preamble)
 
     # -- the Foyer: character creation, the WHO phase before turn one --------
     def _begin_foyer(self, ev: InboundEvent, setup: dict, preamble: str) -> Outbound:
@@ -1077,9 +1071,7 @@ class TransportCore:
         registry.mark_started(self._conn, ev.platform, ev.external_id)
         registry.clear_chargen(self._conn, ev.platform, ev.external_id)
         registry.clear_creation(self._conn, ev.platform, ev.external_id)
-        opening = session.opening()
-        self._deliver_scene_image(ev, pid)  # the opening scene image (post-Foyer entry)
-        return self._reply(ev, f"{result.reply}\n\n{opening}")
+        return self._opening_reply(ev, pid, session, preamble=result.reply)
 
     def _checkpoint_episode(self, ev: InboundEvent, pid: str) -> None:
         """Snapshot the player's current slot as this episode's start checkpoint —
@@ -1187,6 +1179,39 @@ class TransportCore:
                 self._photo_fn(ev.chat_id, rec.asset_path, "")
         except Exception:
             logger.exception("scene-image deliver failed for %s", pid)
+
+    def _opening_reply(self, ev: InboundEvent, pid: str, session: Any,
+                       *, preamble: str = "") -> Outbound:
+        """Deliver a cold open in the founder's layout: the FRAMING (title + premise)
+        first, THEN the location picture, THEN the localized room narration — so the
+        painting introduces the room before the prose walks you in. Falls back to one
+        combined message when there's no picture (no backend / not ready / no sink)."""
+        try:
+            framing, scene = session.opening_parts()
+        except Exception:
+            logger.exception("opening_parts failed for %s", pid)
+            try:
+                return self._reply(ev, ((preamble + "\n\n") if preamble else "") + session.opening())
+            except Exception:
+                return self._reply(ev, preamble or "(the scene didn't render)")
+        head = "\n\n".join(p for p in (preamble, framing) if p)
+        rec = None
+        if self._photo_fn is not None:
+            try:
+                rec = session.pending_image()  # join the render started by opening_parts
+            except Exception:
+                logger.exception("opening image join failed for %s", pid)
+        have_image = bool(rec and getattr(rec, "asset_path", "")
+                          and Path(rec.asset_path).exists())
+        if have_image and scene:
+            if head:
+                self._notify(ev, head)                  # message 1: framing
+            self._photo_fn(ev.chat_id, rec.asset_path, "")  # the location picture
+            return self._reply(ev, scene)               # message 2: the room
+        if have_image:  # picture but no separate room narration → picture then framing
+            self._photo_fn(ev.chat_id, rec.asset_path, "")
+            return self._reply(ev, head)
+        return self._reply(ev, "\n\n".join(p for p in (head, scene) if p))
 
     # -- transcript + /dump ------------------------------------------------
     def _transcript_path(self, ev: InboundEvent) -> Path:
