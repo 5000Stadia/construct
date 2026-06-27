@@ -329,6 +329,12 @@ class Session:
         if narration is unavailable."""
         title = self.title
         intro = (self._meta.get("intro") or "").strip()
+        # SCENE-IMAGERY: the opening needs an image too. `furnish_scene` normally mints
+        # the place description only DURING a turn, so mint it here first and START the
+        # render NOW — BEFORE the (slow) opening narration — so the picture generates in
+        # parallel with the prose and is ready for the bounded delivery join.
+        self._ensure_scene_description()
+        self._note_scene_image()
         scene = self._opening_narration(intro)
         parts = [title]
         if intro:
@@ -339,10 +345,6 @@ class Session:
             who = self._display_name(self._arc.protagonist)
             where = self._display_name(self.location())
             parts.append(f"You are {who}" + (f", at {where}." if where else "."))
-        # SCENE-IMAGERY: the opening needs an image too. `furnish_scene` normally mints
-        # the place description only DURING a turn, so mint it here first, then detect.
-        self._ensure_scene_description()
-        self._note_scene_image()
         # NO forced 'aim'/objective banner (founder 2026-06-22: "no forced goal —
         # the fiction needs to carry it"). The call to action ARISES diegetically
         # over the cold open + first beats, like a detective story that begins
@@ -781,7 +783,7 @@ class Session:
         threading.Thread(target=_run, daemon=True, name="scene-image").start()
         self._pending_image = holder
 
-    def pending_image(self, timeout: float = 30.0) -> Any:
+    def pending_image(self, timeout: float = 75.0) -> Any:
         """Block (bounded) for the in-flight scene render and return the rendered
         SceneImage iff its asset file is ready, else None. One-shot — clears the slot,
         so a fresh image is delivered exactly once, just before its scene's prose."""

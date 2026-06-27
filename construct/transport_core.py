@@ -1078,6 +1078,7 @@ class TransportCore:
         registry.clear_chargen(self._conn, ev.platform, ev.external_id)
         registry.clear_creation(self._conn, ev.platform, ev.external_id)
         opening = session.opening()
+        self._deliver_scene_image(ev, pid)  # the opening scene image (post-Foyer entry)
         return self._reply(ev, f"{result.reply}\n\n{opening}")
 
     def _checkpoint_episode(self, ev: InboundEvent, pid: str) -> None:
