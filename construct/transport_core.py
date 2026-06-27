@@ -100,6 +100,8 @@ class InboundEvent:
 class Outbound:
     chat_id: str
     chunks: list[str] = field(default_factory=list)
+    image: str | None = None  # SCENE-IMAGERY: a location image to show BEFORE the text
+                              # (set ONLY on a scene change — see _scene_image)
 
 
 def chunk(text: str, limit: int) -> list[str]:
@@ -133,7 +135,8 @@ class TransportCore:
                  feedback_dir: Path | str | None = None,
                  provider: Any | None = None,
                  builder: Callable[..., Any] | None = None,
-                 notify: Callable[[str, str], None] | None = None) -> None:
+                 notify: Callable[[str, str], None] | None = None,
+                 photo: Callable[[str, str, str], None] | None = None) -> None:
         self._conn = conn
         self._platform = platform
         self._limit = msg_limit
@@ -166,6 +169,10 @@ class TransportCore:
         self._provider_obj = provider
         self._builder = builder
         self._notify_fn = notify
+        # SCENE-IMAGERY: a (chat_id, image_path, caption) sink for delivering a fresh
+        # location's picture OUT OF BAND (after the text, when the parallel render is
+        # done). Injected by the transport adapter; no-op (text-only) when absent.
+        self._photo_fn = photo
 
     def _provider(self) -> Any:
         if self._provider_obj is None:
@@ -393,6 +400,7 @@ class TransportCore:
         registry.mark_started(self._conn, ev.platform, ev.external_id)
         self._checkpoint_episode(ev, pid)  # the fresh playable start
         opening = session.opening()
+        self._deliver_scene_image(ev, pid)  # opening scene image, in parallel
         return self._reply(ev, f"{preamble}\n\n{opening}" if preamble else opening)
 
     def _drop_slot(self, scenario: str, pid: str) -> None:
@@ -841,6 +849,7 @@ class TransportCore:
             self._pending_continue.add(pid)
             prose = (prose.rstrip() + "\n\n— — —\nThe case is closed, and word of it will "
                      "travel. **Continue to the next chapter?** (yes / no)")
+        self._deliver_scene_image(ev, pid)
         return self._reply(ev, prose)
 
     def _do_continue(self, pid: str, ev: InboundEvent) -> Outbound:
@@ -875,7 +884,9 @@ class TransportCore:
             except Exception:
                 logger.exception("continuation note injection failed for %s", pid)
         try:
-            return self._reply(ev, session.opening())
+            opening = session.opening()
+            self._deliver_scene_image(ev, pid)  # the new chapter's opening scene image
+            return self._reply(ev, opening)
         except Exception as exc:
             logger.exception("continuation opening failed for %s", pid)
             return self._reply(ev, f"(the next chapter opened, but its scene didn't render: {exc})")
@@ -983,6 +994,7 @@ class TransportCore:
         registry.mark_started(self._conn, ev.platform, ev.external_id)
         registry.clear_chargen(self._conn, ev.platform, ev.external_id)
         opening = session.opening()
+        self._deliver_scene_image(ev, pid)  # opening scene image, in parallel
         return self._reply(ev, f"{preamble}\n\n{opening}" if preamble else opening)
 
     # -- the Foyer: character creation, the WHO phase before turn one --------
@@ -1132,6 +1144,25 @@ class TransportCore:
 
     def _reply(self, ev: InboundEvent, text: str) -> Outbound:
         return Outbound(chat_id=ev.chat_id, chunks=chunk(text, self._limit))
+
+    def _deliver_scene_image(self, ev: InboundEvent, pid: str) -> None:
+        """SCENE-IMAGERY: show a fresh location's picture JUST BEFORE its prose
+        (founder's layout: image → new-scene text). The render was started in
+        parallel during the turn (Session `on_scene`), so here we only join it
+        (bounded) and send the photo NOW — before the text reply is returned, so the
+        image lands first. A same-location turn has no pending render → nothing sent,
+        so the conversation stays text-only until the scene actually moves."""
+        if self._photo_fn is None:
+            return
+        session = self._sessions.get(pid)
+        if session is None:
+            return
+        try:
+            rec = session.pending_image()  # bounded join; ready record or None
+            if rec and getattr(rec, "asset_path", ""):
+                self._photo_fn(ev.chat_id, rec.asset_path, "")
+        except Exception:
+            logger.exception("scene-image deliver failed for %s", pid)
 
     # -- transcript + /dump ------------------------------------------------
     def _transcript_path(self, ev: InboundEvent) -> Path:

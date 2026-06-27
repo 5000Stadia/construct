@@ -22,7 +22,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from construct import cohorts
 from construct import resolution
@@ -887,7 +887,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              cast: dict | None = None,
              side_arcs: list[Arc] | None = None,
              terminal_owner: str = "world_event",
-             generate: bool = True) -> TurnResult:
+             generate: bool = True,
+             on_scene: Callable[[], None] | None = None) -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
     'coauthor' (the player may declare facts into the world).
@@ -1250,6 +1251,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
 
     with _phase(trace, "furnish"):
         furnish_scene(p, scene, player_frame, canon_table, trace)
+    # SCENE-IMAGERY (founder: start the image gen ASAP, in parallel): the scene's
+    # description is committed now — fire the detection/render hook here so the
+    # picture renders WHILE the NPC actions + narration below run, and is ready to
+    # show just before this scene's prose. Best-effort; never affects the turn.
+    if on_scene is not None:
+        try:
+            on_scene()
+        except Exception:
+            logger.debug("on_scene hook failed", exc_info=True)
 
     # NPCs PRESENT in the scene drive their own action + speech. Presence is
     # CONTAINMENT-AWARE, not an exact `in == scene` match (founder bug: NPCs the cold

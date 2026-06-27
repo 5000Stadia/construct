@@ -1206,3 +1206,57 @@ class TestLoopback:
         loopback.pump(conn, core, inbound, outbox, now_fn=lambda: NOW)
         assert "recovered line" in outbox.read_text()
         assert registry.pending_outbox(conn, "loopback") == []
+
+
+# ---- SCENE-IMAGERY: photo delivered just before a new scene's prose ------
+
+class TestSceneImageDelivery:
+    """The image rides in OUT OF BAND (the photo side-channel) just before the
+    new-location text, and only on a scene change — same-location turns stay
+    text-only (founder's layout: image → new-scene prose; no image otherwise)."""
+
+    def _admit(self, conn, ext, scenario="anchor"):
+        code = registry.mint_invite(conn, "telegram", scenario, now=NOW)
+        registry.claim_invite(conn, code, "telegram", ext, now=NOW)
+        registry.mark_started(conn, "telegram", ext)
+
+    def _factory(self, pending):
+        class _S(_FakeSession):
+            def turn(self, text):
+                self.turns.append(text)
+                return SimpleNamespace(prose=f"narrated<{text}>", ok=True,
+                                       ended=False, exit_requested=False)
+            def pending_image(self, timeout=30.0):
+                return pending
+
+        class _F(_Factory):
+            def __call__(self, *, scenario, player_id, fresh, mode_override=None):
+                s = _S(scenario, player_id, fresh, mode_override, setup=self.setup)
+                self.sessions[player_id] = s
+                return s
+        return _F()
+
+    def test_fresh_scene_sends_photo_before_text(self, conn):
+        self._admit(conn, "im1")
+        order = []
+        core = _core(conn, self._factory(SimpleNamespace(asset_path="/tmp/scene.png")),
+                     photo=lambda chat, path, cap="": order.append(("photo", path)))
+        out = core.handle(_ev("telegram", "im1", "go to the vault"), now=NOW)
+        order.append(("text", out.chunks[0]))
+        # the photo was delivered DURING handle, before the text reply was returned
+        assert order[0] == ("photo", "/tmp/scene.png")
+        assert order[1][0] == "text" and "narrated" in order[1][1]
+
+    def test_same_location_sends_no_photo(self, conn):
+        self._admit(conn, "im2")
+        sent = []
+        core = _core(conn, self._factory(None),   # nothing pending → no scene change
+                     photo=lambda chat, path, cap="": sent.append(path))
+        core.handle(_ev("telegram", "im2", "look around"), now=NOW)
+        assert sent == []
+
+    def test_no_photo_sink_is_safe(self, conn):
+        self._admit(conn, "im3")
+        core = _core(conn, self._factory(SimpleNamespace(asset_path="/tmp/x.png")))
+        out = core.handle(_ev("telegram", "im3", "look"), now=NOW)  # photo= absent
+        assert out.chunks[0].endswith("narrated<look>")  # no crash; text delivered

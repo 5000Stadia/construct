@@ -92,6 +92,26 @@ class TelegramClient:
         if not ok or status >= 400:
             raise RuntimeError(self._redact(f"sendMessage failed (status={status})"))
 
+    def send_photo(self, chat_id: str, photo_path: str, caption: str = "") -> bool:
+        """Upload a local image (multipart) to a chat — the SCENE-IMAGERY picture
+        shown just before a new location's prose. Best-effort: returns False (never
+        raises) so a generator/upload hiccup can never sink the turn's text."""
+        try:
+            from pathlib import Path
+            p = Path(photo_path)
+            if not p.exists():
+                return False
+            with p.open("rb") as fh:
+                resp = self._http.post(
+                    f"{self._base}/sendPhoto",
+                    data={"chat_id": chat_id, "caption": caption[:1024]} if caption
+                    else {"chat_id": chat_id},
+                    files={"photo": (p.name, fh, "image/png")})
+            return bool(resp.json().get("ok", False))
+        except Exception:
+            logger.debug("telegram sendPhoto failed (ignored)")
+            return False
+
     def send_chat_action(self, chat_id: str, action: str = "typing") -> None:
         """Best-effort presence signal ('typing…'). NEVER raises — a failed
         presence ping must not affect the turn or its exactly-once delivery."""
@@ -198,8 +218,14 @@ def serve(registry_path, token: str, *, session_factory=None, client: TelegramCl
         except Exception:
             logger.exception("telegram notify failed")
 
+    def _photo(chat_id: str, path: str, caption: str = "") -> None:
+        # SCENE-IMAGERY: a fresh location's picture, shown just before its prose.
+        # Best-effort (send_photo never raises) — a missing/slow image must never
+        # block or sink the turn's text.
+        client.send_photo(chat_id, path, caption)
+
     core = TransportCore(conn, platform=PLATFORM, msg_limit=MSG_LIMIT,
-                         session_factory=session_factory, notify=_notify)
+                         session_factory=session_factory, notify=_notify, photo=_photo)
     for uid in registry.interrupted_updates(conn, PLATFORM):
         logger.error("telegram: update %s was interrupted mid-turn; its reply was "
                      "never produced (the player may retry) — not re-running", uid)

@@ -14,6 +14,11 @@ __pycache__/
 # Generated hidden bibles — runtime artifacts (the authoring side of the firewall).
 generated/
 
+# SCENE-IMAGERY: generated location image assets (runtime, regenerable from the
+# per-scenario prompt manifests at worlds/<scenario>.images.json — themselves ignored
+# by the worlds/* rule below).
+images/
+
 # Built/runtime worlds are regenerable from examples/ source (the firewall), so they
 # are ignored — EXCEPT the shipped demo scenario `anchor` (its pristine build + meta),
 # so a fresh clone has a good story ready to play. Per-player play slots, other test/

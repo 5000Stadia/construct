@@ -43,6 +43,7 @@ class Reply:
     ok: bool = True
     ended: bool = False  # the scenario reached its win/loss terminal (win_loss mode)
     exit_requested: bool = False  # player asked (OOC) to leave/start over
+    image: Any = None  # SceneImage for this turn's location (SCENE-IMAGERY), or None
 
 
 class Session:
@@ -338,6 +339,7 @@ class Session:
             who = self._display_name(self._arc.protagonist)
             where = self._display_name(self.location())
             parts.append(f"You are {who}" + (f", at {where}." if where else "."))
+        self._note_scene_image()  # SCENE-IMAGERY: capture the opening location too
         # NO forced 'aim'/objective banner (founder 2026-06-22: "no forced goal —
         # the fiction needs to carry it"). The call to action ARISES diegetically
         # over the cold open + first beats, like a detective story that begins
@@ -628,7 +630,8 @@ class Session:
                               terminal_owner=self._terminal_owner,
                               suspense=self._suspense,
                               cast=self._cast or None,
-                              side_arcs=self._side_arcs)
+                              side_arcs=self._side_arcs,
+                              on_scene=self._note_scene_image)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
             return Reply(prose=f"(the turn could not complete: {exc})",
@@ -640,9 +643,105 @@ class Session:
         if result.trace and getattr(result.trace, "replanned", ""):
             self._reload_arc_portfolio(
                 extra_scope=getattr(result.trace, "reshape_entities", None))
+        # Post-turn safety net: the mid-turn `on_scene` hook already started the
+        # render for the common move-to-a-new-room case; re-checking here (idempotent
+        # via the in-flight guard) also catches a description that CHANGED in place
+        # (a reshape, a fire) where furnish didn't re-fire.
+        self._note_scene_image()
         return Reply(prose=result.prose, trace=result.trace,
                      ended=bool(result.trace and result.trace.terminal),
-                     exit_requested=getattr(result, "exit_requested", False))
+                     exit_requested=getattr(result, "exit_requested", False),
+                     image=self.last_image)
+
+    def _note_scene_image(self) -> Any:
+        """SCENE-IMAGERY hook: DETECT whether the location is new/changed (a fast,
+        pure hash check — NO model call) and, if so, START rendering its image in the
+        BACKGROUND so the generation overlaps the rest of the turn (founder: fire ASAP,
+        text-only meanwhile). The transport joins via `pending_image()` and shows a
+        fresh image JUST BEFORE the new scene's prose. Fail-open; idempotent per scene."""
+        try:
+            from construct import imagery
+            from construct.foyer import state_value
+            if not imagery.enabled():
+                return None
+            loc = self.location()
+            if not loc:
+                return None
+            desc = state_value(self._world.porcelain, loc, "description")
+            if not desc:
+                return None
+            rec = imagery.plan_scene(self.scenario, loc,
+                                     self._display_name(loc) or loc, desc,
+                                     world_brief=self._meta.get("premise", ""),
+                                     genre=self._scene_genre())
+            self._last_image = rec
+            if rec and rec.fresh and not self._render_in_flight(rec):
+                self._start_render(rec)
+            return rec
+        except Exception:
+            logger.debug("scene-image hook failed", exc_info=True)
+            return None
+
+    def _scene_genre(self) -> str:
+        """The world's listed genre / game-type, humanized — dumped into the image
+        style for per-story visual variety (founder). E.g. 'mystery whodunnit, social
+        drama relationship web'. Empty when the world declares none."""
+        parts: list[str] = []
+        gt = self._meta.get("game_type") or self._meta.get("game_types") or []
+        if isinstance(gt, str):
+            gt = [gt]
+        parts.extend(str(g) for g in gt if g)
+        for key in ("genre", "genre_era"):
+            v = (self._meta.get(key) or "").strip()
+            if v:
+                parts.append(v)
+        seen, out = set(), []
+        for p in parts:
+            p = p.replace("_", " ").strip()
+            if p and p.lower() not in seen:
+                seen.add(p.lower())
+                out.append(p)
+        return ", ".join(out[:3])
+
+    def _render_in_flight(self, rec: Any) -> bool:
+        h = getattr(self, "_pending_image", None)
+        return bool(h and h["rec"].description_hash == rec.description_hash)
+
+    def _start_render(self, rec: Any) -> None:
+        """Kick the (slow) prompt-cohort + image generation on a daemon thread, so a
+        fresh location's picture is being made while the turn's prose is composed."""
+        import threading
+        from construct import imagery
+        holder: dict[str, Any] = {"rec": rec, "done": threading.Event()}
+
+        def _run() -> None:
+            try:
+                imagery.render(self.scenario, rec, provider=self._provider)
+            finally:
+                holder["done"].set()
+
+        threading.Thread(target=_run, daemon=True, name="scene-image").start()
+        self._pending_image = holder
+
+    def pending_image(self, timeout: float = 30.0) -> Any:
+        """Block (bounded) for the in-flight scene render and return the rendered
+        SceneImage iff its asset file is ready, else None. One-shot — clears the slot,
+        so a fresh image is delivered exactly once, just before its scene's prose."""
+        holder = getattr(self, "_pending_image", None)
+        self._pending_image = None
+        if not holder:
+            return None
+        holder["done"].wait(timeout)
+        rec = holder["rec"]
+        from pathlib import Path
+        if rec and rec.asset_path and Path(rec.asset_path).exists():
+            return rec
+        return None
+
+    @property
+    def last_image(self) -> Any:
+        """The most recently planned SceneImage (fresh/cached), or None."""
+        return getattr(self, "_last_image", None)
 
     def _reload_arc_portfolio(self, extra_scope: list | None = None) -> None:
         """Refresh the live arc portfolio from PB after a mid-story re-plan, so subsequent
