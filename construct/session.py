@@ -278,7 +278,7 @@ class Session:
                     "defaults": defaults,
                     "theme": theme,  # title · genre · game-type — to color the Foyer voice
                     "world_brief": world_brief,  # the authored premise — to establish the world
-                    "anchors": world_anchors(self._world, self._scope, proto)}
+                    "anchors": world_anchors(self._world, self._scope, proto, as_of=_h)}
         except Exception:
             logger.exception("character_setup failed for %s", self.scenario)
             return None

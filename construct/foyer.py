@@ -101,21 +101,24 @@ def state_value(porcelain: Any, entity: str, attribute: str,
     return None
 
 
-def world_anchors(world: Any, scope: list[str] | None, protagonist: str) -> list[str]:
+def world_anchors(world: Any, scope: list[str] | None, protagonist: str,
+                  *, as_of: float | None = None) -> list[str]:
     """The world's threads tied to the protagonist — the arc-scope entities the
     fiction connected to them (a mentor, an agency, a relative). Read straight
     from canon (the engine is the truth); each rendered as a short anchor line the
-    Foyer can surface. Best-effort; never sinks the phase."""
+    Foyer can surface. Best-effort; never sinks the phase. `as_of` (Cx 257): read
+    the anchors at the opening horizon, so the foyer reflects the world's BEGINNING."""
     anchors: list[str] = []
     p = getattr(world, "porcelain", None)
     for entity in (scope or []):
         if entity == protagonist or not p:
             continue
-        kind = state_value(p, entity, "kind") or entity.split(":", 1)[0]
-        name = (state_value(p, entity, "name")
+        kind = state_value(p, entity, "kind", as_of=as_of) or entity.split(":", 1)[0]
+        name = (state_value(p, entity, "name", as_of=as_of)
                 or entity.split(":", 1)[-1].replace("_", " "))
-        feel = (state_value(p, entity, "role") or state_value(p, entity, "feel")
-                or state_value(p, entity, "disposition") or "")
+        feel = (state_value(p, entity, "role", as_of=as_of)
+                or state_value(p, entity, "feel", as_of=as_of)
+                or state_value(p, entity, "disposition", as_of=as_of) or "")
         anchors.append(f"{name} ({kind})" + (f" — {feel}" if feel else ""))
     return anchors
 
