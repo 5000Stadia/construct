@@ -27,10 +27,10 @@
     "person:cabman"
   ],
   "endless": false,
-  "goal_statement": "Solve Malachi Harrow\u2019s locked-room murder at Number 17 Bleakstone Square: name who killed him and explain how the sealed study was made to lie.",
-  "intro": "In the winter murk of 1888, Number 17 Bleakstone Square stands with its brass polished, its ledgers tied in green tape, and its windows looking eastward toward the smoke and want of Whitechapel. Within such respectable walls, a locked door may seem a miracle to the credulous; yet every blotter, latch, coal-scuttle, and folded receipt keeps a plainer, meaner counsel. Truth, in this house, is no conjurer\u2019s flourish, but the slow exposure of appetite dressed in mourning black and good linen.",
+  "goal_statement": "Solve Malachi Harrow’s locked-room murder at Number 17 Bleakstone Square: name who killed him and explain how the sealed study was made to lie.",
+  "intro": "In the gaslit winter of 1888, Number 17 Bleakstone Square stands behind its polished knocker and drawn curtains, a respectable London house with Whitechapel mud not far from its doorstep. Malachi Harrow has been found dead in his sealed study among green-taped ledgers, while the household below preserves its manners as carefully as its accounts. You are the one called in after the police have admired the locked door too much; here, a blotter, a hearth-rug, or a servant’s pause may speak more plainly than any gentleman at table.",
   "genre": "Victorian mystery",
-  "premise": "In 1888 London, the story moves between No. 17 Bleakstone Square and Whitechapel, where Dr. Ada Merrow runs a dispensary and Beatrice Harrow lives under her uncle\u2019s roof after her father\u2019s death in a railway investment. The central machinery is the respectable paper world of green-taped ledgers, inheritances, investments, allowances, and charitable accounts, which turns money into authority and leaves dependents, patients, and households vulnerable to those who control the books.",
+  "premise": "In 1888 London, the story moves between No. 17 Bleakstone Square and Whitechapel, where Dr. Ada Merrow runs a dispensary and Beatrice Harrow lives under her uncle’s roof after her father’s death in a railway investment. The central machinery is the respectable paper world of green-taped ledgers, inheritances, investments, allowances, and charitable accounts, which turns money into authority and leaves dependents, patients, and households vulnerable to those who control the books.",
   "game_type": [
     "mystery_whodunnit",
     "social_drama_relationship_web"

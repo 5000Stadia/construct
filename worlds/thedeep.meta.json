@@ -97,7 +97,7 @@
               "attribute": "in",
               "value": "obj:persephone"
             },
-            "hook_text": "Rusk cannot say Chen\u2019s name without glancing at the casualty tags; she needs Mara to go to Persephone, but dreads what the doctor will ask her to spend.",
+            "hook_text": "Rusk cannot say Chen’s name without glancing at the casualty tags; she needs Mara to go to Persephone, but dreads what the doctor will ask her to spend.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "volunteered",
@@ -164,7 +164,7 @@
               "attribute": "mobility",
               "value": "cannot_climb_without_being_carried"
             },
-            "hook_text": "He snarls at help, but when the deck shudders his hand closes around Mara\u2019s sleeve with a child\u2019s panic; his pride will not carry him up a ladder.",
+            "hook_text": "He snarls at help, but when the deck shudders his hand closes around Mara’s sleeve with a child’s panic; his pride will not carry him up a ladder.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "volunteered",
@@ -203,7 +203,7 @@
               "attribute": "spare_oxygen",
               "value": "enough_for_two_people_if_launched_within_twelve_minutes"
             },
-            "hook_text": "In Persephone\u2019s dim cabin, Chen keeps adjusting one regulator by sound, listening to a hiss so thin it feels like a confession.",
+            "hook_text": "In Persephone’s dim cabin, Chen keeps adjusting one regulator by sound, listening to a hiss so thin it feels like a confession.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "pressed",
@@ -256,7 +256,7 @@
               "attribute": "statement",
               "value": "I have limited ascent buoyancy. Going to ride the emergency float. See you upstairs or haunt you properly."
             },
-            "hook_text": "Keiko\u2019s voice comes through the intercom bright as a match struck underwater, joking about hauntings because the alternative is saying goodbye.",
+            "hook_text": "Keiko’s voice comes through the intercom bright as a match struck underwater, joking about hauntings because the alternative is saying goodbye.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "volunteered",
@@ -298,7 +298,7 @@
               "attribute": "was_on_comms_with_keiko_during_scrubber_removal",
               "value": "true"
             },
-            "hook_text": "Keiko\u2019s anger at Rusk is real and salted with old command grudges, which makes the one thing she refuses to lie about sting even worse.",
+            "hook_text": "Keiko’s anger at Rusk is real and salted with old command grudges, which makes the one thing she refuses to lie about sting even worse.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "pressed",
@@ -309,7 +309,7 @@
       {
         "id": "obj:manta",
         "shape_role": "vehicle / damaged escape instrument",
-        "surface_role": "mining crawler jammed in Orpheus\u2019s docking collar, with an emergency float still armed",
+        "surface_role": "mining crawler jammed in Orpheus’s docking collar, with an emergency float still armed",
         "presence": "nearby",
         "location": "place:manta_docking_collar",
         "first_witness": false,
@@ -323,7 +323,7 @@
               "attribute": "shows",
               "value": "person:soren_vale_hiding_obj:portable_scrubber_under_crash_webbing"
             },
-            "hook_text": "Manta\u2019s forward camera is cracked into a spiderweb, but one shard of recorded image keeps looping: a bent silhouette, a white canister, and the tremor of emergency lights.",
+            "hook_text": "Manta’s forward camera is cracked into a spiderweb, but one shard of recorded image keeps looping: a bent silhouette, a white canister, and the tremor of emergency lights.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "contradicted",
@@ -362,7 +362,7 @@
               "attribute": "launch_window",
               "value": "must_launch_before_external_pressure_warps_the_lock"
             },
-            "hook_text": "Persephone\u2019s hatch wheel turns a quarter inch, then screams; the sea outside is slowly making the door a permanent wall.",
+            "hook_text": "Persephone’s hatch wheel turns a quarter inch, then screams; the sea outside is slowly making the door a permanent wall.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "volunteered",
@@ -376,7 +376,7 @@
               "attribute": "medical_restraint",
               "value": "can_secure_one_unconscious_patient_for_ascent"
             },
-            "hook_text": "One cot strap has been mended with surgical tape and someone\u2019s shoelace, an ugly little promise that a body does not have to be able to help itself to live.",
+            "hook_text": "One cot strap has been mended with surgical tape and someone’s shoelace, an ugly little promise that a body does not have to be able to help itself to live.",
             "coverage_effect": "genuine",
             "is_red_herring": false,
             "reveal_mode": "volunteered",
@@ -386,8 +386,8 @@
       }
     ]
   },
-  "goal_statement": "Get yourself and as many of Orpheus Station\u2019s crew as you can out alive before the last forty-seven minutes of breathable air are gone.",
-  "intro": "At the bottom of the Pacific, Orpheus earns its keep by chewing rare metals out of black rock while the ocean leans on every seal like a patient creditor. Down here, light is rented, warmth is metered, and oxygen is just another number on Chen\u2019s board until the number starts looking back. When steel groans and the dark gets personal, morality stops being a sermon and becomes inventory: minutes, masks, hands, and the terrible arithmetic of who is still breathing.",
+  "goal_statement": "Get yourself and as many of Orpheus Station’s crew as you can out alive before the last forty-seven minutes of breathable air are gone.",
+  "intro": "In 2039, Orpheus Station is a pressurized mining habitat bolted to the Pacific floor, all steel ribs, work lights, and ocean pressing on the walls like a creditor. A rupture has turned procedure into triage: flooded compartments, failing scrubbers, crew scattered behind locks, and forty-seven minutes of breathable air left in the books. You are one of the people still moving inside the habitat, where survival means choosing who gets heat, pressure, and oxygen when the math has already gone bad.",
   "genre": "undersea survival sci-fi",
   "premise": "In September 2039, Habitat Orpheus is a deep-sea habitat linked to the mining crawler Manta and the craft Persephone, where the crew depends on sealed collars, rebreather masks, scrubbers, and limited ascent buoyancy to stay alive. Its central system is life-support triage: oxygen and CO2 are watched from Central, and every mask, scrubber, and route upward must be assigned to a person when there is not enough time or air for everyone at once.",
   "game_type": [

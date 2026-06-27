@@ -1006,7 +1006,8 @@ class TransportCore:
                                anchors=setup.get("anchors") or [],
                                defaults=setup.get("defaults") or {},
                                theme=setup.get("theme", ""),
-                               world_brief=setup.get("world_brief", ""))
+                               world_brief=setup.get("world_brief", ""),
+                               suggested_name=setup.get("suggested_name", ""))
         except Exception:
             logger.exception("foyer open failed for %s", ev.external_id)
             intro = ("Before you step in — who are you in this story? Tell me your "

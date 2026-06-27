@@ -1792,16 +1792,19 @@ def test_render_leash_keeps_cast_distinct():
 
 def test_author_intro_cohort():
     # The thematic introduction: premise/stakes in voice that GROUNDS the player —
-    # but NO objective/aim line (founder 2026-06-22: the call to action arises in
-    # play, never a game-y banner). The aim is no longer injected into the prompt.
+    # clarity with a stylistic cherry, NO objective/aim BANNER (the call to action
+    # arises in play). The aim IS passed as the player's-situation/role context (so the
+    # intro names their role, not a wrong character) but explicitly not as a banner.
     from construct.cohorts import author_intro
     prov = StubProvider([{"intro": "Rain on a drowned port; the ledgers lie."}])
     out = author_intro(prov, "DIGEST", theme="truth vs scarcity",
                        style="terse noir", aim="name who falsified the meter")
     assert "drowned port" in out["intro"]
     prompt = prov.calls[0][0]
-    assert "do NOT end on an objective" in prompt            # no closing aim line
-    assert "name who falsified the meter" not in prompt      # aim not injected
+    assert "do NOT end on an objective" in prompt            # no closing aim banner
+    assert "name who falsified the meter" in prompt          # aim = role/situation context
+    assert "do NOT restate as an objective banner" in prompt  # …but never as a banner
+    assert "SECOND PERSON" in prompt and "Do NOT give them" in prompt  # no baked name
     assert "do NOT reveal" in prompt                         # spoilers still forbidden
 
 

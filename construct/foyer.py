@@ -155,22 +155,33 @@ class FoyerResult:
 
 
 def foyer_open(provider: Provider, *, role: str = "", anchors: list[str] | None = None,
-               defaults: dict | None = None, theme: str = "", world_brief: str = "") -> str:
+               defaults: dict | None = None, theme: str = "", world_brief: str = "",
+               suggested_name: str = "") -> str:
     """The Foyer's opening line — a brief, on-theme welcome that ESTABLISHES THE
     WORLD, then situates the role in it, then invites the guest in (an interview,
-    not a wall of text). A synthetic 'arrival' turn; returns just the spoken line."""
+    not a wall of text). A synthetic 'arrival' turn; returns just the spoken line.
+    The protagonist's NAME is the player's to choose (founder): present them by ROLE
+    with the name To-Be-Determined; the authored `suggested_name` is offered as a
+    default to keep, never imposed as 'you are <Name>'."""
+    keep = (f"They have NO fixed name yet — it is the player's to choose now and it "
+            f"will become canon. There is a suggested default they MAY keep: "
+            f"'{suggested_name}'. Frame the question as choosing who they are — 'shall "
+            f"I call you {suggested_name}, or will you take another name?' — NOT as "
+            f"renaming an existing person."
+            if suggested_name else
+            "Ask the player to choose their name (or let you pick one).")
     r = foyer_step(provider, CharacterSheet(), "",
                    "(The guest has just arrived. Give the D&D-style pregame as a "
                    "BACK-OF-THE-BOOK blurb — concrete, not just mood — in 3-5 "
                    "sentences: FIRST establish the WORLD from THE WORLD brief below — "
                    "WHEN/WHERE (the era and place, concretely) and WHAT THE SYSTEM IS "
                    "(the central institution and what it does to people); THEN place "
-                   "the ROLE in that system — the player's function and why it matters; "
-                   "THEN ask just the FIRST single question — their NAME, framed with a "
-                   "small diegetic touch (a sensory beat in the scene, e.g. the blank "
-                   "name-plate at their station), offering 'or you decide'. One "
-                   "question, not a checklist — the interview paints the picture one "
-                   "beat at a time from here.)",
+                   "the ROLE in that system — the player's function and why it matters "
+                   "(present them by that ROLE, NOT by a fixed personal name); THEN ask "
+                   "just the FIRST single question — their NAME — framed with a small "
+                   "diegetic touch (a sensory beat, e.g. the still-blank name-plate at "
+                   f"their station). {keep} One question, not a checklist — the "
+                   "interview paints the picture one beat at a time from here.)",
                    role=role, anchors=anchors, defaults=defaults, theme=theme,
                    world_brief=world_brief)
     return r.reply

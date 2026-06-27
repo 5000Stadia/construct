@@ -225,6 +225,11 @@ class Session:
             role = state_value(p, proto, "role") or state_value(p, proto, "kind") or ""
             defaults = {a: v for a in _DETAIL_ATTRS
                         if (v := state_value(p, proto, a))}
+            # NAME IS THE PLAYER'S TO CHOOSE (founder): the protagonist is presented by
+            # ROLE with the name To-Be-Determined, chosen at game start and canonized.
+            # The authored name rides as a SUGGESTED default, never the imposed identity,
+            # so the Foyer never says "you're Lionel Pym — now rename yourself".
+            defaults.pop("name", None)
             genre = (self._meta.get("genre") or self._meta.get("genre_era")
                      or "").strip()
             gt = self._meta.get("game_type") or []
@@ -245,7 +250,8 @@ class Session:
                 world_brief = (self._meta.get("intro") or "").strip() \
                     or ". ".join(s for s in (style_brief, heart) if s)
             return {"protagonist": proto,
-                    "role": name + (f" — {role}" if role else ""),
+                    "role": role or "the figure at the heart of this story",
+                    "suggested_name": name,  # offered as a default to keep, not imposed
                     "defaults": defaults,
                     "theme": theme,  # title · genre · game-type — to color the Foyer voice
                     "world_brief": world_brief,  # the authored premise — to establish the world
