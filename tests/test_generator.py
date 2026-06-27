@@ -434,3 +434,30 @@ def test_author_replan_tags_no_replacement_for_a_beatless_result(tmp_path):
     prov = _GenProvider(proposal={**VALID_PROPOSAL, "beats": []})
     out = author_replan(w, old, prov, reshape_summary="x", turn=7)
     assert out.reason == "no_replacement" and out.arc is None and not out.ok
+
+
+def test_continuation_intro_bridges_endpoints_without_a_formula():
+    """Founder 2026-06-26: the next-episode cold open must BRIDGE where the last story
+    landed to where this one is headed — creatively, NOT the old 4-for-4 'time has passed
+    + you made a name on that one' template."""
+    from construct.game import _build_arc, _continuation_intro
+    prior = _build_arc({**VALID_PROPOSAL, "protagonist": PLAYER,
+                        "tension": [PLAYER, "drive:duty", "drive:fear"]}, arc_id="arc:main")
+    new = _build_arc({**VALID_PROPOSAL, "protagonist": PLAYER,
+                      "tension": [PLAYER, "drive:doubt", "drive:resolve"]}, arc_id="arc:ep_2")
+    intro = _continuation_intro(
+        "The Pier Nine Affair", "won", prior,
+        {"hook": "A body in the lighthouse lamp room, and the lamp still turning."}, new)
+    low = intro.lower()
+    # both endpoints are present (the bridge is built from the two SPECIFIC stories)
+    assert "Pier Nine Affair" in intro                              # where it landed
+    assert "lighthouse lamp room" in intro                          # where it's headed
+    assert "duty against fear" in low                               # prior drive axis
+    # it instructs a CREATIVE bridge and explicitly FORBIDS the old formula (not prescribes it)
+    assert "bridge" in low and "creative latitude" in low
+    assert "do not default to a formula" in low
+    assert "you made a name on that one" in low  # present only as the thing to AVOID
+    # it VARIES with inputs (not a fixed string)
+    other = _continuation_intro("A Quiet Drowning", "lost", prior,
+                                {"hook": "A stranger waits on the stair with no name to give."}, new)
+    assert intro != other

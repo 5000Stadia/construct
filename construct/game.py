@@ -1670,6 +1670,46 @@ def _episode_fuel(reads: Any, prior_arc: Arc, prior_title: str = "",
     return tail
 
 
+def _tension_axis(arc) -> str:
+    """A short 'X against Y' read of an arc's drive axis, or '' if unavailable."""
+    try:
+        _e, strong, weak = arc.shape.tension
+        return (f"{strong.split(':')[-1].replace('_', ' ')} against "
+                f"{weak.split(':')[-1].replace('_', ' ')}")
+    except Exception:
+        return ""
+
+
+def _continuation_intro(prior_title: str, prior_outcome: str, prior_arc, proposal: dict,
+                        new_arc) -> str:
+    """The next episode's COLD-OPEN directive (founder, 2026-06-26): bridge WHERE THE LAST
+    STORY LANDED to WHERE THIS ONE IS HEADED, leaving the narrator free to find the most
+    interesting connection between those two SPECIFIC points. Deliberately NOT a formula —
+    no obligatory 'time has passed' + 'you made a name on that one' (that opener was
+    4-for-4 identical across episodes). The bridge is creatively interpretive so we don't
+    swap one template for another."""
+    solved = "solved" if prior_outcome == "won" else "saw it through to its hard end"
+    landed = f"they {solved}" + (f' "{prior_title}"' if prior_title else " the last case")
+    prior_axis = _tension_axis(prior_arc)
+    if prior_axis:
+        landed += f" — its drama turned on {prior_axis}"
+    headed = ((proposal or {}).get("hook") or "").strip() or "a new situation is beginning to surface"
+    new_axis = _tension_axis(new_arc)
+    return (
+        "THIS IS A NEW CHAPTER for the same protagonist — BRIDGE it, do not reset.\n"
+        f"WHERE THE LAST STORY LANDED: {landed}. That is the ground — situational and "
+        "emotional — they carry out of it.\n"
+        f"WHERE THIS ONE IS HEADED: {headed}"
+        + (f" (its drive: {new_axis})." if new_axis else ".") + "\n"
+        "Open with a SHORT, narratively interesting bridge between those two specific points — "
+        "find the most compelling connection and play it (a consequence come home, an echo or a "
+        "reversal of the last case, a changed self meeting an unchanged world, an old face or an "
+        "old debt, or simply the next thing that pulls them in). You have FULL creative latitude "
+        "on HOW they connect: time may pass or not; a reputation may matter, cut against them, or "
+        "never come up. Do NOT default to a formula — no obligatory 'time has passed' or 'you made "
+        "a name on that one'. Let these two stories decide the bridge, then let the new case surface.")
+
+
 def continue_episode(name: str, provider: Provider, player_id: str | None = None,
                      on_stage=None) -> dict:
     """CONCLUDE→CONTINUE (the Series hook): from a CONCLUDED slot, author the NEXT episode's
@@ -1791,16 +1831,11 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
     meta["entry_epoch"] = epoch
     if _ep2_scope:                              # scope the new chapter to its OWN arc (Cx 189 #2)
         meta["arc_scope"] = _ep2_scope
-    # The cold-open continuation note (founder's "THE Sherlock Holmes? you made a name on
-    # <last case>…"): the next episode opens on TIME-PASS + the protagonist's reputation for the
-    # prior case, THEN the new case surfaces. Consumed by the opening briefing; never a stored row.
-    _solved = "solved" if prior_outcome == "won" else "saw through"
-    meta["continuation_intro"] = (
-        f"THIS IS A NEW CHAPTER, continuing the same protagonist's story. Time has passed since "
-        f"they {_solved} the last case" + (f" (“{prior_title}”)" if prior_title else "")
-        + ". Open on that PASSAGE OF TIME and their EARNED REPUTATION — let someone recognize "
-        "them for it (“you made a name on that one…”), let the world and the "
-        "moment settle, and THEN let the new case begin to surface. Continuity, not a cold reset.")
+    # The cold-open continuation note (founder, 2026-06-26): bridge WHERE THE LAST STORY LANDED to
+    # WHERE THIS ONE IS HEADED, creatively — NOT the old time-pass + "you made a name" formula (it
+    # was 4-for-4 identical). Consumed by the opening briefing; never a stored row.
+    meta["continuation_intro"] = _continuation_intro(
+        prior_title, prior_outcome, prior_main, proposal, new_arc)
     return meta
 
 

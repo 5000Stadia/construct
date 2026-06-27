@@ -386,9 +386,9 @@ class Session:
         style = self._meta.get("style", "")
         if style:
             brief.insert(0, f"VOICE (write in this): {style}")
-        # CONCLUDE→CONTINUE: a continued episode opens on time-pass + the protagonist's earned
-        # reputation for the last case ("you made a name on that one…"), THEN the new case
-        # surfaces (founder). One-shot: consumed and cleared so it never re-frames a later open.
+        # CONCLUDE→CONTINUE: a continued episode opens on a CREATIVE bridge between where the last
+        # story landed and where this one is headed (founder 2026-06-26 — not a fixed time-pass +
+        # reputation formula). One-shot: consumed and cleared so it never re-frames a later open.
         cont = (self._meta.pop("continuation_intro", "") or "").strip()
         if cont:
             brief.append(cont)
