@@ -20,9 +20,11 @@ def worlds(tmp_path, monkeypatch):
     monkeypatch.setattr(imagery, "IMAGES_DIR", tmp_path / "images")  # never touch the repo tree
     monkeypatch.setenv("CONSTRUCT_SCENE_IMAGES", "1")  # opt back in (conftest disables by default)
     monkeypatch.delenv("CONSTRUCT_IMAGE_CMD", raising=False)
-    # No real backend during tests — never hit the network (the built-in OpenAI
-    # dispatcher fires whenever OPENAI_API_KEY is present).
+    # No real backend during tests — never hit the network. The default Codex
+    # backend fires whenever ~/.codex/auth.json exists; the OpenAI one whenever a key
+    # is present. Neutralize both so render() can't make a real image call.
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(imagery, "_codex_available", lambda: False)
     monkeypatch.setattr(imagery, "dispatcher", None)
     return tmp_path
 

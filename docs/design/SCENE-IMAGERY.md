@@ -51,10 +51,14 @@ source of truth.
    touch of the world's **listed genre / game-type** (dumped in for per-story
    variety, e.g. *"with a touch of mystery whodunnit, social drama atmosphere"*).
 5. **Generate the asset.** `imagery._dispatch` produces the file from the prompt.
-   Backends, in order: an explicit `imagery.dispatcher` callable → `CONSTRUCT_IMAGE_CMD`
-   (`{prompt}`/`{out}`) → the built-in **OpenAI Images** backend (`OPENAI_API_KEY`,
-   `gpt-image-1`) → none. With **no backend wired the manifest is still produced** —
-   the prompts sit ready to feed any generator — and play is byte-for-byte text-only.
+   The **default backend is the Codex OAuth subscription** — the Responses
+   `image_generation` tool over `/codex/responses`, reusing Construct's own
+   `CodexProvider` auth (the *same* ChatGPT subscription that powers all the text, so
+   **no separate API key and no separate billing**). Backends, in order: an explicit
+   `imagery.dispatcher` → `CONSTRUCT_IMAGE_CMD` (`{prompt}`/`{out}`) → **Codex
+   subscription** → OpenAI Images (`OPENAI_API_KEY`, `gpt-image-1`) → none; force one
+   with `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none). With **no backend the
+   manifest is still produced** and play is byte-for-byte text-only.
 6. **Deliver before the prose.** When the turn returns, the transport joins the
    in-flight render (`Session.pending_image`, bounded ~30 s) and — if the asset is
    ready — sends the photo through the photo side-channel **before** the text reply
@@ -73,7 +77,10 @@ change-detector; nothing else has to decide "did it change".
 | var | default | effect |
 |---|---|---|
 | `CONSTRUCT_SCENE_IMAGES` | `1` (on) | set falsey to opt a world out entirely |
-| `OPENAI_API_KEY` | — | enables the built-in gpt-image-1 backend |
+| `CONSTRUCT_IMAGE_BACKEND` | auto | force `codex` / `openai` / `cmd` / `none` |
+| (Codex OAuth) | default | `~/.codex/auth.json` → subscription image gen, no API key |
+| `CONSTRUCT_IMAGE_SIZE` | `1536x1024` | requested image size |
+| `OPENAI_API_KEY` | — | enables the OpenAI gpt-image-1 fallback backend |
 | `CONSTRUCT_IMAGE_MODEL` | `gpt-image-1` | OpenAI image model |
 | `CONSTRUCT_IMAGE_SIZE` | `1024x1024` | OpenAI image size |
 | `CONSTRUCT_IMAGE_CMD` | — | custom generator command (`{prompt}`,`{out}`) |

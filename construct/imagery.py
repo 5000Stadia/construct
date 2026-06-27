@@ -25,10 +25,13 @@ turn is never blocked on an image.
   isn't ready in time.
 
 Default-on, lazy, fail-open, opt-out via ``CONSTRUCT_SCENE_IMAGES=0``. Image
-GENERATION is pluggable: set :data:`dispatcher`, or ``CONSTRUCT_IMAGE_CMD``, or an
-``OPENAI_API_KEY`` (the built-in gpt-image-1 backend). With nothing wired, the
-manifest (``worlds/<scenario>.images.json``) IS the deliverable — prompts ready to
-feed any generator — and play is byte-for-byte text-only as before.
+GENERATION is pluggable; the DEFAULT backend is the **Codex OAuth subscription** (the
+Responses `image_generation` tool — the same credential that powers all of Construct's
+text, no separate API key, no separate billing). Order: an explicit :data:`dispatcher`
+→ ``CONSTRUCT_IMAGE_CMD`` → Codex subscription → ``OPENAI_API_KEY`` (gpt-image-1) →
+none; force one with ``CONSTRUCT_IMAGE_BACKEND`` (codex|openai|cmd|none). With no
+backend, the manifest (``worlds/<scenario>.images.json``) IS the deliverable and play
+is byte-for-byte text-only.
 """
 
 from __future__ import annotations
@@ -240,34 +243,137 @@ def note_scene(scenario: str, place_id: str | None, place_name: str,
     return render(scenario, rec, provider=provider)
 
 
+def _codex_available() -> bool:
+    """Whether the Codex OAuth credential is present — the DEFAULT image backend, the
+    same ChatGPT subscription that powers all of Construct's text (no separate API key,
+    no separate billing). Image pixels come from the Responses `image_generation` tool
+    over the `/codex/responses` endpoint."""
+    from pathlib import Path as _P
+    return (_P.home() / ".codex" / "auth.json").exists()
+
+
+def _selected_backend() -> str:
+    """Which generation backend to use: an explicit `dispatcher` always wins; otherwise
+    `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none) forces it, else auto-detect in the
+    order custom-command → Codex subscription → OpenAI API key → none."""
+    if dispatcher is not None:
+        return "dispatcher"
+    forced = os.getenv("CONSTRUCT_IMAGE_BACKEND", "").strip().lower()
+    if forced in ("none", "off", "0", "false", "no"):
+        return "none"
+    if forced in ("codex", "openai", "cmd"):
+        return forced
+    if os.getenv(_CMD_ENV, "").strip():
+        return "cmd"
+    if _codex_available():
+        return "codex"
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return "openai"
+    return "none"
+
+
 def _backend_configured() -> bool:
-    """Whether an image-GENERATION backend is wired (an explicit dispatcher, a custom
-    command, or an OpenAI key). When none is, a render legitimately produces no asset
-    and the prompt-only manifest is the deliverable; when one IS, a missing asset means
-    the generation failed and should be retried, not cached as done (Cx 238 #1)."""
-    return bool(dispatcher is not None
-                or os.getenv(_CMD_ENV, "").strip()
-                or os.getenv("OPENAI_API_KEY", "").strip())
+    """Whether an image-GENERATION backend is wired. When none is, a render legitimately
+    produces no asset and the prompt-only manifest is the deliverable; when one IS, a
+    missing asset means generation failed and should be retried, not cached (Cx 238 #1)."""
+    return _selected_backend() != "none"
 
 
 def _dispatch(rec: SceneImage) -> None:
-    """Synchronously produce the asset file from the prompt. Backends, in order:
-    explicit :data:`dispatcher` → ``CONSTRUCT_IMAGE_CMD`` → built-in OpenAI
-    (``OPENAI_API_KEY``) → none (manifest-only). Never raises."""
+    """Synchronously produce the asset file from the prompt. Backend per
+    :func:`_selected_backend` (default: the Codex subscription). Never raises."""
     try:
-        if dispatcher is not None:
+        backend = _selected_backend()
+        if backend == "dispatcher":
             dispatcher(rec)
-            return
-        cmd = os.getenv(_CMD_ENV, "").strip()
-        if cmd:
+        elif backend == "cmd":
             Path(rec.asset_path).parent.mkdir(parents=True, exist_ok=True)
-            filled = cmd.replace("{prompt}", rec.prompt).replace("{out}", rec.asset_path)
+            filled = os.getenv(_CMD_ENV, "").replace("{prompt}", rec.prompt).replace(
+                "{out}", rec.asset_path)
             subprocess.run(shlex.split(filled), timeout=180, check=False)
-            return
-        if os.getenv("OPENAI_API_KEY", "").strip():
+        elif backend == "codex":
+            _codex_dispatch(rec)
+        elif backend == "openai":
             _openai_dispatch(rec)
     except Exception:
         logger.debug("image dispatch failed for %s", rec.place_id, exc_info=True)
+
+
+def _codex_dispatch(rec: SceneImage) -> None:
+    """Built-in DEFAULT backend: generate via the Codex OAuth subscription — the
+    Responses `image_generation` tool over `/codex/responses`, reusing Construct's own
+    `CodexProvider` auth/headers (no separate OpenAI API key, no separate billing).
+    Synchronous; writes a PNG to ``rec.asset_path``. Never raises."""
+    import asyncio
+
+    import httpx
+
+    from construct.provider import CodexProvider
+
+    p = CodexProvider()
+    auth = p._read_auth()
+    headers = p._headers(auth)
+    url = f"{p._base_url}/codex/responses"
+    model = os.getenv("CONSTRUCT_IMAGE_MODEL_CODEX", p._cheap_model)
+    size = os.getenv("CONSTRUCT_IMAGE_SIZE", "1536x1024")  # landscape scene framing
+    tool = {"type": "image_generation"}
+    if size and size.lower() != "auto":
+        tool["size"] = size
+    body = {
+        "model": model,
+        "instructions": ("Use the image_generation tool to render exactly the "
+                         "described setting. Do not add captions, text, or any people "
+                         "unless the description includes them."),
+        "input": [{"role": "user", "content": rec.prompt}],
+        "store": False, "stream": True, "tools": [tool],
+    }
+
+    async def _run() -> str | None:
+        img = None
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=30)) as http:
+            async with http.stream("POST", url, headers=headers, json=body) as resp:
+                resp.raise_for_status()
+                buffer = ""
+                async for chunk in resp.aiter_text():
+                    buffer += chunk
+                    while "\n\n" in buffer:
+                        idx = buffer.index("\n\n")
+                        block, buffer = buffer[:idx], buffer[idx + 2:]
+                        data = "\n".join(l[5:].strip() for l in block.split("\n")
+                                         if l.startswith("data:")).strip()
+                        if not data or data == "[DONE]":
+                            continue
+                        try:
+                            ev = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        et = ev.get("type", "")
+                        # the FULL image arrives on output_item.done as item.result
+                        if et == "response.output_item.done":
+                            item = ev.get("item", {})
+                            if item.get("type") == "image_generation_call" and item.get("result"):
+                                img = item["result"]
+                        elif et in ("response.completed", "response.done"):
+                            for item in ev.get("response", {}).get("output", []):
+                                if item.get("type") == "image_generation_call" and item.get("result"):
+                                    img = item["result"]
+                        # fallbacks: a top-level result, then a streamed partial preview
+                        r = ev.get("result")
+                        if isinstance(r, str) and len(r) > 100:
+                            img = r
+                        pi = ev.get("partial_image_b64")
+                        if not img and isinstance(pi, str) and len(pi) > 100:
+                            img = pi
+        return img
+
+    img_b64 = asyncio.run(_run())
+    if img_b64:
+        out = Path(rec.asset_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(base64.b64decode(img_b64))
+        logger.info("codex image written: %s", out)
+    else:
+        logger.warning("codex image generation returned no image for %s", rec.place_id)
 
 
 def _openai_dispatch(rec: SceneImage) -> None:
