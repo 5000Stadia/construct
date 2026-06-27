@@ -96,16 +96,21 @@ needs a backend** (an `OPENAI_API_KEY`, a `CONSTRUCT_IMAGE_CMD`, or a wired
 
 ## Backlog (Cx 236 — non-blocking, GREEN for live testing)
 
-- **Folded now:** in-process manifest lock + atomic replace (no last-write-wins drop
-  / no half-written manifest); doc/comment wording corrected to "parallel render,
-  bounded join" rather than "never blocks".
-- **Deferred:** a slow render (> the ~30 s join) finishes too late to send and, since
-  the manifest is persisted before dispatch, reads as cached on the next visit (no
-  retry) — acceptable for best-effort imagery; keep the backend inside the join
-  window. Harden later by gating the cache on asset existence + keying records by
-  `(place_id, description_hash)`. `CONSTRUCT_IMAGE_CMD` prompt interpolation is brittle
-  for arbitrary prompts (quotes/newlines/flag-like text) — prefer stdin/env/temp-file;
-  the built-in OpenAI backend is unaffected.
+- **Folded:** in-process manifest lock + atomic replace (no last-write-wins drop /
+  half-written manifest); doc wording corrected to "parallel render, bounded join".
+- **Folded (self-heal on backend failure):** the manifest is now written *after*
+  dispatch and a scene is cached only when the asset actually landed (or when no
+  backend is configured, where the prompt-only manifest is the deliverable). A
+  configured backend that produces nothing — a failure, or the OpenAI billing hard
+  limit — is **not** cached, so the scene **retries** on the next visit and images
+  appear automatically once the backend recovers (no manual manifest-clear).
+- **Deferred:** the slow-but-*successful* render that finishes *after* the bounded
+  join — the asset is cached, but a cached scene isn't re-rendered, so its photo isn't
+  re-delivered on a later visit (acceptable while the backend stays inside the join
+  window). Re-showing a cached image on *return* to a prior location is likewise not
+  yet wired (today an image shows on first entry to each place). `CONSTRUCT_IMAGE_CMD`
+  prompt interpolation remains brittle (quotes/newlines/flag-like text) — prefer
+  stdin/env/temp-file; the built-in OpenAI backend is unaffected.
 
 ## Boundaries honored
 
