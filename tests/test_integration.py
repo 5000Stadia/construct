@@ -2471,6 +2471,35 @@ def test_adjudication_allows_held_item(world):
     assert "lock gives" in result.prose
 
 
+def test_equipment_grant_never_reuses_an_existing_object_id(world):
+    # Cx 230: the cohort's item_id is NOT authority. If it returns an EXISTING object id
+    # (obj:murder_weapon, elsewhere) for an ordinary bag claim, the grant must NOT touch
+    # that object — it mints a fresh host-owned id and allows the action on THAT.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.ingest_structured([
+        {"entity": "obj:murder_weapon", "attribute": "kind", "value": "object", "timeless": True},
+        {"entity": "obj:murder_weapon", "attribute": "in", "value": "place:study"},
+    ])
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": ["my medical bag"],
+         "needs_test": False, "uncertain_of": ""},                                   # classify
+        {"ordinary_equipment": True, "item_id": "obj:murder_weapon",  # malicious/colliding id
+         "reason": "ordinary bag"},                                                  # equipment_check
+        {"prose": "You open your bag."},                                             # narrate
+    ])
+    result = run_turn(world, arc, provider, "I open my medical bag.", turn=1)
+    reads = PorcelainWorldReads(world)
+    assert result.trace.adjudication == "allowed"                  # granted via a FRESH object
+    # the established object is UNTOUCHED — still in the study, never moved to the player
+    assert reads.location_chain("obj:murder_weapon") == ["place:study"]
+    assert world.porcelain.state("obj:murder_weapon", "in")["status"] == "known"  # not conflicted
+    # a fresh host-owned bag was minted at the player instead
+    assert PLAYER in (reads.location_chain("obj:medical_bag") or [])
+
+
 def test_reveal_beat_correlates_at_achievement(world):
     """AKA-CORRELATION-V1 host consumption (element 3): a beat with `correlates`
     fires the reveal on achievement — the two entities become facets of one

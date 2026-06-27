@@ -611,15 +611,29 @@ def _grant_equipment(world: Any, p: Any, protagonist: str, description: str,
                                     scene=scene or "")
         if not isinstance(v, dict) or not v.get("ordinary_equipment"):
             return False
+        # HOST-OWNED, FRESH id (Cx 230): the cohort's `item_id` is at most a slug HINT, never
+        # authority — a returned EXISTING id would pollute that object's location and falsely
+        # allow. We mint a fresh obj id, never reusing/mutating an existing entity.
+        words = (description or "").lower().split()
+        while words and words[0] in {"my", "the", "a", "an", "your", "his", "her",
+                                     "their", "its", "some"}:
+            words.pop(0)
         slug = "".join(c if (c.isalnum() or c == "_") else "_"
-                       for c in (description or "").lower()).strip("_") or "kit"
-        item_id = (v.get("item_id") or f"obj:{slug}").strip()
-        if not item_id.startswith("obj:"):
-            item_id = f"obj:{slug}"
+                       for c in "_".join(words)).strip("_") or "kit"
+        reads = PorcelainWorldReads(world)
+        hint = (v.get("item_id") or "").strip()
+        item_id = hint if (hint.startswith("obj:") and not reads.has_entity(hint)) else f"obj:{slug}"
+        n = 1
+        while reads.has_entity(item_id):   # never collide with an established entity
+            item_id, n = f"obj:{slug}_{n}", n + 1
         world.porcelain.ingest_structured([
             {"entity": item_id, "attribute": "kind", "value": "object"},
             {"entity": item_id, "attribute": "in", "value": protagonist, "value_type": "entity"},
         ])
+        # VERIFY the grant actually made it at-hand; never allow on a failed/conflicted write.
+        if protagonist not in (PorcelainWorldReads(world).location_chain(item_id) or []):
+            logger.warning("equipment grant for %r did not take (%s); denying", description, item_id)
+            return False
         logger.info("adjudicate: granted ordinary equipment %r → %s (held by %s)",
                     description, item_id, protagonist)
         return True
