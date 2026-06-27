@@ -518,15 +518,17 @@ def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon",
     return {"facts": facts}
 
 
-def _route_obstruction(p: Any, origin: str | None, target: str | None) -> dict | None:
+def _route_obstruction(p: Any, origin: str | None, target: str | None,
+                       *, as_of: float | None = None) -> dict | None:
     """First non-clear segment on origin->target via PB route() (RFC-003), or
     None. Fail-open: any route error => None => move proceeds unchecked. A
     `blocked` segment carries `evidence` (the portal's blocking fact); an
-    `obscured` one a computed `unknown_basis`."""
+    `obscured` one a computed `unknown_basis`. `as_of` (Cx 255): read passability
+    at the play horizon, so a future blocked/open portal can't alter movement now."""
     if not origin or not target or origin == target:
         return None
     try:
-        r = p.route(origin, target)
+        r = p.route(origin, target, as_of=as_of)
     except Exception as exc:
         logger.warning("route() unavailable, movement unchecked: %s", exc)
         return None
@@ -537,10 +539,12 @@ def _route_obstruction(p: Any, origin: str | None, target: str | None) -> dict |
 
 
 def _mirror_rows(p: Any, rows: list[dict], frame: str,
-                 canon_table: dict[tuple[str, str], object], trace: TurnTrace) -> None:
+                 canon_table: dict[tuple[str, str], object], trace: TurnTrace,
+                 *, as_of: float | None = None) -> None:
     """Mirror freshly-ingested canon facts into a knows: frame. Values
     come from the canon snapshot; point-read fallback for out-of-scope
-    entities only."""
+    entities only. `as_of` (Cx 255): the fallback point-read honors the play
+    horizon, so a future source winner can't be mirrored over the current value."""
     items = []
     for row in rows:
         if row.get("frame") not in (None, "canon"):
@@ -548,7 +552,7 @@ def _mirror_rows(p: Any, rows: list[dict], frame: str,
         key = (row["entity"], row["attribute"])
         value = canon_table.get(key, _ABSENT)
         if value is _ABSENT:
-            st = p.state(row["entity"], row["attribute"])
+            st = p.state(row["entity"], row["attribute"], as_of=as_of)
             trace.point_reads += 1
             if st["status"] != "known":
                 continue
@@ -1011,7 +1015,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # against a knows:-derived scope, so "where is my brass spoon?"
         # binds engine-side — the old host-side normalize-and-retry is
         # retired (PB catch-up).
-        a = p.ask(player_input, frame=player_frame)
+        a = p.ask(player_input, frame=player_frame, as_of=_h)  # answer at the play horizon (Cx 255)
         prose = a.get("prose") if isinstance(a, dict) else getattr(a, "prose", None)
         facts = a.get("facts") if isinstance(a, dict) else getattr(a, "facts", [])
         if prose or facts:
@@ -1156,7 +1160,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # allowed but flagged so the prose can hedge; missing capture degrades
             # to obscured/clear, never a false hard-block.
             origin = pre_chain[0] if pre_chain else None
-            seg = _route_obstruction(p, origin, target)
+            seg = _route_obstruction(p, origin, target, as_of=_h)
             if seg and seg.get("status") == "blocked":
                 trace.movement_status = "blocked"
                 trace.movement_obstruction = seg
@@ -1217,14 +1221,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     scene_features = []
     if scene:
         try:
-            scene_features = list(p.features(scene))
+            scene_features = list(p.features(scene, as_of=_h))
         except Exception:  # read unsupported / error — never break the turn
             scene_features = []
     snap_scope = list(scope) + ([scene] if scene else []) + scene_features
     canon_snap = _snap_or_empty(p, snap_scope, as_of=_h)
     canon_table = _table(canon_snap)
 
-    _mirror_rows(p, receipt_rows, player_frame, canon_table, trace)
+    _mirror_rows(p, receipt_rows, player_frame, canon_table, trace, as_of=_h)
     touched = {row["entity"] for row in receipt_rows}
     if touched & arc_entities(arc):
         p.ingest_structured([
@@ -1785,7 +1789,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # after PB's indexed read path landed (letter 024; measured 0.68s on
     # the live world vs >250s pre-fix).
     player_table = _table(player_snap)
-    diff = p.frame_diff("canon", player_frame, sorted(set(snap_scope)))
+    diff = p.frame_diff("canon", player_frame, sorted(set(snap_scope)), as_of=_h)  # Cx 255
     threads = [f"{f['entity']} · {f['attribute']} · {f['value']}" for f in diff][:12]
     trace.irony_delta_size = len(diff)
 
@@ -2633,7 +2637,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         with _phase(trace, "promote"):
             p.ingest_structured(promote, frame="canon", classify="batch")
             canon_table.update(_table(_snap_or_empty(p, snap_scope, as_of=_h)))
-            _mirror_rows(p, promote, player_frame, canon_table, trace)
+            _mirror_rows(p, promote, player_frame, canon_table, trace, as_of=_h)
     trace.contradictions = sorted(contradictions)
     trace.quarantined = sorted(quarantined)
 

@@ -389,7 +389,7 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # The protagonist MUST be a STAGED person (Cx 160): everything downstream — cast
     # staging, knows:<protagonist> delivery, pillar coverage — keys off arc.protagonist,
     # so an unlocatable role id (person:detective) silently darkens the whole world.
-    located_people = _locatable_people(world, known_ids)
+    located_people = _locatable_people(world, known_ids, as_of=opening_as_of)
     proto_feedback = ""
     _guard_failed_proposal: dict | None = None
     from construct.cohorts import FICTION_CRAFT
@@ -645,7 +645,12 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
         # at_scene members for deduction; a missing scene is logged, never invented here).
         try:
             from construct.cast import cast_location_plan
-            _chain = world.porcelain.locate(arc.protagonist)
+            # AS-OF PLAY HORIZON (Cx 255 blocking #1): anchor the opening cast to where the
+            # protagonist is AT THE OPENING, not at the timeline head. In a horizon world a HEAD
+            # read returns the source AFTERMATH place; staging the cast there at turn_time(0)
+            # would then WIN at the opening horizon — recreating the scatter the horizon fixes.
+            # Read as-of opening_as_of (== turn_time(0) for horizon worlds); None for legacy = head.
+            _chain = world.porcelain.locate(arc.protagonist, as_of=opening_as_of)
             _scene_place = _chain[0] if _chain else None
             if _scene_place:
                 _loc_items = cast_location_plan(cast_nodes, _scene_place)
@@ -1415,13 +1420,17 @@ def _world_digest(world: Any, limit: int = 6000) -> str:
     return json.dumps(world.porcelain.snapshot(scope))[:limit] if scope else "(empty)"
 
 
-def _locatable_people(world: Any, known_ids: list[str]) -> list[str]:
+def _locatable_people(world: Any, known_ids: list[str],
+                      *, as_of: float | None = None) -> list[str]:
     """The `person:*` ids that are actually STAGED somewhere in canon (Cx 160 #3).
     `has_entity` is too weak — a generic extracted role like `person:detective`
     carries a `kind` row but `locate()` is empty, so it would pass a mere-existence
-    check yet leave the cast unstageable. The protagonist must be one of THESE."""
+    check yet leave the cast unstageable. The protagonist must be one of THESE.
+
+    `as_of` (Cx 255): in a horizon world, "located" means located AT THE OPENING — a figure
+    that only appears in the source aftermath must not qualify as the opening protagonist."""
     return [e for e in known_ids
-            if e.startswith("person:") and world.porcelain.locate(e)]
+            if e.startswith("person:") and world.porcelain.locate(e, as_of=as_of)]
 
 
 def _fallback_protagonist(world: Any, located: list[str], play_as: str) -> str | None:

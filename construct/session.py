@@ -229,7 +229,7 @@ class Session:
         when = read_clock(self._world, loc).render()
         where = ""
         if loc:
-            where = (state_value(self._world.porcelain, loc, "name")
+            where = (state_value(self._world.porcelain, loc, "name", as_of=self._horizon())
                      or loc.split(":", 1)[-1].replace("_", " "))
         return f"{when} | {where}" if where else when
 
@@ -242,10 +242,12 @@ class Session:
             from construct.foyer import world_anchors, state_value, _DETAIL_ATTRS
             proto = self._arc.protagonist
             p = self._world.porcelain
-            name = state_value(p, proto, "name") or proto.split(":")[-1].replace("_", " ")
-            role = state_value(p, proto, "role") or state_value(p, proto, "kind") or ""
+            _h = self._horizon()  # the opening horizon (Cx 255): role/name/defaults at the start
+            name = state_value(p, proto, "name", as_of=_h) or proto.split(":")[-1].replace("_", " ")
+            role = (state_value(p, proto, "role", as_of=_h)
+                    or state_value(p, proto, "kind", as_of=_h) or "")
             defaults = {a: v for a in _DETAIL_ATTRS
-                        if (v := state_value(p, proto, a))}
+                        if (v := state_value(p, proto, a, as_of=_h))}
             # NAME IS THE PLAYER'S TO CHOOSE (founder): the protagonist is presented by
             # ROLE with the name To-Be-Determined, chosen at game start and canonized.
             # The authored name rides as a SUGGESTED default, never the imposed identity,
@@ -379,11 +381,12 @@ class Session:
         a humanized id — never a raw `kind:slug`."""
         if not entity:
             return ""
+        _h = self._horizon()
         try:
             snap = self._world.porcelain.snapshot(
-                [entity], frame=f"knows:{self._arc.protagonist}")
+                [entity], frame=f"knows:{self._arc.protagonist}", as_of=_h)
             facts = snap.get("facts", []) or \
-                self._world.porcelain.snapshot([entity]).get("facts", [])
+                self._world.porcelain.snapshot([entity], as_of=_h).get("facts", [])
         except Exception:
             facts = []
         for attr in ("name", "alias", "title"):

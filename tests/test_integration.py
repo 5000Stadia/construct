@@ -1678,6 +1678,28 @@ def test_entry_epoch_staging_wins_over_aftermath_and_live_supersedes(world):
         executor._ENTRY_EPOCH.reset(tok)
 
 
+def test_cast_staging_anchors_to_opening_not_aftermath(world):
+    # Cx 255 blocking #1: cast staging must anchor to the protagonist's OPENING location, not
+    # the timeline head. A source axis with the protagonist at home (chunk 1) and hospital
+    # (chunk 3) must yield an opening scene of `place:home` when located as-of opening_as_of.
+    from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP
+    STEP = SOURCE_STEP
+    opening_as_of = STEP + ENTRY_MARGIN
+    world.ingest_structured([
+        {"entity": "place:home", "attribute": "kind", "value": "house", "timeless": True},
+        {"entity": "place:hospital", "attribute": "kind", "value": "ward", "timeless": True},
+        {"entity": "person:hero", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:hero", "attribute": "in", "value": "place:home",
+         "value_type": "entity", "valid_from": STEP},                   # chunk 1: opening
+        {"entity": "person:hero", "attribute": "in", "value": "place:hospital",
+         "value_type": "entity", "valid_from": 3.0 * STEP},             # chunk 3: aftermath
+    ])
+    # The head read (the OLD staging anchor) picks the aftermath — the bug.
+    assert world.porcelain.locate("person:hero")[0] == "place:hospital"
+    # The opening-horizon read (the fix) anchors the opening scene at home.
+    assert world.porcelain.locate("person:hero", as_of=opening_as_of)[0] == "place:home"
+
+
 def test_horizon_metadata_coordinates():
     # B' S2: the spaced-axis coordinates. opening sits one margin above chunk 1 (so opening
     # staging supersedes chunk-1 source); the next source chunk is the fail-closed ceiling.

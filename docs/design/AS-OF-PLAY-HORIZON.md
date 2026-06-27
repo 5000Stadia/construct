@@ -47,25 +47,40 @@ emberroad is fixed by a REBUILD from `generated/emberroad.md` under the new poli
 in-place restamp (PB append-only triggers; old rows would still fold). `opening_as_of` =
 an authored coordinate on the normalized axis. *(Crux — get this right or as-of is meaningless.)*
 
-**S2 — Horizon metadata.** Durable `opening_as_of` (meta) + per-slot `play_as_of` (session
-frame). Fresh ingested-fiction worlds default to `opening_as_of`, NOT `None`=head. A live
-turn advances `play_as_of` into a reserved interval below the next authored future coordinate
-(so future chapter rows can't re-enter by numeric accident).
+**S2 — Horizon metadata.** SHIPPED (`04e624c`, Cx 253 GREEN). The source axis is spaced at
+ingest by `SOURCE_STEP = 1_000_000` (chunk i → `i*SOURCE_STEP`). `executor.horizon_metadata`
+gives `opening_as_of = SOURCE_STEP + ENTRY_MARGIN` (strictly above chunk 1, so opening staging
+supersedes it) and `next_source_as_of = 2*SOURCE_STEP` (the fail-closed ceiling). The unifying
+move: the existing `entry_epoch` contextvar IS the play origin — for a horizon world it is set
+to `opening_as_of` (low, just above chunk 1) instead of "above everything," so
+`turn_time(n) = opening_as_of + n` and live writes supersede the opening within the reserved
+band. `_finalize_scenario(source_step=…)` branches HORIZON vs LEGACY (the Cx-127 epoch-raise is
+kept verbatim for interview/single-timeframe worlds, gated out for horizon worlds);
+`continue_episode` likewise keeps `opening_as_of` as origin for horizon slots (Cx 253 §4).
+meta carries `opening_as_of`/`next_source_as_of`/`source_step`.
 
-**S3 — Thread as-of through the read boundary.** Add an as-of lane to `PorcelainWorldReads`
-(`state`, `location_chain`, `events`, `assertion_in_frame`) so beat/clock conditions and
-`InFrame`/`Located`/`Occurred` read the horizon, not head. Thread the horizon through
-`Session.location`, `_present_people`, scene description + image selection, status, opening
-anchors, and `run_turn`'s scene/presence/movement/adjudication reads.
+**S3 — Thread as-of through the read boundary.** SHIPPED (`04e624c`). `PorcelainWorldReads`
+carries a `horizon` (the foundation, `4f949a6`); `Session._horizon(turn) = opening_as_of + turns`
+fail-closed strictly below `next_source_as_of`; `None` for legacy worlds (head — byte-for-byte
+unchanged). `run_turn(horizon=…)` binds `live_reads` + every direct `p.locate`/`_snap_or_empty`/
+`furnish_scene`/`adjudicate` read; `Session` binds `location`/`_present_people`/`_scene_contents`/
+scene-imagery/`terminal_outcome`. `state_value`/`_snap_or_empty`/`furnish_scene`/`adjudicate`
+gained an `as_of` lane (default `None` = head). `entry_as_of` defaults to `opening_as_of` so the
+cold-open establishing/situation snapshots read at the opening. Diegetic CLOCK reads stay at head
+(Cx 253 §2 — the clock is world content, not the visibility axis).
 
-**S4 — Regressions.** Keep Cx-127 (calendar-year rows never opening-current; a live turn
-supersedes opening state) until replaced. Add the non-location-attribute regression: future
-`bracelet`/`appearance`/`fire_under_skin` rows exist, the opening read omits them, a later
-live acquisition includes them.
+**S4 — Regressions.** SHIPPED (`04e624c`, 581 green). `test_porcelain_reads_honor_play_horizon`
+(head sees aftermath; horizon excludes location + the bracelet/appearance ATTRIBUTE axis +
+events + `assertion_in_frame`), `test_live_turn_supersedes_opening_at_the_horizon`,
+`test_horizon_guard_caps_below_next_source`, `test_legacy_world_has_no_play_horizon`,
+`test_horizon_metadata_coordinates`. The Cx-127 mechanism tests remain as legacy/no-horizon
+compatibility guards.
 
-**S5 — Four-world A/B + live verify.** `anchor`/`latch`/`thedeep` open materially identical
-(their fix is a no-op — single-timeframe / no aftermath). `emberroad` opens at Harth with
-humble Mara, the relic just waking, Tovin/Lysa present per the opening dossier.
+**S5 — Four-world A/B + live verify.** IN PROGRESS. `anchor`/`latch`/`thedeep` open materially
+identical (their fix is a no-op — single-timeframe / no aftermath; confirmed `opening_as_of:
+None` on the live run). `emberroad` is REBUILT from `generated/emberroad.md` under the S1/S2
+policy and must open at Harth with humble Mara (not the post-quest Keeper end-state), then
+re-join the base-4 shelf.
 
 ## PB
 
