@@ -57,9 +57,10 @@ logger = logging.getLogger(__name__)
 #: one elegant, slightly otherworldly gallery. Always present regardless of what the
 #: model returns (we compose it deterministically, not via the cohort). A touch of the
 #: world's genre is layered on per scene (see `compose_prompt`).
-HOUSE_STYLE = ("a highly detailed oil color painting — fine intricate brushwork, rich "
-               "texture and depth, masterful painterly light, crisp detail, elegant and "
-               "quietly otherworldly, museum-quality fine art")
+HOUSE_STYLE = ("a traditional oil painting on canvas — unmistakably painted, with "
+               "visible brushstrokes, impasto texture and glazed depth, rich pigment and "
+               "masterful painterly light, detailed and elegant, quietly otherworldly, "
+               "museum-quality fine art (NOT a photograph, NOT a 3D render)")
 
 _FLAG_ENV = "CONSTRUCT_SCENE_IMAGES"
 _CMD_ENV = "CONSTRUCT_IMAGE_CMD"
@@ -96,6 +97,7 @@ class SceneImage:
     description: str = ""
     world_brief: str = ""
     genre: str = ""
+    contents: str = ""
     prompt: str = ""
 
     @property
@@ -168,24 +170,26 @@ def compose_prompt(content: str, genre: str = "") -> str:
 
 def plan_scene(scenario: str, place_id: str | None, place_name: str,
                description: str | None, *, world_brief: str = "",
-               genre: str = "") -> SceneImage | None:
+               genre: str = "", contents: str = "") -> SceneImage | None:
     """FAST, pure detection (no model call) — safe to call every turn. Returns a
-    :class:`SceneImage` flagged ``fresh`` (new/changed location → the caller should
-    :func:`render` it) or ``cached`` (unchanged → do nothing), or None when disabled
-    / nothing to depict. A cached hit carries the prior prompt+asset from the
-    manifest; a fresh one carries the source description for rendering."""
-    if not enabled() or not place_id or not (description or "").strip():
+    :class:`SceneImage` flagged ``fresh`` (new/changed location OR changed contents →
+    the caller should :func:`render` it) or ``cached`` (unchanged → do nothing), or
+    None when disabled / nothing to depict. The hash folds in the room CONTENTS, so a
+    body appearing (or any change to what's in the room) refreshes the image."""
+    description, contents = (description or "").strip(), (contents or "").strip()
+    if not enabled() or not place_id or not (description or contents):
         return None
-    h = _hash(description)
+    h = _hash(description + "\x1f" + contents)
     prior = _load_manifest(scenario).get(place_id)
     if prior and prior.get("description_hash") == h and prior.get("prompt"):
         return SceneImage(place_id=place_id, place_name=place_name, description_hash=h,
                           asset_path=prior.get("asset_path", _asset_path(scenario, place_id, h)),
                           status="cached", prompt=prior["prompt"], description=description,
-                          world_brief=world_brief, genre=genre)
+                          world_brief=world_brief, genre=genre, contents=contents)
     return SceneImage(place_id=place_id, place_name=place_name, description_hash=h,
                       asset_path=_asset_path(scenario, place_id, h), status="fresh",
-                      description=description, world_brief=world_brief, genre=genre)
+                      description=description, world_brief=world_brief, genre=genre,
+                      contents=contents)
 
 
 def render(scenario: str, rec: SceneImage, *, provider: Any = None,
@@ -200,8 +204,9 @@ def render(scenario: str, rec: SceneImage, *, provider: Any = None,
             from construct import cohorts
             content = (cohorts.image_prompt(provider, place_name=rec.place_name,
                                             description=rec.description,
-                                            world_brief=rec.world_brief) or {}).get("prompt", "")
-        rec.prompt = compose_prompt(content or rec.description, rec.genre)
+                                            world_brief=rec.world_brief,
+                                            contents=rec.contents) or {}).get("prompt", "")
+        rec.prompt = compose_prompt(content or rec.description or rec.contents, rec.genre)
         _dispatch(rec)
         asset_ok = Path(rec.asset_path).exists()
         # Persist the manifest AFTER dispatch (Cx 238 #1): cache the record only when
@@ -239,11 +244,11 @@ def render_async(scenario: str, rec: SceneImage, *, provider: Any = None,
 
 def note_scene(scenario: str, place_id: str | None, place_name: str,
                description: str | None, *, provider: Any = None,
-               world_brief: str = "", genre: str = "") -> SceneImage | None:
+               world_brief: str = "", genre: str = "", contents: str = "") -> SceneImage | None:
     """Synchronous plan+render convenience (CLI / tests / non-async callers): detect,
     and render in-line only when fresh. Returns the record or None."""
     rec = plan_scene(scenario, place_id, place_name, description,
-                     world_brief=world_brief, genre=genre)
+                     world_brief=world_brief, genre=genre, contents=contents)
     if rec is None or not rec.fresh:
         return rec
     return render(scenario, rec, provider=provider)

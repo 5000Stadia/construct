@@ -37,7 +37,7 @@ def test_fresh_then_cached_reuses_without_a_model_call(worlds):
     prov = _prov()
     rec = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=prov)
     assert rec is not None and rec.status == "fresh"
-    assert "oil color painting" in rec.prompt.lower()
+    assert "oil painting" in rec.prompt.lower()
     assert rec.asset_path.endswith(".png") and rec.description_hash in rec.asset_path
     assert len(prov.calls) == 1
 

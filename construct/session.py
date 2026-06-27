@@ -339,7 +339,10 @@ class Session:
             who = self._display_name(self._arc.protagonist)
             where = self._display_name(self.location())
             parts.append(f"You are {who}" + (f", at {where}." if where else "."))
-        self._note_scene_image()  # SCENE-IMAGERY: capture the opening location too
+        # SCENE-IMAGERY: the opening needs an image too. `furnish_scene` normally mints
+        # the place description only DURING a turn, so mint it here first, then detect.
+        self._ensure_scene_description()
+        self._note_scene_image()
         # NO forced 'aim'/objective banner (founder 2026-06-22: "no forced goal —
         # the fiction needs to carry it"). The call to action ARISES diegetically
         # over the cold open + first beats, like a detective story that begins
@@ -667,13 +670,15 @@ class Session:
             loc = self.location()
             if not loc:
                 return None
-            desc = state_value(self._world.porcelain, loc, "description")
-            if not desc:
+            desc = state_value(self._world.porcelain, loc, "description") or ""
+            contents = self._scene_contents(loc)
+            if not (desc or contents):
                 return None
             rec = imagery.plan_scene(self.scenario, loc,
                                      self._display_name(loc) or loc, desc,
                                      world_brief=self._meta.get("premise", ""),
-                                     genre=self._scene_genre())
+                                     genre=self._scene_genre(),
+                                     contents=contents)
             self._last_image = rec
             if rec and rec.fresh and not self._render_in_flight(rec):
                 self._start_render(rec)
@@ -702,6 +707,59 @@ class Session:
                 seen.add(p.lower())
                 out.append(p)
         return ", ".join(out[:3])
+
+    def _ensure_scene_description(self) -> None:
+        """Mint the current scene's `description` if it's never been furnished — so the
+        OPENING has an image source (furnish_scene otherwise runs only inside a turn).
+        Best-effort; a furnish hiccup just means the opening leans on scene contents."""
+        try:
+            from construct.turnloop import TurnTrace, furnish_scene
+            scene = self.location()
+            if not scene:
+                return
+            furnish_scene(self._world.porcelain, scene,
+                          f"knows:{self._arc.protagonist}", {}, TurnTrace(turn=0))
+        except Exception:
+            logger.debug("opening scene furnish failed", exc_info=True)
+
+    def _scene_contents(self, scene: str) -> str:
+        """The notable canon things ACTUALLY in the scene — objects/clues and any
+        corpse — so the image depicts the real, furnished room (founder: not a bare
+        hall). LIVING people are deliberately excluded (theatre of the mind); a dead
+        body IS included. Read from the arc scope (the cast + key objects); best-effort."""
+        from construct.foyer import state_value
+        p = self._world.porcelain
+        proto = self._arc.protagonist
+        items: list[str] = []
+        try:
+            here = p.locate(scene) or []
+        except Exception:
+            here = []
+        for e in (self._scope or []):
+            if e in (proto, scene):
+                continue
+            try:
+                loc = state_value(p, e, "in")
+                if loc != scene:
+                    chain = p.locate(e) or []
+                    if scene not in chain and not (set(chain) & {scene, *here}):
+                        continue
+            except Exception:
+                continue
+            name = state_value(p, e, "name") or e.split(":", 1)[-1].replace("_", " ")
+            kind = (state_value(p, e, "kind") or "").strip()
+            if e.startswith("person:"):
+                cond = " ".join(filter(None, (
+                    state_value(p, e, "state"), state_value(p, e, "condition"),
+                    state_value(p, e, "status"), kind))).lower()
+                if any(w in cond for w in ("dead", "slain", "corpse", "killed",
+                                           "lifeless", "murdered", "body")):
+                    items.append(f"the body of {name}")
+                continue  # living people stay theatre-of-the-mind
+            label = name if (not kind or kind.lower() in name.lower()) else f"{name} ({kind})"
+            items.append(label)
+        # stable order so the hash is deterministic for an unchanged room
+        return ", ".join(sorted(dict.fromkeys(items))[:8])
 
     def _render_in_flight(self, rec: Any) -> bool:
         h = getattr(self, "_pending_image", None)

@@ -36,8 +36,16 @@ source of truth.
    the slow work (prompt cohort + image generation) runs on a daemon thread **while
    the NPC actions + narration are still being composed**. The text is never blocked
    waiting on a picture.
-3. **Mint the prompt.** `cohorts.image_prompt` rewrites the narration-prose
-   description into a text-to-image prompt for an **unpeopled** setting:
+2b. **Ground it in the room's real contents.** The committed `place.description` is
+   often terse, so the image cohort is also fed the scene's actual canon **contents** —
+   the objects/clues and any corpse truly located in the room (`Session._scene_contents`;
+   living people are excluded — theatre of the mind). The hash folds contents in, so a
+   body appearing or an object moving refreshes the image. The **opening** furnishes the
+   description first (`Session._ensure_scene_description`) so the title screen gets a
+   picture too (furnish otherwise runs only during a turn).
+
+3. **Mint the prompt.** `cohorts.image_prompt` rewrites the description + contents
+   into a text-to-image prompt for an **unpeopled** setting:
    - **KEEP** the fixed, scene-defining details that would look *wrong if omitted* —
      a broken-down wagon, a slain body with a dagger in its back, spilled blood, an
      overturned chair. A **corpse is part of the set** and stays.
