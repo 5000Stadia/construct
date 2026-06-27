@@ -17,6 +17,7 @@ STUDY2 = STUDY + " Now the desk is overturned and the window glass is shattered.
 @pytest.fixture
 def worlds(tmp_path, monkeypatch):
     monkeypatch.setattr(imagery, "WORLDS_DIR", tmp_path)
+    monkeypatch.setattr(imagery, "IMAGES_DIR", tmp_path / "images")  # never touch the repo tree
     monkeypatch.setenv("CONSTRUCT_SCENE_IMAGES", "1")  # opt back in (conftest disables by default)
     monkeypatch.delenv("CONSTRUCT_IMAGE_CMD", raising=False)
     # No real backend during tests — never hit the network (the built-in OpenAI
@@ -112,10 +113,32 @@ def test_cohort_prompt_instructs_player_absence():
 
 def test_dispatcher_is_called_on_fresh_only(worlds):
     seen = []
-    imagery.dispatcher = lambda rec: seen.append(rec.status)
+
+    def _disp(rec):  # a real backend writes the asset; caching is asset-gated
+        seen.append(rec.status)
+        from pathlib import Path
+        Path(rec.asset_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(rec.asset_path).write_bytes(b"\x89PNG fake")
+
+    imagery.dispatcher = _disp
     try:
         imagery.note_scene("latch", "place:study", "the study", STUDY, provider=_prov())
         imagery.note_scene("latch", "place:study", "the study", STUDY, provider=_prov())
     finally:
         imagery.dispatcher = None
-    assert seen == ["fresh"]  # cached re-entry does NOT re-dispatch
+    assert seen == ["fresh"]  # cached re-entry (asset present) does NOT re-dispatch
+
+
+def test_backend_failure_is_not_cached_and_retries(worlds):
+    """If a backend is configured but writes no asset (a failure / billing limit), the
+    scene is NOT cached as done — a later visit re-renders so the image can still land."""
+    calls = []
+    imagery.dispatcher = lambda rec: calls.append(rec.place_id)  # writes no file
+    try:
+        a = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=_prov())
+        b = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=_prov())
+    finally:
+        imagery.dispatcher = None
+    assert a.status == "fresh" and b.status == "fresh"  # retried, not cached
+    assert calls == ["place:study", "place:study"]
+    assert not imagery.manifest_path("latch").exists()  # nothing cached

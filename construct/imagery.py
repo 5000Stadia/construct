@@ -60,6 +60,10 @@ HOUSE_STYLE = ("a detailed oil color painting — rich textured brushwork, paint
 _FLAG_ENV = "CONSTRUCT_SCENE_IMAGES"
 _CMD_ENV = "CONSTRUCT_IMAGE_CMD"
 
+#: Where generated image assets are written (overridable for tests so they never
+#: touch the repo tree). Gitignored at the repo root.
+IMAGES_DIR = Path("images")
+
 #: Serializes the load→modify→save of a scenario's manifest across the background
 #: render threads (in-process), so two concurrent renders can't read the same JSON
 #: and last-write-wins over each other's prompt records (Cx 236 note 2).
@@ -115,9 +119,9 @@ def manifest_path(scenario: str) -> Path:
 
 
 def _asset_path(scenario: str, place_id: str, h: str) -> str:
-    # Where a generator should write the asset; relative + deterministic so the same
-    # description always maps to the same file (reuse) and a change maps to a new one.
-    return str(Path("images") / _slug(scenario) / f"{_slug(place_id)}-{h}.png")
+    # Where a generator should write the asset; deterministic so the same description
+    # always maps to the same file (reuse) and a change maps to a new one.
+    return str(IMAGES_DIR / _slug(scenario) / f"{_slug(place_id)}-{h}.png")
 
 
 def _load_manifest(scenario: str) -> dict:
@@ -189,14 +193,24 @@ def render(scenario: str, rec: SceneImage, *, provider: Any = None,
                                             description=rec.description,
                                             world_brief=rec.world_brief) or {}).get("prompt", "")
         rec.prompt = compose_prompt(content or rec.description, rec.genre)
-        with _manifest_lock:  # serialize concurrent same-scenario renders (Cx 236 #2)
-            manifest = _load_manifest(scenario)
-            manifest[rec.place_id] = {"place_name": rec.place_name,
-                                      "description_hash": rec.description_hash,
-                                      "prompt": rec.prompt, "asset_path": rec.asset_path}
-            _save_manifest(scenario, manifest)
         _dispatch(rec)
-        if deliver is not None and Path(rec.asset_path).exists():
+        asset_ok = Path(rec.asset_path).exists()
+        # Persist the manifest AFTER dispatch (Cx 238 #1): cache the record only when
+        # the asset actually landed, OR when no backend is configured (then the
+        # prompt-only manifest is itself the deliverable). If a backend IS configured
+        # but produced nothing (a failure, or the OpenAI billing limit), DON'T cache —
+        # so the scene retries on a later visit instead of reading as done forever.
+        if asset_ok or not _backend_configured():
+            with _manifest_lock:  # serialize concurrent same-scenario renders (Cx 236 #2)
+                manifest = _load_manifest(scenario)
+                manifest[rec.place_id] = {"place_name": rec.place_name,
+                                          "description_hash": rec.description_hash,
+                                          "prompt": rec.prompt, "asset_path": rec.asset_path}
+                _save_manifest(scenario, manifest)
+        else:
+            logger.info("scene image: backend produced no asset — not caching, will "
+                        "retry on next visit: %s", rec.place_id)
+        if deliver is not None and asset_ok:
             deliver(rec)
         logger.info("scene image rendered: %s", rec.place_id)
     except Exception:
@@ -224,6 +238,16 @@ def note_scene(scenario: str, place_id: str | None, place_name: str,
     if rec is None or not rec.fresh:
         return rec
     return render(scenario, rec, provider=provider)
+
+
+def _backend_configured() -> bool:
+    """Whether an image-GENERATION backend is wired (an explicit dispatcher, a custom
+    command, or an OpenAI key). When none is, a render legitimately produces no asset
+    and the prompt-only manifest is the deliverable; when one IS, a missing asset means
+    the generation failed and should be retried, not cached as done (Cx 238 #1)."""
+    return bool(dispatcher is not None
+                or os.getenv(_CMD_ENV, "").strip()
+                or os.getenv("OPENAI_API_KEY", "").strip())
 
 
 def _dispatch(rec: SceneImage) -> None:
