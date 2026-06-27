@@ -914,6 +914,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #    uncertain resolution judgment ride the same call (no extra latency).
     moves_to, requires = "", []
     needs_test, uncertain_of = False, ""
+    uses_knowledge = False  # SCENE-CONTEXT-SHAPE: protagonist-competence gate (Cx 247)
     reshape_attempt = False
     commits, commitment = False, ""
     takes = ""
@@ -983,6 +984,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # Default TRUE on absence (old stubs / schema-less classify) so extraction is never
         # silently skipped where a fact could be asserted (protected-key licensing depends on it).
         asserts_or_reveals = bool(verdict.get("asserts_or_reveals", True))
+        uses_knowledge = bool(verdict.get("uses_protagonist_knowledge")) and kind == "action"
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:
         kind = "action"
@@ -1015,6 +1017,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # under canon + concealment.
         kind = "action"
         improv_query = player_input
+        uses_knowledge = True  # improvising an answer the character would plainly know → competence
         trace.classified = "question→improv"
     if kind == "ooc":
         # Answered by CONDUIT, the host persona (not the narrator, not a character):
@@ -1058,7 +1061,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 f"ADJUDICATION (binding): the attempt FAILS — {denial}. "
                 f"Render the failure honestly and diegetically; the world "
                 f"does not bend.",
-                arc.protagonist)
+                arc.protagonist, peopled=False, competence=False)  # brief denial render (Cx 247)
             trace.cohort_calls.append("narrate:main")
             p.ingest_structured([
                 {"entity": f"event:turn_{turn}", "attribute": "kind",
@@ -2485,8 +2488,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     trace.briefing = briefing  # captured for the mechanics log (the directives → the prose)
 
     # ---- RENDER (loud-fail) ----------------------------------------------
+    # SCENE-CONTEXT-SHAPE Stage 2: the peopled / competence directives ride the window
+    # ONLY when this turn triggers them — present cast (containment-aware npcs), and a
+    # capability-dependent protagonist-knowledge move (classify's uses_protagonist_knowledge,
+    # or the question→improv ordinary-knowledge fallthrough). Cx 247 / K 080.
+    _peopled, _competence = bool(npcs), uses_knowledge
     with _phase(trace, "narrate"):
-        prose = cohorts.narrate(provider, briefing, arc.protagonist)
+        prose = cohorts.narrate(provider, briefing, arc.protagonist,
+                                peopled=_peopled, competence=_competence)
     trace.cohort_calls.append("narrate:main")
     # Deterministic player-boundary guard on the render: prose naming
     # the protagonist in third person gets ONE re-ask with the violation
@@ -2498,7 +2507,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             briefing + f"\n\nVIOLATION TO FIX: your previous render named "
             f"{arc.protagonist} as a third-person character. They are 'you'. "
             f"Re-render without naming them.",
-            arc.protagonist)
+            arc.protagonist, peopled=_peopled, competence=_competence)  # same flags (Cx 247)
         trace.cohort_calls.append("narrate:main(re-ask)")
     if names_protagonist(prose, arc.protagonist):
         trace.player_boundary = "FLAGGED: protagonist named in third person"

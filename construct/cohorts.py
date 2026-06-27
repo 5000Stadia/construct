@@ -68,6 +68,15 @@ CLASSIFY_SCHEMA = {
                          "description": "if needs_test, ONE short clause naming what "
                          "resists or what's at stake ('the pit may be too wide'); "
                          "empty otherwise"},
+        "uses_protagonist_knowledge": {"type": "boolean",
+                         "description": "true when this turn asks the narrator to VOLUNTEER "
+                         "ordinary/professional/local knowledge the PROTAGONIST would already "
+                         "possess — 'as the detective, reconstruct how the bolt was worked', a "
+                         "professional routine, customary/local know-how, character-memory or "
+                         "commonplace expertise, or a canon-unanswered detail the character would "
+                         "plainly know. FALSE for generic look-around, plain wait, simple "
+                         "movement/taking, idle dialogue, questioning an NPC (the answer is the "
+                         "NPC's), OOC, and record questions answered directly from canon."},
         "reshape_attempt": {"type": "boolean",
                        "description": "true ONLY when the action reaches for the MIRACULOUS — "
                        "to OVERTURN a world fact the story treated as settled: revive the dead, "
@@ -2196,11 +2205,17 @@ def open_scene(provider: Provider, briefing: str, protagonist: str) -> str:
     return _clean_prose(result["prose"])
 
 
-def narrate(provider: Provider, briefing: str, protagonist: str) -> str:
+def narrate(provider: Provider, briefing: str, protagonist: str, *,
+            peopled: bool = True, competence: bool = True) -> str:
+    # SCENE-CONTEXT-SHAPE Stage 2 (conditional injection): the peopled / competence
+    # directives ride the window ONLY when the turn triggers them (NPCs present /
+    # a capability-dependent protagonist-knowledge move) — not as always-on rule mass.
+    _peopled = f"{WORLD_IS_PEOPLED}\n\n" if peopled else ""
+    _competence = f"{PROTAGONIST_COMPETENCE}\n\n" if competence else ""
     result = complete_sync(provider,
         f"You are the narrator of a text construct.\n\nBRIEFING (everything "
         f"you know — there is nothing else):\n{briefing}\n\n{RENDER_LEASH}\n\n"
-        f"{RENDER_STYLE}\n\n{PROTAGONIST_COMPETENCE}\n\n{WORLD_IS_PEOPLED}\n\n"
+        f"{RENDER_STYLE}\n\n{_competence}{_peopled}"
         f"{player_constraint(protagonist)}\n\n"
         f"A pacing directive, if present, describes what the WORLD does; if "
         f"any part of it would script the player, render only the world's "

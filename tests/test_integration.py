@@ -1810,6 +1810,51 @@ def test_render_blocks_stage1_collapsed_shape():
     assert len(RENDER_STYLE) + len(RENDER_LEASH) < 4500
 
 
+def test_narrate_conditional_blocks_gate():
+    # Stage 2: WORLD_IS_PEOPLED / PROTAGONIST_COMPETENCE ride the window only when their
+    # flag is set — the narrate() gating mechanism (Cx 247 / K 080).
+    from construct.cohorts import narrate
+    on = StubProvider([{"prose": "x"}])
+    narrate(on, "BRIEFING", "person:p", peopled=True, competence=True)
+    p_on = on.calls[-1][0]
+    assert "policy-machines" in p_on and "make another character recite" in p_on
+    off = StubProvider([{"prose": "x"}])
+    narrate(off, "BRIEFING", "person:p", peopled=False, competence=False)
+    p_off = off.calls[-1][0]
+    assert "policy-machines" not in p_off and "make another character recite" not in p_off
+
+
+def _solo_classify(**over):
+    base = {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            "uncertain_of": "", "uses_protagonist_knowledge": False}
+    base.update(over)
+    return base
+
+
+def test_turn_gates_competence_on_knowledge_move_solo(world):
+    # A solo expert move (uses_protagonist_knowledge) keeps competence; no NPCs → peopled off.
+    arc = make_arc(); seed_arc(world, arc)
+    world._extractions.append({"items": []}); world._extractions.append({"items": []})
+    provider = StubProvider([_solo_classify(uses_protagonist_knowledge=True),
+                             {"prose": "You reconstruct the mechanism."}])
+    run_turn(world, arc, provider, "As the detective, reconstruct how the bolt was worked.", turn=1)
+    np = _narrate_prompt(provider)
+    assert "make another character recite" in np     # competence ON — capability-dependent move
+    assert "policy-machines" not in np         # peopled OFF — solo scene
+
+
+def test_turn_drops_both_on_solo_idle(world):
+    # A solo idle/look turn sheds both blocks (the prompt-mass win).
+    arc = make_arc(); seed_arc(world, arc)
+    world._extractions.append({"items": []}); world._extractions.append({"items": []})
+    provider = StubProvider([_solo_classify(uses_protagonist_knowledge=False),
+                             {"prose": "You wait."}])
+    run_turn(world, arc, provider, "I wait, watching.", turn=1)
+    np = _narrate_prompt(provider)
+    assert "make another character recite" not in np  # no capability move
+    assert "policy-machines" not in np          # solo
+
+
 def test_author_intro_cohort():
     # The thematic introduction: premise/stakes in voice that GROUNDS the player —
     # clarity with a stylistic cherry, NO objective/aim BANNER (the call to action
