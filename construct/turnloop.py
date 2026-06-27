@@ -1327,8 +1327,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # intended reading (all present NPCs act in the same moment) and the latency
         # win is large; the COMMITS are still serialized so canon order is
         # deterministic. If serial reaction is ever needed, drop _parallel here.
+        # Horizon-bind the character-sheet read (Cx 259 fresh-hunt): this sheet feeds
+        # npc_turn, whose accepted action is ingested to canon before beat_pass + terminal —
+        # so a future-stamped knows:<npc> row must NOT drive NPC behavior at the play horizon.
         sheets = {npc: json.dumps(p.snapshot(npc, frame=f"knows:{npc}",
-                                             lens="character_sheet"))[:4000]
+                                             lens="character_sheet", as_of=_h))[:4000]
                   for npc in npcs}
         scene_json = json.dumps(canon_snap)[:4000]
         # TURN-LATENCY Lever 4: ONE folded npc_turn call per present NPC (was two —
