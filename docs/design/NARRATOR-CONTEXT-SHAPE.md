@@ -9,9 +9,10 @@ bound the simultaneous imperative count (~≤12), scope rules like we scope pins
 ## Today (the problem)
 
 The narrate call concatenates, every turn, the standing union of:
-`RENDER_STYLE` (~27 clauses) + `RENDER_LEASH` (~25) + `FICTION_CRAFT` (~13) +
+`RENDER_STYLE` (~27 clauses) + `RENDER_LEASH` (~25) +
 `PROTAGONIST_COMPETENCE` (~8) + `WORLD_IS_PEOPLED` (~7) + ~per-turn directives →
-**>100 simultaneous imperatives.** Past ~10–12, compliance goes lossy and the model
+**>60 simultaneous imperatives.** (`FICTION_CRAFT` is NOT in the live narrate call — it's
+authoring/session-zero only, Cx 245 — so it's not narrator bloat.) Past ~10–12, compliance goes lossy and the model
 services the list instead of reading the scene. The situation is a small island in a
 sea of rules.
 

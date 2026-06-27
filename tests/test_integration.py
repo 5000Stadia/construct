@@ -1787,7 +1787,27 @@ def test_render_leash_keeps_cast_distinct():
     # references to it, never fabricating an identity-merge.
     from construct.cohorts import RENDER_LEASH
     assert "DISTINCT CAST" in RENDER_LEASH
-    assert "never invent that one character is secretly another" in RENDER_LEASH
+    assert "never invent that one is secretly another" in RENDER_LEASH
+
+
+def test_render_blocks_stage1_collapsed_shape():
+    # Narrator collapse Stage 1 (founder prompt-elegance audit; Cx 245 / K 079 GREEN):
+    # the two standing blocks are consolidated — dedup + contradictions fixed — and carry
+    # the founder's two new rules, WITHOUT banning ordinary improv or hiding real exits.
+    from construct.cohorts import RENDER_LEASH, RENDER_STYLE
+    # No narrator option-menus, but real exits/affordances are still scene fact (not hidden).
+    assert "NEVER TIP CHOICES" in RENDER_STYLE
+    assert "ways out" in RENDER_STYLE
+    # Player-is-protagonist + false-premise refusal scoped to SIGNIFICANT/defined referents…
+    assert "PLAYER is the protagonist" in RENDER_LEASH
+    assert "SIGNIFICANT or already-defined" in RENDER_LEASH
+    # …so ordinary grounded improv is explicitly NOT banned (Cx 245 wording guard).
+    assert "fair improv" in RENDER_LEASH
+    # The two contradictions/overstatements are gone.
+    assert "What you make real here becomes part of the world" not in RENDER_LEASH
+    assert "ANSWER THIS TURN, do not re-establish" not in RENDER_STYLE
+    # Standing-rule mass shrank well below the old ~7.1k chars for the two blocks.
+    assert len(RENDER_STYLE) + len(RENDER_LEASH) < 4500
 
 
 def test_author_intro_cohort():
