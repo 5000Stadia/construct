@@ -19,19 +19,24 @@ logger = logging.getLogger(__name__)
 class PorcelainWorldReads:
     """WorldReads over a pattern-buffer World's porcelain."""
 
-    def __init__(self, world: Any) -> None:
+    def __init__(self, world: Any, *, horizon: float | None = None) -> None:
         self._p = world.porcelain
+        # AS-OF PLAY HORIZON (B' / Cx 253): when set, EVERY read materializes as-of this
+        # coordinate — so beat/clock conditions and Located/InFrame/Occurred read the
+        # current play horizon, never the timeline head (which is the source aftermath).
+        # None = head = legacy behavior (single-timeframe / pre-horizon worlds).
+        self._horizon = horizon
 
     def has_entity(self, entity: str) -> bool:
         # Every registered entity carries a kind row; locate covers
         # anchored-but-kindless edge cases.
-        st = self._p.state(entity, "kind")
+        st = self._p.state(entity, "kind", as_of=self._horizon)
         if st["status"] in ("known", "conflicted"):
             return True
-        return bool(self._p.locate(entity))
+        return bool(self._p.locate(entity, as_of=self._horizon))
 
     def state(self, entity: str, attribute: str, *, frame: str = "canon") -> object:
-        st = self._p.state(entity, attribute, frame=frame)
+        st = self._p.state(entity, attribute, frame=frame, as_of=self._horizon)
         if st["status"] == "known":
             return st["fact"]["value"]
         if st["status"] == "conflicted":
@@ -49,13 +54,13 @@ class PorcelainWorldReads:
         return None  # unknown/frontier — INDETERMINATE to the atoms
 
     def location_chain(self, entity: str) -> list[str] | None:
-        chain = self._p.locate(entity)
+        chain = self._p.locate(entity, as_of=self._horizon)
         if chain:
             return list(chain)
         return [] if self.has_entity(entity) else None
 
     def assertion_in_frame(self, frame: str, entity: str, attribute: str, value: object) -> bool:
-        st = self._p.state(entity, attribute, frame=frame)
+        st = self._p.state(entity, attribute, frame=frame, as_of=self._horizon)
         return st["status"] in ("known", "conflicted") and st["fact"]["value"] == value
 
     def events(
@@ -67,6 +72,10 @@ class PorcelainWorldReads:
         until: int | None = None,
         frame: str = "canon",
     ) -> list[EventRow]:
+        # Horizon-bound the event read (Cx 253 §4: events() feeding conditions must not see
+        # future source rows). Cap `until` at the play horizon when one is set.
+        if self._horizon is not None:
+            until = self._horizon if until is None else min(until, self._horizon)
         rows = self._p.events(
             kind=kind, participants=participant, since=since, until=until, frame=frame)
         return [
