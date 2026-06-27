@@ -35,9 +35,9 @@ def gauge_id(slug: str) -> str:
     return slug if slug.startswith("gauge:") else f"gauge:{slug}"
 
 
-def _state_value(porcelain, entity: str, attribute: str):
+def _state_value(porcelain, entity: str, attribute: str, *, as_of: float | None = None):
     try:
-        st = porcelain.state(entity, attribute)
+        st = porcelain.state(entity, attribute, as_of=as_of)
     except Exception:  # noqa: BLE001 — a frontier/unknown gauge reads as absent
         return None
     if isinstance(st, dict) and st.get("status") in ("known", "conflicted"):
@@ -45,9 +45,11 @@ def _state_value(porcelain, entity: str, attribute: str):
     return None
 
 
-def read_gauge(world, slug: str) -> float | None:
-    """The gauge's current folded total, or None if never seeded."""
-    total = _state_value(world.porcelain, gauge_id(slug), LEVEL_ATTR)
+def read_gauge(world, slug: str, *, as_of: float | None = None) -> float | None:
+    """The gauge's current folded total, or None if never seeded. `as_of` (Cx 259): read at
+    the play horizon. Gauges are host-authored at build/play coordinates (never source-stamped),
+    so this is a no-op for horizon worlds — bound for a uniformly horizon-disciplined turn path."""
+    total = _state_value(world.porcelain, gauge_id(slug), LEVEL_ATTR, as_of=as_of)
     if isinstance(total, bool):
         return None
     if isinstance(total, (int, float)):
@@ -128,16 +130,17 @@ def ensure_gauges(world, arc) -> None:
                        floor=g.floor, ceiling=g.ceiling)
 
 
-def gauge_pass(world, arc, action: str) -> dict[str, float]:
+def gauge_pass(world, arc, action: str, *, as_of: float | None = None) -> dict[str, float]:
     """Drain/replenish every gauge by its delta and return the new folded levels.
     MUST run before `beat_pass`/`arc_outcome`/`clock_pass` so a crossed floor is
     visible to terminal/beat evaluation the SAME turn (Cx 150). Seeds lazily on
-    first touch (`ensure_gauges`) so accrue is established at runtime."""
+    first touch (`ensure_gauges`) so accrue is established at runtime. `as_of`: read
+    the post-commit level at the play horizon (Cx 259)."""
     ensure_gauges(world, arc)
     levels: dict[str, float] = {}
     for g in getattr(arc, "gauges", ()):
         commit_gauge(world, g.gauge_id, gauge_delta_for(g, action))
-        levels[g.gauge_id] = read_gauge(world, g.gauge_id)
+        levels[g.gauge_id] = read_gauge(world, g.gauge_id, as_of=as_of)
     return levels
 
 
@@ -175,25 +178,25 @@ def gauge_urgency(gauge, level: float) -> float:
     return max(0.0, min(1.0, (level - gauge.floor) / rng))
 
 
-def gauge_lines(arc, world) -> list[tuple]:
+def gauge_lines(arc, world, *, as_of: float | None = None) -> list[tuple]:
     """`(gauge, level, urgency)` for every readable gauge — the input the turn
     loop turns into an ephemeral pin line. Derived live; never canon."""
     out = []
     for g in getattr(arc, "gauges", ()):
-        lvl = read_gauge(world, g.gauge_id)
+        lvl = read_gauge(world, g.gauge_id, as_of=as_of)
         if lvl is not None:
             out.append((g, lvl, gauge_urgency(g, lvl)))
     return out
 
 
-def gauge_coloring(arc, world) -> str | None:
+def gauge_coloring(arc, world, *, as_of: float | None = None) -> str | None:
     """`"costly"` when any terminal gauge sits at/below its `costly_band` — a WIN
     earned on the last of the reserve reads as a costly victory, not a clean one
     (part 5; the band→outcome map is per-shape config that may override this)."""
     for g in getattr(arc, "gauges", ()):
         if not g.terminal_on_floor:
             continue
-        lvl = read_gauge(world, g.gauge_id)
+        lvl = read_gauge(world, g.gauge_id, as_of=as_of)
         if lvl is not None and gauge_urgency(g, lvl) <= g.costly_band:
             return "costly"
     return None

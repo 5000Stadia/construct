@@ -389,7 +389,14 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # The protagonist MUST be a STAGED person (Cx 160): everything downstream — cast
     # staging, knows:<protagonist> delivery, pillar coverage — keys off arc.protagonist,
     # so an unlocatable role id (person:detective) silently darkens the whole world.
-    located_people = _locatable_people(world, known_ids, as_of=opening_as_of)
+    # Protagonist ELIGIBILITY reads at HEAD, even for horizon worlds (Cx 255 audit → reversed
+    # after the emberroad evidence): a saga's opening chapters are often ATMOSPHERIC (scene-
+    # setting prose) and place no cast, so the cast's `in` rows first appear mid-text. Filtering
+    # eligibility to `as_of=opening_as_of` emptied the allowlist and failed the build. Eligibility
+    # only needs "is this a real STAGED person" (not a kindless role); head answers that. The B'
+    # protection lives in the horizon-bound STATE reads + the opening-anchored staging below, not
+    # in eligibility — and an author never picks an aftermath-only figure as the POV character.
+    located_people = _locatable_people(world, known_ids)
     proto_feedback = ""
     _guard_failed_proposal: dict | None = None
     from construct.cohorts import FICTION_CRAFT
@@ -645,15 +652,23 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
         # at_scene members for deduction; a missing scene is logged, never invented here).
         try:
             from construct.cast import cast_location_plan
-            # AS-OF PLAY HORIZON (Cx 255 blocking #1): anchor the opening cast to where the
-            # protagonist is AT THE OPENING, not at the timeline head. In a horizon world a HEAD
-            # read returns the source AFTERMATH place; staging the cast there at turn_time(0)
-            # would then WIN at the opening horizon — recreating the scatter the horizon fixes.
-            # Read as-of opening_as_of (== turn_time(0) for horizon worlds); None for legacy = head.
-            _chain = world.porcelain.locate(arc.protagonist, as_of=opening_as_of)
-            _scene_place = _chain[0] if _chain else None
+            # AS-OF PLAY HORIZON (Cx 255 blocking #1, generalized): anchor the opening cast to
+            # where the protagonist is AT THE OPENING, never the timeline head (the aftermath).
+            # `_opening_scene_place` prefers the opening-horizon location, falls back to the
+            # protagonist's EARLIEST source location (a saga whose opening chapters are
+            # atmospheric and place no cast — emberroad), and only then to head (legacy).
+            _scene_place = _opening_scene_place(world, arc.protagonist, opening_as_of)
             if _scene_place:
                 _loc_items = cast_location_plan(cast_nodes, _scene_place)
+                # STAGE THE PROTAGONIST at the opening scene too (Cx 255 generalized): in a
+                # horizon world their source `in` rows may all sit ABOVE the opening (placed
+                # only mid-journey), so without this they'd have NO location at the play horizon
+                # and the opening would render nowhere. Stamped at turn_time(0) like the cast.
+                _loc_items = [it for it in _loc_items
+                              if not (it.get("entity") == arc.protagonist
+                                      and it.get("attribute") == "in")]
+                _loc_items.append({"entity": arc.protagonist, "attribute": "in",
+                                   "value": _scene_place, "value_type": "entity"})
                 if _loc_items:
                     # Stamp the opening `in` rows on the ENTRY axis (turn_time(0) == entry_epoch)
                     # so they WIN the containment fold over any aftermath `in` the source prose
@@ -1431,6 +1446,37 @@ def _locatable_people(world: Any, known_ids: list[str],
     that only appears in the source aftermath must not qualify as the opening protagonist."""
     return [e for e in known_ids
             if e.startswith("person:") and world.porcelain.locate(e, as_of=as_of)]
+
+
+def _opening_scene_place(world: Any, protagonist: str,
+                         opening_as_of: float | None) -> str | None:
+    """The place to anchor the opening tableau on (cast staging). Resolution order:
+    1. the protagonist's location AT the opening horizon (the well-formed-bible case — the
+       opening chapter placed them); else
+    2. their EARLIEST source location (a saga whose hero is first placed mid-text: their
+       introduction/home — NEVER the head, which is the aftermath the horizon excludes); else
+    3. head (single-timeframe / legacy worlds).
+    This is the Cx-255 blocking-#1 fix generalized to bibles whose opening is atmospheric."""
+    p = world.porcelain
+    if opening_as_of is not None:
+        chain = p.locate(protagonist, as_of=opening_as_of)
+        if chain:
+            return chain[0]
+        # earliest placed location (min valid_from `in` row) — their introduction, not the end
+        earliest_vf: float | None = None
+        for r in world.buffer.all_rows():
+            if (r.entity == protagonist and r.attribute == "in"
+                    and getattr(r, "valid_from", None) is not None):
+                if earliest_vf is None or r.valid_from < earliest_vf:
+                    earliest_vf = r.valid_from
+        if earliest_vf is not None:
+            chain = p.locate(protagonist, as_of=earliest_vf)
+            if chain:
+                logger.info("opening scene for %s anchored to earliest source location "
+                            "(as-of %.0f): %s", protagonist, earliest_vf, chain[0])
+                return chain[0]
+    chain = p.locate(protagonist)  # head (legacy / last resort)
+    return chain[0] if chain else None
 
 
 def _fallback_protagonist(world: Any, located: list[str], play_as: str) -> str | None:

@@ -1262,7 +1262,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # Gauge drain FIRST (GAUGE §3, Cx 150): commit each gauge's signed per-turn
     # delta before clocks/beats/outcome so a crossed floor is visible to terminal
     # and Quantity-driven-clock evaluation THIS turn (not the post-render time slot).
-    trace.gauge_levels = gauge_pass(world, arc, player_input)
+    trace.gauge_levels = gauge_pass(world, arc, player_input, as_of=_h)
     # For a TIME-DEADLINE arc only (Cx 173 #3): advance diegetic time HERE — before clocks/beats/
     # outcome — so a single big-jump action ("I wait three hours", "I go watch the movie") crosses
     # the authored deadline (`failure_when` = Quantity over time:elapsed) on the SAME turn it's taken
@@ -1981,7 +1981,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # GAUGE coloring (GAUGE §5): a WIN earned on the last of the reserve is a COSTLY
         # victory, not a clean triumph — the gauge supplies the number, the shape the meaning.
         if conc and outcome == "won" and conc.get("outcome") == "triumph" \
-                and gauge_coloring(arc, world) == "costly":
+                and gauge_coloring(arc, world, as_of=_h) == "costly":
             conc = dict(conc, outcome="costly_victory",
                         basis=conc.get("basis", "") +
                         " — but it was won on the last of the reserve, at the edge of disaster")
@@ -2197,7 +2197,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # GAUGE surfacing (GAUGE §4): the live numeric constraint IS the tension. Urgency is
     # derived this turn from the folded level vs the floor (distance_to_floor/range, Cx 150)
     # — never stored. Ordered most-urgent first; the narrator dramatizes it, never prints a HUD.
-    _glines = sorted(gauge_lines(arc, world), key=lambda t: t[2])
+    _glines = sorted(gauge_lines(arc, world, as_of=_h), key=lambda t: t[2])
     if _glines:
         def _phrase(u: float) -> str:
             return ("all but gone — act now" if u <= 0.1 else "critical" if u <= 0.25
