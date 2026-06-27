@@ -1,0 +1,38 @@
+{
+  "title": "The Green-Tape Ledgers",
+  "protagonist": "person:lionel_pym",
+  "theme": "Truth is not a parlor trick: a locked room opens only when the detective is willing to expose the respectable greed around it.",
+  "stance": "fiction",
+  "mode": "pure",
+  "style": "Victorian London gaslight detective fiction, told in a restrained late-nineteenth-century register: precise, observant, morally shadowed, with Whitechapel grit, drawing-room unease, and every domestic object made to seem capable of testimony.",
+  "scenario_mode": "win_loss",
+  "arc_scope": [
+    "obj:black_fibre",
+    "obj:black_silk_tape",
+    "obj:malachi_harrow_ledgers",
+    "obj:study_door",
+    "obj:window_sill",
+    "person:lionel_pym"
+  ],
+  "main_arc": "arc:main",
+  "arc_ids": [
+    "arc:main"
+  ],
+  "entry_epoch": 2888.0,
+  "seeded_frames": [
+    "person:lionel_pym",
+    "person:ada_merrow",
+    "person:beatrice",
+    "person:beatrice_harrow",
+    "person:cabman"
+  ],
+  "endless": false,
+  "goal_statement": "Solve Malachi Harrow\u2019s locked-room murder at Number 17 Bleakstone Square: name who killed him and explain how the sealed study was made to lie.",
+  "intro": "In the winter murk of 1888, Number 17 Bleakstone Square stands with its brass polished, its ledgers tied in green tape, and its windows looking eastward toward the smoke and want of Whitechapel. Within such respectable walls, a locked door may seem a miracle to the credulous; yet every blotter, latch, coal-scuttle, and folded receipt keeps a plainer, meaner counsel. Truth, in this house, is no conjurer\u2019s flourish, but the slow exposure of appetite dressed in mourning black and good linen.",
+  "genre": "Victorian mystery",
+  "premise": "In 1888 London, the story moves between No. 17 Bleakstone Square and Whitechapel, where Dr. Ada Merrow runs a dispensary and Beatrice Harrow lives under her uncle\u2019s roof after her father\u2019s death in a railway investment. The central machinery is the respectable paper world of green-taped ledgers, inheritances, investments, allowances, and charitable accounts, which turns money into authority and leaves dependents, patients, and households vulnerable to those who control the books.",
+  "game_type": [
+    "mystery_whodunnit",
+    "social_drama_relationship_web"
+  ]
+}

@@ -1,0 +1,397 @@
+{
+  "title": "The Last Forty-Seven Minutes",
+  "protagonist": "person:mara_venn",
+  "theme": "Under pressure, survival becomes not the refusal to choose, but the courage to spend what cannot be replaced on the living.",
+  "stance": "fiction",
+  "mode": "pure",
+  "style": "Near-future deep-sea survival noir in a pressurized Pacific mining habitat: spare, technical, claustrophobic prose with saltwater dread, gallows humor, procedural urgency, and the moral chill of people counting breaths in the dark.",
+  "scenario_mode": "win_loss",
+  "arc_scope": [
+    "obj:habitat_orpheus",
+    "obj:manta",
+    "obj:persephone",
+    "person:chen",
+    "person:keiko",
+    "person:leena_rusk",
+    "person:mara_venn",
+    "person:soren_vale"
+  ],
+  "main_arc": "arc:main",
+  "arc_ids": [
+    "arc:main"
+  ],
+  "entry_epoch": 20391914.0,
+  "seeded_frames": [
+    "person:mara_venn",
+    "person:chen",
+    "person:elias_chen",
+    "person:keiko",
+    "person:keiko_alvarez"
+  ],
+  "endless": false,
+  "cast": {
+    "pillars": [
+      {
+        "id": "pillar:oxygen_clock",
+        "label": "The oxygen and CO2 clock: what is truly running out, how fast, and which actions spend it faster.",
+        "required": true
+      },
+      {
+        "id": "pillar:ascent_vehicle",
+        "label": "The ascent route: Manta, Persephone, and the emergency float each offer a partial escape with brutal limits.",
+        "required": true
+      },
+      {
+        "id": "pillar:medical_triage",
+        "label": "Triage under pressure: who can survive the ascent, who cannot walk, and what irreplaceable supplies must be spent.",
+        "required": true
+      },
+      {
+        "id": "pillar:scrubber_theft",
+        "label": "The hidden scrubber scheme: a stolen CO2 scrubber has made the ordeal worse, and finding who moved it determines the last choice.",
+        "required": true
+      }
+    ],
+    "cast": [
+      {
+        "id": "person:leena_rusk",
+        "shape_role": "first witness / exhausted station lead",
+        "surface_role": "Orpheus shift commander, trying to keep the remaining crew from turning on each other",
+        "presence": "at_scene",
+        "first_witness": true,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:rusk_opens_the_clock",
+            "pillar_id": "pillar:oxygen_clock",
+            "fact": {
+              "entity": "obj:habitat_orpheus",
+              "attribute": "remaining_breathable_time",
+              "value": "forty_seven_minutes"
+            },
+            "hook_text": "Rusk has written the number 47 on her palm in grease pencil and keeps rubbing it as if she can erase the countdown by skinning herself.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          },
+          {
+            "clue_id": "clue:rusk_names_keiko_manta",
+            "pillar_id": "pillar:ascent_vehicle",
+            "fact": {
+              "entity": "person:keiko",
+              "attribute": "in",
+              "value": "obj:manta"
+            },
+            "hook_text": "Every time the pressure hull groans, Rusk looks toward the docking tunnel instead of the ceiling, like the real lifeline is already locked away from her.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          },
+          {
+            "clue_id": "clue:rusk_names_chen_persephone",
+            "pillar_id": "pillar:medical_triage",
+            "fact": {
+              "entity": "person:chen",
+              "attribute": "in",
+              "value": "obj:persephone"
+            },
+            "hook_text": "Rusk cannot say Chen\u2019s name without glancing at the casualty tags; she needs Mara to go to Persephone, but dreads what the doctor will ask her to spend.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          },
+          {
+            "clue_id": "clue:rusk_soren_scrubber_access",
+            "pillar_id": "pillar:scrubber_theft",
+            "fact": {
+              "entity": "person:soren_vale",
+              "attribute": "had_last_unsupervised_access_to",
+              "value": "obj:portable_scrubber"
+            },
+            "hook_text": "Rusk keeps defending Vale too loudly, then notices the empty bracket where the portable scrubber should hang and goes very still.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          }
+        ]
+      },
+      {
+        "id": "person:soren_vale",
+        "shape_role": "culprit / wounded hoarder",
+        "surface_role": "corporate surveyor with a crushed ankle and a private escape calculation",
+        "presence": "at_scene",
+        "first_witness": false,
+        "is_culprit": true,
+        "clues": [
+          {
+            "clue_id": "clue:vale_blames_rusk_bay",
+            "pillar_id": "pillar:scrubber_theft",
+            "fact": {
+              "entity": "person:leena_rusk",
+              "attribute": "was_seen_near",
+              "value": "obj:portable_scrubber"
+            },
+            "hook_text": "Vale lies on a blanket with his boot cut open, sweating through expensive thermal layers, and points every accusation at Rusk before anyone asks him anything.",
+            "coverage_effect": "false",
+            "is_red_herring": true,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure",
+            "debunked_by": "clue:manta_camera_vale_scrubber"
+          },
+          {
+            "clue_id": "clue:vale_knows_manta_buoyancy",
+            "pillar_id": "pillar:ascent_vehicle",
+            "fact": {
+              "entity": "obj:manta",
+              "attribute": "emergency_float_capacity",
+              "value": "one_conscious_passenger_plus_one_secured_casualty"
+            },
+            "hook_text": "Vale keeps asking whether the Manta float has straps, not seats, and his fear has the ugly precision of someone who has already counted bodies against buoyancy.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:vale_injury_limit",
+            "pillar_id": "pillar:medical_triage",
+            "fact": {
+              "entity": "person:soren_vale",
+              "attribute": "mobility",
+              "value": "cannot_climb_without_being_carried"
+            },
+            "hook_text": "He snarls at help, but when the deck shudders his hand closes around Mara\u2019s sleeve with a child\u2019s panic; his pride will not carry him up a ladder.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          }
+        ]
+      },
+      {
+        "id": "person:chen",
+        "shape_role": "medic / triage conscience",
+        "surface_role": "station medic monitoring oxygen toxicity, CO2 load, and the injured in Persephone",
+        "presence": "nearby",
+        "location": "place:persephone_lock",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:chen_triage_not_verdict",
+            "pillar_id": "pillar:medical_triage",
+            "fact": {
+              "entity": "person:chen",
+              "attribute": "statement",
+              "value": "Triage isn't a verdict."
+            },
+            "hook_text": "Chen has triage tags tucked into his collar like prayer papers, but his hands only shake when someone calls his arithmetic mercy.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:chen_persephone_tanks",
+            "pillar_id": "pillar:oxygen_clock",
+            "fact": {
+              "entity": "obj:persephone",
+              "attribute": "spare_oxygen",
+              "value": "enough_for_two_people_if_launched_within_twelve_minutes"
+            },
+            "hook_text": "In Persephone\u2019s dim cabin, Chen keeps adjusting one regulator by sound, listening to a hiss so thin it feels like a confession.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:chen_vale_first_mask",
+            "pillar_id": "pillar:medical_triage",
+            "fact": {
+              "entity": "person:chen",
+              "attribute": "action",
+              "value": "fitted_rebreather_mask_over_vale_first"
+            },
+            "hook_text": "Chen will not apologize for whose face he covered first; the mask straps left crescent marks in his gloves where he pulled too hard.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:chen_scrubber_missing_changed_clock",
+            "pillar_id": "pillar:scrubber_theft",
+            "fact": {
+              "entity": "obj:portable_scrubber",
+              "attribute": "absence_effect",
+              "value": "co2_will_force_unconsciousness_before_oxygen_is_empty"
+            },
+            "hook_text": "Chen keeps correcting people who say they are running out of air; what frightens him is not empty tanks, but the poison they are making by breathing.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          }
+        ]
+      },
+      {
+        "id": "person:keiko",
+        "shape_role": "pilot / sealed lifeline",
+        "surface_role": "Manta crawler pilot trapped in the docking collar with one damaged ascent option",
+        "presence": "nearby",
+        "location": "place:manta_docking_collar",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:keiko_float_offer",
+            "pillar_id": "pillar:ascent_vehicle",
+            "fact": {
+              "entity": "person:keiko",
+              "attribute": "statement",
+              "value": "I have limited ascent buoyancy. Going to ride the emergency float. See you upstairs or haunt you properly."
+            },
+            "hook_text": "Keiko\u2019s voice comes through the intercom bright as a match struck underwater, joking about hauntings because the alternative is saying goodbye.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          },
+          {
+            "clue_id": "clue:keiko_manta_power_cost",
+            "pillar_id": "pillar:oxygen_clock",
+            "fact": {
+              "entity": "obj:manta",
+              "attribute": "manual_undock_cost",
+              "value": "six_minutes_of_habitat_power_and_one_person_outside"
+            },
+            "hook_text": "Keiko can hear the collar bolts clicking out of rhythm; she names each one like an old enemy and hates the one that must be freed by hand.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:keiko_saw_vale_toolbag",
+            "pillar_id": "pillar:scrubber_theft",
+            "fact": {
+              "entity": "person:soren_vale",
+              "attribute": "carried",
+              "value": "obj:scrubber_toolbag_toward_manta_bay"
+            },
+            "hook_text": "Keiko stops joking when asked about the last ten minutes before impact; through the porthole she saw someone limping with a bag too heavy for papers.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:keiko_clears_rusk",
+            "pillar_id": "pillar:scrubber_theft",
+            "fact": {
+              "entity": "person:leena_rusk",
+              "attribute": "was_on_comms_with_keiko_during_scrubber_removal",
+              "value": "true"
+            },
+            "hook_text": "Keiko\u2019s anger at Rusk is real and salted with old command grudges, which makes the one thing she refuses to lie about sting even worse.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          }
+        ]
+      },
+      {
+        "id": "obj:manta",
+        "shape_role": "vehicle / damaged escape instrument",
+        "surface_role": "mining crawler jammed in Orpheus\u2019s docking collar, with an emergency float still armed",
+        "presence": "nearby",
+        "location": "place:manta_docking_collar",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:manta_camera_vale_scrubber",
+            "pillar_id": "pillar:scrubber_theft",
+            "fact": {
+              "entity": "obj:manta_camera_log",
+              "attribute": "shows",
+              "value": "person:soren_vale_hiding_obj:portable_scrubber_under_crash_webbing"
+            },
+            "hook_text": "Manta\u2019s forward camera is cracked into a spiderweb, but one shard of recorded image keeps looping: a bent silhouette, a white canister, and the tremor of emergency lights.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "contradicted",
+            "reveal_condition": "scrutiny"
+          },
+          {
+            "clue_id": "clue:manta_float_limit",
+            "pillar_id": "pillar:ascent_vehicle",
+            "fact": {
+              "entity": "obj:manta",
+              "attribute": "ascent_capacity",
+              "value": "cannot_lift_more_than_two_human_masses_after_collar_damage"
+            },
+            "hook_text": "The emergency float lever is painted yellow and cheerful; the warped load gauge beside it sits in the red like a bad joke.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "examined"
+          }
+        ]
+      },
+      {
+        "id": "obj:persephone",
+        "shape_role": "lifeboat / narrow mercy",
+        "surface_role": "two-seat submersible with damaged reserves, docked in the Persephone lock",
+        "presence": "nearby",
+        "location": "place:persephone_lock",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:persephone_launch_window",
+            "pillar_id": "ascent_vehicle",
+            "fact": {
+              "entity": "obj:persephone",
+              "attribute": "launch_window",
+              "value": "must_launch_before_external_pressure_warps_the_lock"
+            },
+            "hook_text": "Persephone\u2019s hatch wheel turns a quarter inch, then screams; the sea outside is slowly making the door a permanent wall.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "examined"
+          },
+          {
+            "clue_id": "clue:persephone_medical_strap",
+            "pillar_id": "pillar:medical_triage",
+            "fact": {
+              "entity": "obj:persephone",
+              "attribute": "medical_restraint",
+              "value": "can_secure_one_unconscious_patient_for_ascent"
+            },
+            "hook_text": "One cot strap has been mended with surgical tape and someone\u2019s shoelace, an ugly little promise that a body does not have to be able to help itself to live.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "examined"
+          }
+        ]
+      }
+    ]
+  },
+  "goal_statement": "Get yourself and as many of Orpheus Station\u2019s crew as you can out alive before the last forty-seven minutes of breathable air are gone.",
+  "intro": "At the bottom of the Pacific, Orpheus earns its keep by chewing rare metals out of black rock while the ocean leans on every seal like a patient creditor. Down here, light is rented, warmth is metered, and oxygen is just another number on Chen\u2019s board until the number starts looking back. When steel groans and the dark gets personal, morality stops being a sermon and becomes inventory: minutes, masks, hands, and the terrible arithmetic of who is still breathing.",
+  "genre": "undersea survival sci-fi",
+  "premise": "In September 2039, Habitat Orpheus is a deep-sea habitat linked to the mining crawler Manta and the craft Persephone, where the crew depends on sealed collars, rebreather masks, scrubbers, and limited ascent buoyancy to stay alive. Its central system is life-support triage: oxygen and CO2 are watched from Central, and every mask, scrubber, and route upward must be assigned to a person when there is not enough time or air for everyone at once.",
+  "game_type": [
+    "wilderness_survival",
+    "rescue_extraction"
+  ]
+}

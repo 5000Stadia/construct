@@ -27,5 +27,14 @@ images/
 # examples/ (Kernos 063 B.2).
 *.world
 worlds/*
+# The base showcase worlds ship with the repo (founder: include the base 4) — their
+# pristine build + meta, so a fresh clone has the curated stories ready to play. Per-
+# player play slots, other built worlds (live_*), backups and transport state stay ignored.
 !worlds/anchor.world
 !worlds/anchor.meta.json
+!worlds/latch.world
+!worlds/latch.meta.json
+!worlds/thedeep.world
+!worlds/thedeep.meta.json
+!worlds/emberroad.world
+!worlds/emberroad.meta.json
