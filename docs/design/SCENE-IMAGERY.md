@@ -80,6 +80,7 @@ change-detector; nothing else has to decide "did it change".
 | `CONSTRUCT_IMAGE_BACKEND` | auto | force `codex` / `openai` / `cmd` / `none` |
 | (Codex OAuth) | default | `~/.codex/auth.json` → subscription image gen, no API key |
 | `CONSTRUCT_IMAGE_SIZE` | `1536x1024` | requested image size |
+| `CONSTRUCT_IMAGE_QUALITY` | `auto` | Codex image quality (detail comes from the style prompt, not high-res) |
 | `OPENAI_API_KEY` | — | enables the OpenAI gpt-image-1 fallback backend |
 | `CONSTRUCT_IMAGE_MODEL` | `gpt-image-1` | OpenAI image model |
 | `CONSTRUCT_IMAGE_SIZE` | `1024x1024` | OpenAI image size |

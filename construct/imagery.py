@@ -57,8 +57,9 @@ logger = logging.getLogger(__name__)
 #: one elegant, slightly otherworldly gallery. Always present regardless of what the
 #: model returns (we compose it deterministically, not via the cohort). A touch of the
 #: world's genre is layered on per scene (see `compose_prompt`).
-HOUSE_STYLE = ("a detailed oil color painting — rich textured brushwork, painterly "
-               "light and depth, elegant and quietly otherworldly, fine-art quality")
+HOUSE_STYLE = ("a highly detailed oil color painting — fine intricate brushwork, rich "
+               "texture and depth, masterful painterly light, crisp detail, elegant and "
+               "quietly otherworldly, museum-quality fine art")
 
 _FLAG_ENV = "CONSTRUCT_SCENE_IMAGES"
 _CMD_ENV = "CONSTRUCT_IMAGE_CMD"
@@ -149,15 +150,20 @@ def _save_manifest(scenario: str, manifest: dict) -> None:
 
 
 def compose_prompt(content: str, genre: str = "") -> str:
-    """The final generator prompt: the cohort's unpeopled setting content + the house
-    style (always), with a light touch of the world's genre. Kept deterministic so the
-    style can never be dropped by the model."""
+    """The final generator prompt: the cohort's setting content + a hard depict-only
+    constraint (so the generator can't invent props/items the prose doesn't have) + the
+    house style, with the world's genre as visual MOOD only (never added content). Kept
+    deterministic so neither the constraint nor the style can be dropped by the model."""
     content = (content or "").strip().rstrip(".")
     style = HOUSE_STYLE
     genre = (genre or "").strip().strip(".,")
     if genre:
-        style += f", with a touch of {genre} atmosphere"
-    return f"{content}.\n\nStyle: {style}."
+        style += f", in the visual mood and palette of {genre}"
+    return (f"{content}.\n\n"
+            "Depict ONLY the elements described above — do not add any other objects, "
+            "items, props, text, or people (especially no interactable items like keys, "
+            "weapons, or documents that are not described).\n"
+            f"Style: {style}.")
 
 
 def plan_scene(scenario: str, place_id: str | None, place_name: str,
@@ -316,14 +322,19 @@ def _codex_dispatch(rec: SceneImage) -> None:
     url = f"{p._base_url}/codex/responses"
     model = os.getenv("CONSTRUCT_IMAGE_MODEL_CODEX", p._cheap_model)
     size = os.getenv("CONSTRUCT_IMAGE_SIZE", "1536x1024")  # landscape scene framing
-    tool = {"type": "image_generation"}
+    quality = os.getenv("CONSTRUCT_IMAGE_QUALITY", "auto")  # detail comes from the STYLE prompt,
+    tool = {"type": "image_generation"}                     # not from forcing high-res (founder)
     if size and size.lower() != "auto":
         tool["size"] = size
+    if quality and quality.lower() != "auto":
+        tool["quality"] = quality
     body = {
         "model": model,
-        "instructions": ("Use the image_generation tool to render exactly the "
-                         "described setting. Do not add captions, text, or any people "
-                         "unless the description includes them."),
+        "instructions": ("Use the image_generation tool to render EXACTLY the described "
+                         "setting and only the objects it names. Do not add any objects, "
+                         "items, props, captions, text, or people that are not in the "
+                         "description — especially no interactable items (keys, weapons, "
+                         "documents). A described corpse stays; living people do not."),
         "input": [{"role": "user", "content": rec.prompt}],
         "store": False, "stream": True, "tools": [tool],
     }
