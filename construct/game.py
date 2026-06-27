@@ -389,13 +389,14 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # The protagonist MUST be a STAGED person (Cx 160): everything downstream — cast
     # staging, knows:<protagonist> delivery, pillar coverage — keys off arc.protagonist,
     # so an unlocatable role id (person:detective) silently darkens the whole world.
-    # Protagonist ELIGIBILITY reads at HEAD, even for horizon worlds (Cx 255 audit → reversed
-    # after the emberroad evidence): a saga's opening chapters are often ATMOSPHERIC (scene-
-    # setting prose) and place no cast, so the cast's `in` rows first appear mid-text. Filtering
-    # eligibility to `as_of=opening_as_of` emptied the allowlist and failed the build. Eligibility
-    # only needs "is this a real STAGED person" (not a kindless role); head answers that. The B'
-    # protection lives in the horizon-bound STATE reads + the opening-anchored staging below, not
-    # in eligibility — and an author never picks an aftermath-only figure as the POV character.
+    # Protagonist ELIGIBILITY reads at HEAD, even for horizon worlds (Cx 255 audit → reversed on
+    # the emberroad evidence; Cx 261 ruling). THE INVARIANT IS THE CODE SPLIT, not a heuristic:
+    # head eligibility may only choose a real STAGED person (not a kindless role) — it must NOT
+    # decide opening STATE. "Is this a real person somewhere on the source map" and "is this
+    # person already placed at the opening horizon" are different questions. Opening state comes
+    # entirely from `_opening_scene_place` staging + the horizon-bound runtime reads below.
+    # (A saga's opening chapters are often ATMOSPHERIC and place no cast, so the cast's `in` rows
+    # first appear mid-text; `as_of=opening_as_of` here emptied the allowlist and failed the build.)
     located_people = _locatable_people(world, known_ids)
     proto_feedback = ""
     _guard_failed_proposal: dict | None = None
@@ -1442,8 +1443,11 @@ def _locatable_people(world: Any, known_ids: list[str],
     carries a `kind` row but `locate()` is empty, so it would pass a mere-existence
     check yet leave the cast unstageable. The protagonist must be one of THESE.
 
-    `as_of` (Cx 255): in a horizon world, "located" means located AT THE OPENING — a figure
-    that only appears in the source aftermath must not qualify as the opening protagonist."""
+    `as_of` is supported for callers wanting located-as-of a coordinate, but the PRODUCTION
+    protagonist-eligibility path deliberately calls this at HEAD (Cx 261): eligibility is an
+    identity/staged-person guard only; OPENING STATE is decided by `_opening_scene_place` +
+    horizon-bound reads, not here. (An `as_of=opening_as_of` eligibility filter is too strong for
+    atmospheric saga bibles whose opening chapters place no cast — it empties the allowlist.)"""
     return [e for e in known_ids
             if e.startswith("person:") and world.porcelain.locate(e, as_of=as_of)]
 

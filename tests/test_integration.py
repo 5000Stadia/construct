@@ -1725,6 +1725,37 @@ def test_refer_resolves_aftermath_entity_by_name_so_presence_guard_is_needed(wor
     assert PorcelainWorldReads(world).has_entity("place:keepruins")   # head: present
 
 
+def test_opening_scene_place_falls_back_to_earliest_not_aftermath(world):
+    # Cx 261 note: the saga/atmospheric case. The protagonist is NOT placed at the opening
+    # horizon (the opening chapter is scene-setting); their earliest source `in` is later than
+    # opening_as_of; an even-later aftermath `in` exists. _opening_scene_place must anchor the
+    # opening tableau on the EARLIEST source location (their introduction), NEVER the head.
+    from construct.game import _opening_scene_place
+    from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP
+    STEP = SOURCE_STEP
+    opening_as_of = STEP + ENTRY_MARGIN
+    world.ingest_structured([
+        {"entity": "place:harth", "attribute": "kind", "value": "village", "timeless": True},
+        {"entity": "place:road", "attribute": "kind", "value": "road", "timeless": True},
+        {"entity": "place:keep_ruins", "attribute": "kind", "value": "ruin", "timeless": True},
+        {"entity": "person:mara", "attribute": "kind", "value": "person", "timeless": True},
+        # NO `in` at/below opening_as_of (opening chapter is atmospheric) — first placement is
+        # chunk 2 (introduction at home), then the aftermath at chunk 5.
+        {"entity": "person:mara", "attribute": "in", "value": "place:harth",
+         "value_type": "entity", "valid_from": 2.0 * STEP},
+        {"entity": "person:mara", "attribute": "in", "value": "place:keep_ruins",
+         "value_type": "entity", "valid_from": 5.0 * STEP},
+    ])
+    # head = the aftermath (the old, wrong anchor)
+    assert world.porcelain.locate("person:mara")[0] == "place:keep_ruins"
+    # nothing at the opening horizon
+    assert world.porcelain.locate("person:mara", as_of=opening_as_of) == []
+    # _opening_scene_place anchors on the EARLIEST source location (their introduction at home)
+    assert _opening_scene_place(world, "person:mara", opening_as_of) == "place:harth"
+    # legacy (no horizon) falls back to head
+    assert _opening_scene_place(world, "person:mara", None) == "place:keep_ruins"
+
+
 def test_horizon_metadata_coordinates():
     # B' S2: the spaced-axis coordinates. opening sits one margin above chunk 1 (so opening
     # staging supersedes chunk-1 source); the next source chunk is the fail-closed ceiling.
