@@ -76,6 +76,10 @@ GREETING = (
     "▶️ Resume — pick up a saved game where you left off\n\n"
     "What'll it be?")
 
+#: A FIXED, bundled projector image shown just before the welcome menu — a static part
+#: of the project (never generated, never changes). Best-effort over the photo channel.
+WELCOME_IMAGE = Path(__file__).resolve().parent / "assets" / "welcome.png"
+
 #: Sent the moment a build begins (the long generate-then-ingest). The per-phase
 #: pings follow via the notify channel (INGEST-PROGRESS-NOTIFICATIONS.md).
 BUILD_HEADS_UP = (
@@ -506,6 +510,7 @@ class TransportCore:
         registry.clear_chargen(self._conn, ev.platform, ev.external_id)
         self._sessions.pop(pid, None)
         registry.set_creation(self._conn, ev.platform, ev.external_id, _empty_creation())
+        self._send_welcome_image(ev)  # the projector image leads the welcome menu
         return ("Stepped out — your story is saved where you left it.\n\n" + GREETING)
 
     def _ooc(self, pid: str, ev: InboundEvent, text: str) -> str:
@@ -599,7 +604,7 @@ class TransportCore:
                 # empty creation blob so the next message starts the conversation.
                 registry.set_creation(self._conn, ev.platform, ev.external_id,
                                       _empty_creation())
-                return self._reply(ev, GREETING)
+                return self._greeting_reply(ev)
         return self._reply(ev, STATIC_REJECT)  # uniform; never leaks the reason
 
     # -- the library the Construct showcases (by title, not raw id) ----------
@@ -905,7 +910,7 @@ class TransportCore:
             # the next message starts the conversation.
             registry.set_creation(self._conn, ev.platform, ev.external_id,
                                   _empty_creation())
-            return self._reply(ev, GREETING)
+            return self._greeting_reply(ev)
 
         history_list = list(blob.get("history") or [])
         state = ArchitectState.from_dict(blob.get("state"))
@@ -1144,6 +1149,24 @@ class TransportCore:
 
     def _reply(self, ev: InboundEvent, text: str) -> Outbound:
         return Outbound(chat_id=ev.chat_id, chunks=chunk(text, self._limit))
+
+    def _send_welcome_image(self, ev: InboundEvent) -> None:
+        """Show the fixed projector image just before the welcome menu (founder). It's
+        a static bundled asset — never generated, always the same — sent best-effort
+        over the photo side-channel so the picture lands before the menu text. No-op
+        if there's no photo sink (CLI) or the asset is missing."""
+        if self._photo_fn is None:
+            return
+        try:
+            if WELCOME_IMAGE.exists():
+                self._photo_fn(ev.chat_id, str(WELCOME_IMAGE), "")
+        except Exception:
+            logger.exception("welcome image send failed for %s", ev.external_id)
+
+    def _greeting_reply(self, ev: InboundEvent) -> Outbound:
+        """The projector welcome: the static image, then the menu."""
+        self._send_welcome_image(ev)
+        return self._reply(ev, GREETING)
 
     def _deliver_scene_image(self, ev: InboundEvent, pid: str) -> None:
         """SCENE-IMAGERY: show a fresh location's picture JUST BEFORE its prose

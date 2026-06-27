@@ -1260,3 +1260,14 @@ class TestSceneImageDelivery:
         core = _core(conn, self._factory(SimpleNamespace(asset_path="/tmp/x.png")))
         out = core.handle(_ev("telegram", "im3", "look"), now=NOW)  # photo= absent
         assert out.chunks[0].endswith("narrated<look>")  # no crash; text delivered
+
+    def test_welcome_image_precedes_the_menu(self, conn):
+        # The static projector image leads the welcome menu on first load (invite claim).
+        from construct.transport_core import WELCOME_IMAGE
+        assert WELCOME_IMAGE.exists()  # bundled, committed asset
+        sent = []
+        code = registry.mint_invite(conn, "telegram", "anchor", now=NOW)
+        core = _core(conn, _Factory(), photo=lambda c, p, cap="": sent.append(p))
+        out = core.handle(_ev("telegram", "wi", code), now=NOW)
+        assert sent and sent[0].endswith("welcome.png")          # image first
+        assert "Welcome to the Construct Projector" in out.chunks[0]  # then the menu
