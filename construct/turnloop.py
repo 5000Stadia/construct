@@ -913,6 +913,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #    uncertain resolution judgment ride the same call (no extra latency).
     moves_to, requires = "", []
     needs_test, uncertain_of = False, ""
+    reshape_attempt = False
     commits, commitment = False, ""
     takes = ""
     examines_target = ""  # the ONE specific detail the player closely investigates (make-it-real gate)
@@ -972,6 +973,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         requires = [r for r in verdict.get("requires", []) if r]
         needs_test = bool(verdict.get("needs_test")) and kind == "action"
         uncertain_of = (verdict.get("uncertain_of") or "").strip()
+        reshape_attempt = bool(verdict.get("reshape_attempt")) and kind == "action"
         commits = bool(verdict.get("commits")) and kind in ("action", "declaration")
         commitment = (verdict.get("commitment") or "").strip() or player_input
         takes = (verdict.get("takes") or "").strip()
@@ -1613,7 +1615,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # protected-key gate (Cx 204/205 #2). Inert when off: apply_reshape returns None →
     # no patch, no license, no briefing change. Private witness frames are NOT licensed.
     _reshape_license: set[tuple[str, str, str]] = set()
-    if kind == "action" and needs_test and _resolved_tier not in ("", "assured"):
+    # The reshape judge (a model call) runs ONLY when classify flagged a genuine miraculous
+    # attempt — so an ordinary uncertain action (pick a lock, search) never pays for it. This
+    # cheap pre-filter is what lets world-changing be ON by default without taxing every turn.
+    if reshape_attempt and needs_test and _resolved_tier not in ("", "assured"):
         _snap = set(snap_scope)
         _scene_facts = "; ".join(
             f"{e.split(':', 1)[-1]}.{a}={v}"

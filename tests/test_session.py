@@ -614,7 +614,7 @@ class _FullReshapeProvider(_RoutingProvider):
         from construct.provider import task_of
         if task_of(prompt) == "cls":
             self.calls.append((prompt, schema, tier))
-            return {"kind": "action", "moves_to": "", "requires": [],
+            return {"kind": "action", "moves_to": "", "requires": [], "reshape_attempt": True,
                     "needs_test": True, "uncertain_of": "whether the dead can be revived"}
         if task_of(prompt) == "rsh":
             self.calls.append((prompt, schema, tier))

@@ -31,13 +31,16 @@ from construct.arc.executor import turn_time
 
 logger = logging.getLogger(__name__)
 
-#: World-changing agency is OFF by default — a normal mystery plays byte-for-byte
-#: as today. Enable per the founder's flag once the trigger is reviewed.
+#: World-changing agency is ON by default (founder 2026-06-26): it's core behavior — a
+#: miraculous, earned act may reshape the world — not an opt-in. It costs nothing on
+#: ordinary turns (the reshape judge runs only when classify flags a genuine
+#: canon-overturning attempt). Opt OUT (a pure-realism world, a debug A/B) by setting
+#: CONSTRUCT_WORLD_RESHAPE to a falsey value.
 _FLAG_ENV = "CONSTRUCT_WORLD_RESHAPE"
 
 
 def reshape_enabled() -> bool:
-    return os.getenv(_FLAG_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+    return os.getenv(_FLAG_ENV, "1").strip().lower() not in ("0", "false", "no", "off", "")
 
 #: Resolution tiers that LAND the target reshape. The other two tiers commit a
 #: consequence WITHOUT flipping the target ("however it lands" — every tier writes

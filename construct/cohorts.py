@@ -68,6 +68,13 @@ CLASSIFY_SCHEMA = {
                          "description": "if needs_test, ONE short clause naming what "
                          "resists or what's at stake ('the pit may be too wide'); "
                          "empty otherwise"},
+        "reshape_attempt": {"type": "boolean",
+                       "description": "true ONLY when the action reaches for the MIRACULOUS — "
+                       "to OVERTURN a world fact the story treated as settled: revive the dead, "
+                       "undo a death or loss, unbreak what was broken, reverse a finished "
+                       "outcome. FALSE for all ordinary actions and ordinary uncertainty "
+                       "(picking a lock, searching, persuading, fighting, a risky climb) — those "
+                       "resolve normally. Most turns: false."},
         "commits": {"type": "boolean",
                     "description": "true ONLY when the player makes a DECISIVE, "
                     "CONCLUSORY move that commits them to an outcome — naming/accusing "

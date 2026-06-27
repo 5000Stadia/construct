@@ -2942,7 +2942,7 @@ class TestWorldReshape:
             {"entity": "fact:secret", "attribute": "culprit", "value": "person:newculprit"}]})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
              "uncertain_of": "whether the truth itself can be rewritten"},          # classify
             {"is_reshape": True, "slug": "culprit_rewritten",
              "target": {"entity": "fact:secret", "attribute": "culprit",
@@ -2982,7 +2982,7 @@ class TestWorldReshape:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
              "uncertain_of": "whether the victim can be brought back"},             # classify
             {"is_reshape": True, "slug": "victim_revived",
              "target": {"entity": "person:rival", "attribute": "alive", "value": "true"},
@@ -3012,18 +3012,21 @@ class TestWorldReshape:
     def test_flag_off_is_inert(self, world, monkeypatch):
         monkeypatch.setattr("construct.resolution.draw_tier",
                             lambda *a, **k: "complete_success")
-        # no CONSTRUCT_WORLD_RESHAPE → apply_reshape returns None; the turn is normal.
+        # Explicit OPT-OUT (reshape is ON by default now): the flag disables it even on a
+        # genuine reshape_attempt, so a pure-realism world plays byte-for-byte as before.
+        monkeypatch.setenv("CONSTRUCT_WORLD_RESHAPE", "0")
         arc = make_arc()
         seed_arc(world, arc)
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+             "reshape_attempt": True,
              "uncertain_of": "whether the truth can be rewritten"},               # classify
             {"prose": "You strain against the truth, but it is what it is."},      # narrate
         ])
         result = run_turn(world, arc, provider, "I will the truth to change.", turn=1)
-        assert result.trace.reshape == ""                            # no reshape fired
+        assert result.trace.reshape == ""                            # disabled → no reshape fired
         assert world.porcelain.state(
             "fact:secret", "culprit")["fact"]["value"] == "person:rival"  # untouched
 
@@ -3038,7 +3041,7 @@ class TestWorldReshape:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
              "uncertain_of": "whether the truth can be rewritten"},               # classify
             {"is_reshape": True, "slug": "culprit_rewritten",
              "target": {"entity": "fact:secret", "attribute": "culprit",
