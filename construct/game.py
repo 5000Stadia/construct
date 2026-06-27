@@ -786,7 +786,15 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         skipped = 0
         for i, chunk in enumerate(chunks, start=1):
             try:
-                world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}", at=float(i))
+                # AS-OF-PLAY-HORIZON S1 (PB 081 Win 3 + Cx 251 + K 082): cursor-authoritative
+                # source ingest — the chunk cursor (advanced to i) governs `valid_from` for all
+                # non-timeless rows, so a diegetic year in the prose ("year 612") can no longer
+                # invert the story-time axis against cursor-ordered chapters. The overridden
+                # per-item valid_from is DEMOTED losslessly (PB keeps it as source_valid_from
+                # meta), not dropped. This is the linchpin that makes the opening as-of horizon
+                # slice cleanly (opening rows < aftermath rows).
+                world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}", at=float(i),
+                                       cursor_authoritative=True)
             except Exception as exc:  # noqa: BLE001 — one bad chunk must not sink
                 # A single extraction defect (e.g. a cycle-forming containment edge
                 # the model wrote) raises a hard engine invariant. Fail OPEN per
