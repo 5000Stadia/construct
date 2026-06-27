@@ -1700,6 +1700,31 @@ def test_cast_staging_anchors_to_opening_not_aftermath(world):
     assert world.porcelain.locate("person:hero", as_of=opening_as_of)[0] == "place:home"
 
 
+def test_refer_resolves_aftermath_entity_by_name_so_presence_guard_is_needed(world):
+    # Cx 257 fresh-hunt: refer() resolves an entity by its REGISTERED NAME even as-of the
+    # opening — tier-1 identity lookup bypasses the as_of candidate filter. This is the exact
+    # reason the as_of bind ALONE is insufficient and a horizon-presence guard is required.
+    from construct.adapter import PorcelainWorldReads
+    from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP
+    STEP = SOURCE_STEP
+    opening_as_of = STEP + ENTRY_MARGIN
+    world.ingest_structured([
+        # a place whose very EXISTENCE (kind+name) is aftermath-stamped (chunk 3)
+        {"entity": "place:keepruins", "attribute": "kind", "value": "ruin",
+         "valid_from": 3.0 * STEP},
+        {"entity": "place:keepruins", "attribute": "name", "value": "the Keep Ruins",
+         "valid_from": 3.0 * STEP},
+    ])
+    # refer matches by name even as-of the opening (tier-1 bypass) — so as_of alone won't deny.
+    r = world.refer("the Keep Ruins", frame="canon", as_of=opening_as_of)
+    assert getattr(r, "entity_id", None) == "place:keepruins"
+    # The horizon-presence guard is what actually denies it: has_entity is horizon-bound, so a
+    # future-only entity is ABSENT at the opening (kind row is in its future) — movement/take
+    # in run_turn drop the target on exactly this check.
+    assert not PorcelainWorldReads(world, horizon=opening_as_of).has_entity("place:keepruins")
+    assert PorcelainWorldReads(world).has_entity("place:keepruins")   # head: present
+
+
 def test_horizon_metadata_coordinates():
     # B' S2: the spaced-axis coordinates. opening sits one margin above chunk 1 (so opening
     # staging supersedes chunk-1 source); the next source chunk is the fail-closed ceiling.

@@ -660,7 +660,7 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
     than denied (IMPROV-AND-AUTHORITY); load-bearing/specific objects still
     deny. Deterministic after refer() (+ one cheap grant check on a miss)."""
     for description in requires:
-        res = world.refer(description, frame="canon")
+        res = world.refer(description, frame="canon", as_of=as_of)  # at-hand only at the horizon (Cx 257)
         if getattr(res, "status", None) != "resolved" or not getattr(res, "entity_id", None):
             if _grant_equipment(world, p, protagonist, description, scene, provider):
                 continue  # ordinary role equipment — granted, action stands
@@ -1116,9 +1116,21 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     Unresolved destinations fall back to whatever extraction did,
     #     loudly logged.
     if moves_to:
-        res = world.refer(moves_to, frame="canon")
+        # Resolve the move destination at the play horizon (Cx 257 fresh-hunt): a HEAD refer
+        # would resolve a place that only exists in the source AFTERMATH, and route()'s
+        # `no_path` returns empty segments (seg is None) — so a future-only place would fall
+        # through and commit as live movement. as_of=_h confines the candidate set.
+        res = world.refer(moves_to, frame="canon", as_of=_h)
         status = getattr(res, "status", None)
         target = getattr(res, "entity_id", None)
+        # Horizon-presence guard (Cx 257): `refer` resolves an entity by its registered NAME
+        # even when that entity only EXISTS in the source AFTERMATH — tier-1 identity lookup
+        # bypasses the as_of candidate filter. So confirm the target is present at the play
+        # horizon (has_entity is horizon-bound) before treating it as a reachable destination;
+        # a future-only place is not here yet. No-op for ordinary timeless geography.
+        if status == "resolved" and target and not live_reads.has_entity(target):
+            logger.info("move target %s absent at the play horizon; not resolving", target)
+            status, target = None, None
         # Entitlement gate (INVESTIGATION-SHAPE.md §3c / Cx 061 #3): for OFFSCENE cast, canon
         # referability is NOT player entitlement. Movement to the person OR their authored
         # place is blocked until the player has LEARNED their whereabouts (a `whereabouts` row
@@ -1187,8 +1199,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     it back" was wrongly denied. Host-side + coreference-proof: "I take X" → X is
     #     with you, never the pronoun-phantom the extraction sometimes invents.)
     if takes:
-        ores = world.refer(takes, frame="canon")
+        ores = world.refer(takes, frame="canon", as_of=_h)  # take only a horizon-present object (Cx 257)
         otarget = getattr(ores, "entity_id", None)
+        # Horizon-presence guard (Cx 257): don't grant possession of a future-only object that
+        # `refer` matched purely by its registered name; it doesn't exist yet at the opening.
+        if otarget and not live_reads.has_entity(otarget):
+            logger.info("take target %s absent at the play horizon; not granting", otarget)
+            otarget = None
         if (getattr(ores, "status", None) == "resolved" and otarget
                 and otarget != arc.protagonist and otarget not in _NARRATOR_PHANTOM):
             p.ingest_structured([{
