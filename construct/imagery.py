@@ -162,9 +162,10 @@ def compose_prompt(content: str, genre: str = "") -> str:
     if genre:
         style += f", in the visual mood and palette of {genre}"
     return (f"{content}.\n\n"
-            "Depict ONLY the elements described above — do not add any other objects, "
-            "items, props, text, or people (especially no interactable items like keys, "
-            "weapons, or documents that are not described).\n"
+            "Show a believably furnished, lived-in room: ordinary period-appropriate "
+            "furniture and fixtures are welcome, but add NO living people and NO "
+            "discrete interactable or plot items that aren't named above (no keys, "
+            "weapons, documents, letters, or a body the scene didn't specify).\n"
             f"Style: {style}.")
 
 
