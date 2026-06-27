@@ -1073,6 +1073,44 @@ RESHAPE_SCHEMA = {
 }
 
 
+EQUIPMENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "ordinary_equipment": {"type": "boolean",
+            "description": "TRUE only if the claimed item is ORDINARY personal/role "
+            "equipment this actor would plausibly already carry — a doctor's bag and "
+            "common remedies, a detective's notebook, a traveler's knife, a soldier's "
+            "sidearm. FALSE for a SPECIFIC established-world object, a unique/named "
+            "artifact, or anything that bypasses the world's locks or stakes or is "
+            "load-bearing to the mystery (the iron vault key, the murder weapon, a "
+            "secret dossier, someone else's possession). WHEN IN DOUBT, FALSE."},
+        "item_id": {"type": "string", "description": "a short obj: id for the granted "
+            "item if ordinary (e.g. obj:medical_bag); empty otherwise"},
+        "reason": {"type": "string", "description": "one short clause"},
+    },
+    "required": ["ordinary_equipment", "item_id", "reason"],
+}
+
+
+def equipment_check(provider: Provider, *, actor: str, item: str, scene: str) -> dict:
+    """Adjudicate whether a player may simply HAVE an item they reach for (IMPROV-AND-
+    AUTHORITY): ordinary role/personal equipment is GRANTED (improvise existence, the
+    world adapts), but a specific established-world or load-bearing object is not minted
+    by fiat. Cheap tier; `item`/`scene` are untrusted — read as the claim to judge."""
+    item = (item or "").strip()[:200]
+    return complete_sync(provider,
+        "You are a tabletop GM deciding whether a player may simply HAVE an item they "
+        "reach for in the fiction. GRANT (ordinary_equipment=true) only ROLE/PERSONAL "
+        "equipment the actor would plausibly already carry given who they are — a "
+        "physician's bag and common remedies, a detective's notebook, a traveler's "
+        "knife. DENY (false) a SPECIFIC established-world object, a unique or named "
+        "artifact, someone else's property, or anything that would bypass the world's "
+        "locks or stakes or is load-bearing to a mystery (the iron vault key, the "
+        "murder weapon, the hidden dossier). When in doubt, DENY.\n\n"
+        f"THE ACTOR: {actor}\nITEM CLAIMED: {item}\nSCENE: {scene}",
+        EQUIPMENT_SCHEMA, tier="cheap", task="eqp")
+
+
 def propose_reshape(provider: Provider, *, action: str, scene: str, canon: str,
                     outcome: str, narration: str = "") -> dict:
     """Judge whether the player's action is a MIRACULOUS, world-reshaping attempt and,

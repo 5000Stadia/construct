@@ -596,16 +596,52 @@ def _table(snap: dict) -> dict[tuple[str, str], object]:
     return {(f["entity"], f["attribute"]): f["value"] for f in snap.get("facts", [])}
 
 
+def _grant_equipment(world: Any, p: Any, protagonist: str, description: str,
+                     scene: str | None, provider: Any) -> bool:
+    """IMPROV-AND-AUTHORITY: an unresolved required item that is ORDINARY role/personal
+    equipment (a physician's bag, a detective's notebook) is GRANTED — minted as the
+    protagonist's possession and committed (the world adapts), so the action stands
+    instead of being denied for a missing canon object. A specific/load-bearing object
+    is NOT granted. Fail-safe: no provider, a 'no' verdict, or any error → False (deny)."""
+    if provider is None:
+        return False
+    try:
+        from construct import cohorts
+        v = cohorts.equipment_check(provider, actor=protagonist, item=description,
+                                    scene=scene or "")
+        if not isinstance(v, dict) or not v.get("ordinary_equipment"):
+            return False
+        slug = "".join(c if (c.isalnum() or c == "_") else "_"
+                       for c in (description or "").lower()).strip("_") or "kit"
+        item_id = (v.get("item_id") or f"obj:{slug}").strip()
+        if not item_id.startswith("obj:"):
+            item_id = f"obj:{slug}"
+        world.porcelain.ingest_structured([
+            {"entity": item_id, "attribute": "kind", "value": "object"},
+            {"entity": item_id, "attribute": "in", "value": protagonist, "value_type": "entity"},
+        ])
+        logger.info("adjudicate: granted ordinary equipment %r → %s (held by %s)",
+                    description, item_id, protagonist)
+        return True
+    except Exception:
+        logger.exception("equipment grant failed; denying")
+        return False
+
+
 def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
-               requires: list[str]) -> str | None:
+               requires: list[str], provider: Any = None) -> str | None:
     """The Adjudicate faculty (letter 028, finding E): locate() is the
     rules lawyer. Each claimed item must resolve AND be at hand (its
     containment chain reaching the player or the current scene). Returns
-    None if the action stands, else the denial reason. Deterministic
-    after refer()."""
+    None if the action stands, else the denial reason. An unresolved item
+    that is ordinary role equipment is GRANTED (improvise + commit) rather
+    than denied (IMPROV-AND-AUTHORITY); load-bearing/specific objects still
+    deny. Deterministic after refer() (+ one cheap grant check on a miss)."""
     for description in requires:
         res = world.refer(description, frame="canon")
         if getattr(res, "status", None) != "resolved" or not getattr(res, "entity_id", None):
+            if _grant_equipment(world, p, protagonist, description, scene, provider):
+                continue  # ordinary role equipment — granted, action stands
             return (f"{description!r} is not a thing you are known to have — "
                     f"it has never been established in this world's canon")
         entity = res.entity_id
@@ -995,7 +1031,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     pre_chain = p.locate(arc.protagonist)
     pre_scene = pre_chain[0] if pre_chain else None
     if requires and mode == "pure":
-        denial = adjudicate(world, p, arc.protagonist, pre_scene, requires)
+        denial = adjudicate(world, p, arc.protagonist, pre_scene, requires, provider)
         if denial:
             trace.adjudication = f"denied: {denial}"
             prose = cohorts.narrate(

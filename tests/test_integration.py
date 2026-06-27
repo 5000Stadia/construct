@@ -2410,11 +2410,14 @@ def test_movement_to_undiscovered_offscene_target_is_blocked(world):
 
 
 def test_adjudication_denies_phantom_key(world):
+    # A LOAD-BEARING / specific object is still denied — the equipment grant must NOT
+    # mint a vault key by fiat (it would bypass the world's locks).
     arc = make_arc()
     seed_arc(world, arc)
     provider = StubProvider([
         {"kind": "action", "moves_to": "",
          "requires": ["the iron vault key"], "needs_test": False, "uncertain_of": ""},          # classify
+        {"ordinary_equipment": False, "item_id": "", "reason": "a specific load-bearing key"},  # equipment_check
         {"prose": "Your pocket holds no such key; the vault stays shut."},
     ])
     result = run_turn(world, arc, provider,
@@ -2424,6 +2427,28 @@ def test_adjudication_denies_phantom_key(world):
     assert "no such key" in result.prose
     # the phantom action never entered canon
     assert world.porcelain.state("obj:iron_vault_key", "kind")["status"] == "unknown"
+
+
+def test_adjudication_grants_ordinary_role_equipment(world):
+    # IMPROV-AND-AUTHORITY (founder): a physician's bag is ordinary role equipment — it
+    # is GRANTED (minted + committed), not denied for being unestablished, so the action
+    # stands instead of stonewalling on a missing canon object.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": ["my medical bag"],
+         "needs_test": False, "uncertain_of": ""},                                              # classify
+        {"ordinary_equipment": True, "item_id": "obj:medical_bag",
+         "reason": "ordinary physician's equipment"},                                           # equipment_check
+        {"prose": "You open your medical bag and set to work."},
+    ])
+    result = run_turn(world, arc, provider, "I open my medical bag and treat the wound.", turn=1)
+    assert result.trace.adjudication == "allowed"          # granted, not denied
+    # the equipment was minted as the protagonist's possession (the world adapts)
+    assert world.porcelain.state("obj:medical_bag", "kind")["status"] == "known"
+    assert PLAYER in (PorcelainWorldReads(world).location_chain("obj:medical_bag") or [])
 
 
 def test_adjudication_allows_held_item(world):
