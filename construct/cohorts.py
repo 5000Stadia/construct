@@ -2206,21 +2206,30 @@ def open_scene(provider: Provider, briefing: str, protagonist: str) -> str:
 
 
 def narrate(provider: Provider, briefing: str, protagonist: str, *,
-            peopled: bool = True, competence: bool = True) -> str:
+            peopled: bool = True, competence: bool = True, reorder: bool = False) -> str:
     # SCENE-CONTEXT-SHAPE Stage 2 (conditional injection): the peopled / competence
     # directives ride the window ONLY when the turn triggers them (NPCs present /
     # a capability-dependent protagonist-knowledge move) — not as always-on rule mass.
     _peopled = f"{WORLD_IS_PEOPLED}\n\n" if peopled else ""
     _competence = f"{PROTAGONIST_COMPETENCE}\n\n" if competence else ""
-    result = complete_sync(provider,
-        f"You are the narrator of a text construct.\n\nBRIEFING (everything "
-        f"you know — there is nothing else):\n{briefing}\n\n{RENDER_LEASH}\n\n"
-        f"{RENDER_STYLE}\n\n{_competence}{_peopled}"
+    rules = (
+        f"{RENDER_LEASH}\n\n{RENDER_STYLE}\n\n{_competence}{_peopled}"
         f"{player_constraint(protagonist)}\n\n"
         f"A pacing directive, if present, describes what the WORLD does; if "
         f"any part of it would script the player, render only the world's "
         f"side of it and leave the player's response to the player.\n\n"
-        f"{FORBID_TASK_MARKERS}\n\n"
-        f"Render this turn: 1-3 paragraphs.",
-        NARRATE_SCHEMA, tier="main", task="nar")
+        f"{FORBID_TASK_MARKERS}")
+    if reorder:
+        # SCENE-CONTEXT-SHAPE Stage 3 (window reorder, K 078): voice contract at the TOP
+        # (durable identity), the SITUATION foregrounded in the high-attention tail, the
+        # render ask LAST (freshest = most-followed). Behind a flag pending A/B + sign-off.
+        prompt = (f"You are the narrator of a text construct. Your voice contract:\n\n"
+                  f"{rules}\n\n"
+                  f"SITUATION (everything you know — there is nothing else):\n{briefing}\n\n"
+                  f"Render this turn: 1-3 paragraphs.")
+    else:
+        prompt = (f"You are the narrator of a text construct.\n\nBRIEFING (everything "
+                  f"you know — there is nothing else):\n{briefing}\n\n{rules}\n\n"
+                  f"Render this turn: 1-3 paragraphs.")
+    result = complete_sync(provider, prompt, NARRATE_SCHEMA, tier="main", task="nar")
     return _clean_prose(result["prose"])

@@ -80,6 +80,7 @@ def compare(world: str, candidate_path: str) -> None:
     spec = importlib.util.spec_from_file_location("candidate", candidate_path)
     cand = importlib.util.module_from_spec(spec); spec.loader.exec_module(cand)
     overrides = getattr(cand, "OVERRIDES", {})
+    nkwargs = getattr(cand, "NARRATE_KWARGS", {})  # e.g. {"reorder": True} for Stage 3
     prov = CodexProvider()
     out = CAP_DIR / f"narrator-ab-{world}-{int(time.time())}.md"
     buf = [f"# Narrator A/B — {world} — candidate {Path(candidate_path).name}\n",
@@ -94,7 +95,7 @@ def compare(world: str, candidate_path: str) -> None:
         try:
             for k, v in overrides.items():
                 setattr(cohorts, k, v)
-            b = cohorts.narrate(prov, br, proto)                   # candidate standing blocks
+            b = cohorts.narrate(prov, br, proto, **nkwargs)        # candidate blocks/shape
         finally:
             for k, v in saved.items():
                 setattr(cohorts, k, v)
