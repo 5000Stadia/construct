@@ -234,6 +234,24 @@ class TestRouting:
         assert catalog.get("anchor", "").startswith("The Last Honest Meter")
         assert "anchor2" not in catalog        # retired (no meta/title)
 
+    def test_library_shares_player_built_worlds(self, conn, monkeypatch):
+        # Founder: player-built (live_*) worlds ARE shared in the library now — the good
+        # generated worlds are pooled for everyone; saves stay per-player (separate slots).
+        # Only untitled artifacts are excluded.
+        import construct.game as _game
+        monkeypatch.setattr(_game, "list_scenarios", lambda: [
+            {"name": "anchor", "title": "The Last Honest Meter", "genre": "noir"},
+            {"name": "live_telegram_42", "title": "The Drowned Harbor", "genre": "mystery"},
+            {"name": "live_telegram_99", "title": "", "genre": ""},   # untitled → excluded
+        ])
+        f = _Factory()
+        core = _core(conn, f)
+        cat = core._catalog()
+        assert "live_telegram_42" in cat                 # a player-built world is now shared
+        assert cat["live_telegram_42"].startswith("The Drowned Harbor")
+        assert "anchor" in cat
+        assert "live_telegram_99" not in cat             # untitled artifact still excluded
+
     def test_atrium_show_library_renders_host_menu(self, conn):
         # The Construct emits show_library; the HOST renders a clean menu block
         # (one world per line + a genre emoji), so the agent's prose stays short.

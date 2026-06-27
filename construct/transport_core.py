@@ -596,17 +596,17 @@ class TransportCore:
 
     # -- the library the Construct showcases (by title, not raw id) ----------
     def _library(self) -> list[dict]:
-        """Ready-made showcase worlds, each as {name, title, logline}. The guest
-        sees the TITLE (a campaign/novel name set at ingest), never the raw
-        scenario id. Excludes per-player built worlds (`live_*`), play slots, and
-        any world missing a title (an incomplete/test artifact)."""
+        """Every shelf-ready world, each as {name, title, logline}. The guest sees the
+        TITLE (a campaign/novel name set at ingest), never the raw scenario id. Includes
+        PLAYER-BUILT worlds (`live_*`) — they're SHARED options for everyone (founder:
+        pool the good generated worlds), while each player who picks one gets their OWN
+        save (a separate per-player slot from the shared pristine). Excludes only play
+        slots and any world missing a title (an incomplete/test artifact)."""
         out: list[dict] = []
         try:
             from construct.game import list_scenarios
             for s in list_scenarios():
                 name = s["name"]
-                if name.startswith("live_"):
-                    continue
                 title = (s.get("title") or "").strip()
                 if not title or title == name:
                     continue  # no real title → not shelf-ready, skip it
