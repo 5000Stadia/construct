@@ -27,7 +27,8 @@ class FixtureWorld:
     def has_entity(self, entity: str) -> bool:
         return entity in self.entities
 
-    def state(self, entity: str, attribute: str, *, frame: str = "canon") -> object:
+    def state(self, entity: str, attribute: str, *, frame: str = "canon",
+              as_of: float | None = None) -> object:
         return self.states.get((frame, entity, attribute))
 
     def location_chain(self, entity: str) -> list[str] | None:

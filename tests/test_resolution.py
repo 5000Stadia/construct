@@ -17,7 +17,7 @@ class FakeWorld:
             self.rows[(it["entity"], it["attribute"])] = str(it["value"])
         return {"rows": items}
 
-    def state(self, entity, attribute, frame=None):
+    def state(self, entity, attribute, frame=None, as_of=None):
         return self.rows.get((entity, attribute))
 
 

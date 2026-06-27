@@ -1678,6 +1678,100 @@ def test_entry_epoch_staging_wins_over_aftermath_and_live_supersedes(world):
         executor._ENTRY_EPOCH.reset(tok)
 
 
+def test_horizon_metadata_coordinates():
+    # B' S2: the spaced-axis coordinates. opening sits one margin above chunk 1 (so opening
+    # staging supersedes chunk-1 source); the next source chunk is the fail-closed ceiling.
+    from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP, horizon_metadata
+    opening, nxt = horizon_metadata(SOURCE_STEP)
+    assert opening == SOURCE_STEP + ENTRY_MARGIN
+    assert nxt == 2.0 * SOURCE_STEP
+    assert opening < nxt                              # opening band sits below the next chunk
+
+
+def test_porcelain_reads_honor_play_horizon(world):
+    # B' S3 / Cx 253 §3: the linchpin. A bible narrates the whole arc — chunk 1 (opening) at
+    # SOURCE_STEP, the aftermath at 3*SOURCE_STEP. Reading as-of the OPENING horizon must show
+    # the opening state and EXCLUDE every future source row (location AND the attribute axis —
+    # the bracelet/aged regression); reading at HEAD (legacy horizon=None) sees the aftermath.
+    from construct.adapter import PorcelainWorldReads
+    from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP
+    STEP = SOURCE_STEP
+    opening_as_of = STEP + ENTRY_MARGIN
+    world.ingest_structured([
+        {"entity": "place:harth", "attribute": "kind", "value": "village", "timeless": True},
+        {"entity": "place:keep_ruins", "attribute": "kind", "value": "ruin", "timeless": True},
+        {"entity": "person:mara", "attribute": "kind", "value": "person", "timeless": True},
+        # CHUNK 1 (the opening): Mara at home in Harth, young, no relic yet.
+        {"entity": "person:mara", "attribute": "in", "value": "place:harth",
+         "value_type": "entity", "valid_from": STEP},
+        {"entity": "person:mara", "attribute": "appearance", "value": "young",
+         "valid_from": STEP},
+        # AFTERMATH (chunk 3): the source narrates her END — at the ruins, aged, the bracelet worn.
+        {"entity": "person:mara", "attribute": "in", "value": "place:keep_ruins",
+         "value_type": "entity", "valid_from": 3.0 * STEP},
+        {"entity": "person:mara", "attribute": "appearance", "value": "aged",
+         "valid_from": 3.0 * STEP},
+        {"entity": "person:mara", "attribute": "bracelet", "value": "worn",
+         "valid_from": 3.0 * STEP},
+        # an aftermath EVENT, for the events() horizon check
+        {"entity": "event:keep_fell", "attribute": "kind", "value": "collapse",
+         "valid_from": 3.0 * STEP},
+    ])
+    head = PorcelainWorldReads(world)                          # legacy / no horizon = head
+    horizon = PorcelainWorldReads(world, horizon=opening_as_of)
+
+    # HEAD sees the aftermath (the staging-aftermath-scatter bug, unfixed by reading head).
+    assert head.location_chain("person:mara")[0] == "place:keep_ruins"
+    assert head.state("person:mara", "appearance") == "aged"
+    assert head.state("person:mara", "bracelet") == "worn"
+
+    # The OPENING horizon excludes ALL future source rows — location, attribute, and the
+    # aftermath-ADDED attribute (bracelet) is simply absent at the opening (no unset sentinel).
+    assert horizon.location_chain("person:mara")[0] == "place:harth"
+    assert horizon.state("person:mara", "appearance") == "young"
+    assert horizon.state("person:mara", "bracelet") is None    # the non-location-attr regression
+
+    # events() is horizon-bounded — the aftermath collapse is invisible at the opening.
+    assert [e.event_id for e in head.events(kind="collapse")] == ["event:keep_fell"]
+    assert horizon.events(kind="collapse") == []
+
+    # assertion_in_frame honors the horizon too (beats/InFrame read the opening, not head).
+    assert head.assertion_in_frame("canon", "person:mara", "appearance", "aged")
+    assert not horizon.assertion_in_frame("canon", "person:mara", "appearance", "aged")
+    assert horizon.assertion_in_frame("canon", "person:mara", "appearance", "young")
+
+
+def test_live_turn_supersedes_opening_at_the_horizon(world):
+    # B' S2/S3: a live turn at opening_as_of + k SUPERSEDES the opening staging (the Cx-127
+    # invariant, preserved) AND stays below the next source coordinate, so a read at the
+    # advanced horizon shows the live state while still excluding future source.
+    from construct.adapter import PorcelainWorldReads
+    from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP
+    STEP = SOURCE_STEP
+    opening_as_of = STEP + ENTRY_MARGIN
+    world.ingest_structured([
+        {"entity": "place:harth", "attribute": "kind", "value": "village", "timeless": True},
+        {"entity": "place:road", "attribute": "kind", "value": "road", "timeless": True},
+        {"entity": "person:mara", "attribute": "kind", "value": "person", "timeless": True},
+        # opening staging at opening_as_of
+        {"entity": "person:mara", "attribute": "in", "value": "place:harth",
+         "value_type": "entity", "valid_from": opening_as_of},
+        # a future source chunk at 2*STEP (the ceiling) — must stay excluded throughout
+        {"entity": "person:mara", "attribute": "in", "value": "place:keep_ruins",
+         "value_type": "entity", "valid_from": 2.0 * STEP},
+    ])
+    # turn 5: the player walks to the road; stamped within the reserved band.
+    world.ingest_structured([
+        {"entity": "person:mara", "attribute": "in", "value": "place:road",
+         "value_type": "entity", "valid_from": opening_as_of + 5.0},
+    ])
+    play_horizon = PorcelainWorldReads(world, horizon=opening_as_of + 5.0)
+    assert play_horizon.location_chain("person:mara")[0] == "place:road"   # live supersedes
+    # the opening horizon still shows the staged opening (the live write is in its future)
+    opening = PorcelainWorldReads(world, horizon=opening_as_of)
+    assert opening.location_chain("person:mara")[0] == "place:harth"
+
+
 def test_literal_result_reads_declared_result_events(world):
     # Consolidation (131/132): the Contest literal result is a declared canon Occurred EVENT,
     # read via the event log — no bespoke scoreboard entity. None when nothing is declared.

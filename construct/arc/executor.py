@@ -52,6 +52,23 @@ TURN_EPOCH = 1000.0
 #: Margin above the highest pre-play `valid_from` (headroom so the first turns never tie).
 ENTRY_MARGIN = 1000.0
 
+#: AS-OF PLAY HORIZON (B' S2, Cx 253): the source-axis spacing for ingested-fiction worlds.
+#: Each source chunk i lands at `i * SOURCE_STEP` on ONE monotone valid-time coordinate, so
+#: the opening chunk (1) sits far below the aftermath (chunk N). The opening is then staged
+#: just ABOVE chunk 1 (`opening_as_of`), and live turns advance the play horizon within the
+#: reserved band [opening_as_of, next_source_as_of). SOURCE_STEP is deliberately HUGE (not a
+#: magic 1000 — Cx 253 §1): the band must never be exhausted into the next source chunk by
+#: turn-count arithmetic, so the horizon guard stays fail-closed.
+SOURCE_STEP = 1_000_000.0
+
+
+def horizon_metadata(source_step: float = SOURCE_STEP) -> tuple[float, float]:
+    """`(opening_as_of, next_source_as_of)` for a horizon (ingested-fiction) world. The
+    opening is staged at `source_step + ENTRY_MARGIN` — strictly above chunk 1's source rows
+    (at `source_step`), so opening staging supersedes them — and the next source chunk sits
+    at `2 * source_step`, the fail-closed ceiling the play horizon must remain below."""
+    return source_step + ENTRY_MARGIN, 2.0 * source_step
+
 _ENTRY_EPOCH: contextvars.ContextVar[float] = contextvars.ContextVar(
     "construct_entry_epoch", default=TURN_EPOCH)
 

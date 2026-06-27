@@ -88,7 +88,7 @@ class _FakeP:
     def __init__(self, facts):
         self.facts = facts  # (entity, attr) -> value
 
-    def state(self, entity, attribute, frame="canon"):
+    def state(self, entity, attribute, frame="canon", as_of=None):
         if (entity, attribute) in self.facts:
             return {"status": "known", "fact": {"value": self.facts[(entity, attribute)]}}
         return {"status": "unknown"}

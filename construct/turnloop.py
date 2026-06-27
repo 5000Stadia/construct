@@ -492,11 +492,12 @@ def _receipt_rows(receipt: Any) -> list[dict]:
     return receipt.to_dict()["rows"] if hasattr(receipt, "to_dict") else receipt["rows"]
 
 
-def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon") -> dict:
+def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon",
+                   *, as_of: float | None = None) -> dict:
     if not scope:
         return {"facts": []}
     ids = sorted(set(scope))
-    snap = p.snapshot(ids, frame=frame)
+    snap = p.snapshot(ids, frame=frame, as_of=as_of)
     if "error" not in snap:
         return snap
     # The strict snapshot rejected the WHOLE batch because some id isn't a KNOWN entity (e.g.
@@ -509,7 +510,7 @@ def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon") -> dict:
     facts: list = []
     for e in ids:
         try:
-            one = p.snapshot([e], frame=frame)
+            one = p.snapshot([e], frame=frame, as_of=as_of)
         except Exception:
             continue
         if "error" not in one:
@@ -561,15 +562,17 @@ def _mirror_rows(p: Any, rows: list[dict], frame: str,
 
 
 def furnish_scene(p: Any, scene: str | None, player_frame: str,
-                  canon_table: dict, trace: TurnTrace) -> None:
+                  canon_table: dict, trace: TurnTrace,
+                  *, as_of: float | None = None) -> None:
     """Fiction-mode scene furnishing (letter 020 finding B): seed the
     description thunk through the gate, force via `resolve()` (resolver
     authority, generated provenance, constraint inheritance), mirror to
     the player frame. Memoized — stable on return; lazy — current scene
-    only."""
+    only. `as_of` (B' S3): check existing description as-of the play horizon, so an
+    aftermath description for this scene never suppresses opening furnishing."""
     if scene is None or canon_table.get((scene, "description")) is not None:
         return
-    st = p.state(scene, "description")
+    st = p.state(scene, "description", as_of=as_of)
     trace.point_reads += 1
     if st["status"] != "unknown":
         return
@@ -643,7 +646,8 @@ def _grant_equipment(world: Any, p: Any, protagonist: str, description: str,
 
 
 def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
-               requires: list[str], provider: Any = None) -> str | None:
+               requires: list[str], provider: Any = None,
+               *, as_of: float | None = None) -> str | None:
     """The Adjudicate faculty (letter 028, finding E): locate() is the
     rules lawyer. Each claimed item must resolve AND be at hand (its
     containment chain reaching the player or the current scene). Returns
@@ -659,7 +663,7 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
             return (f"{description!r} is not a thing you are known to have — "
                     f"it has never been established in this world's canon")
         entity = res.entity_id
-        chain = p.locate(entity)
+        chain = p.locate(entity, as_of=as_of)
         if protagonist not in chain and (scene is None or scene not in chain):
             where = chain[0] if chain else "nowhere known"
             return (f"{description!r} ({entity}) is not at hand — "
@@ -888,6 +892,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              side_arcs: list[Arc] | None = None,
              terminal_owner: str = "world_event",
              generate: bool = True,
+             horizon: float | None = None,
              on_scene: Callable[[], None] | None = None) -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
@@ -905,7 +910,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # declaration is the source of truth; the loss terminal is derived each load.
     arc = apply_gauge_terminals(arc)
     p = world.porcelain
-    live_reads = PorcelainWorldReads(world)
+    # AS-OF PLAY HORIZON (B' S3): bind EVERY read this turn to the play horizon so beats/clocks
+    # and presence/adjudication never see future source rows. None (legacy/single-timeframe) =
+    # the timeline head — byte-for-byte unchanged. `_h` is the local alias threaded into the
+    # direct p.locate/snapshot/state calls below (the adapter handles its own via `horizon`).
+    _h = horizon
+    live_reads = PorcelainWorldReads(world, horizon=horizon)
     trace = TurnTrace(turn=turn)
     player_frame = _player_frame(arc)
 
@@ -941,7 +951,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     _ask_by_oid: dict = {}
     if cast:
         try:
-            _entry_chain = p.locate(arc.protagonist)
+            _entry_chain = p.locate(arc.protagonist, as_of=_h)
             _entry_scene = _entry_chain[0] if _entry_chain else None
         except Exception:
             _entry_chain, _entry_scene = [], None
@@ -954,7 +964,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 if not _hc:
                     continue
                 try:
-                    _ncolocated = _colocated(p.locate(_nid), _entry_scene, _entry_chain)
+                    _ncolocated = _colocated(p.locate(_nid, as_of=_h), _entry_scene, _entry_chain)
                 except Exception:
                     _ncolocated = False
                 if not _ncolocated:
@@ -1048,10 +1058,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # 1b. Adjudication (letter 028, finding E): locate() is the rules
     #     lawyer. A failed precondition means the action DOES NOT COMMIT;
     #     the failure renders honestly and is receipted, never silent.
-    pre_chain = p.locate(arc.protagonist)
+    pre_chain = p.locate(arc.protagonist, as_of=_h)
     pre_scene = pre_chain[0] if pre_chain else None
     if requires and mode == "pure":
-        denial = adjudicate(world, p, arc.protagonist, pre_scene, requires, provider)
+        denial = adjudicate(world, p, arc.protagonist, pre_scene, requires, provider, as_of=_h)
         if denial:
             trace.adjudication = f"denied: {denial}"
             prose = cohorts.narrate(
@@ -1130,7 +1140,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # location — never set the protagonist `in` a person. If their whereabouts aren't
         # placed/known, don't teleport; the narrator handles it diegetically.
         if status == "resolved" and target and target.startswith("person:"):
-            _pchain = p.locate(target)
+            _pchain = p.locate(target, as_of=_h)
             _person_place = _pchain[0] if _pchain else None
             if _person_place:
                 logger.info("route to person %s redirected to their place %s",
@@ -1185,7 +1195,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             logger.info("player took: %s -> held by %s", otarget, arc.protagonist)
 
     # 3. Scene + the canon materialization (ONE snapshot serves the tick).
-    chain = p.locate(arc.protagonist)
+    chain = p.locate(arc.protagonist, as_of=_h)
     scene = chain[0] if chain else None
     # Diegetic time (DIEGETIC-TIME.md): the current moment on the governing
     # calendar (the player's place → world default), read for the briefing now and
@@ -1211,7 +1221,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         except Exception:  # read unsupported / error — never break the turn
             scene_features = []
     snap_scope = list(scope) + ([scene] if scene else []) + scene_features
-    canon_snap = _snap_or_empty(p, snap_scope)
+    canon_snap = _snap_or_empty(p, snap_scope, as_of=_h)
     canon_table = _table(canon_snap)
 
     _mirror_rows(p, receipt_rows, player_frame, canon_table, trace)
@@ -1253,7 +1263,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         trace.clocks_fired += clock_pass(world, sa, live_reads, counters, turn)
 
     with _phase(trace, "furnish"):
-        furnish_scene(p, scene, player_frame, canon_table, trace)
+        furnish_scene(p, scene, player_frame, canon_table, trace, as_of=_h)
     # SCENE-IMAGERY (founder: start the image gen ASAP, in parallel): the scene's
     # description is committed now — fire the detection/render hook here so the
     # picture renders WHILE the NPC actions + narration below run, and is ready to
@@ -1276,7 +1286,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             return False
         if canon_table.get((e, "in")) == scene:  # fast path: exact same place
             return True
-        npc_chain = p.locate(e)
+        npc_chain = p.locate(e, as_of=_h)
         trace.point_reads += 1
         return _colocated(npc_chain, scene, chain)
 
@@ -1318,7 +1328,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if decision["acts"] and decision["action"]:
                 p.ingest(decision["action"], source=npc, at=turn_time(turn),
                          classify="batch")
-                canon_snap = _snap_or_empty(p, snap_scope)  # refresh: canon moved
+                canon_snap = _snap_or_empty(p, snap_scope, as_of=_h)  # refresh: canon moved
                 canon_table = _table(canon_snap)
 
     # ---- INTERVIEW DELIVERY (STORY-SHAPES §8) ----------------------------
@@ -1582,7 +1592,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         except Exception as exc:  # governance must never sink the turn
             trace.dropped_cohorts.append(f"weave_pick ({exc})")
 
-    player_snap = _snap_or_empty(p, snap_scope, frame=player_frame)
+    player_snap = _snap_or_empty(p, snap_scope, frame=player_frame, as_of=_h)
     # EVENT-OCCURS-FIRING (Cx 115): resolve the action outcome NOW (before beat_pass) so an authored
     # `event_occurs` act-beat can fire on a SUCCESSFUL act and beat_pass achieves it THIS turn. The
     # tier is drawn ONCE here (deterministic deck) and REUSED by the narrator briefing (no 2nd draw).
@@ -1676,9 +1686,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     _new_scope = sorted(set(e for e in arc_entities(arc) if live_reads.has_entity(e))
                                         | set(_reshaped_ents))
                     snap_scope = _new_scope + ([scene] if scene else []) + scene_features
-                    canon_snap = _snap_or_empty(p, snap_scope)
+                    canon_snap = _snap_or_empty(p, snap_scope, as_of=_h)
                     canon_table = _table(canon_snap)
-                    player_snap = _snap_or_empty(p, snap_scope, frame=player_frame)
+                    player_snap = _snap_or_empty(p, snap_scope, frame=player_frame, as_of=_h)
                     logger.info("arc re-planned mid-story -> %s", arc.arc_id)
                 elif _ro.reason == "no_replacement":
                     # The old destination is gone and nothing coherent replaces it → EXPLICIT
@@ -2252,7 +2262,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         if e.startswith(("person:", "place:", "obj:", "fact:"))
                         and live_reads.has_entity(e)]
         reveal = [f"{f['entity']} · {f['attribute']} · {f['value']}"
-                  for f in _snap_or_empty(p, sorted(reveal_scope)).get("facts", [])
+                  for f in _snap_or_empty(p, sorted(reveal_scope), as_of=_h).get("facts", [])
                   if f["entity"] != arc.protagonist][:20]
         _ending_tag = conc["outcome"] if conc else f"{outcome}; grade: {_grade}"
         briefing_parts.append(
@@ -2622,7 +2632,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if promote:
         with _phase(trace, "promote"):
             p.ingest_structured(promote, frame="canon", classify="batch")
-            canon_table.update(_table(_snap_or_empty(p, snap_scope)))
+            canon_table.update(_table(_snap_or_empty(p, snap_scope, as_of=_h)))
             _mirror_rows(p, promote, player_frame, canon_table, trace)
     trace.contradictions = sorted(contradictions)
     trace.quarantined = sorted(quarantined)

@@ -57,6 +57,15 @@ class Session:
         self.scenario = scenario
         self.player_id = player_id
         self.entry_as_of = entry_as_of
+        # AS-OF PLAY HORIZON (B' S3): a HORIZON world (ingested fiction with a spaced source
+        # axis) binds every canon read to `opening_as_of + turns-so-far`, so beats/conditions
+        # and scene/presence reads see the opening state and never the source aftermath.
+        # Absent (legacy/interview/single-timeframe) → reads run at the timeline head, unchanged.
+        self._opening_as_of = meta.get("opening_as_of")
+        self._next_source_as_of = meta.get("next_source_as_of")
+        if self._opening_as_of is not None and self.entry_as_of is None:
+            # The establishing/situation snapshots read as-of the opening coordinate.
+            self.entry_as_of = float(self._opening_as_of)
         self._world = world
         self._arc = arc
         # The rest of the arc portfolio (LIVING-WORLD-GENERATOR P1): side arcs
@@ -191,9 +200,21 @@ class Session:
     def protagonist(self) -> str:
         return self._arc.protagonist
 
+    def _horizon(self, turn: int | None = None) -> float | None:
+        """The current play horizon (B' as-of): `opening_as_of + turns-so-far`, fail-closed
+        STRICTLY below the next source coordinate (Cx 253 §1) so future source canon can never
+        enter by turn-count arithmetic. None for legacy/single-timeframe worlds (head reads)."""
+        if self._opening_as_of is None:
+            return None
+        n = next_turn_number(self._world) if turn is None else turn
+        h = float(self._opening_as_of) + float(n)
+        if self._next_source_as_of is not None:
+            h = min(h, float(self._next_source_as_of) - 1.0)
+        return h
+
     def location(self) -> str | None:
         """Current scene id (deterministic; no model call)."""
-        chain = self._world.porcelain.locate(self._arc.protagonist)
+        chain = self._world.porcelain.locate(self._arc.protagonist, as_of=self._horizon())
         return chain[0] if chain else None
 
     def status_line(self) -> str:
@@ -442,9 +463,10 @@ class Session:
         the turn-loop helper (no second 'present' definition; Cx 059). Returns display names."""
         scope = self._scope or []
         prot = self._arc.protagonist
+        _h = self._horizon()
         try:
             from construct.turnloop import _colocated
-            chain = self._world.porcelain.locate(prot)
+            chain = self._world.porcelain.locate(prot, as_of=_h)
             scene = chain[0] if chain else None
         except Exception:
             return [], []
@@ -459,7 +481,7 @@ class Session:
             if not e.startswith("person:") or e == prot:
                 continue
             try:
-                npc_chain = self._world.porcelain.locate(e)
+                npc_chain = self._world.porcelain.locate(e, as_of=_h)
             except Exception:
                 continue
             if _colocated(npc_chain, scene, chain):
@@ -617,14 +639,17 @@ class Session:
         # (obs #3 half 3) — turn_time stamping must sit above all pre-play valid_from.
         from construct.arc.executor import set_entry_epoch
         set_entry_epoch(self._entry_epoch)
+        n = next_turn_number(self._world)
+        # AS-OF PLAY HORIZON (B' S3): bind this turn's reads (terminal check + the whole turn
+        # loop) to opening_as_of + n. None for legacy worlds — the head read, unchanged.
+        horizon = self._horizon(n)
         # Only a WIN_LOSS scenario ends; endless/freeplay never short-circuits
         # (a stale terminal receipt from a prior mode must not freeze open play).
         if self._scenario_mode == "win_loss":
-            ended = terminal_outcome(PorcelainWorldReads(self._world))
+            ended = terminal_outcome(PorcelainWorldReads(self._world, horizon=horizon))
             if ended:
                 return Reply(prose=f"(The story has ended — you {ended}. "
                                    f"Start fresh to play again.)", trace=None, ended=True)
-        n = next_turn_number(self._world)
         try:
             result = run_turn(self._world, self._arc, self._provider, text, n,
                               scope=self._scope, mode=self._mode, endless=self._endless,
@@ -638,6 +663,7 @@ class Session:
                               suspense=self._suspense,
                               cast=self._cast or None,
                               side_arcs=self._side_arcs,
+                              horizon=horizon,
                               on_scene=self._note_scene_image)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
@@ -674,7 +700,8 @@ class Session:
             loc = self.location()
             if not loc:
                 return None
-            desc = state_value(self._world.porcelain, loc, "description") or ""
+            desc = state_value(self._world.porcelain, loc, "description",
+                               as_of=self._horizon()) or ""
             contents = self._scene_contents(loc)
             if not (desc or contents):
                 return None
@@ -722,7 +749,8 @@ class Session:
             if not scene:
                 return
             furnish_scene(self._world.porcelain, scene,
-                          f"knows:{self._arc.protagonist}", {}, TurnTrace(turn=0))
+                          f"knows:{self._arc.protagonist}", {}, TurnTrace(turn=0),
+                          as_of=self._horizon())
         except Exception:
             logger.debug("opening scene furnish failed", exc_info=True)
 
@@ -734,28 +762,29 @@ class Session:
         from construct.foyer import state_value
         p = self._world.porcelain
         proto = self._arc.protagonist
+        _h = self._horizon()
         items: list[str] = []
         try:
-            here = p.locate(scene) or []
+            here = p.locate(scene, as_of=_h) or []
         except Exception:
             here = []
         for e in (self._scope or []):
             if e in (proto, scene):
                 continue
             try:
-                loc = state_value(p, e, "in")
+                loc = state_value(p, e, "in", as_of=_h)
                 if loc != scene:
-                    chain = p.locate(e) or []
+                    chain = p.locate(e, as_of=_h) or []
                     if scene not in chain and not (set(chain) & {scene, *here}):
                         continue
             except Exception:
                 continue
-            name = state_value(p, e, "name") or e.split(":", 1)[-1].replace("_", " ")
-            kind = (state_value(p, e, "kind") or "").strip()
+            name = state_value(p, e, "name", as_of=_h) or e.split(":", 1)[-1].replace("_", " ")
+            kind = (state_value(p, e, "kind", as_of=_h) or "").strip()
             if e.startswith("person:"):
                 cond = " ".join(filter(None, (
-                    state_value(p, e, "state"), state_value(p, e, "condition"),
-                    state_value(p, e, "status"), kind))).lower()
+                    state_value(p, e, "state", as_of=_h), state_value(p, e, "condition", as_of=_h),
+                    state_value(p, e, "status", as_of=_h), kind))).lower()
                 if any(w in cond for w in ("dead", "slain", "corpse", "killed",
                                            "lifeless", "murdered", "body")):
                     items.append(f"the body of {name}")

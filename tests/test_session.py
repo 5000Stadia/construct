@@ -494,6 +494,29 @@ class TestEntryAsOf:
         assert "(entering as of" not in s.opening()
         s.close()
 
+    def test_legacy_world_has_no_play_horizon(self, scenario):
+        # B' S3: a legacy/single-timeframe world (no opening_as_of meta) reads the timeline
+        # head — _horizon() is None — so its behavior is byte-for-byte unchanged.
+        s = Session.open(scenario, player_id="leg", fresh=True, provider=_provider())
+        assert s._opening_as_of is None
+        assert s._horizon() is None
+        assert s._horizon(999) is None
+        s.close()
+
+    def test_horizon_guard_caps_below_next_source(self, scenario):
+        # B' S2/S3 (Cx 253 §1, fail-closed): the play horizon advances with turns but can
+        # NEVER reach the next source coordinate — even an absurd turn count is clamped strictly
+        # below it, so future source canon cannot enter by turn-count arithmetic.
+        from construct.arc.executor import horizon_metadata, SOURCE_STEP
+        opening, nxt = horizon_metadata(SOURCE_STEP)
+        s = Session.open(scenario, player_id="g", fresh=True, provider=_provider())
+        s._opening_as_of, s._next_source_as_of = opening, nxt   # simulate a horizon world
+        assert s._horizon(0) == opening                          # turn 0 → the opening coordinate
+        assert s._horizon(10) == opening + 10                    # advances per turn
+        assert s._horizon(10**9) == nxt - 1.0                    # clamped strictly below the ceiling
+        assert s._horizon(10**9) < nxt
+        s.close()
+
 
 class TestColdOpenConcealment:
     def test_live_threads_suppress_concealed_alias(self, scenario, monkeypatch):

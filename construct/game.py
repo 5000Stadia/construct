@@ -305,14 +305,21 @@ def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
 def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                        spath: Path, endless: bool, on_stage=None,
                        win_direction: str = "", play_as: str = "",
-                       game_types: list | None = None) -> dict:
+                       game_types: list | None = None,
+                       source_step: float | None = None) -> dict:
     """Shared session-zero tail (both creation paths): once canon is
     established, author the hidden arc over it (lint-gated), seed
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION.
-    Emits per-stage status (stages 2-6) via `on_stage`."""
+    Emits per-stage status (stages 2-6) via `on_stage`.
+
+    `source_step` (B' S2): set ONLY by the ingest path, where the source axis was spaced by
+    SOURCE_STEP. Its presence marks a HORIZON world — the opening is staged at `opening_as_of`
+    (just above chunk 1) and reads bind to a per-turn play horizon, NOT the timeline head.
+    None (the interview path / single-timeframe worlds) → the legacy epoch-raise."""
     from construct.arc.executor import (
         arc_entities,
         compute_entry_epoch,
+        horizon_metadata,
         set_entry_epoch,
         turn_time,
     )
@@ -339,17 +346,32 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                     "for route() (PB)")
     _declare_traversal_policy(world)
 
-    # STAGING-AFTERMATH-SCATTER fix (obs #3 half 3, Cx 127): pin the live-entry epoch ABOVE
-    # every pre-play `valid_from` now that all source prose is ingested + coreferenced — so the
-    # opening staging (and every live turn) win the containment fold over aftermath rows the
-    # source narrates (e.g. a character extracted `in providence_hospital` at calendar year
-    # 1974.0). Set on the contextvar so the turn_time(0) stamps below (arc items, turn_0, cast
-    # staging) all land on the entry axis; persisted to meta so play re-establishes it. A
-    # one-timeframe world (anchor/deduction) computes back to TURN_EPOCH → a no-op.
-    entry_epoch = compute_entry_epoch(world)
-    set_entry_epoch(entry_epoch)
-    if entry_epoch > 1000.0:
-        logger.info("scenario entry epoch raised to %.1f (above pre-play valid_from)", entry_epoch)
+    # AS-OF PLAY HORIZON (B' S2, Cx 253) vs. the legacy epoch-raise (Cx 127):
+    #
+    #  - HORIZON world (source_step set — ingested fiction with a spaced axis): the play origin
+    #    is `opening_as_of` (just above chunk 1), NOT above the aftermath. Opening staging stamps
+    #    at turn_time(0) == opening_as_of, supersedes chunk 1, and the source aftermath (≥ the
+    #    next chunk at next_source_as_of) is simply EXCLUDED by reading as-of the horizon — no
+    #    epoch-raise. The per-turn play horizon (Session) advances within [opening_as_of,
+    #    next_source_as_of) and reads bind to it (S3), so beats/conditions never see the future.
+    #  - LEGACY world (source_step None — interview/single-timeframe): keep the Cx-127 raise —
+    #    pin the live-entry epoch ABOVE every pre-play `valid_from` so opening staging + live
+    #    turns win the containment fold over any aftermath rows. A one-timeframe world
+    #    (anchor/deduction) computes back to TURN_EPOCH → a no-op.
+    opening_as_of: float | None = None
+    next_source_as_of: float | None = None
+    if source_step is not None:
+        opening_as_of, next_source_as_of = horizon_metadata(source_step)
+        entry_epoch = opening_as_of
+        set_entry_epoch(entry_epoch)
+        logger.info("horizon world: opening_as_of=%.1f, next_source_as_of=%.1f (step %.0f)",
+                    opening_as_of, next_source_as_of, source_step)
+    else:
+        entry_epoch = compute_entry_epoch(world)
+        set_entry_epoch(entry_epoch)
+        if entry_epoch > 1000.0:
+            logger.info("scenario entry epoch raised to %.1f (above pre-play valid_from)",
+                        entry_epoch)
 
     _emit(on_stage, "Stage 4 · Authoring the hidden arc over canon")
     reads = PorcelainWorldReads(world)
@@ -685,6 +707,13 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             # (Session). Absent / == TURN_EPOCH for one-timeframe worlds (a no-op).
             "entry_epoch": entry_epoch,
             "seeded_frames": seeded, "endless": bool(endless)}
+    # AS-OF PLAY HORIZON (B' S2): a HORIZON world records its opening coordinate + the
+    # fail-closed ceiling so Session binds every read to `opening_as_of + turns` (S3). Absent
+    # on legacy/interview worlds → Session reads the timeline head (the epoch-raise path).
+    if opening_as_of is not None:
+        meta["opening_as_of"] = opening_as_of
+        meta["next_source_as_of"] = next_source_as_of
+        meta["source_step"] = source_step
     # The populated cast (STORY-SHAPES §8), host-side control data the turn loop reads for
     # interview delivery (which NPC holds which clue, gated by reveal_condition). Stored as
     # the raw proposal; the session rebuilds typed nodes via cast.cast_from_proposal. Only
@@ -780,6 +809,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         # BATCHED pass at the end of _finalize classifies them in grouped calls —
         # "same judgments, fewer round trips" (engine classify_all docstring).
         world.ingestor.classify_inline = False
+        from construct.arc.executor import SOURCE_STEP
         chunks = _chunk_chapters(text)
         _emit(on_stage, f"Stage 1 · Ingesting prose → pattern-buffer · model "
                         f"extraction → assertions, provenance-tracked ({len(chunks)} chunks)")
@@ -793,7 +823,11 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                 # per-item valid_from is DEMOTED losslessly (PB keeps it as source_valid_from
                 # meta), not dropped. This is the linchpin that makes the opening as-of horizon
                 # slice cleanly (opening rows < aftermath rows).
-                world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}", at=float(i),
+                # S2 (Cx 253 §1): SPACE the axis by SOURCE_STEP so chunk i → i*SOURCE_STEP. The
+                # opening is staged just above chunk 1 and the live play horizon advances within
+                # the reserved band below chunk 2 (2*SOURCE_STEP) — a band too wide to exhaust.
+                world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}",
+                                       at=float(i) * SOURCE_STEP,
                                        cursor_authoritative=True)
             except Exception as exc:  # noqa: BLE001 — one bad chunk must not sink
                 # A single extraction defect (e.g. a cycle-forming containment edge
@@ -812,7 +846,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
             logger.warning("ingest completed with %d/%d chunk(s) skipped", skipped, len(chunks))
         return _finalize_scenario(world, name, title, provider, spath, endless,
                                   on_stage, win_direction=win_direction,
-                                  play_as=play_as, game_types=game_types)
+                                  play_as=play_as, game_types=game_types,
+                                  source_step=SOURCE_STEP)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
@@ -1737,12 +1772,17 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
     _emit(on_stage, "Reflecting on how your story ended")
     world = _world(slot, name, model=engine_tier_dispatch(provider))
     reads = PorcelainWorldReads(world)
-    # Turns/markers for the new chapter sit above all prior canon (incl. the last episode).
-    epoch = compute_entry_epoch(world)
-    set_entry_epoch(epoch)
-    turn = next_turn_number(world)
     meta_path = scenario_path(name).with_suffix(".meta.json")
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    # The episode's write origin (Cx 253 §4): for a HORIZON world the origin STAYS at
+    # `opening_as_of` — the new chapter's arc rows + turns advance the play horizon within the
+    # reserved band (turn_time(turn) = opening_as_of + turn supersedes prior); raising it above
+    # the source aftermath (compute_entry_epoch) would reintroduce the old above-everything
+    # behavior and re-expose future source rows. Legacy worlds keep the Cx-127 raise.
+    _opening = meta.get("opening_as_of")
+    epoch = float(_opening) if _opening is not None else compute_entry_epoch(world)
+    set_entry_epoch(epoch)
+    turn = next_turn_number(world)
     prior_main_id = arc_io.main_arc_from_frame(reads)
     prior_arcs = arc_io.portfolio_from_frame(reads)
     prior_main = next((a for a in prior_arcs if a.arc_id == prior_main_id),

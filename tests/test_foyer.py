@@ -13,7 +13,7 @@ class _FakePorc:
         self.facts = facts or {}          # (entity, attribute) -> value
         self.ingested = []                # rows committed as stated canon
 
-    def state(self, entity, attribute, frame="canon"):
+    def state(self, entity, attribute, frame="canon", as_of=None):
         # Mirror the real porcelain shape: a structured {status, fact:{value}} dict.
         if (entity, attribute) in self.facts:
             return {"status": "known", "fact": {"value": self.facts[(entity, attribute)]}}

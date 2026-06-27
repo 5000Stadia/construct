@@ -84,12 +84,16 @@ def _ask_required(field: str) -> str:
     return f"Before we step in — could you settle your {field}?"
 
 
-def state_value(porcelain: Any, entity: str, attribute: str) -> str | None:
+def state_value(porcelain: Any, entity: str, attribute: str,
+                *, as_of: float | None = None) -> str | None:
     """The bare canon value for (entity, attribute), or None. `porcelain.state`
     returns a structured `{status, fact:{value}}` dict — unwrap it the way
-    `adapter.PorcelainWorldReads.state` does (known/conflicted → the value)."""
+    `adapter.PorcelainWorldReads.state` does (known/conflicted → the value).
+
+    `as_of` (B' S3): materialize as-of the play horizon, so scene/imagery reads see the
+    opening state, not the source aftermath. None (the default) = the timeline head."""
     try:
-        st = porcelain.state(entity, attribute)
+        st = porcelain.state(entity, attribute, as_of=as_of)
     except Exception:
         return None
     if isinstance(st, dict) and st.get("status") in ("known", "conflicted"):

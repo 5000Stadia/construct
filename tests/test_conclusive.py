@@ -21,7 +21,7 @@ class FakeReads:
     def set_beat(self, bid: str, status: str):
         self.s[(bid, "status")] = status
 
-    def state(self, entity, attribute, frame=None):
+    def state(self, entity, attribute, frame=None, as_of=None):
         return self.s.get((entity, attribute))
 
     def has_entity(self, entity):
