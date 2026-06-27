@@ -76,11 +76,31 @@ events + `assertion_in_frame`), `test_live_turn_supersedes_opening_at_the_horizo
 `test_horizon_metadata_coordinates`. The Cx-127 mechanism tests remain as legacy/no-horizon
 compatibility guards.
 
-**S5 — Four-world A/B + live verify.** IN PROGRESS. `anchor`/`latch`/`thedeep` open materially
-identical (their fix is a no-op — single-timeframe / no aftermath; confirmed `opening_as_of:
-None` on the live run). `emberroad` is REBUILT from `generated/emberroad.md` under the S1/S2
-policy and must open at Harth with humble Mara (not the post-quest Keeper end-state), then
-re-join the base-4 shelf.
+**S5 — Four-world A/B + live verify.** SHIPPED + LIVE-GREEN (`8a4ec7f`). `anchor`/`latch`/
+`thedeep` open materially identical (`horizon=None`, the fix is a no-op — confirmed on the live
+run; all three graded strong + peopled). `emberroad` REBUILT from `generated/emberroad.md` under
+the S1/S2 policy now OPENS AT HARTH with humble Mara Thist receiving the just-found waking relic
+from Lysa Fen — NOT the post-quest Keeper end-state (no bracelet/"aged"/Keep ruins) — and is back
+on the base-4 shelf (`opening_as_of=1001000, next_source_as_of=2000000`).
+
+**S5a — the saga-shape fix (live-surfaced).** The first rebuild FAILED the protagonist guard:
+emberroad's opening chapters are ATMOSPHERIC (they place no cast; the cast's `in` rows first
+appear mid-journey), so `_locatable_people(as_of=opening_as_of)` emptied the allowlist. Fix:
+(1) protagonist ELIGIBILITY reads at head (the opening chapter may place no one; the B'
+protection lives in the horizon STATE reads + opening-anchored staging, not eligibility);
+(2) `_opening_scene_place()` anchors the opening tableau to the opening-horizon location, else
+the protagonist's EARLIEST source location (introduction/home, never head/aftermath), else head;
+(3) the protagonist is explicitly staged at the opening scene (their source `in` rows may all
+sit above the horizon). This generalizes the Cx-255 blocking-#1 fix to atmospheric/saga bibles.
+
+## Cx review trail
+B' code went through Cx review rounds 255 (BLOCKED: 2 holes) → 257 (movement/take `refer`
+head-read) → 259 (NPC `character_sheet` head-read) → 260/261 (the saga-shape reversal), each
+fresh-hunt catching one more head read until the turn-path fold was complete. Every direct
+`p.locate`/`snapshot`/`state`/`refer`/`route`/`features`/`frame_diff`/`ask`/gauge read in the
+turn + opening path now carries `as_of=_h` (None=head for legacy). `clock.py` + reshape
+`_canonical_id` stay at head by design (diegetic clock ≠ visibility axis; identity
+canonicalization is timeless).
 
 ## PB
 
