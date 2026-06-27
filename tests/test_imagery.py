@@ -19,6 +19,9 @@ def worlds(tmp_path, monkeypatch):
     monkeypatch.setattr(imagery, "WORLDS_DIR", tmp_path)
     monkeypatch.setenv("CONSTRUCT_SCENE_IMAGES", "1")  # opt back in (conftest disables by default)
     monkeypatch.delenv("CONSTRUCT_IMAGE_CMD", raising=False)
+    # No real backend during tests — never hit the network (the built-in OpenAI
+    # dispatcher fires whenever OPENAI_API_KEY is present).
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setattr(imagery, "dispatcher", None)
     return tmp_path
 
