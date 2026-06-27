@@ -1,0 +1,448 @@
+{
+  "title": "The Ember That Burned Cold",
+  "protagonist": "person:mara_thist",
+  "theme": "The road does not choose the worthy; it makes worth from the one who keeps walking when home is already behind them.",
+  "stance": "fiction",
+  "mode": "pure",
+  "style": "Write as a bleak medieval mountain mystery, half monastic chronicle and half hearthside folktale: ash, snow, iron, bells, fever, and old saints; spare, grave, sensory prose with archaic restraint, letting suspicion gather in small physical details rather than accusation.",
+  "scenario_mode": "win_loss",
+  "arc_scope": [
+    "doc:ansel_letter",
+    "person:brother_caldus",
+    "person:caldus",
+    "person:elian_of_the_three_hearths",
+    "person:harth",
+    "person:lysa_fen",
+    "person:mara_thist",
+    "person:mara_thists_father",
+    "person:reeve_ansel_vale",
+    "person:tovin_beck",
+    "person:veyr",
+    "place:old_scriptorium"
+  ],
+  "main_arc": "arc:main",
+  "arc_ids": [
+    "arc:main"
+  ],
+  "entry_epoch": 1001000.0,
+  "seeded_frames": [
+    "person:mara_thist",
+    "person:ansel",
+    "person:brother_caldus",
+    "person:caldus",
+    "person:elian"
+  ],
+  "endless": false,
+  "opening_as_of": 1001000.0,
+  "next_source_as_of": 2000000.0,
+  "source_step": 1000000.0,
+  "cast": {
+    "pillars": [
+      {
+        "id": "pillar:home_left_behind",
+        "label": "Mara's starting self is the daughter who wants permission to turn back, and the road must prove home is already behind her.",
+        "required": true
+      },
+      {
+        "id": "pillar:cost_of_understanding",
+        "label": "Every true reading of Saint Orven's Step demands a payment: pain, shelter, reputation, or a cherished explanation.",
+        "required": true
+      },
+      {
+        "id": "pillar:rival_readings",
+        "label": "The ruin offers competing interpretations\u2014curse, fraud, penance, or mercy\u2014and Mara must learn which reading makes the next step possible.",
+        "required": true
+      },
+      {
+        "id": "pillar:inherited_burden",
+        "label": "Caldus's death passes an unfinished duty to the living, not because they are worthy but because they remain.",
+        "required": true
+      },
+      {
+        "id": "pillar:chosen_next_step",
+        "label": "Transformation becomes real only when Mara acts without a guarantee: she chooses the dangerous descent over the warm road home.",
+        "required": true
+      }
+    ],
+    "cast": [
+      {
+        "id": "person:lysa_fen",
+        "shape_role": "witness",
+        "surface_role": "charcoal-burner's widow sheltering in the gatehouse with a smoked shawl and a knife she uses for bread and kindling alike",
+        "presence": "at_scene",
+        "first_witness": true,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:lysa_names_caldus_dead",
+            "pillar_id": "pillar:inherited_burden",
+            "fact": {
+              "entity": "person:caldus",
+              "attribute": "died",
+              "value": "true"
+            },
+            "hook_text": "Lysa has soot in the creases of her hands and keeps glancing toward the old scriptorium door as if listening for a man who will not cough again.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          },
+          {
+            "clue_id": "clue:lysa_saw_veyr_at_cold_ember",
+            "pillar_id": "pillar:rival_readings",
+            "fact": {
+              "entity": "person:lysa_fen",
+              "attribute": "saw_person",
+              "value": "person:veyr"
+            },
+            "hook_text": "When the cold brazier is mentioned, Lysa's thumb finds an old burn scar and she suddenly remembers needing water at midnight.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:lysa_names_elian_route",
+            "pillar_id": "pillar:chosen_next_step",
+            "fact": {
+              "entity": "person:lysa_fen",
+              "attribute": "says_route_keeper_is",
+              "value": "person:elian"
+            },
+            "hook_text": "She knows the lower path by its accidents, not its stones: the bent pine where her boy broke his wrist, the cistern where voices change, the stair no mule will take.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          }
+        ]
+      },
+      {
+        "id": "person:harth",
+        "shape_role": "rival",
+        "surface_role": "muleteer with a swollen knee, a rosary of iron nail-heads, and a practical hatred of pilgrim heroics",
+        "presence": "at_scene",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:harth_offers_homeward_bargain",
+            "pillar_id": "pillar:home_left_behind",
+            "fact": {
+              "entity": "person:harth",
+              "attribute": "offers_mara",
+              "value": "safe_passage_home_before_dawn"
+            },
+            "hook_text": "Harth keeps his mule saddled facing downhill and speaks of warm stoves with the cruelty of a man describing water to the thirsty.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          },
+          {
+            "clue_id": "clue:harth_blames_elian",
+            "pillar_id": "pillar:rival_readings",
+            "fact": {
+              "entity": "person:harth",
+              "attribute": "blames",
+              "value": "person:elian"
+            },
+            "hook_text": "He spits whenever Elian's name is said, but his anger has the rhythm of fear rather than certainty.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:harth_claims_caldus_hid_gold",
+            "pillar_id": "pillar:inherited_burden",
+            "fact": {
+              "entity": "person:caldus",
+              "attribute": "hid",
+              "value": "abbey_gold_under_the_scriptorium"
+            },
+            "hook_text": "Harth has counted the missing altar fittings three different ways and likes the version in which dead monks are thieves.",
+            "coverage_effect": "false",
+            "is_red_herring": true,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure",
+            "debunked_by": "clue:scriptorium_ledger_fever_sale"
+          }
+        ]
+      },
+      {
+        "id": "person:veyr",
+        "shape_role": "tempter",
+        "surface_role": "sharp-eyed road priest in a red travel-cloak, warm to the frightened and merciless to the wavering",
+        "presence": "at_scene",
+        "first_witness": false,
+        "is_culprit": true,
+        "clues": [
+          {
+            "clue_id": "clue:veyr_preaches_chosen_only",
+            "pillar_id": "pillar:rival_readings",
+            "fact": {
+              "entity": "person:veyr",
+              "attribute": "teaches",
+              "value": "the_road_chooses_only_the_worthy"
+            },
+            "hook_text": "Veyr calls Mara 'child' with exquisite gentleness, then watches to see whether the word makes her smaller.",
+            "coverage_effect": "false",
+            "is_red_herring": true,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure",
+            "debunked_by": "clue:orven_step_inscription_keeps_walking"
+          },
+          {
+            "clue_id": "clue:veyr_knows_caldus_letter",
+            "pillar_id": "pillar:inherited_burden",
+            "fact": {
+              "entity": "person:veyr",
+              "attribute": "knows_about",
+              "value": "doc:ansel_letter"
+            },
+            "hook_text": "When Caldus's coat is searched, Veyr looks not at the pockets but at the lining, as though he has already imagined what might be sewn there.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:veyr_names_ansel",
+            "pillar_id": "pillar:cost_of_understanding",
+            "fact": {
+              "entity": "person:veyr",
+              "attribute": "says_to_question",
+              "value": "person:reeve_ansel_vale"
+            },
+            "hook_text": "He offers a name like a gift, too quickly, and smiles when it makes the room look toward authority instead of toward him.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          }
+        ]
+      },
+      {
+        "id": "person:tovin_beck",
+        "shape_role": "guide",
+        "surface_role": "apprentice bell-founder with cracked lips, carrying the Step's last handbell wrapped in his sleeping blanket",
+        "presence": "nearby",
+        "location": "place:saint_orvens_step",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:tovin_heard_caldus_refuse_return",
+            "pillar_id": "home_left_behind",
+            "fact": {
+              "entity": "person:caldus",
+              "attribute": "last_refused",
+              "value": "the_downhill_road_home"
+            },
+            "hook_text": "Tovin cannot stop touching the bell's broken mouth; each time he does, he winces as if it answers in a voice only he hears.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:tovin_names_brother_caldus_burden",
+            "pillar_id": "pillar:inherited_burden",
+            "fact": {
+              "entity": "person:brother_caldus",
+              "attribute": "receives",
+              "value": "doc:ansel_letter"
+            },
+            "hook_text": "He remembers the letter because Caldus laughed once after reading it, then cried as if laughter had opened the wrong door.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:tovin_bell_cost",
+            "pillar_id": "pillar:cost_of_understanding",
+            "fact": {
+              "entity": "obj:last_handbell",
+              "attribute": "rings_only_when_carried_down_the_broken_stair",
+              "value": "true"
+            },
+            "hook_text": "The bell is worthless as metal and priceless as warning; Tovin offers it with the face of someone surrendering the last thing that proves he served here.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          }
+        ]
+      },
+      {
+        "id": "person:elian_of_the_three_hearths",
+        "shape_role": "guide",
+        "surface_role": "scarred hostel-keeper and former stretcher-bearer, known for feeding strangers before asking their names",
+        "presence": "nearby",
+        "location": "place:saint_orvens_step",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:elian_carried_veyr",
+            "pillar_id": "rival_readings",
+            "fact": {
+              "entity": "person:elian",
+              "attribute": "carried",
+              "value": "person:veyr"
+            },
+            "hook_text": "Elian's left shoulder sits lower than the right; when Veyr passes behind him, that old injury seems to remember weight.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:elian_price_of_lower_way",
+            "pillar_id": "pillar:cost_of_understanding",
+            "fact": {
+              "entity": "place:lower_cistern_stair",
+              "attribute": "requires_payment",
+              "value": "leave_pack_or_break_leg"
+            },
+            "hook_text": "He describes the descent as a host describes a guest-room: where it leaks, where it kills, and which corner forgives no pride.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:elian_gives_route",
+            "pillar_id": "pillar:chosen_next_step",
+            "fact": {
+              "entity": "person:elian_of_the_three_hearths",
+              "attribute": "can_guide_to",
+              "value": "place:lower_cistern_stair"
+            },
+            "hook_text": "He has already cut a strip from his own coat for Mara's hand, but will not tie it unless she asks for the hard road by name.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "none"
+          }
+        ]
+      },
+      {
+        "id": "person:reeve_ansel_vale",
+        "shape_role": "informant",
+        "surface_role": "village reeve with ink-stained cuffs, a father's careful grief, and a ledger he keeps locked beneath bread flour",
+        "presence": "offscene",
+        "location": "place:saint_orvens_step",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:ansel_sent_letter_not_gold",
+            "pillar_id": "pillar:inherited_burden",
+            "fact": {
+              "entity": "doc:ansel_letter",
+              "attribute": "contained",
+              "value": "names_of_fever_orphans_not_treasure_map"
+            },
+            "hook_text": "Ansel speaks like a man used to settling rents, until Caldus's name makes him fold both hands over the ledger key.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:ansel_maras_father_warned",
+            "pillar_id": "pillar:home_left_behind",
+            "fact": {
+              "entity": "person:mara_thists_father",
+              "attribute": "warned",
+              "value": "home_can_become_a_cage_with_a_kind_voice"
+            },
+            "hook_text": "He knows an old sentence of Mara's father that no reeve should know, and he hates himself for having kept it until it could hurt her usefully.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          },
+          {
+            "clue_id": "clue:ansel_names_orphans_cost",
+            "pillar_id": "pillar:cost_of_understanding",
+            "fact": {
+              "entity": "person:reeve_ansel_vale",
+              "attribute": "withheld_names_to_spare_village_shame",
+              "value": "true"
+            },
+            "hook_text": "His mercy has the smell of mildew: carefully stored, well-meant, and ruining what it was meant to preserve.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "pressed",
+            "reveal_condition": "pressure"
+          }
+        ]
+      },
+      {
+        "id": "place:old_scriptorium",
+        "shape_role": "site",
+        "surface_role": "collapsed writing-room of Saint Orven's Step, its desks furred with ash and its east wall split to show older stones beneath the abbey skin",
+        "presence": "nearby",
+        "location": "place:old_scriptorium",
+        "first_witness": false,
+        "is_culprit": false,
+        "clues": [
+          {
+            "clue_id": "clue:scriptorium_ledger_fever_sale",
+            "pillar_id": "pillar:rival_readings",
+            "fact": {
+              "entity": "obj:abbey_ledger",
+              "attribute": "records",
+              "value": "altar_silver_sold_for_fever_medicine"
+            },
+            "hook_text": "Under the fallen beam, a ledger lies open where rain has spared only the ugliest arithmetic: silver weighed against broth, burial cloth, and children's names.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "examined"
+          },
+          {
+            "clue_id": "clue:orven_step_inscription_keeps_walking",
+            "pillar_id": "pillar:rival_readings",
+            "fact": {
+              "entity": "obj:orven_step_inscription",
+              "attribute": "reads",
+              "value": "the_road_makes_worth_from_the_one_who_keeps_walking"
+            },
+            "hook_text": "The inscription is not on the shrine face where pious eyes look, but low on the stair, polished by palms, knees, and desperate people crawling onward.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "contradicted",
+            "reveal_condition": "scrutiny"
+          },
+          {
+            "clue_id": "clue:scriptorium_caldus_final_map",
+            "pillar_id": "pillar:chosen_next_step",
+            "fact": {
+              "entity": "person:caldus",
+              "attribute": "marked_final_route",
+              "value": "place:lower_cistern_stair"
+            },
+            "hook_text": "Caldus's last ink-line staggers across the margin, stops where the nib tore paper, then resumes in charcoal darker than the ash around it.",
+            "coverage_effect": "genuine",
+            "is_red_herring": false,
+            "reveal_mode": "volunteered",
+            "reveal_condition": "examined"
+          }
+        ]
+      }
+    ]
+  },
+  "goal_statement": "Carry the waking relic to Mount Veyr, brave the Emberroad\u2019s old vows and cold fire, and decide its fate \u2014 and yours.",
+  "intro": "Snow has closed the high passes behind you, and ahead the Emberroad climbs toward Mount Veyr through ruined chapels, iron bells, fever-houses, and watchfires that burn blue-cold in the ash. You are the bearer of a waking relic, a thing wrapped for saints and feared by living hands, and every vow along the road asks what kind of soul may carry power without being eaten by it. Home is already a dark line below the clouds; on this mountain road, worth is not found in clean birth or holy speech, but in each step kept when the wind turns cruel.",
+  "genre": "dark fantasy pilgrimage",
+  "premise": "Along the Ember Road to Saint Orven\u2019s Step, a ruined monastic stop where fever has left an old monk alone in the scriptorium, travelers move through a world of tonsures, pilgrim coats, letters, and abandoned holy houses. The central order is the road-bound pilgrimage: it takes people who have already lost home, kin, or shelter and makes them prove themselves by continuing from refuge to refuge, dependent on strangers and vows rather than safety.",
+  "game_type": [
+    "epic_quest_saga",
+    "pilgrimage"
+  ]
+}
