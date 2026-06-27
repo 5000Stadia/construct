@@ -23,11 +23,29 @@ reads still read head.
 
 ## Stages (each behind the suite; the four-world A/B is the gate)
 
-**S1 — Monotone source coordinate + `opening_as_of`.** The source axis is mixed/inverted
-(emberroad: opening rows 606/612, end rows 7/8). The finalize pass must normalize ingested
-rows to a monotone story coordinate (opening < aftermath) and record `opening_as_of` in meta.
-Calendar years stay diegetic facts, not the timeline. *(Crux — get this right or as-of is
-meaningless.)*
+**S1 — Monotone source coordinate + `opening_as_of`.** SETTLED (mesh-aligned: Cx 251 + K
+082 + PB 080). Root cause: the extraction model emits an explicit `valid_from` from diegetic
+prose dates ("year 612"), which OVERRIDES the chunk cursor (`ingest.py:378-380`) → inverted
+axis (emberroad opening at 612, end at 8). End-only attrs (bracelet/aged/fire @8) fold in
+regardless.
+
+Mechanism (#1, host policy — NO PB default change): **normalize source `valid_from` onto a
+monotone narrative coordinate (chunk/scene/beat order + a deterministic intra-chunk offset
+where local order matters) BEFORE PB append; demote diegetic dates to plain `year`/`date`
+FACTS, never the timeline (lossless — K).** Implementation: either (a) PB exposes a
+`valid_from_policy="cursor"` ingest knob (cleanest — pending PB's K-084 answer), or (b) host
+wraps the extraction model output during `create_scenario_from_ingest` to strip/remap
+extracted `valid_from` so the cursor governs. REJECTED as root: #2 `seq`/asserted-time (not
+valid-time, no persisted chunk provenance), #3 range heuristics (miss small/NULL — keep only
+as a post-ingest validation gate).
+
+`valid_from=None`: do NOT blindly stamp — NULL is correct for truly timeless/structural rows
+(`kind`, aliases, place graph, meta); only STATE/EVENT-like source facts that need horizon
+slicing get a coordinate. Audit by attribute family.
+
+emberroad is fixed by a REBUILD from `generated/emberroad.md` under the new policy — NOT an
+in-place restamp (PB append-only triggers; old rows would still fold). `opening_as_of` =
+an authored coordinate on the normalized axis. *(Crux — get this right or as-of is meaningless.)*
 
 **S2 — Horizon metadata.** Durable `opening_as_of` (meta) + per-slot `play_as_of` (session
 frame). Fresh ingested-fiction worlds default to `opening_as_of`, NOT `None`=head. A live
