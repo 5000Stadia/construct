@@ -18,9 +18,11 @@ turn is never blocked on an image.
 * :func:`plan_scene` — pure, fast, NO model call: hashes the description, reads the
   manifest, and says fresh-or-cached. The turn loop calls only this.
 * :func:`render` / :func:`render_async` — the heavy path (the prompt cohort + the
-  generator): the transport fires this IN PARALLEL the moment a fresh scene is
-  detected, so the text reply goes out immediately and the picture is delivered
-  (via a ``deliver`` callback) as soon as it's ready.
+  generator): fired IN PARALLEL the moment a fresh scene is detected (during the
+  turn), so generation overlaps the NPC/narration work. The transport then blocks up
+  to a bounded join (`Session.pending_image`) to preserve the founder's layout —
+  image first, then the new scene's prose — falling through to text-only if the asset
+  isn't ready in time.
 
 Default-on, lazy, fail-open, opt-out via ``CONSTRUCT_SCENE_IMAGES=0``. Image
 GENERATION is pluggable: set :data:`dispatcher`, or ``CONSTRUCT_IMAGE_CMD``, or an
@@ -57,6 +59,11 @@ HOUSE_STYLE = ("a detailed oil color painting — rich textured brushwork, paint
 
 _FLAG_ENV = "CONSTRUCT_SCENE_IMAGES"
 _CMD_ENV = "CONSTRUCT_IMAGE_CMD"
+
+#: Serializes the load→modify→save of a scenario's manifest across the background
+#: render threads (in-process), so two concurrent renders can't read the same JSON
+#: and last-write-wins over each other's prompt records (Cx 236 note 2).
+_manifest_lock = threading.Lock()
 
 #: Optional host-set dispatcher: ``(SceneImage) -> str | None``. SYNCHRONOUS — it
 #: must have written ``rec.asset_path`` by the time it returns (so the file can be
@@ -125,9 +132,13 @@ def _load_manifest(scenario: str) -> dict:
 
 
 def _save_manifest(scenario: str, manifest: dict) -> None:
+    # Atomic replace (Cx 236 note 2): write a sibling temp then os.replace, so a
+    # crash mid-write can never leave a half-written/corrupt manifest.
     p = manifest_path(scenario)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    os.replace(tmp, p)
 
 
 def compose_prompt(content: str, genre: str = "") -> str:
@@ -178,11 +189,12 @@ def render(scenario: str, rec: SceneImage, *, provider: Any = None,
                                             description=rec.description,
                                             world_brief=rec.world_brief) or {}).get("prompt", "")
         rec.prompt = compose_prompt(content or rec.description, rec.genre)
-        manifest = _load_manifest(scenario)
-        manifest[rec.place_id] = {"place_name": rec.place_name,
-                                  "description_hash": rec.description_hash,
-                                  "prompt": rec.prompt, "asset_path": rec.asset_path}
-        _save_manifest(scenario, manifest)
+        with _manifest_lock:  # serialize concurrent same-scenario renders (Cx 236 #2)
+            manifest = _load_manifest(scenario)
+            manifest[rec.place_id] = {"place_name": rec.place_name,
+                                      "description_hash": rec.description_hash,
+                                      "prompt": rec.prompt, "asset_path": rec.asset_path}
+            _save_manifest(scenario, manifest)
         _dispatch(rec)
         if deliver is not None and Path(rec.asset_path).exists():
             deliver(rec)

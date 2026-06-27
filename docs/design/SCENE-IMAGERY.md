@@ -94,10 +94,25 @@ needs a backend** (an `OPENAI_API_KEY`, a `CONSTRUCT_IMAGE_CMD`, or a wired
 - `construct/telegram_bot.py` — `TelegramClient.send_photo`, the `_photo` wiring.
 - `tests/test_imagery.py`, `tests/test_telegram.py::TestSceneImageDelivery`.
 
+## Backlog (Cx 236 — non-blocking, GREEN for live testing)
+
+- **Folded now:** in-process manifest lock + atomic replace (no last-write-wins drop
+  / no half-written manifest); doc/comment wording corrected to "parallel render,
+  bounded join" rather than "never blocks".
+- **Deferred:** a slow render (> the ~30 s join) finishes too late to send and, since
+  the manifest is persisted before dispatch, reads as cached on the next visit (no
+  retry) — acceptable for best-effort imagery; keep the backend inside the join
+  window. Harden later by gating the cache on asset existence + keying records by
+  `(place_id, description_hash)`. `CONSTRUCT_IMAGE_CMD` prompt interpolation is brittle
+  for arbitrary prompts (quotes/newlines/flag-like text) — prefer stdin/env/temp-file;
+  the built-in OpenAI backend is unaffected.
+
 ## Boundaries honored
 
 - **Engine untouched** — reads the committed `place.description`; commits nothing new
   to canon. Pure host orchestration.
-- **Never blocks a turn** — detection is a pure hash check; rendering is off-thread;
-  delivery is bounded and best-effort. A slow/failed/absent generator only costs the
-  picture, never the text.
+- **Detection never taxes a turn; delivery is bounded** — detection is a pure hash
+  check (no model call); rendering runs off-thread, overlapping the turn's
+  NPC/narration work. The transport then blocks up to the bounded join (~30 s) to keep
+  the image *before* the prose; a slow/failed/absent generator falls through to
+  text-only, never breaking the turn's text or its exactly-once delivery.
