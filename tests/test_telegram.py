@@ -390,8 +390,9 @@ class TestRouting:
         assert any("Entering people, places & things into the pattern-buffer" in p for p in pings)
         assert any(re.search(r"\[\d+/\d+\]", p) for p in pings)
         assert not any("(2/5)" in p for p in pings)
-        # entered the freshly-built per-player world; player repointed + started
-        built = f"live_telegram_bld"
+        # entered the freshly-built world; each build gets a UNIQUE name (so a player's
+        # builds ACCUMULATE in the shared library instead of clobbering) — first build is _1.
+        built = "live_telegram_bld_1"
         assert registry.scenario_for(conn, "telegram", "bld") == built
         assert f.calls[-1] == (built, "telegram:bld", True, "win_loss")
         assert f"OPENING:{built}:telegram:bld" in out.chunks[0]

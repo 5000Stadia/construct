@@ -1080,7 +1080,14 @@ class TransportCore:
         """Run the long generate-then-ingest for the assembled brief, streaming
         per-phase progress via the notify channel (the chat does not sit empty),
         then enter the freshly-built world. On failure, stay in the Atrium."""
-        name = f"live_{_safe(ev.platform)}_{_safe(ev.external_id)}"
+        from construct.game import scenario_path, slot_path
+        # Each build ADDS a world to the (shared) library — a unique name per build, so a
+        # player accumulates a collection instead of clobbering their one world (founder).
+        base = f"live_{_safe(ev.platform)}_{_safe(ev.external_id)}"
+        name, _n = f"{base}_1", 1
+        while scenario_path(name).exists():
+            _n += 1
+            name = f"{base}_{_n}"
         self._notify(ev, preamble)
         self._notify(ev, BUILD_HEADS_UP)
 
@@ -1092,12 +1099,9 @@ class TransportCore:
                 self._notify(ev, line)
 
         try:
-            from construct.game import scenario_path, _unpublish_scenario, slot_path
-            if scenario_path(name).exists():
-                _unpublish_scenario(name)  # a rebuild replaces the prior world
             slot = slot_path(name, pid)
             if slot.exists():
-                slot.unlink()
+                slot.unlink()  # fresh name → paranoia only
             self._build(name=name, provider=self._provider(),
                         seed=brief.get("premise", ""),
                         endless=brief.get("mode") != "win_loss",
