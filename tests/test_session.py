@@ -677,3 +677,16 @@ def test_replan_carries_restaged_entity_into_next_turn_scope(scenario, monkeypat
     reply2 = s.turn("I ask the revived rival who attacked him.")
     assert reply2.ok
     s.close()
+
+
+def test_is_namelike_rejects_descriptive_clauses():
+    # #4 host slice: a proper name/handle is name-like; a descriptive clause is not, so the
+    # display fallback won't use "deaf on the left side" AS a name (it humanizes the id instead).
+    from construct.session import _is_namelike
+    assert _is_namelike("Hobbes")
+    assert _is_namelike("Administrator Cray")
+    assert _is_namelike("Dr. Ames")
+    assert not _is_namelike("deaf on the left side")
+    assert not _is_namelike("the clerk with the tin ear")
+    assert not _is_namelike("the wrapped crown")   # article-led
+    assert not _is_namelike("")

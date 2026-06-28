@@ -32,6 +32,20 @@ from construct.turnloop import TurnTrace, run_turn, terminal_outcome
 logger = logging.getLogger(__name__)
 
 
+def _is_namelike(value: str) -> bool:
+    """Whether a string reads as a NAME/handle rather than a descriptive clause (#4 host
+    slice). A proper name is short and not article-led ("Administrator Cray", "Hobbes"); a
+    descriptive alias is a clause ("deaf on the left side", "the clerk with the tin ear") — those
+    should NOT be used AS a display name. Heuristic: ≤3 words and not starting with an article."""
+    v = (value or "").strip()
+    if not v:
+        return False
+    words = v.split()
+    if len(words) > 3:
+        return False
+    return words[0].lower() not in ("the", "a", "an")
+
+
 @dataclass
 class Reply:
     """What a turn returns to any transport: the prose to show, and the
@@ -389,12 +403,22 @@ class Session:
                 self._world.porcelain.snapshot([entity], as_of=_h).get("facts", [])
         except Exception:
             facts = []
-        for attr in ("name", "alias", "title"):
-            for f in facts:
-                if f["entity"] == entity and f["attribute"] == attr:
-                    return str(f["value"])
+        # Prefer a proper `name`; if there is none, prefer a NAME-LIKE alias/title over a
+        # descriptive clause (#4 host slice): an unnamed entity often carries a descriptive
+        # alias ("deaf on the left side", "the clerk with the tin ear") that reads terribly AS
+        # a name. Fall back to the humanized id ("clerk") before resorting to such a phrase.
+        vals = {a: [str(f["value"]) for f in facts
+                    if f["entity"] == entity and f["attribute"] == a]
+                for a in ("name", "alias", "title")}
+        if vals["name"]:
+            return vals["name"][0]
+        namelike = [v for v in (vals["alias"] + vals["title"]) if _is_namelike(v)]
+        if namelike:
+            return min(namelike, key=len)            # the tightest name-like handle
         s = str(entity)
-        return s.split(":", 1)[-1].replace("_", " ") if ":" in s else s
+        if ":" in s:
+            return s.split(":", 1)[-1].replace("_", " ")   # humanized id beats a descriptive clause
+        return (vals["alias"] + vals["title"] + [s])[0]
 
     def _opening_narration(self, intro: str) -> str:
         """Render the cold open from the establishing anchors (by name, in voice).
@@ -529,8 +553,14 @@ class Session:
         for f in facts:
             if f["attribute"] not in ("name", "alias", "title"):
                 continue
-            if f["attribute"] == "name" or f["entity"] not in names:
-                names[f["entity"]] = str(f["value"])
+            val = str(f["value"])
+            # a `name` always wins; an alias/title only fills when no name is present AND it
+            # reads like a name, not a descriptive clause (#4: keep "deaf on the left side" out
+            # of the cold-open's present-cast list — disp() humanizes the id instead).
+            if f["attribute"] == "name":
+                names[f["entity"]] = val
+            elif f["entity"] not in names and _is_namelike(val):
+                names[f["entity"]] = val
 
         def disp(x):
             s = str(x)
