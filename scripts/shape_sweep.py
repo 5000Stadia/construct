@@ -14,7 +14,7 @@ from construct.session import Session
 
 # (name, game_type → shape, one-line brief)
 SHAPES = [
-    ("sw_bond", "romance", "A slow-burn romance between two people thrown together by a long winter in a remote lighthouse station."),
+    # sw_bond already validated live (gauge_bond "Winter Light at Greyhook" — STRONG).
     ("sw_contest", "duel_standoff", "A lone fighter arrives in a frontier town for a reckoning — a duel at dusk that the whole town is bracing for."),
     ("sw_gambit", "heist", "A small crew has one night to lift a guarded relic from a glittering, well-watched vault."),
     ("sw_discovery", "exploration_discovery", "An expedition descends into an uncharted ruin where every chamber hides a secret and a hazard."),
