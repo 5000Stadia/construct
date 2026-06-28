@@ -51,6 +51,11 @@ def _is_namelike(value: str) -> bool:
     if first in ("i", "you", "he", "she", "it", "they", "we", "i'm", "i'll", "i've",
                  "we're", "they're", "he's", "she's", "it's", "that", "this", "there"):
         return False
+    # a bare adverb/filler mis-extracted as an entity ("here", "now") is never a name (the
+    # spurious-entity ROOT is extraction quality — PB/#56 — but keep these out of the display).
+    if v.lower() in ("here", "there", "now", "then", "yes", "no", "ok", "okay", "this", "that",
+                     "it", "them", "us", "him", "her", "everyone", "someone", "no one", "nobody"):
+        return False
     return True
 
 
