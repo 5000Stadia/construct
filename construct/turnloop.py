@@ -2527,9 +2527,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # capability-dependent protagonist-knowledge move (classify's uses_protagonist_knowledge,
     # or the question→improv ordinary-knowledge fallthrough). Cx 247 / K 080.
     _peopled, _competence = bool(npcs), uses_knowledge
+    # RULE OF COOL (founder 2026-06-27): inject the improv-serves-the-thread directive when there
+    # is a rich live thread to gravitate toward — present cast, unwalked threads, or an authored
+    # cast/pillar surface. Keeps the narrator's improv enriching the core, not inventing hollow
+    # tangents (the castdemo rabbit-hole). Off on a genuinely empty scene (no always-on mass).
+    _serve_thread = bool(npcs or threads or cast)
     with _phase(trace, "narrate"):
         prose = cohorts.narrate(provider, briefing, arc.protagonist,
-                                peopled=_peopled, competence=_competence)
+                                peopled=_peopled, competence=_competence,
+                                serve_thread=_serve_thread)
     trace.cohort_calls.append("narrate:main")
     # Deterministic player-boundary guard on the render: prose naming
     # the protagonist in third person gets ONE re-ask with the violation
@@ -2541,7 +2547,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             briefing + f"\n\nVIOLATION TO FIX: your previous render named "
             f"{arc.protagonist} as a third-person character. They are 'you'. "
             f"Re-render without naming them.",
-            arc.protagonist, peopled=_peopled, competence=_competence)  # same flags (Cx 247)
+            arc.protagonist, peopled=_peopled, competence=_competence,
+            serve_thread=_serve_thread)  # same flags (Cx 247)
         trace.cohort_calls.append("narrate:main(re-ask)")
     if names_protagonist(prose, arc.protagonist):
         trace.player_boundary = "FLAGGED: protagonist named in third person"

@@ -1774,6 +1774,19 @@ WORLD_IS_PEOPLED = (
 )
 
 
+IMPROV_SERVES_THE_THREAD = (
+    "RULE OF COOL — your invention serves the richest story already in front of the player. "
+    "The deep authored thread here (the people present, the situation they are caught in, where "
+    "it is all heading) is the most interesting thing in this world; when you add texture or "
+    "improvise, make it ENRICH that thread — or a vivid tangent the PLAYER has actively chosen. "
+    "Do NOT manufacture self-contained apparatus (a side-corridor, a clever mechanism, a "
+    "passer-by with a sub-plot) that leads nowhere and pulls attention off what is alive here. "
+    "'Yes, and' the player toward the most interesting story: the moment their attention touches "
+    "a live thread, let the world lean into it; if they drift into empty space, let the texture "
+    "point quietly back to what matters — never spin up filler for them to chase."
+)
+
+
 def player_constraint(protagonist: str) -> str:
     """The player-character boundary (letter 025 — binding on every
     nudge and render): the arc pushes the world AT the player; it cannot
@@ -2047,12 +2060,14 @@ def nudge_pick(provider: Provider, rung: str, threads: list[str], scene: str,
         f"Unwalked story threads (the player has not seen these):\n"
         + "\n".join(f"- {t}" for t in threads)
         + f"\n\nCURRENT SCENE:\n{scene}\n\n{player_constraint(protagonist)}\n\n"
-        f"Pick the ONE thread that fits this scene most naturally and write "
-        f"a one-line directive for how the world surfaces it diegetically. "
-        f"The directive may author ONLY what OTHER entities and the world do "
-        f"to or around the player (press, arrive, glare, refuse to leave, "
-        f"surface a record) — never what the player does, says, feels, or "
-        f"decides. Pressure, not puppetry.",
+        f"RULE OF COOL — pick the ONE thread that is BOTH the most interesting AND the most "
+        f"RELEVANT to what the player is engaging in this scene (route by what their attention "
+        f"is on; nudge toward the richest thread that logically connects to it). Never nudge "
+        f"toward an empty direction with nothing rich behind it. Write a one-line directive for "
+        f"how the world surfaces that thread diegetically. The directive may author ONLY what "
+        f"OTHER entities and the world do to or around the player (press, arrive, glare, refuse "
+        f"to leave, surface a record) — never what the player does, says, feels, or decides. "
+        f"Pressure, not puppetry.",
         NUDGE_SCHEMA, tier="cheap", task="ndg")
 
 
@@ -2206,14 +2221,20 @@ def open_scene(provider: Provider, briefing: str, protagonist: str) -> str:
 
 
 def narrate(provider: Provider, briefing: str, protagonist: str, *,
-            peopled: bool = True, competence: bool = True, reorder: bool = False) -> str:
-    # SCENE-CONTEXT-SHAPE Stage 2 (conditional injection): the peopled / competence
-    # directives ride the window ONLY when the turn triggers them (NPCs present /
-    # a capability-dependent protagonist-knowledge move) — not as always-on rule mass.
+            peopled: bool = True, competence: bool = True, reorder: bool = False,
+            serve_thread: bool = False) -> str:
+    # SCENE-CONTEXT-SHAPE Stage 2 (conditional injection): the peopled / competence / rule-of-
+    # cool directives ride the window ONLY when the turn triggers them (NPCs present / a
+    # capability-dependent protagonist-knowledge move / a live rich thread to serve) — not as
+    # always-on rule mass.
     _peopled = f"{WORLD_IS_PEOPLED}\n\n" if peopled else ""
     _competence = f"{PROTAGONIST_COMPETENCE}\n\n" if competence else ""
+    # RULE OF COOL (founder 2026-06-27): when there is a live rich thread in front of the player
+    # (present cast / open situation / authored destination), the narrator's improv must ENRICH
+    # it, never wander into hollow apparatus — the castdemo rabbit-hole fix.
+    _serve = f"{IMPROV_SERVES_THE_THREAD}\n\n" if serve_thread else ""
     rules = (
-        f"{RENDER_LEASH}\n\n{RENDER_STYLE}\n\n{_competence}{_peopled}"
+        f"{RENDER_LEASH}\n\n{RENDER_STYLE}\n\n{_competence}{_peopled}{_serve}"
         f"{player_constraint(protagonist)}\n\n"
         f"A pacing directive, if present, describes what the WORLD does; if "
         f"any part of it would script the player, render only the world's "
