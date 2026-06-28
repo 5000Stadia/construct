@@ -792,12 +792,23 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # on the interview path (inline classification already ran; classify_all only
     # touches unclassified rows). Restores inline mode for live play after.
     if not world.ingestor.classify_inline:
-        _emit(on_stage, "Stage 6.2 · Classifying durability · BATCHED grouped "
-                        "model calls (the build's main efficiency win)")
+        # BUILD LATENCY (#3 / PB 081 Win 1): rules-based durability classification — ZERO LM
+        # calls (~272s/build saved) vs. the batched LM pass. Ambiguous attrs take the doctrine's
+        # asymmetric default STATE (a rebuildable index; the erasing EVENT class is barred by
+        # CLASSIFIER-EVENT-SAFETY), so it is correctness-safe — the only thing lost is the LM's
+        # STATE-vs-DISP/CONSTITUTIVE nuance on ambiguous attrs (a quality call). Default ON;
+        # CONSTRUCT_FAST_CLASSIFY=0 restores the LM batch pass if a build ever needs that nuance.
+        _fast_classify = os.getenv("CONSTRUCT_FAST_CLASSIFY", "1") != "0"
+        _emit(on_stage, "Stage 6.2 · Classifying durability · "
+                        + ("RULES (zero model calls — the build's main efficiency win)"
+                           if _fast_classify else "BATCHED grouped model calls"))
         try:
-            world.classifier.classify_all(batch_size=CLASSIFY_BATCH_SIZE)
+            if _fast_classify:
+                world.classifier.classify_rows(world.buffer.all_rows(), model=False)
+            else:
+                world.classifier.classify_all(batch_size=CLASSIFY_BATCH_SIZE)
         except Exception as exc:  # never sink a build on the optimization
-            logger.warning("batched durability classification failed: %s", exc)
+            logger.warning("durability classification failed: %s", exc)
         world.ingestor.classify_inline = True
     spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
     return meta
