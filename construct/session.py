@@ -43,7 +43,15 @@ def _is_namelike(value: str) -> bool:
     words = v.split()
     if len(words) > 3:
         return False
-    return words[0].lower() not in ("the", "a", "an")
+    first = words[0].lower().strip(".,;:!?")
+    # not article-led, and not a clause fragment that starts with a pronoun/contraction (a
+    # dialogue line like "I'm carrying it" can be mis-extracted as an entity — never a name).
+    if first in ("the", "a", "an"):
+        return False
+    if first in ("i", "you", "he", "she", "it", "they", "we", "i'm", "i'll", "i've",
+                 "we're", "they're", "he's", "she's", "it's", "that", "this", "there"):
+        return False
+    return True
 
 
 @dataclass

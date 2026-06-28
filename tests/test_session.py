@@ -689,4 +689,6 @@ def test_is_namelike_rejects_descriptive_clauses():
     assert not _is_namelike("deaf on the left side")
     assert not _is_namelike("the clerk with the tin ear")
     assert not _is_namelike("the wrapped crown")   # article-led
+    assert not _is_namelike("i'm carrying it")   # contraction/pronoun-led dialogue fragment
+    assert not _is_namelike("It was the wind")
     assert not _is_namelike("")
