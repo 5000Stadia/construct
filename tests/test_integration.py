@@ -543,6 +543,32 @@ class TestFullTurn:
         assert result.trace.took == "obj:spoon"
         assert world.porcelain.state("obj:spoon", "in")["fact"]["value"] == PLAYER
 
+    def test_declaration_commitment_not_denied_in_pure_mode(self, world):
+        # #2: a conclusory accusation that parses as a DECLARATION ("It was Julian — he killed
+        # his uncle") must NOT be stonewalled by the canon-strict declaration-denial as illegal
+        # fact-authoring. With commits=True it is the player NAMING their conclusion — it must
+        # reach the commitment path (judge → conclude), not return the "you can't author" message.
+        from construct.arc.executor import turn_time
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+              "valid_from": turn_time(3)}], frame="plot:main")
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "declaration", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "names the rival as the killer"},
+            {"grade": "vindicated", "rationale": "matches the culprit"},
+            {"prose": "You name the rival; the room stills."},
+        ])
+        result = run_turn(world, arc, provider, "It was the rival. He did it.",
+                          turn=5, scenario_mode="win_loss", mode="pure",
+                          scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        # NOT the canon-strict denial; the commitment path ran and concluded.
+        assert "canon-strict" not in (result.prose or "")
+        assert result.trace.commitment and result.trace.terminal is True
+
     def test_conclusory_commitment_terminates_with_grade(self, world):
         # Phase 3 win-model: at the conclusory scene (climax-ready) the player's decisive
         # commitment is JUDGED once → a graded outcome that ENDS the story (win_loss) and

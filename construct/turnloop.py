@@ -1052,7 +1052,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             reply = "Noted — the world holds. Say the word to continue."
         return TurnResult(prose=f"Conduit: {reply}", trace=trace)
 
-    if kind == "declaration" and mode == "pure":
+    if kind == "declaration" and mode == "pure" and not commits:
+        # A declaration that tries to AUTHOR a new world-fact by fiat is denied in canon-strict
+        # mode. But a CONCLUSORY COMMITMENT (commits=True) read as a declaration ("It was Julian —
+        # he killed his uncle") is NOT fact-authoring — it's the player naming their conclusion,
+        # the climax the commitment path judges/concludes/bounces (#2: a hedged accusation must
+        # not be stonewalled as illegal authoring just because it parsed as a declaration).
         trace.adjudication = "denied: declarations are co-author moves; this scenario is canon-strict"
         return TurnResult(
             prose="(canon-strict) This world's facts are already written — "
