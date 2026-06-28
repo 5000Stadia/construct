@@ -123,30 +123,9 @@ CLASSIFY_SCHEMA = {
     "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of"],
 }
 
-NPC_ACTION_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "acts": {"type": "boolean"},
-        "action": {"type": "string",
-                   "description": "third-person factual description of the physical act; empty if acts=false"},
-    },
-    "required": ["acts", "action"],
-}
-
-NPC_INTENT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "speaks": {"type": "boolean"},
-        "intent": {"type": "string",
-                   "description": "what the character wants from this exchange; empty if silent"},
-        "line_hint": {"type": "string", "description": "optional voice flavor"},
-    },
-    "required": ["speaks", "intent", "line_hint"],
-}
-
-#: TURN-LATENCY Lever 4: the union of NPC_ACTION_SCHEMA + NPC_INTENT_SCHEMA, so a
-#: single per-NPC call decides BOTH the world-action and the speak-intent (halving
-#: the per-NPC model calls). Consumed by `npc_turn`.
+#: TURN-LATENCY Lever 4: a single per-NPC call decides BOTH the world-action and the
+#: speak-intent (halving the per-NPC model calls). Consumed by `npc_turn` — which SUPERSEDED
+#: the separate `npc_world_action`/`npc_intent` cohorts (retired in the cohort audit, #58).
 NPC_TURN_SCHEMA = {
     "type": "object",
     "properties": {
@@ -2010,29 +1989,6 @@ def detect_events(provider: Provider, action: str, outcome: str,
         f"CANDIDATE EVENTS (kind :: what the act is):\n{listing}\n\n"
         "Return the kinds that genuinely occurred (usually zero or one).",
         DETECT_EVENTS_SCHEMA, tier="cheap", task="evt")
-
-
-def npc_world_action(provider: Provider, npc_id: str, sheet: str, scene: str,
-                     protagonist: str) -> dict:
-    return complete_sync(provider,
-        f"You are {npc_id}. CHARACTER SHEET (your knowledge and dispositions — "
-        f"you know NOTHING beyond this):\n{sheet}\n\nCURRENT SCENE:\n{scene}\n\n"
-        f"Decide whether this character takes a PHYSICAL action right now "
-        f"(moving, taking, doing — not talking), driven by their OWN "
-        f"dispositions. Most turns: acts=false. Your action may never "
-        f"include, script, or presume anything done or said by "
-        f"{protagonist} (the player's character).",
-        NPC_ACTION_SCHEMA, tier="main", task="npa")
-
-
-def npc_intent(provider: Provider, npc_id: str, sheet: str, scene: str,
-               protagonist: str) -> dict:
-    return complete_sync(provider,
-        f"You are {npc_id}. CHARACTER SHEET (your entire knowledge — "
-        f"you know NOTHING beyond this):\n{sheet}\n\nCURRENT SCENE:\n{scene}\n\n"
-        f"Decide whether this character speaks this turn and what they want. "
-        f"Never speak or act FOR {protagonist} (the player's character).",
-        NPC_INTENT_SCHEMA, tier="cheap", task="npi")
 
 
 def npc_turn(provider: Provider, npc_id: str, sheet: str, scene: str,
