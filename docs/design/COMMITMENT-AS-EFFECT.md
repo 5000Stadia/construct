@@ -101,3 +101,18 @@ transcript + a Cx fiction read; the win is "the ending feels like the consequenc
 ## Out of scope (for now)
 The full forward-ripple authoring (the generator elaborating the serial-killer arc) is the
 living-world generator's P2/continuation job — this spec only PERSISTS the fallout it consumes.
+
+## #2 — a HEDGED accusation fires the conclusion (2026-06-27, live-confirmed)
+A tentative resolve ("I think it was X… that's my read") used to STALL — no conclusion, no
+payoff. Two-layer cause, both fixed:
+1. `classify` required a DECISIVE move for `commits`; a hedged naming read as non-decisive →
+   broadened so a tentative naming counts (the hedge is tone). The `kind`-gate still protects
+   pure questions ("could it be X?" → kind=question → commits forced False).
+2. THE REAL CAUSE (only surfaced via the LIVE run): a conclusory accusation that parses as
+   `kind="declaration"` hit the canon-strict DECLARATION-DENIAL ("you can't author facts")
+   BEFORE the commitment path. Fix: `if kind=="declaration" and mode=="pure" and not commits` —
+   a conclusory commitment is the player NAMING their conclusion, not fact-authoring by fiat.
+Downstream was already correct (complete coverage → judge+conclude; incomplete → BOUNCE
+non-terminal "not yet proven"; turn-1 → not earned). Live-confirmed on the Brackenmere pillar
+whodunit: hedged accusation → graded TRIUMPH epilogue. INVARIANT: the declaration-denial guard
+and the commitment path both key on `kind=="declaration"`; keep the `not commits` exemption.

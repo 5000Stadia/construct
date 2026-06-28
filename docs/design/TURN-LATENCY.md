@@ -270,3 +270,18 @@ provisional-then-final trace.
 ## Out of scope
 Streaming narration (transport change); model-tier downgrades (quality risk); the build-time
 durability-classification bottleneck (separate concern).
+
+## Build-latency wins (#3, 2026-06-28) — PB 081
+The ~35-min build's two biggest costs, both PB-provided opt-in levers, default ON:
+- **Win 1 — rules durability classification** (`CONSTRUCT_FAST_CLASSIFY`, default on): finalize
+  classifies via rules (`classify_rows(model=False)`) instead of a batched LM pass — ZERO model
+  calls (~−272s). Ambiguous attrs take the asymmetric default STATE (rebuildable index; erasing
+  EVENT barred), so it is correctness-safe; only the LM's ambiguous-attr nuance is lost.
+- **Win 2 — parallel chunk extraction** (`CONSTRUCT_PARALLEL_EXTRACT`, default on): the read-only
+  `porcelain.extract` seam lets all chunks extract CONCURRENTLY (`CONSTRUCT_EXTRACT_CONCURRENCY`,
+  default 8), then `ingest_structured` serially with the spaced cursor + cursor_authoritative +
+  deferred classify (AS-OF-PLAY-HORIZON preserved exactly). ~311s serial extraction collapses
+  toward the slowest chunk. Fail-open per chunk on both extract + ingest.
+
+Caveat (observed 2026-06-28): under a DEGRADED Codex, single `tier=main` calls (e.g. author_cast
+on a large bible) can hit the 900s bound — serialize heavy builds rather than run many at once.
