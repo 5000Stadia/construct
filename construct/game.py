@@ -845,27 +845,57 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         chunks = _chunk_chapters(text)
         _emit(on_stage, f"Stage 1 · Ingesting prose → pattern-buffer · model "
                         f"extraction → assertions, provenance-tracked ({len(chunks)} chunks)")
+        # BUILD LATENCY #3 Win 2 (PB 081): EXTRACTION is the slow LM step and the chunks are
+        # independent (coreference is the Stage-2 reconcile pass). `porcelain.extract` is
+        # READ-ONLY (no buffer write), so run all chunk extractions CONCURRENTLY (PB's only
+        # write-serialization constraint is the single SQLite connection — extraction never
+        # writes), then `ingest_structured` the results SERIALLY in chunk order. ~311s of serial
+        # extraction collapses toward the slowest single chunk. Default on; CONSTRUCT_PARALLEL_
+        # EXTRACT=0 restores the serial path.
+        #
+        # AS-OF-PLAY-HORIZON is preserved exactly: each chunk's rows are committed with the cursor
+        # advanced to i*SOURCE_STEP (S2 spacing) + cursor_authoritative=True (S1 — the cursor
+        # governs valid_from; diegetic dates demote to source_valid_from), and classify is DEFERRED
+        # to the finalize rules pass (Win 1). Fail-open per chunk preserved on both extract + ingest.
+        _parallel_extract = os.getenv("CONSTRUCT_PARALLEL_EXTRACT", "1") != "0"
         skipped = 0
+        items_by_chunk: dict[int, list] = {}
+        if _parallel_extract and len(chunks) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            cap = max(1, int(os.getenv("CONSTRUCT_EXTRACT_CONCURRENCY", "8")))
+            with ThreadPoolExecutor(max_workers=cap) as pool:
+                futs = {i: pool.submit(world.porcelain.extract, chunk, extract="full")
+                        for i, chunk in enumerate(chunks, start=1)}
+                for i, fut in futs.items():
+                    try:
+                        items_by_chunk[i] = fut.result()
+                        _emit(on_stage, f"   …chunk {i}/{len(chunks)} extracted")
+                    except Exception as exc:  # noqa: BLE001 — one bad chunk must not sink
+                        skipped += 1
+                        logger.warning("chunk %d/%d extract failed (%s: %s) — skipping",
+                                       i, len(chunks), type(exc).__name__, str(exc)[:200])
+                        _emit(on_stage, f"   …chunk {i}/{len(chunks)} SKIPPED ({type(exc).__name__})")
         for i, chunk in enumerate(chunks, start=1):
             try:
-                # AS-OF-PLAY-HORIZON S1 (PB 081 Win 3 + Cx 251 + K 082): cursor-authoritative
-                # source ingest — the chunk cursor (advanced to i) governs `valid_from` for all
-                # non-timeless rows, so a diegetic year in the prose ("year 612") can no longer
-                # invert the story-time axis against cursor-ordered chapters. The overridden
-                # per-item valid_from is DEMOTED losslessly (PB keeps it as source_valid_from
-                # meta), not dropped. This is the linchpin that makes the opening as-of horizon
-                # slice cleanly (opening rows < aftermath rows).
-                # S2 (Cx 253 §1): SPACE the axis by SOURCE_STEP so chunk i → i*SOURCE_STEP. The
-                # opening is staged just above chunk 1 and the live play horizon advances within
-                # the reserved band below chunk 2 (2*SOURCE_STEP) — a band too wide to exhaust.
-                world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}",
-                                       at=float(i) * SOURCE_STEP,
-                                       cursor_authoritative=True)
+                if _parallel_extract and len(chunks) > 1:
+                    items = items_by_chunk.get(i)
+                    if items is None:
+                        continue  # extract already failed + logged
+                    # advance the cursor to this chunk's coordinate, then commit serially
+                    world.ingestor.cursor.advance(float(i) * SOURCE_STEP)
+                    world.porcelain.ingest_structured(
+                        items, classify="defer", cursor_authoritative=True)
+                else:
+                    # serial path (legacy / single chunk): extract+ingest in one call
+                    world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}",
+                                           at=float(i) * SOURCE_STEP,
+                                           cursor_authoritative=True)
+                    _emit(on_stage, f"   …chunk {i}/{len(chunks)} extracted")
             except Exception as exc:  # noqa: BLE001 — one bad chunk must not sink
-                # A single extraction defect (e.g. a cycle-forming containment edge
-                # the model wrote) raises a hard engine invariant. Fail OPEN per
-                # chunk: log loudly, drop that chunk's facts, keep building — the
-                # viability gate still catches a world too thin to play.
+                # A single extraction/ingest defect (e.g. a cycle-forming containment edge the
+                # model wrote) raises a hard engine invariant. Fail OPEN per chunk: log loudly,
+                # drop that chunk's facts, keep building — the viability gate still catches a
+                # world too thin to play.
                 skipped += 1
                 logger.warning("chunk %d/%d ingest failed (%s: %s) — skipping; the "
                                "build continues", i, len(chunks),
@@ -873,7 +903,6 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                 _emit(on_stage, f"   …chunk {i}/{len(chunks)} SKIPPED "
                                 f"({type(exc).__name__})")
                 continue
-            _emit(on_stage, f"   …chunk {i}/{len(chunks)} extracted")
         if skipped:
             logger.warning("ingest completed with %d/%d chunk(s) skipped", skipped, len(chunks))
         return _finalize_scenario(world, name, title, provider, spath, endless,
@@ -891,7 +920,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
 
 def create_scenario_from_interview(name: str, brief: str, provider: Provider,
                                    endless: bool = False, on_stage=None,
-                                   win_direction: str = "", play_as: str = "") -> dict:
+                                   win_direction: str = "", play_as: str = "",
+                                   game_types: list | None = None) -> dict:
     """Session-zero Path B: build a world LIVE from a brief (no source
     text). An interviewer cohort expands the brief into the constitutive
     spine — charter, places + lateral graph, key NPCs with dispositional
@@ -921,9 +951,12 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
         world.ingestor.cursor.advance(1.0)
         world.porcelain.ingest_structured(items)
         logger.info("interview authored %d spine items", len(items))
+        # game_types pass-through (parity with the ingest path): a caller may FORCE the
+        # game-type(s)/shape (else _finalize derives it from the digest). The interview path is
+        # single-spine, so no source-axis spacing → no source_step (legacy/head reads).
         return _finalize_scenario(world, name, title, provider, spath, endless,
                                   on_stage, win_direction=win_direction,
-                                  play_as=play_as)
+                                  play_as=play_as, game_types=game_types)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
