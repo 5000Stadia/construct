@@ -175,6 +175,8 @@ def process_updates(conn, core: TransportCore, client: TelegramClient,
                 typer.join(timeout=2.0)
             registry.record_outbox(conn, PLATFORM, uid, out.chat_id, out.chunks)
         _send_pending(conn, client, uid)  # raises on failure → offset NOT advanced
+        if ev is not None:
+            core.settle(ev)  # POST-SEND: deferred bookkeeping now (overlaps the player reading)
         offset = max(offset, uid + 1)
         registry.set_offset(conn, PLATFORM, offset)
     return offset

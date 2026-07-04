@@ -198,6 +198,28 @@ class StubProvider(Provider):
     async def complete(self, prompt: str, schema: dict, *, tier: Tier = "main",
                        deliberate: bool = False) -> dict:
         self.calls.append((prompt, schema, tier))
+        # #88A stage-gate default: the clarification gate is a NEW cheap call inside the
+        # commitment path; pre-existing tests stub that path without knowing about it. Unless
+        # a test EXPLICITLY stubs the gate (queue head carries "specified"), answer
+        # "specified" here WITHOUT consuming the queue — the legacy stub sequence flows on.
+        if task_of(prompt) == "csg" and not (
+                self._queue and isinstance(self._queue[0], dict)
+                and "specified" in self._queue[0]):
+            return {"specified": True, "missing": [], "clarification": ""}
+        # #97 (same precedent): the Remembrancer's gated cheap calls are NEW inside
+        # long-stubbed paths (asks_self / protagonist-knowledge turns). Unless a test
+        # EXPLICITLY stubs them (queue head carries the signature key), answer the
+        # silent default without consuming the queue. Tag is `rmb`, NOT `mem` — the
+        # narrative-memory compactor owns `mem` (Cx 439 #2: sharing it silently fed
+        # compaction the wrong schema).
+        if task_of(prompt) == "rmb" and not (
+                self._queue and isinstance(self._queue[0], dict)
+                and "stirs" in self._queue[0]):
+            return {"stirs": False, "memory": "", "feeling": ""}
+        if task_of(prompt) == "mcl" and not (
+                self._queue and isinstance(self._queue[0], dict)
+                and "claims" in self._queue[0]):
+            return {"claims": [], "people": []}
         if not self._queue:
             raise ProviderTransportError("StubProvider queue exhausted")
         response = self._queue.pop(0)

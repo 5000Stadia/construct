@@ -68,6 +68,10 @@ class _FakeSession:
         return SimpleNamespace(prose=f"narrated<{text}>", ok=True, ended=False,
                                exit_requested="new story" in text.lower())
 
+    def flush_settle(self):
+        # TURN-LATENCY dumbfire: the adapter calls this post-send; the fake has no tail.
+        self.settled = getattr(self, "settled", 0) + 1
+
 
 class _Factory:
     def __init__(self, setup=None):
@@ -231,8 +235,11 @@ class TestRouting:
         f = _Factory()
         core = _core(conn, f)
         catalog = core._catalog()
-        assert catalog.get("anchor", "").startswith("The Last Honest Meter")
-        assert "anchor2" not in catalog        # retired (no meta/title)
+        # anchor was RETIRED (founder, 2026-07-03: moved to worlds/attic) — the catalog
+        # reads the live worlds/ dir, so bodycase is the stable representative now.
+        assert catalog.get("bodycase", "").startswith("The Rain in Bluegate Yard")
+        assert "anchor" not in catalog         # retired to the attic
+        assert "anchor2" not in catalog        # never existed (no meta/title)
 
     def test_library_shares_player_built_worlds(self, conn, monkeypatch):
         # Founder: player-built (live_*) worlds ARE shared in the library now — the good
@@ -263,7 +270,7 @@ class TestRouting:
         body = out.chunks[0]
         assert body.startswith("Here's what's ready")          # short agent intro
         assert "ready-made worlds" in body.lower()             # host menu header
-        assert "The Last Honest Meter" in body                 # a real title, listed
+        assert "The Rain in Bluegate Yard" in body             # a real title, listed
         assert "new world" in body                             # the build option line
         assert f.calls == []                                   # still in dialogue
 
@@ -329,6 +336,29 @@ class TestRouting:
         assert "OPENING:anchor:telegram:fz" in out2.chunks[0]
         assert registry.is_started(conn, "telegram", "fz")
         assert registry.get_chargen(conn, "telegram", "fz") is None   # Foyer cleared
+
+    def test_foyer_done_fires_opening_heads_up_before_the_slow_opening(self, conn):
+        # FOUNDER: after the name turn, the opening render takes a bit — fire an immediate
+        # "settling you in" heads-up via the notify push BEFORE the slow opening, so the
+        # chat isn't silent. A non-done turn fires no such ping.
+        from construct.transport_core import OPENING_HEADS_UP
+        self._admit(conn, ext="hu", started=False)
+        setup = {"role": "a clerk", "defaults": {}, "anchors": [], "protagonist": "person:clerk"}
+        f = _Factory(setup=setup)
+        sess = _FakeSession("anchor", "telegram:hu", False, setup=setup)
+        pings: list[str] = []
+        core = _core(conn, f, notify=lambda chat_id, text: pings.append(text),
+                     provider=StubProvider([
+                         _fturn("Mara — noted.", _fact("set_detail", "name", "Mara")),
+                         _fturn("Then let's begin.", _fact("set_detail", "pronouns", "she/her"),
+                                _fact("done"))]))
+        core._sessions["telegram:hu"] = sess
+        registry.set_chargen(conn, "telegram", "hu",
+                             {"history": [], "sheet": {}, "setup": setup})
+        core.handle(_ev("telegram", "hu", "call me Mara"), now=NOW)
+        assert OPENING_HEADS_UP not in pings           # not on a mid-Foyer (not-done) turn
+        core.handle(_ev("telegram", "hu", "ready"), now=NOW)
+        assert OPENING_HEADS_UP in pings               # fired on the done turn, before the opening
 
     def test_atrium_resume_reopens_saved_game_not_fresh(self, conn, tmp_path):
         # A guest with a saved game can resume it from the dialogue (fresh=False).
@@ -1226,8 +1256,13 @@ class TestSceneImageDelivery:
                 self.turns.append(text)
                 return SimpleNamespace(prose=f"narrated<{text}>", ok=True,
                                        ended=False, exit_requested=False)
-            def pending_image(self, timeout=30.0):
-                return pending
+            def take_pending_image(self):
+                if pending is None:
+                    return None
+                import threading as _t
+                done = _t.Event()
+                done.set()                       # render already finished → ready immediately
+                return {"rec": pending, "done": done}
 
         class _F(_Factory):
             def __call__(self, *, scenario, player_id, fresh, mode_override=None):
@@ -1236,15 +1271,17 @@ class TestSceneImageDelivery:
                 return s
         return _F()
 
-    def test_fresh_scene_sends_photo_before_text(self, conn):
+    def test_fresh_scene_sends_photo_before_text(self, conn, tmp_path):
         self._admit(conn, "im1")
+        img = tmp_path / "scene.png"
+        img.write_bytes(b"\x89PNG fake")          # the asset must EXIST to be sent (Cx-safe guard)
         order = []
-        core = _core(conn, self._factory(SimpleNamespace(asset_path="/tmp/scene.png")),
+        core = _core(conn, self._factory(SimpleNamespace(asset_path=str(img))),
                      photo=lambda chat, path, cap="": order.append(("photo", path)))
         out = core.handle(_ev("telegram", "im1", "go to the vault"), now=NOW)
         order.append(("text", out.chunks[0]))
-        # the photo was delivered DURING handle, before the text reply was returned
-        assert order[0] == ("photo", "/tmp/scene.png")
+        # the photo was delivered DURING handle (render ready), before the text reply was returned
+        assert order[0] == ("photo", str(img))
         assert order[1][0] == "text" and "narrated" in order[1][1]
 
     def test_same_location_sends_no_photo(self, conn):
@@ -1260,6 +1297,47 @@ class TestSceneImageDelivery:
         core = _core(conn, self._factory(SimpleNamespace(asset_path="/tmp/x.png")))
         out = core.handle(_ev("telegram", "im3", "look"), now=NOW)  # photo= absent
         assert out.chunks[0].endswith("narrated<look>")  # no crash; text delivered
+
+    def test_slow_render_is_sent_late_not_dropped(self, conn, tmp_path, monkeypatch):
+        # FOUNDER image fix (B): a render not ready when the text ships must NOT block the reply
+        # and must NOT be dropped — it's sent LATE (a follow-up photo) when it finishes.
+        import threading
+        import time
+
+        from construct import transport_core
+        monkeypatch.setattr(transport_core, "IMAGE_BEFORE_TEXT_S", 0.05)
+        monkeypatch.setattr(transport_core, "IMAGE_LATE_S", 5.0)
+        self._admit(conn, "im4")
+        img = tmp_path / "late.png"
+        done = threading.Event()                       # render NOT finished yet
+        rec = SimpleNamespace(asset_path=str(img))
+        sent = []
+
+        class _S(_FakeSession):
+            def turn(self, text):
+                self.turns.append(text)
+                return SimpleNamespace(prose=f"narrated<{text}>", ok=True,
+                                       ended=False, exit_requested=False)
+            def take_pending_image(self):
+                return {"rec": rec, "done": done}
+
+        class _F(_Factory):
+            def __call__(self, *, scenario, player_id, fresh, mode_override=None):
+                s = _S(scenario, player_id, fresh, mode_override, setup=self.setup)
+                self.sessions[player_id] = s
+                return s
+
+        core = _core(conn, _F(), photo=lambda chat, path, cap="": sent.append(path))
+        out = core.handle(_ev("telegram", "im4", "go to the vault"), now=NOW)
+        assert "narrated" in out.chunks[0]             # text shipped WITHOUT waiting on the image
+        assert sent == []                              # nothing sent before the text
+        img.write_bytes(b"\x89PNG late")               # the render finishes a moment later...
+        done.set()
+        for _ in range(200):                           # ...and the late thread delivers it
+            if sent:
+                break
+            time.sleep(0.02)
+        assert sent == [str(img)]                      # sent LATE, not dropped
 
     def test_welcome_image_precedes_the_menu(self, conn):
         # The static projector image leads the welcome menu on first load (invite claim).
@@ -1291,7 +1369,10 @@ class TestSceneImageDelivery:
                      photo=lambda c, p, cap="": photos.append(p),
                      notify=lambda c, t: notes.append(t))
         out = core._opening_reply(_ev("telegram", "ox", "x"), "telegram:ox", _S())
-        assert notes == ["FRAMING — the premise"]            # 1: framing (out of band)
+        # 0: the please-wait heads-up (founder 2026-07-02 — every opening path announces
+        # itself); 1: framing (out of band)
+        assert notes[0].startswith("✨ Settling you into the world")
+        assert notes[1:] == ["FRAMING — the premise"]
         assert photos == [str(img)]                          # 2: the picture
         assert out.chunks[0] == "ROOM — you stand in the office"  # 3: the room
 
@@ -1308,3 +1389,47 @@ class TestSceneImageDelivery:
         core = _core(conn, _Factory(), photo=lambda c, p, cap="": None)
         out = core._opening_reply(_ev("telegram", "oy", "x"), "telegram:oy", _S())
         assert out.chunks[0] == "FRAMING\n\nROOM"  # combined, no awkward fragmentation
+
+
+# ---- #95 DEATH TERMINAL (DEATH-TESTAMENT.md, Cx 422): no next-chapter arm -----
+
+class TestDeathTerminalTransport:
+    def _admit(self, conn, ext, scenario="bodycase"):
+        code = registry.mint_invite(conn, "telegram", scenario, now=NOW)
+        registry.claim_invite(conn, code, "telegram", ext, now=NOW)
+        registry.mark_started(conn, "telegram", ext)
+
+    def _factory(self, can_continue):
+        class _S(_FakeSession):
+            def turn(self, text):
+                self.turns.append(text)
+                return SimpleNamespace(prose=f"narrated<{text}>", ok=True,
+                                       ended=True, can_continue=can_continue,
+                                       exit_requested=False)
+
+        class _F(_Factory):
+            def __call__(self, *, scenario, player_id, fresh, mode_override=None):
+                s = _S(scenario, player_id, fresh, mode_override, setup=self.setup)
+                self.sessions[player_id] = s
+                return s
+        return _F()
+
+    def test_death_ending_never_arms_continue(self, conn):
+        # a death terminal renders The End — no "story goes on", no _pending_continue
+        self._admit(conn, "dt1")
+        core = _core(conn, self._factory(can_continue=False))
+        out = core.handle(_ev("telegram", "dt1", "I press on across the parapet"),
+                          now=NOW)
+        text = "\n".join(out.chunks)
+        assert "The End" in text
+        assert "The story goes on" not in text
+        assert "telegram:dt1" not in core._pending_continue
+
+    def test_chapter_ending_still_arms_continue(self, conn):
+        # regression guard: an ordinary chapter close keeps the auto-continue arm
+        self._admit(conn, "dt2")
+        core = _core(conn, self._factory(can_continue=True))
+        out = core.handle(_ev("telegram", "dt2", "I name the culprit"), now=NOW)
+        text = "\n".join(out.chunks)
+        assert "End of Chapter" in text and "The story goes on" in text
+        assert "telegram:dt2" in core._pending_continue

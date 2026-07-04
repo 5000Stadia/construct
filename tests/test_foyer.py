@@ -22,6 +22,11 @@ class _FakePorc:
     def ingest_structured(self, items, frame=None):
         self.ingested += items
 
+    def locate(self, entity, as_of=None):
+        # The immediate place chain — [place] when an `in` fact exists, else [].
+        place = self.facts.get((entity, "in"))
+        return [place] if place else []
+
 
 class _FakeWorld:
     def __init__(self, facts=None):
@@ -166,3 +171,50 @@ def test_ingest_character_failopen_keeps_additions_as_history(monkeypatch):
     ingest_character(w, p, "person:wren", sheet)
     hist = [r for r in w.porcelain.ingested if r["attribute"] == "history"]
     assert hist and hist[0]["value"] == "a secret rivalry"
+
+
+def test_ground_character_fills_role_and_place_gaps():
+    # CHARACTER-GROUNDING P2: the engine completes a concrete role + inhabited place so the
+    # player knows what they are and what "my office" IS. Fills only the gaps.
+    from construct.foyer import ground_character
+    p = StubProvider([{
+        "role_summary": "a chartered accountant in independent practice",
+        "background": "Known for noticing what a column won't balance to.",
+        "place_name": "Pym & Co.",
+        "place_kind": "office",
+        "place_description": "A small public accountancy on Bleakstone Square; one upstairs room "
+                             "of ledgers and a green-shaded lamp."}])
+    w = _FakeWorld({("person:pc", "name"): "Lionel", ("person:pc", "in"): "place:office"})
+    ground_character(w, p, "person:pc", world_brief="gaslit London", theme="mystery")
+    ing = {(r["entity"], r["attribute"]): r["value"] for r in w.porcelain.ingested}
+    assert ing[("person:pc", "role")] == "a chartered accountant in independent practice"
+    assert "noticing" in ing[("person:pc", "background")]
+    assert ing[("place:office", "name")] == "Pym & Co."
+    assert ing[("place:office", "kind")] == "office"        # required schema field, now committed
+    assert "accountancy" in ing[("place:office", "description")]
+
+
+def test_ground_character_honors_player_set_role_and_named_place():
+    # Honor specifics: a role/place the player already set is NOT overwritten; only gaps fill.
+    from construct.foyer import ground_character
+    p = StubProvider([{
+        "role_summary": "a chartered accountant", "background": "auto background",
+        "place_name": "Pym & Co.", "place_kind": "office",
+        "place_description": "An upstairs accountancy of ledgers and lamplight."}])
+    w = _FakeWorld({("person:pc", "name"): "Lionel",
+                    ("person:pc", "role"): "a private enquiry agent",   # player set
+                    ("place:office", "name"): "Marsh & Sons",            # already named
+                    ("person:pc", "in"): "place:office"})
+    ground_character(w, p, "person:pc")
+    ing = {(r["entity"], r["attribute"]): r["value"] for r in w.porcelain.ingested}
+    assert ("person:pc", "role") not in ing            # player's role preserved, not overwritten
+    assert ("place:office", "name") not in ing         # existing place name preserved
+    assert "ledgers" in ing[("place:office", "description")]   # the gap (description) still fills
+
+
+def test_ground_character_failopen_on_cohort_error():
+    # A grounding miss must never block the game — defaults stand, no rows.
+    from construct.foyer import ground_character
+    w = _FakeWorld({("person:pc", "name"): "Lionel", ("person:pc", "in"): "place:office"})
+    ground_character(w, StubProvider([]), "person:pc")  # empty queue → cohort raises
+    assert w.porcelain.ingested == []

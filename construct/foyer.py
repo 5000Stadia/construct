@@ -62,8 +62,10 @@ class CharacterSheet:
                    additions=list(data.get("additions") or []))
 
 
-#: The character-detail fields written straight onto the protagonist as canon.
-_DETAIL_ATTRS = ("name", "gender", "pronouns", "background")
+#: The character-detail fields written straight onto the protagonist as canon. `role` is
+#: included so a Foyer-DECLARED role (the Picard "declare your post" beat) becomes canon and
+#: is HONORED by the grounding step rather than overwritten (Cx 280).
+_DETAIL_ATTRS = ("name", "gender", "pronouns", "background", "role")
 
 #: Fields that MUST be set before the Foyer may finish. The open-conversation
 #: capture can miss one (a guest narrates their backstory but never states
@@ -150,6 +152,61 @@ def ingest_character(world: Any, provider: Provider, protagonist: str,
             logger.exception("addition grounding failed; storing as history facts")
             p.ingest_structured([{"entity": protagonist, "attribute": "history",
                                   "value": a} for a in sheet.additions])
+
+
+def ground_character(world: Any, provider: Provider, protagonist: str,
+                     *, world_brief: str = "", theme: str = "",
+                     as_of: float | None = None) -> None:
+    """CHARACTER-GROUNDING P2 (the Picard model, CHARACTER-GROUNDING.md): the engine COMPLETES a
+    grounded role + inhabited place for the protagonist at seal — who they are (profession +
+    standing motivation) and what their space concretely IS — so the player never enters play not
+    knowing what they are. HONORS player-set details (fills only the gaps; never overwrites a
+    role/background/place-name the player gave). Commits as `stated` canon. Fail-open: any miss
+    leaves the build's defaults untouched. NEVER references the plot.
+
+    `as_of` (Cx 280): all locate/state reads bind to the OPENING horizon, so a horizon world
+    (ingested fiction with a spaced source axis) grounds the protagonist's OPENING place, never an
+    aftermath place the head-of-timeline read would pick."""
+    p = world.porcelain
+    def _sv(entity, attr):
+        return state_value(p, entity, attr, as_of=as_of) if entity else None
+    try:
+        role = _sv(protagonist, "role") or ""
+        background = _sv(protagonist, "background") or ""
+        name = _sv(protagonist, "name") or ""
+        chain = p.locate(protagonist, as_of=as_of)
+        place = chain[0] if chain else None
+        place_name = _sv(place, "name")
+        place_desc = _sv(place, "description")
+        place_kind = _sv(place, "kind")
+        place_label = place_name or (place.split(":", 1)[-1].replace("_", " ") if place else "")
+        sheet_summary = "; ".join(
+            f"{a}: {_sv(protagonist, a)}"
+            for a in ("name", "background", "role", "gender", "pronouns") if _sv(protagonist, a))
+        out = cohorts.ground_character(
+            provider, role=role, name=name, world_brief=world_brief,
+            sheet_summary=sheet_summary, place_label=place_label, theme=theme)
+        rows: list[dict] = []
+        # Fill ONLY the gaps — honor anything the player (or the build) already set.
+        if not role and out.get("role_summary"):
+            rows.append({"entity": protagonist, "attribute": "role", "value": out["role_summary"]})
+        if not background and out.get("background"):
+            rows.append({"entity": protagonist, "attribute": "background",
+                         "value": out["background"]})
+        if place:
+            if not place_name and out.get("place_name"):
+                rows.append({"entity": place, "attribute": "name", "value": out["place_name"]})
+            if not place_kind and out.get("place_kind"):
+                rows.append({"entity": place, "attribute": "kind", "value": out["place_kind"]})
+            if not place_desc and out.get("place_description"):
+                rows.append({"entity": place, "attribute": "description",
+                             "value": out["place_description"]})
+        if rows:
+            p.ingest_structured(rows)
+            logger.info("grounded character %s: role=%r place=%s (+%d rows)",
+                        protagonist, out.get("role_summary"), place, len(rows))
+    except Exception:
+        logger.exception("character grounding failed for %s; defaults stand", protagonist)
 
 
 @dataclass

@@ -536,8 +536,11 @@ _DEFAULT_FALLOUT = ("arc_unresolved",
 
 
 def _human(entity: str) -> str:
-    """A readable name for an entity id, for the narrator directive (not stored)."""
-    return entity.split(":", 1)[-1].replace("_", " ")
+    """A readable name for an entity id, for the narrator directive (not stored). A `person:` slug
+    is a proper NAME → Title-Case it (founder blind test: 'clara_vale' addressed as lowercase 'clara
+    vale'); obj/place stay lowercase so prose reads naturally ('you lift the brass token')."""
+    local = entity.split(":", 1)[-1].replace("_", " ")
+    return local.title() if str(entity).startswith("person:") else local
 
 
 def _required_unreachable(reads: Any, arc: Arc) -> bool:
@@ -677,6 +680,37 @@ def arc_protected_keys(arc: Arc) -> set[tuple[str, str]]:
             if isinstance(atom, (StateIs, InFrame)):
                 keys.add((atom.entity, atom.attribute))
     return keys
+
+
+#: Function words + structural attr names that are never "concealed vocabulary" (they'd
+#: false-positive every freeform value). Shared by the render + build leak screens.
+_CONCEAL_STOP = {"the", "a", "an", "of", "to", "is", "in", "on", "status", "kind",
+                 "name", "alias", "title", "fact", "event", "obj", "person", "place"}
+
+
+def concealed_tokens(keys: set[tuple[str, str]]) -> set[str]:
+    """Distinctive tokens of the arc's HIDDEN facts — drawn from each protected entity id
+    and attribute (NOT the value: a protected fact's value is often a public name, not itself
+    secret). The shared concealment vocabulary the cold open screens freeform text against
+    (Cx 022 #3 / 333 #3 / 337). `keys` = `arc_protected_keys(arc)`."""
+    toks: set[str] = set()
+    for (e, a) in keys:
+        for src in (str(e).split(":", 1)[-1], str(a)):
+            for t in src.replace("_", " ").replace("-", " ").lower().split():
+                if len(t) > 3 and t not in _CONCEAL_STOP:
+                    toks.add(t)
+    return toks
+
+
+def value_leaks(text: str, tokens: set[str]) -> bool:
+    """True if freeform `text` brushes any concealed token. One screen used by BOTH the
+    render path (`Session._value_leaks` / `live_threads`) and the build path
+    (`game.seed_player_relationships`) so a leaked value can never be persisted or shown
+    (Cx 337). Empty token set → fail-open False (a quiet/unprotected arc conceals nothing)."""
+    if not tokens:
+        return False
+    words = set(str(text).replace("_", " ").replace("-", " ").replace(":", " ").lower().split())
+    return bool(tokens & words)
 
 
 def arc_entities(arc: Arc) -> set[str]:

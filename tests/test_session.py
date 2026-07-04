@@ -186,6 +186,8 @@ class _CastRoutingProvider(StubProvider):
             return {"thread": "", "directive": ""}
         if t == "nar":
             return {"prose": "The witness, pressed, admits what they saw."}
+        if t == "opn":
+            return {"prose": "You stand in the study; the witness waits, known to you."}
         return {"items": []}  # any tail call (e.g. time estimate) — harmless
 
 
@@ -204,6 +206,141 @@ def test_interview_delivery_through_real_session_metadata(tmp_path, monkeypatch)
     # the clue surfaced into the player's knowledge frame via interview delivery
     assert PorcelainWorldReads(s._world).assertion_in_frame(
         PLAYER_FRAME, "fact:clue", "shows", "guilt")
+
+
+def _open_prompt(provider):
+    """The opening cohort prompt the session sent (task 'opn'), or '' if none."""
+    return next((p for (p, _s, _t) in reversed(provider.calls)
+                 if task_of(p) == "opn"), "")
+
+
+class TestOpeningGrounding:
+    """Founder 2026-06-30: the cold open must GROUND the player in their character's
+    lived context — why they are here, who the people present are to them — read from
+    the player's own knowledge frame, and a STANDING directive for every game."""
+
+    def _cast_session(self, tmp_path, monkeypatch, provider, *, ground_facts=()):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "worlds").mkdir()
+        _author_cast_scenario(tmp_path / "worlds" / "cast.world", "w:cast")
+        s = Session.open("cast", player_id="u1", provider=provider)
+        if ground_facts:
+            # write the player's lived knowledge (what they walk in already knowing)
+            s._world.porcelain.ingest_structured(list(ground_facts), frame=PLAYER_FRAME)
+        return s
+
+    def test_player_grounding_reads_situation_and_present_relationships(
+            self, tmp_path, monkeypatch):
+        s = self._cast_session(
+            tmp_path, monkeypatch, _CastRoutingProvider(),
+            ground_facts=[
+                {"entity": PLAYER, "attribute": "current_assignment",
+                 "value": "investigate the murder in the yard"},
+                {"entity": PLAYER, "attribute": "relationship_to_person:witness",
+                 "value": "your newly assigned partner on the case"},
+            ])
+        _anchors, names = s._establishing_anchors()
+        present, _absent, present_ids, absent_ids = s._present_people(names)
+        assert "person:witness" in present_ids
+        situation, rels, _absent_rels = s._player_grounding(names, present_ids, absent_ids)
+        assert any("investigate the murder" in line for line in situation)
+        assert rels.get("person:witness") == "your newly assigned partner on the case"
+        # identity attrs are NOT re-listed as situation
+        assert not any("kind:" in line or line.startswith("name") for line in situation)
+        s.close()
+
+    def test_open_carries_standing_grounding_directive_and_lived_context(
+            self, tmp_path, monkeypatch):
+        provider = _CastRoutingProvider()
+        s = self._cast_session(
+            tmp_path, monkeypatch, provider,
+            ground_facts=[
+                {"entity": PLAYER, "attribute": "current_assignment",
+                 "value": "investigate the murder in the yard"},
+                {"entity": PLAYER, "attribute": "relationship_to_person:witness",
+                 "value": "your newly assigned partner on the case"},
+            ])
+        s.opening()
+        prompt = _open_prompt(provider)
+        assert "GROUND THE PLAYER" in prompt                    # the standing directive (all games)
+        assert "WHAT YOU ALREADY KNOW" in prompt                # the lived-situation block
+        assert "investigate the murder in the yard" in prompt
+        assert "your newly assigned partner on the case" in prompt   # present-cast relationship
+        s.close()
+
+    def test_present_block_surfaces_roles_and_guides_not_scripts(
+            self, tmp_path, monkeypatch):
+        # Founder 2026-07-01: the old rule ("first witness speaks first and introduces the
+        # others") had a witness marshalling the room + voicing the investigator's agenda. The
+        # recalibration surfaces each present person's OWN role and guides the agent to unveil
+        # intelligently (each speaks from their own standing), rather than scripting a lead.
+        provider = _CastRoutingProvider()
+        s = self._cast_session(tmp_path, monkeypatch, provider)  # person:witness (surface 'the witness')
+        s.opening()
+        prompt = _open_prompt(provider)
+        assert "UNVEIL INTELLIGENTLY" in prompt                       # guide, don't script
+        assert "from their OWN role" in prompt
+        assert "no one voices another's agenda" in prompt             # the founder's exact concern
+        assert "the witness" in prompt                                # the person's own role is surfaced
+        assert "introduce the others by name" not in prompt           # old prescriptive script is gone
+        s.close()
+
+    def test_grounding_directive_present_even_without_lived_facts(
+            self, tmp_path, monkeypatch):
+        # the STANDING directive governs EVERY open, even a world with no authored
+        # situation facts — it instructs the narrator to ground from whatever is true.
+        provider = _CastRoutingProvider()
+        s = self._cast_session(tmp_path, monkeypatch, provider)
+        s.opening()
+        prompt = _open_prompt(provider)
+        assert "GROUND THE PLAYER" in prompt
+        assert "WHAT YOU ALREADY KNOW" not in prompt            # no situation block when none exists
+        s.close()
+
+    def test_grounding_value_does_not_leak_concealed_vocabulary(
+            self, tmp_path, monkeypatch):
+        # Cx 333 #3: a freeform situation/relationship VALUE bypasses the (entity,attribute)
+        # protected-key filter — one naming the hidden answer must be token-screened, exactly
+        # as live-thread aliases are. The cast arc protects (fact:clue, shows); a situation
+        # line brushing 'clue' must be dropped from the open.
+        s = self._cast_session(
+            tmp_path, monkeypatch, _CastRoutingProvider(),
+            ground_facts=[
+                {"entity": PLAYER, "attribute": "stray_thought",
+                 "value": "the clue points straight at the witness"},   # 'clue' is concealed
+                {"entity": PLAYER, "attribute": "current_assignment",
+                 "value": "look into the disturbance"},                  # benign — survives
+            ])
+        _anchors, names = s._establishing_anchors()
+        _present, _absent, present_ids, absent_ids = s._present_people(names)
+        situation, _rels, _absent_rels = s._player_grounding(names, present_ids, absent_ids)
+        assert any("disturbance" in line for line in situation)
+        assert not any("clue" in line for line in situation)        # concealed value dropped
+        s.close()
+
+    def test_solo_open_holds_call_present_open_does_not(self, tmp_path, monkeypatch):
+        # Cx 333 #5: the held "zoom into your empty space, no hook" mode is for a SOLO open;
+        # when cast is present the case scene is in motion → grounding=False (call may arise).
+        from unittest.mock import patch
+        provider = _CastRoutingProvider()
+        s = self._cast_session(tmp_path, monkeypatch, provider)  # person:witness is present
+        with patch("construct.cohorts.open_scene", return_value="x") as m:
+            s.opening()
+        assert m.call_args.kwargs.get("grounding") is False       # present cast → not a held solo open
+        s.close()
+
+    def test_solo_fresh_open_holds_the_call(self, scenario):
+        # the other half of the seam (Cx 335 #5): a fresh open with NO present cast (the demo
+        # scenario — person:rival has no location) IS a held solo open → grounding=True.
+        from unittest.mock import patch
+        s = Session.open(scenario, player_id="u1", provider=_provider())
+        _anchors, names = s._establishing_anchors()
+        present, _absent, _pids, _aids = s._present_people(names)
+        assert present == []                                       # genuinely solo
+        with patch("construct.cohorts.open_scene", return_value="x") as m:
+            s.opening()
+        assert m.call_args.kwargs.get("grounding") is True         # solo fresh → hold the call
+        s.close()
 
 
 class _RoutingProvider(StubProvider):
@@ -229,6 +366,8 @@ class _RoutingProvider(StubProvider):
             return {"thread": "", "directive": ""}
         if task_of(prompt) == "nar":
             return {"prose": "The study holds around you, lamplit and certain."}
+        if task_of(prompt) == "opn":
+            return {"prose": "You stand in the lamplit study, the desk waiting under your hand."}
         raise AssertionError(f"unrouted prompt: {prompt[:60]!r}")
 
 
@@ -256,6 +395,25 @@ class TestSession:
         # The solo CLI (no player_id) keeps the original slot name.
         Session.open(scenario, provider=_provider()).close()
         assert slot_path(scenario).name == "demo.play.world"
+
+    def test_settle_held_then_joined_by_next_turn(self, scenario):
+        """TURN-LATENCY dumbfire: a turn HOLDS its post-narrate bookkeeping in
+        `_pending_settle` (the adapter runs it post-send). The NEXT turn JOINS that
+        pending work at its start — BEFORE computing the new turn number — so two
+        back-to-back turns can never collide on a turn id, and close() flushes the last."""
+        from construct.game import next_turn_number
+        s = Session.open(scenario, player_id="u1", provider=_provider())
+        s.turn("I look around the study.")
+        # The turn-integrity RECEIPT is synchronous, so the turn row is durable immediately
+        # (no collision possible by construction); only the LM finalization is held.
+        assert s._pending_settle is not None          # LM finalization held, not yet run
+        assert next_turn_number(s._world) == 2        # turn_0 + turn_1 receipt already durable
+        # the 2nd turn JOINS turn 1's settle at its start (the back-to-back guard).
+        s.turn("I look again.")
+        assert next_turn_number(s._world) == 3        # turn_2 receipt durable, distinct id
+        assert s._pending_settle is not None          # turn 2's finalization now pending
+        s.close()                                     # final flush runs the last finalizer
+        assert s._pending_settle is None
 
     def test_resume_persists_across_sessions(self, scenario):
         s1 = Session.open(scenario, player_id="u1", provider=_provider())
@@ -306,13 +464,21 @@ class TestSession:
         assert "name who is responsible" not in s.opening()
         s.close()
 
-    def test_thematic_intro_shown_at_opening(self, scenario, tmp_path):
+    def test_premise_is_not_dumped_at_opening(self, scenario, tmp_path):
+        # FOUNDER 2026-06-29: the opening must NOT dump the back-of-book premise as an
+        # expository crawl — it spoils the case ("Harrow has been found dead…") and pre-empts
+        # discovery. Introduce the world DIEGETICALLY through the cold-open scene instead.
         meta_path = (tmp_path / "worlds" / "demo.world").with_suffix(".meta.json")
         meta = json.loads(meta_path.read_text())
-        meta["intro"] = "The lamplit study holds its secrets. Find the one that matters."
+        meta["intro"] = ("Malachi Harrow has been found dead in his sealed study. "
+                         "You are called in to find the killer.")
         meta_path.write_text(json.dumps(meta))
         s = Session.open(scenario, player_id="u1", provider=_provider())
-        assert "holds its secrets" in s.opening()
+        opening = s.opening()
+        assert "found dead" not in opening          # the premise/spoiler is NOT dumped upfront
+        assert "find the killer" not in opening.lower()
+        # the diegetic cold-open scene still renders (introduced through experience)
+        assert "lamplit study" in opening
         s.close()
 
     def test_endless_has_no_aim(self, scenario):
@@ -425,6 +591,10 @@ class _FakeSession:
     def turn(self, text):
         self.calls.append(text)
         return type("R", (), {"prose": f"ok:{text}", "ok": True, "trace": None})()
+    def flush_settle(self):
+        # adapter post-send hook (TURN-LATENCY dumbfire); tracked off `calls` so the
+        # barrage assertion still sees only the merged turn text.
+        self.settled = getattr(self, "settled", 0) + 1
     def close(self):
         pass
 
@@ -693,3 +863,93 @@ def test_is_namelike_rejects_descriptive_clauses():
     assert not _is_namelike("It was the wind")
     assert not _is_namelike("here") and not _is_namelike("someone")   # bare filler/adverb
     assert not _is_namelike("")
+
+
+def test_notebook_screens_build_residue_but_shows_learned(scenario):
+    # #83 case-board: the notebook renders the protagonist's own frame — build-stamped
+    # answer rows (protected keys / leaking freeform) are screened exactly like every
+    # render surface, while a row LEARNED IN PLAY (vf above the opening stamp) is earned
+    # through the gated writes and SHOWS even on a protected key.
+    s = Session.open(scenario, player_id="u1", fresh=True, provider=StubProvider([]))
+    stamp = turn_time(0)
+    s._world.porcelain.ingest_structured([
+        # build residue on the protected key (fact:secret, culprit) — must NOT show
+        {"entity": "fact:secret", "attribute": "culprit", "value": "the rival, plainly",
+         "valid_from": stamp},
+        # build residue whose VALUE brushes concealed vocabulary — must NOT show
+        {"entity": "person:rival", "attribute": "reputation",
+         "value": "whispered to be the culprit of the affair", "valid_from": stamp},
+        # honest build grounding — shows
+        {"entity": "person:rival", "attribute": "standing", "value": "an old acquaintance",
+         "valid_from": stamp},
+        # LEARNED IN PLAY on the same protected key — earned; shows
+        {"entity": "fact:secret", "attribute": "culprit", "value": "the rival did it",
+         "valid_from": turn_time(2)},
+    ], frame=PLAYER_FRAME)
+    out = s.journal()
+    s.close()
+    assert "the rival did it" in out                       # earned knowledge renders
+    assert "the rival, plainly" not in out                 # build-stamped protected key
+    assert "whispered to be the culprit" not in out        # build-stamped leaking value
+    assert "an old acquaintance" in out                    # ordinary grounding survives
+    assert out.startswith("📓")
+
+
+def test_notebook_marks_settled_entities_as_closed_history(scenario):
+    # #96 S3 (Cx 414): a past chapter's ANSWERED entity renders in the notebook as
+    # settled history — its evidence never re-serves as an active lead.
+    import json as _json
+    s = Session.open(scenario, player_id="u1", fresh=True, provider=StubProvider([]))
+    s._world.porcelain.ingest_structured([
+        {"entity": "person:rival", "attribute": "standing",
+         "value": "the one who did it, last chapter", "valid_from": turn_time(2)},
+        {"entity": "person:witness", "attribute": "standing",
+         "value": "still worth talking to", "valid_from": turn_time(2)},
+    ], frame=PLAYER_FRAME)
+    s._world.porcelain.ingest_structured([
+        {"entity": "settled:episode_9", "attribute": "record",
+         "value": _json.dumps({"title": "The First Case", "outcome": "won",
+                               "settled": ["person:rival · guilt · proven — ANSWERED"]}),
+         "value_type": "literal", "valid_from": turn_time(9)}], frame="session:main")
+    out = s.journal()
+    s.close()
+    _rival_line = next(ln for ln in out.splitlines() if "Rival" in ln and ln.lstrip().startswith("•"))
+    assert "settled (a past chapter's answer)" in _rival_line
+    _witness_line = next(ln for ln in out.splitlines() if "Witness" in ln and ln.lstrip().startswith("•"))
+    assert "settled" not in _witness_line                  # live threads stay untagged
+
+
+def test_opening_names_the_containment_chain(tmp_path, monkeypatch):
+    # THE GEOGRAPHY OF SELF (founder live 2026-07-03, Brackenmere): when the player's
+    # place sits INSIDE a larger named place, the opening brief must name the chain and
+    # instruct the open to make the roof-relationship unmistakable — "your parlor" hid
+    # that the parlor was rooms WITHIN the dead lord's hall.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "worlds").mkdir()
+    _author_scenario(tmp_path / "worlds" / "demo.world", "w:demo")
+    s = Session.open("demo", player_id="u1", fresh=True, provider=StubProvider([]))
+    s._world.porcelain.ingest_structured([
+        {"entity": "place:manor", "attribute": "kind", "value": "manor", "timeless": True},
+        {"entity": "place:manor", "attribute": "name", "value": "Brackenmere Hall"},
+        {"entity": "place:study", "attribute": "in", "value": "place:manor",
+         "value_type": "entity"},
+    ])
+    # THE INTIMATE VERSION (founder 2026-07-03): the authored relationship-to-place —
+    # causes, motivation, history — rides the WHERE YOU ARE grounding.
+    s._world.porcelain.ingest_structured([
+        {"entity": PLAYER, "attribute": "relationship_to_place:manor",
+         "value": "the hall whose master gave you rooms when grief closed every other door"},
+    ], frame=PLAYER_FRAME)
+    provider = StubProvider([{"prose": "The rain ticks at your parlor window."}])
+    s._provider = provider
+    try:
+        s._opening_narration("A death in the family.")
+    except Exception:
+        pass  # the render may need more stubs — the BRIEF is what we assert on
+    _open_prompts = [p for (p, _s, _t) in provider.calls]
+    assert any("WHERE YOU ARE" in p and "Brackenmere Hall" in p for p in _open_prompts), \
+        "the opening brief must name the containment chain"
+    assert any("YOUR HISTORY WITH THIS GROUND" in p
+               and "grief closed every other door" in p for p in _open_prompts), \
+        "the authored place relationship must ride the grounding"
+    s.close()

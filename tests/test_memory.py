@@ -21,8 +21,19 @@ from construct.arc.grammar import (
 )
 from construct.provider import StubProvider, task_of
 from construct.turnloop import (
-    _MEMORY, _RECENT_TURNS, _COMPACT_BATCH, _TRANSCRIPT, run_turn,
+    _MEMORY, _RECENT_TURNS, _COMPACT_BATCH, _TRANSCRIPT, run_turn as _run_turn,
 )
+
+
+def run_turn(*args, **kwargs):
+    """Test wrapper: run a full turn INCLUDING the deferred post-narrate `settle`
+    bookkeeping (TURN-LATENCY dumbfire) — the transcript append and `compact_memory`
+    that these tests force past the compaction boundary now live in `settle`."""
+    result = _run_turn(*args, **kwargs)
+    if getattr(result, "settle", None) is not None:
+        result.settle()
+    return result
+
 
 PLAYER = "person:hero"
 PF = f"knows:{PLAYER}"

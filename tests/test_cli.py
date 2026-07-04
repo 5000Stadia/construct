@@ -49,6 +49,8 @@ def test_play_repl_loop(monkeypatch, capsys):
         def turn(self, line):
             calls.append(("turn", line))
             return _Reply()
+        def flush_settle(self):
+            calls.append("settle")  # adapter/REPL post-send hook (TURN-LATENCY dumbfire)
         def close(self):
             calls.append("closed")
 

@@ -553,9 +553,21 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 build_pillars,
                 cast_from_proposal,
                 check_solvability,
+                disambiguate_cast_identities,
                 validate_beat_delivery,
                 validate_signature_support,
             )
+            # IDENTITY COHERENCE (#92, Cx 404): the canon identity text a reused person id
+            # must be compatible with — read once per id, best-effort.
+            _idreads = PorcelainWorldReads(world)
+
+            def _identity_of(pid: str) -> str | None:
+                try:
+                    bits = [_idreads.state(pid, a) for a in ("role", "title")]
+                    s = " ".join(str(b) for b in bits if b)
+                    return s or None
+                except Exception:  # noqa: BLE001
+                    return None
             # The author-insist half of GENRE-SIGNATURE-ELEMENTS (Cx 097): the fundamental
             # elements the generated fiction MUST establish for this shape, fed to the cohort.
             _sig_dir = author_signature_directive(resolved_game_types)
@@ -571,6 +583,14 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                                          _shape, arc.protagonist, people, feedback=_feedback,
                                          signature_directive=_sig_dir,
                                          beat_targets=_beat_targets)
+                # IDENTITY COHERENCE GATE (#92, Cx 404 A): a reused canon person id whose
+                # established role contradicts the proposed conception is DISAMBIGUATED on
+                # the RAW proposal (the persisted meta["cast"] must carry the fresh id too —
+                # remapping only the typed nodes would reintroduce the collision on reload).
+                _cprop, _remaps = disambiguate_cast_identities(
+                    _cprop, _identity_of, set(known_ids))
+                if _remaps:
+                    logger.info("cast identity collision(s) disambiguated: %s", _remaps)
                 _cast, _specs = cast_from_proposal(_cprop)
                 _req = [pid for pid, _label, required in _specs if required]
                 # Validate holders against canon ids too (Cx 032: a clue on a phantom NPC
@@ -584,8 +604,11 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 # we seed them as reachable canon at staging below, so they're legal holders here.
                 _hybrid = {n.node_id for n in _cast
                            if n.node_id.startswith(("obj:", "place:"))}
-                _problems = check_solvability(_req, _cast, known_ids=set(known_ids) | _hybrid,
-                                              require_staging=(_shape == "deduction"))
+                # Disambiguated fresh persons (#92) are admitted as cast-authored canon
+                # below, exactly like hybrids — legal holders here.
+                _problems = check_solvability(
+                    _req, _cast, known_ids=set(known_ids) | _hybrid | set(_remaps.values()),
+                    require_staging=(_shape == "deduction"))
                 # GENRE-SIGNATURE-ELEMENTS lint (Cx 097): the genre's hard signature promises
                 # must actually ship (e.g. a deduction cast needs a strong red herring + a
                 # cross-suspicion edge). Merged into the same feedback/retry loop as solvability.
@@ -598,6 +621,29 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                     arc = _dc.replace(arc,
                                       pillars=build_pillars(_specs, _cast, arc.protagonist))
                     cast_nodes, cast_proposal = _cast, _cprop
+                    # ADMIT disambiguated persons as cast-authored canon (#92, Cx 404 req 3):
+                    # a fresh person:<slug>_N exists nowhere yet — seed kind/name/role (+
+                    # pronouns if authored) so presence, staging, and reference all work.
+                    if _remaps:
+                        _admit: list[dict] = []
+                        _by_id = {str(m.get("id")): m for m in (_cprop.get("cast") or [])}
+                        for _orig, _fresh in _remaps.items():
+                            _m = _by_id.get(_fresh, {})
+                            _admit.append({"entity": _fresh, "attribute": "kind",
+                                           "value": "person", "timeless": True})
+                            _admit.append({"entity": _fresh, "attribute": "name",
+                                           "value": _orig.split(":", 1)[-1]
+                                           .replace("_", " ").title()})
+                            if _m.get("surface_role"):
+                                _admit.append({"entity": _fresh, "attribute": "role",
+                                               "value": str(_m["surface_role"])[:120]})
+                            if (_m.get("pronouns") or "") in ("he/him", "she/her",
+                                                              "they/them"):
+                                _admit.append({"entity": _fresh, "attribute": "pronouns",
+                                               "value": _m["pronouns"], "timeless": True})
+                        world.porcelain.ingest_structured(_admit)
+                        logger.info("admitted %d disambiguated cast identit(ies) as canon",
+                                    len(_remaps))
                     logger.info("authored %d pillar(s) + %d cast member(s) for %s (attempt %d)",
                                 len(arc.pillars), len(_cast), _shape, _attempt + 1)
                     break
@@ -645,6 +691,16 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 world.porcelain.ingest_structured(_items, frame=_frame)
             except Exception as exc:  # one bad frame must not sink the seal
                 logger.warning("cast clue seed for %s skipped: %s", _frame, exc)
+        # CAST IDENTITY (#87, the Tin Ear gender drift): each member's authored pronouns as
+        # ordinary timeless canon truth — the render reads it and holds voice consistent.
+        try:
+            from construct.cast import cast_identity_plan
+            _idrows = cast_identity_plan(cast_nodes)
+            if _idrows:
+                world.porcelain.ingest_structured(_idrows)
+                logger.info("seeded %d cast pronoun row(s)", len(_idrows))
+        except Exception as exc:  # identity seeding must never sink the seal
+            logger.warning("cast identity seed skipped: %s", exc)
         # STAGE the cast in PLACE (INVESTIGATION-SHAPE.md §3a/§3c-layer-1): write ordinary
         # canon `in` facts so the at_scene cast is co-located with the protagonist's crime
         # scene and remote suspects sit in referable places to travel to. The scene place is
@@ -696,6 +752,16 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                                arc.protagonist)
         except Exception as exc:  # staging must never sink the seal
             logger.warning("cast location staging skipped: %s", exc)
+
+        # OPENING-GROUNDING (founder 2026-06-30): author the player's STANDING relationship to
+        # each present/known cast member into knows:<protagonist>, so the grounded cold open
+        # (Session._player_grounding) introduces each as who-they-are-TO-the-player, not a
+        # third-party intro. Fail-open; non-spoiler (protected keys screened here + at render).
+        try:
+            seed_player_relationships(world, provider, arc.protagonist, cast_nodes, digest,
+                                      protected=arc_protected_keys(arc))
+        except Exception as exc:  # relationship authoring NEVER sinks the seal
+            logger.warning("player-relationship seeding skipped: %s", exc)
 
     _emit(on_stage, "Stage 5.5 · Distilling narrative flavor · genre/voice overlay "
                     "+ per-entity feel (host annotation; engine stays vanilla)")
@@ -786,6 +852,18 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # agree; just record it on meta here.
     if resolved_game_types:
         meta["game_type"] = resolved_game_types
+    # #95 DEATH POLICY (DEATH-TESTAMENT.md, Cx 422): does the player character's death
+    # end this story? One build-time judgment; per-chapter granularity (continuation
+    # re-derives). Fail-open to `shielded` — no world kills by accident.
+    try:
+        _dp = cohorts.classify_death_policy(
+            provider, meta.get("genre", ""),
+            ", ".join(resolved_game_types or []), meta.get("premise", ""))
+        meta["death_policy"] = (_dp.get("policy") or "shielded").strip()
+        meta["death_policy_reason"] = (_dp.get("reason") or "").strip()
+    except Exception as exc:
+        logger.warning("death policy derivation skipped: %s", exc)
+        meta["death_policy"] = "shielded"
     # Batched durability classification (the deferred pass from
     # create_scenario_from_ingest): ONE grouped sweep over everything ingested
     # with inline classification off — the build's main efficiency win. A no-op
@@ -1369,6 +1447,77 @@ def seed_character_frames(world: Any, provider: Provider,
     return seeded
 
 
+def seed_player_relationships(world: Any, provider: Provider, protagonist: str,
+                              cast_nodes: tuple, digest: str,
+                              protected: set | None = None) -> int:
+    """Author the player's STANDING relationship to each PERSON cast member into the
+    `knows:<protagonist>` frame (OPENING-GROUNDING, founder 2026-06-30) — so the grounded cold
+    open introduces a present character as who-they-are-TO-the-player, not a third-party intro.
+    Writes `relationship_to_<id>` rows; the render path (`Session._player_grounding`) consumes
+    them. Returns the count written. Fail-open: any miss leaves the build untouched (the open
+    still grounds from the protagonist's other lived-context facts). Reversible — knows: only.
+
+    NON-SPOILER: the cohort is instructed to author only the player's KNOWN standing, never the
+    solution; as a host-side backstop any value brushing the arc's protected vocabulary is
+    dropped at RENDER (`_value_leaks`). We also skip a `relationship_to_<id>` whose (entity,
+    attribute) lands in `protected` (defensive — relationship keys are not normally protected)."""
+    from construct import cohorts
+    roster = [{"id": n.node_id,
+               "surface_role": getattr(n, "surface_role", ""),
+               "shape_role": getattr(n, "shape_role", "")}
+              for n in cast_nodes
+              if n.node_id.startswith("person:") and n.node_id != protagonist]
+    reads = PorcelainWorldReads(world)
+    # THE GEOGRAPHY OF SELF, INTIMATE (founder 2026-07-03, Brackenmere): "if I live in this
+    # place… I should have a MORE intimate explanation of my relationship with the starting
+    # location, not less." The opening place CHAIN joins the roster so the cohort authors the
+    # causes, motivation, and history that brought the player under this roof — consumed by
+    # the cold open's WHERE-YOU-ARE grounding.
+    try:
+        for _pid in (world.porcelain.locate(protagonist) or []):
+            _pid = str(_pid)
+            if not _pid.startswith("place:"):
+                continue
+            _pnm = reads.state(_pid, "name") or _pid.split(":", 1)[-1].replace("_", " ")
+            roster.append({"id": _pid,
+                           "surface_role": f"the opening location ({_pnm}) — the player's "
+                                           f"own starting ground"})
+    except Exception:  # noqa: BLE001 — the chain is enrichment, never a build gate
+        pass
+    if not roster:
+        return 0
+    prot_role = reads.state(protagonist, "role") or ""
+    try:
+        out = cohorts.author_player_relationships(provider, prot_role, roster, digest)
+    except Exception as exc:  # authoring NEVER sinks a build
+        logger.warning("player-relationship authoring skipped: %s", exc)
+        return 0
+    valid_ids = {r["id"] for r in roster}
+    protected = protected or set()
+    # Concealment at AUTHOR time (Cx 337): never persist a relationship value that brushes the
+    # arc's hidden vocabulary into knows:<prot> — defense in depth alongside the render screen,
+    # using the SAME shared token set so the two cannot drift.
+    from construct.arc.executor import concealed_tokens, value_leaks
+    concealed = concealed_tokens(protected)
+    rows: list[dict] = []
+    for rel in out.get("relationships", []):
+        target, phrase = rel.get("target"), (rel.get("relationship") or "").strip()
+        if not target or not phrase or target not in valid_ids:
+            continue                                  # only real, in-roster cast
+        attr = f"relationship_to_{target}"
+        if (protagonist, attr) in protected:
+            continue
+        if value_leaks(phrase, concealed):            # a leaked value never reaches storage
+            logger.info("player-relationship to %s dropped (brushes concealed vocabulary)", target)
+            continue
+        rows.append({"entity": protagonist, "attribute": attr, "value": phrase})
+    if rows:
+        world.porcelain.ingest_structured(rows, frame=f"knows:{protagonist}")
+        logger.info("seeded %d player-relationship fact(s) into knows:%s",
+                    len(rows), protagonist)
+    return len(rows)
+
+
 def reseed_character_frames(name: str, provider: Provider,
                             characters: list[str] | None = None) -> list[str]:
     """Re-author knowledge frames on the PRISTINE scenario without
@@ -1781,6 +1930,7 @@ def _episode_fuel(reads: Any, prior_arc: Arc, prior_title: str = "",
          passed; their name precedes them.
     The prior title + outcome are ALWAYS woven in (the reputation callback) so even a clean solve
     continues with continuity, not a cold reset."""
+    from construct.arc.executor import SESSION
     threads: list[str] = []
     # 1. a STANDING consequence chained to the last terminal (the book-2 hook), if any
     try:
@@ -1827,15 +1977,32 @@ def _tension_axis(arc) -> str:
 
 
 def _continuation_intro(prior_title: str, prior_outcome: str, prior_arc, proposal: dict,
-                        new_arc) -> str:
+                        new_arc, prior_shape: dict | None = None,
+                        door_place: str | None = None,
+                        callback: str | None = None) -> str:
     """The next episode's COLD-OPEN directive (founder, 2026-06-26): bridge WHERE THE LAST
     STORY LANDED to WHERE THIS ONE IS HEADED, leaving the narrator free to find the most
     interesting connection between those two SPECIFIC points. Deliberately NOT a formula —
     no obligatory 'time has passed' + 'you made a name on that one' (that opener was
     4-for-4 identical across episodes). The bridge is creatively interpretive so we don't
     swap one template for another."""
-    solved = "solved" if prior_outcome == "won" else "saw it through to its hard end"
+    # THE SHAPE, not the binary (founder ruling / #88 S4a): the bridge is authored from the
+    # graded outcome — a wrong close travels as a stain, a costly one as a toll, a triumph as a
+    # name — never from won/lost.
+    _shape = prior_shape or {}
+    _grade, _oshape, _basis = (_shape.get("grade", ""), _shape.get("outcome_shape", ""),
+                               _shape.get("basis", ""))
+    if _grade == "wrong" or _oshape in ("failure", "quiet_failure"):
+        solved = "closed it on the WRONG answer — that stain and its fallout travel with them"
+    elif _oshape == "costly_victory" or _grade == "pyrrhic":
+        solved = "carried it home, but at a toll that shows"
+    elif _oshape in ("bittersweet", "partial") or _grade == "partial":
+        solved = "resolved it in the main, though something in it still doesn't sit square"
+    else:
+        solved = "solved" if prior_outcome == "won" else "saw it through to its hard end"
     landed = f"they {solved}" + (f' "{prior_title}"' if prior_title else " the last case")
+    if _basis:
+        landed += f" ({_basis})"
     prior_axis = _tension_axis(prior_arc)
     if prior_axis:
         landed += f" — its drama turned on {prior_axis}"
@@ -1853,7 +2020,60 @@ def _continuation_intro(prior_title: str, prior_outcome: str, prior_arc, proposa
         "old debt, or simply the next thing that pulls them in). You have FULL creative latitude "
         "on HOW they connect: time may pass or not; a reputation may matter, cut against them, or "
         "never come up. Do NOT default to a formula — no obligatory 'time has passed' or 'you made "
-        "a name on that one'. Let these two stories decide the bridge, then let the new case surface.")
+        "a name on that one'. Let these two stories decide the bridge, then let the new case surface."
+        + (f"\nTHE DOORWAY (engine truth — the map already places them): the new chapter opens at "
+           f"{door_place.split(':', 1)[-1].replace('_', ' ')}, after time has passed. Open THERE — "
+           f"do not restage the last scene, and give the character nothing they do not already carry. "
+           f"PRESENCE TRUTH holds at the opening too: stage ONLY people the world places there — an "
+           f"undeclared clerk or passer-by narrated as present will be honestly DENIED a turn later "
+           f"and read as a ghost. A hook may arrive by note, sound, or word carried — never by an "
+           f"invented person standing in the room."
+           if door_place else "")
+        + (f"\nA CONSEQUENCE CALLBACK (#96 — the world shows the player their effect; surface "
+           f"this ONE diegetically as part of the bridge — a front page on the rack, a changed "
+           f"greeting, a name traveling — never a system note): {callback}"
+           if callback else ""))
+
+
+def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
+                     turn: int) -> str | None:
+    """THE EPISODE DOORWAY (#88 S4, Cx 375 blocking requirement / 380 fix): the bridge to the
+    next chapter is ENGINE TRUTH — never prompt-only prose. (i) TIME: jump to the next calendar
+    phase (the classic "by morning…" seam); (ii) PLACE: the protagonist returns to the prior
+    episode's OPENING place (their base), never left standing at the terminal scene unless that
+    WAS the base; (iii) ITEMS: adds NOTHING (possessions carry as-is). Each leg fail-open +
+    loud. Returns the doorway place (or None)."""
+    from construct.arc.executor import turn_time
+    door_place = None
+    try:
+        from construct.clock import commit_elapsed, read_clock
+        clk = read_clock(world)
+        cal = clk.calendar
+        phases = [n for _f, n in cal.phases]
+        cur = clk.phase
+        nxt = phases[(phases.index(cur) + 1) % len(phases)] if cur in phases else None
+        jump = 0
+        if nxt:
+            jump = cal.next_phase_start(clk.minutes, nxt) - clk.minutes
+        if jump <= 0:
+            jump = int(cal.hours_per_day * 60 // 3)  # a solid rest regardless
+        commit_elapsed(world, jump)
+        logger.info("episode doorway: time +%s min (into %s)", jump, nxt or "the next stretch")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("episode doorway time-jump skipped: %s", exc)
+    try:
+        if protagonist:
+            open_chain = world.porcelain.locate(protagonist, as_of=epoch + 0.5)
+            door_place = open_chain[0] if open_chain else None
+            now_chain = world.porcelain.locate(protagonist)
+            if door_place and (now_chain[0] if now_chain else None) != door_place:
+                world.porcelain.ingest_structured([{
+                    "entity": protagonist, "attribute": "in", "value": door_place,
+                    "value_type": "entity", "valid_from": turn_time(turn)}])
+                logger.info("episode doorway: %s returns to %s", protagonist, door_place)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("episode doorway relocation skipped: %s", exc)
+    return door_place
 
 
 def continue_episode(name: str, provider: Provider, player_id: str | None = None,
@@ -1884,110 +2104,302 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
     # behavior and re-expose future source rows. Legacy worlds keep the Cx-127 raise.
     _opening = meta.get("opening_as_of")
     epoch = float(_opening) if _opening is not None else compute_entry_epoch(world)
-    set_entry_epoch(epoch)
-    turn = next_turn_number(world)
-    prior_main_id = arc_io.main_arc_from_frame(reads)
-    prior_arcs = arc_io.portfolio_from_frame(reads)
-    prior_main = next((a for a in prior_arcs if a.arc_id == prior_main_id),
-                      prior_arcs[0] if prior_arcs else None)
+    # SCOPED write context (Cx 383): the raised continuation epoch must never outlive this
+    # call — Session.open restores the per-slot epoch for actual play; leaking it poisons
+    # turn_time() for whoever runs next in the process (test order proved it).
+    _epoch_tok = set_entry_epoch(epoch)
+    try:
+        turn = next_turn_number(world)
+        prior_main_id = arc_io.main_arc_from_frame(reads)
+        prior_arcs = arc_io.portfolio_from_frame(reads)
+        prior_main = next((a for a in prior_arcs if a.arc_id == prior_main_id),
+                          prior_arcs[0] if prior_arcs else None)
 
-    _emit(on_stage, "Dreaming up the next chapter")
-    from construct.turnloop import terminal_outcome
-    prior_title = meta.get("title", "")
-    prior_outcome = terminal_outcome(reads)   # 'won'/'lost' of the just-ended episode
-    # The ENTIRE previous adventure (the narrative-memory ledger — compacted, regenerable from the
-    # lossless arch:turn_* archive) is the lead-in for authoring the next fiction (founder).
-    history = (reads.state("session:narrative_memory", "text", frame=SESSION) or "")[:4500]
-    fuel = _episode_fuel(reads, prior_main, prior_title, prior_outcome, history) if prior_main else \
-        "The previous chapter has closed; a new thread stirs in its wake."
-    known_ids = sorted(e for e in _canon_entity_ids(world)
-                       if e.startswith(("person:", "fact:", "obj:", "place:")))
-    # The continuation prompt poses the founder's two questions so the next case is callback-aware,
-    # not a cold reset: (1) what does the WORLD look like now? (2) which CALLBACKS make the most
-    # interesting fiction? Grow the next case from the richest one.
-    trigger = (
-        "the previous chapter has closed and the SAME protagonist continues. Before you author, "
-        "weigh two things. (1) WHAT DOES THE WORLD LOOK LIKE AS WE CONTINUE — what the last case "
-        "changed, who is still around, what the protagonist is now KNOWN for, what wounds or debts "
-        "or doors it opened. (2) WHICH CALLBACKS MAKE FOR THE MOST INTERESTING FICTION DIRECTION — "
-        "a recurring figure returning, a consequence coming home to roost, a rival or ally back in "
-        "play, an unfinished bond, the reputation that now both opens and closes doors. Grow the "
-        "next case from the RICHEST callback — continuity that pays off, never a cold reset.")
-    prior_protagonist = prior_main.protagonist if prior_main else None
-    proposal = cohorts.generate_arc(
-        provider, trigger=trigger,
-        fuel=fuel, available_ids=known_ids, style=meta.get("style", ""),
-        present_characters=", ".join(_known_people(world)) or "(carry the established cast)",
-        protagonist=prior_protagonist or "")
-    # HARD INVARIANT (Cx 138): the next chapter is the SAME protagonist's — the generator's prompt
-    # is pinned, but enforce it deterministically too (generate_arc descends from the side-arc
-    # author, which otherwise picks an NPC). Override the proposal's protagonist before building so
-    # a stray pick can never silently switch the player character out from under them.
-    if prior_protagonist:
-        proposal["protagonist"] = prior_protagonist
-    new_id = f"arc:ep_{turn}"
-    new_arc = _build_arc(proposal, arc_id=new_id)
-    if prior_protagonist and new_arc.protagonist != prior_protagonist:
-        raise RuntimeError(
-            f"continuation protagonist drift: {new_arc.protagonist!r} != {prior_protagonist!r}")
+        _emit(on_stage, "Dreaming up the next chapter")
+        from construct.turnloop import terminal_outcome
+        prior_title = meta.get("title", "")
+        prior_outcome = terminal_outcome(reads)   # 'won'/'lost' of the just-ended episode
+        # #95 PERMANENCE (Cx 422): the story ended at the protagonist's death — there is
+        # no next chapter, for anyone. Refused BEFORE any generator or prompt work.
+        if prior_outcome == "died":
+            world.close()
+            raise RuntimeError(
+                "this story ended at the protagonist's death — the world's story "
+                "rests; there is no next chapter")
+        # The ENTIRE previous adventure (the narrative-memory ledger — compacted, regenerable from the
+        # lossless arch:turn_* archive) is the lead-in for authoring the next fiction (founder).
+        history = (reads.state("session:narrative_memory", "text", frame=SESSION) or "")[:4500]
+        fuel = _episode_fuel(reads, prior_main, prior_title, prior_outcome, history) if prior_main else \
+            "The previous chapter has closed; a new thread stirs in its wake."
+        known_ids = sorted(e for e in _canon_entity_ids(world)
+                           if e.startswith(("person:", "fact:", "obj:", "place:")))
+        # The continuation prompt poses the founder's two questions so the next case is callback-aware,
+        # not a cold reset: (1) what does the WORLD look like now? (2) which CALLBACKS make the most
+        # interesting fiction? Grow the next case from the richest one.
+        # ---- #96 S3: SETTLED HISTORY (Cx 414 constraint 3) --------------------------------
+        # The closed chapter's ANSWERED questions become durable CLOSED HISTORY — callback
+        # material, never a mystery to reopen. Recorded as a session literal (the notebook
+        # and future opens read it) and fed to the generator with the explicit prohibition.
+        _settled_lines: list[str] = []
+        try:
+            if prior_main is not None:
+                for _atom in (getattr(prior_main.shape, "premise", None),
+                              getattr(prior_main.shape, "world_condition", None)):
+                    _se, _sa = getattr(_atom, "entity", None), getattr(_atom, "attribute", None)
+                    if _se and _sa:
+                        _settled_lines.append(
+                            f"{_se} · {_sa} · {getattr(_atom, 'value', '')} — ANSWERED")
+            for _row in world.buffer.visible(frame=SESSION):
+                if (str(_row.entity).startswith("card:")
+                        and str(_row.attribute) == "weave_state"):
+                    _settled_lines.append(f"{_row.entity}: {_row.value} — closed")
+            _settled_lines = _settled_lines[:12]
+            world.porcelain.ingest_structured(
+                [{"entity": f"settled:episode_{turn}", "attribute": "record",
+                  "value": json.dumps({"title": prior_title,
+                                       "outcome": prior_outcome or "",
+                                       "settled": _settled_lines})[:4000],
+                  "value_type": "literal", "valid_from": turn_time(turn)}],
+                frame=SESSION)
+        except Exception:  # noqa: BLE001 — settled history is enrichment, never a gate
+            _settled_lines = []
+        # ---- #96 S4: PERSONAL THREADS (Cx 414 constraint 4) -------------------------------
+        # Promises made, bonds formed, debts incurred — first-class continuation fuel, not
+        # lossy prose memory. One cheap structured extraction over the ledger; stored as a
+        # session literal; named to the generator as threads to HONOR or consciously pay off.
+        _personal: list[dict] = []
+        try:
+            if history.strip():
+                _pt = cohorts.extract_personal_threads(provider, history)
+                _personal = [t for t in (_pt.get("threads") or [])
+                             if isinstance(t, dict) and (t.get("thread") or "").strip()][:6]
+                if _personal:
+                    world.porcelain.ingest_structured(
+                        [{"entity": "session:personal_threads", "attribute": "record",
+                          "value": json.dumps(_personal)[:3000], "value_type": "literal",
+                          "valid_from": turn_time(turn)}], frame=SESSION)
+        except Exception:  # noqa: BLE001 — threads are enrichment, never a gate
+            _personal = []
+        trigger = (
+            "the previous chapter has closed and the SAME protagonist continues. Before you author, "
+            "weigh two things. (1) WHAT DOES THE WORLD LOOK LIKE AS WE CONTINUE — what the last case "
+            "changed, who is still around, what the protagonist is now KNOWN for, what wounds or debts "
+            "or doors it opened. (2) WHICH CALLBACKS MAKE FOR THE MOST INTERESTING FICTION DIRECTION — "
+            "a recurring figure returning, a consequence coming home to roost, a rival or ally back in "
+            "play, an unfinished bond, the reputation that now both opens and closes doors. Grow the "
+            "next case from the RICHEST callback — continuity that pays off, never a cold reset."
+            + (("\nCLOSED HISTORY (the last chapter's ANSWERED questions — history now, usable "
+                "as callbacks, NEVER re-opened as mysteries; the crew remembers its own "
+                "resolutions):\n" + "\n".join(f"- {s}" for s in _settled_lines))
+               if _settled_lines else "")
+            + (("\nPERSONAL THREADS TO HONOR (the player's own commitments — carry each "
+                "forward visibly or consciously pay it off; never drop one as optional "
+                "flavor):\n" + "\n".join(
+                    f"- {t.get('thread')} [{t.get('status', 'open')}]" for t in _personal))
+               if _personal else "")
+            + "\nGive the new chapter its OWN `title` — never the prior chapter's.")
+        prior_protagonist = prior_main.protagonist if prior_main else None
+        proposal = cohorts.generate_arc(
+            provider, trigger=trigger,
+            fuel=fuel, available_ids=known_ids, style=meta.get("style", ""),
+            present_characters=", ".join(_known_people(world)) or "(carry the established cast)",
+            protagonist=prior_protagonist or "")
+        # HARD INVARIANT (Cx 138): the next chapter is the SAME protagonist's — the generator's prompt
+        # is pinned, but enforce it deterministically too (generate_arc descends from the side-arc
+        # author, which otherwise picks an NPC). Override the proposal's protagonist before building so
+        # a stray pick can never silently switch the player character out from under them.
+        if prior_protagonist:
+            proposal["protagonist"] = prior_protagonist
+        new_id = f"arc:ep_{turn}"
+        new_arc = _build_arc(proposal, arc_id=new_id)
+        if prior_protagonist and new_arc.protagonist != prior_protagonist:
+            raise RuntimeError(
+                f"continuation protagonist drift: {new_arc.protagonist!r} != {prior_protagonist!r}")
 
-    _emit(on_stage, "Setting the new threads in motion")
-    world.porcelain.ingest_structured(
-        arc_io.arc_to_items(new_arc, frame=PLOT) + arc_io.index_items(new_arc, frame=PLOT),
-        frame=PLOT)
-    # The new arc becomes MAIN; the concluded arc stays in the portfolio as past (its terminal
-    # receipt is now BEHIND the episode boundary, so it no longer ends the scenario).
-    all_ids = [a.arc_id for a in prior_arcs] + [new_id]
-    # RETRACT the sealed portfolio rows, THEN append the replacement (Cx 167). The portfolio
-    # rows are classified CONSTITUTIVE, and a constitutive fold does NOT recency-supersede —
-    # PB serves the EARLIEST and marks the key conflicted, so neither a timeless nor a
-    # valid_from write would override it; the reopened episode would silently run the OLD
-    # main arc (its stale session:reckoning_ready then trips turn-1 expiry). Append-only
-    # retraction of the visible rows clears the conflict so the new manifest reads clean.
-    for _row in world.buffer.visible(frame=PLOT):
-        if _row.entity == "arc:portfolio" and _row.attribute in ("arc_ids", "main_arc"):
-            world.porcelain.retract(_row.id, "continuation: superseding the portfolio manifest")
-    world.porcelain.ingest_structured(
-        arc_io.portfolio_items(all_ids, main_arc_id=new_id, frame=PLOT,
-                               valid_from=turn_time(turn)), frame=PLOT)
-    # The EPISODE BOUNDARY: terminal_outcome reads win/loss receipts only SINCE this marker, so
-    # the prior episode's ending no longer freezes the new one (PB is append-only).
-    world.porcelain.ingest_structured(
-        [{"entity": f"event:episode_start_{turn}", "attribute": "kind",
-          "value": "episode_start", "valid_from": turn_time(turn)}], frame=SESSION)
-    # DURABLE PER-PLAYER episode epoch (Cx 138 #2): persist the raised epoch into THIS slot's
-    # session frame so the reopened Session stamps episode-N+1 turns ABOVE the boundary (scenario
-    # meta is shared + stale; the slot is per-player). Session prefers this over meta["entry_epoch"].
-    # Recompute the cold-open presentation scope from the NEW arc (Cx 189 #2): EP2 must NOT inherit
-    # EP1's `arc_scope`. The stale scope carried the old episode's cast (and any polluted aliases)
-    # into the new chapter's opening, making EP2 read as a warped replay instead of a fresh case.
-    from construct.arc.executor import arc_entities as _arc_entities
-    _reads2 = PorcelainWorldReads(world)
-    _ep2_scope = sorted({e for e in _arc_entities(new_arc) if _reads2.has_entity(e)})
-    # PERSIST epoch AND the new scope per-slot in the session frame (Cx 191): the live reopen via
-    # Session.open reloads the SHARED, stale scenario meta — so the returned meta isn't enough.
-    # Session prefers these slot rows over meta (mirrors the entry_epoch fix). Scope is a JSON-blob
-    # literal so the classifier never mistypes it.
-    _epi_rows = [{"entity": "session:episode", "attribute": "entry_epoch", "value": epoch}]
-    if _ep2_scope:
-        _epi_rows.append({"entity": "session:episode", "attribute": "arc_scope",
-                          "value": json.dumps(_ep2_scope), "value_type": "literal"})
-    world.porcelain.ingest_structured(_epi_rows, frame=SESSION)
-    world.close()
+        _emit(on_stage, "Setting the new threads in motion")
+        world.porcelain.ingest_structured(
+            arc_io.arc_to_items(new_arc, frame=PLOT) + arc_io.index_items(new_arc, frame=PLOT),
+            frame=PLOT)
+        # The new arc becomes MAIN; the concluded arc stays in the portfolio as past (its terminal
+        # receipt is now BEHIND the episode boundary, so it no longer ends the scenario).
+        all_ids = [a.arc_id for a in prior_arcs] + [new_id]
+        # RETRACT the sealed portfolio rows, THEN append the replacement (Cx 167). The portfolio
+        # rows are classified CONSTITUTIVE, and a constitutive fold does NOT recency-supersede —
+        # PB serves the EARLIEST and marks the key conflicted, so neither a timeless nor a
+        # valid_from write would override it; the reopened episode would silently run the OLD
+        # main arc (its stale session:reckoning_ready then trips turn-1 expiry). Append-only
+        # retraction of the visible rows clears the conflict so the new manifest reads clean.
+        for _row in world.buffer.visible(frame=PLOT):
+            if _row.entity == "arc:portfolio" and _row.attribute in ("arc_ids", "main_arc"):
+                world.porcelain.retract(_row.id, "continuation: superseding the portfolio manifest")
+        world.porcelain.ingest_structured(
+            arc_io.portfolio_items(all_ids, main_arc_id=new_id, frame=PLOT,
+                                   valid_from=turn_time(turn)), frame=PLOT)
+        # The EPISODE BOUNDARY: terminal_outcome reads win/loss receipts only SINCE this marker, so
+        # the prior episode's ending no longer freezes the new one (PB is append-only).
+        world.porcelain.ingest_structured(
+            [{"entity": f"event:episode_start_{turn}", "attribute": "kind",
+              "value": "episode_start", "valid_from": turn_time(turn)}], frame=SESSION)
+        # THE DOORWAY'S OPENING EPOCH (Cx 382 blocker): `epoch` above is the WRITE origin — for a
+        # played NON-horizon slot compute_entry_epoch RAISES it above prior plays (correct for
+        # writes, wrong for looking up where the episode OPENED: locate at raised+0.5 sees the
+        # terminal scene). Prefer the slot's durable episode epoch, then scenario meta, then the
+        # write origin as a last resort. Captured HERE — BEFORE the _epi_rows persist below
+        # overwrites the slot row with the new episode's raised epoch (reading after would read
+        # back our own write and re-poison the lookup).
+        _open_epoch = None
+        try:
+            _sv = reads.state("session:episode", "entry_epoch", frame=SESSION)
+            _open_epoch = float(_sv) if _sv is not None else None
+        except Exception:  # noqa: BLE001
+            _open_epoch = None
+        if _open_epoch is None:
+            _me = meta.get("entry_epoch")
+            _open_epoch = float(_me) if _me is not None else epoch
+        # THE EPISODE DOORWAY (#88 S4, Cx 375 blocking requirement): the bridge to the next chapter
+        # is ENGINE TRUTH written before the checkpoint — never prompt-only prose. (i) TIME: jump to
+        # the next calendar phase (the classic "by morning…" seam) so the new chapter never opens in
+        # the same minute; (ii) PLACE: the protagonist returns to the prior episode's OPENING place
+        # (their base — bureau/gatehouse/home), never left standing at the terminal scene unless that
+        # WAS the base; (iii) ITEMS: the doorway adds NOTHING (possessions carry as-is; intro prose
+        # may not mint). Fail-open per leg — a miss leaves that dimension unchanged, loudly.
+        _door_place = _episode_doorway(world, prior_protagonist, _open_epoch, turn)
+        # HOOK-CAST STAGING (#90, Cx 387): a person the new chapter's hook puts ON STAGE must
+        # exist as canon presence BEFORE the opening renders — prose-only staging made the live
+        # ch2 hook witness vanish a turn later ("no one is in the room"). Ordinary kind/name/
+        # role/in rows at the doorway place; at most two; fail-open per entry.
+        _hook_ids: list[str] = []
+        try:
+            _stage_place = _door_place
+            if _stage_place is None and prior_protagonist:
+                _ploc = world.porcelain.locate(prior_protagonist)
+                _stage_place = _ploc[0] if _ploc else None
+            _hc_rows: list[dict] = []
+            for _hc in (proposal.get("hook_cast") or [])[:2]:
+                _hid = str((_hc or {}).get("id") or "").strip()
+                if not _hid.startswith("person:") or not _stage_place:
+                    continue
+                if not PorcelainWorldReads(world).has_entity(_hid):
+                    _hc_rows.append({"entity": _hid, "attribute": "kind", "value": "person",
+                                     "timeless": True})
+                    if _hc.get("name"):
+                        _hc_rows.append({"entity": _hid, "attribute": "name",
+                                         "value": str(_hc["name"])[:60]})
+                    if _hc.get("role"):
+                        _hc_rows.append({"entity": _hid, "attribute": "role",
+                                         "value": str(_hc["role"])[:120]})
+                _hc_rows.append({"entity": _hid, "attribute": "in", "value": _stage_place,
+                                 "value_type": "entity", "valid_from": turn_time(turn)})
+                _hook_ids.append(_hid)
+            if _hc_rows:
+                world.porcelain.ingest_structured(_hc_rows)
+                logger.info("staged %d hook-cast row(s) (%s) at %s",
+                            len(_hc_rows), _hook_ids, _stage_place)
+        except Exception:  # staging must never sink the continuation
+            logger.exception("hook-cast staging failed (continuing without)")
+            _hook_ids = []
+        # DURABLE PER-PLAYER episode epoch (Cx 138 #2): persist the raised epoch into THIS slot's
+        # session frame so the reopened Session stamps episode-N+1 turns ABOVE the boundary (scenario
+        # meta is shared + stale; the slot is per-player). Session prefers this over meta["entry_epoch"].
+        # Recompute the cold-open presentation scope from the NEW arc (Cx 189 #2): EP2 must NOT inherit
+        # EP1's `arc_scope`. The stale scope carried the old episode's cast (and any polluted aliases)
+        # into the new chapter's opening, making EP2 read as a warped replay instead of a fresh case.
+        # The staged hook cast joins the scope (#90) — presence/npc candidates enumerate FROM scope,
+        # so an unscoped hook witness would be invisible even with honest canon rows.
+        from construct.arc.executor import arc_entities as _arc_entities
+        _reads2 = PorcelainWorldReads(world)
+        _ep2_scope = sorted({e for e in _arc_entities(new_arc) if _reads2.has_entity(e)}
+                            | set(_hook_ids))
+        # PERSIST epoch AND the new scope per-slot in the session frame (Cx 191): the live reopen via
+        # Session.open reloads the SHARED, stale scenario meta — so the returned meta isn't enough.
+        # Session prefers these slot rows over meta (mirrors the entry_epoch fix). Scope is a JSON-blob
+        # literal so the classifier never mistypes it.
+        _epi_rows = [{"entity": "session:episode", "attribute": "entry_epoch", "value": epoch}]
+        if _ep2_scope:
+            _epi_rows.append({"entity": "session:episode", "attribute": "arc_scope",
+                              "value": json.dumps(_ep2_scope), "value_type": "literal"})
+        world.porcelain.ingest_structured(_epi_rows, frame=SESSION)
+        # THE SHAPE RECEIPT is the continuation's truth (founder ruling): read the latest terminal
+        # event's grade/shape/basis rows (row-level — the receipt is session bookkeeping, not a fold).
+        _prior_shape: dict = {}
+        try:
+            _rc_rows = [r for r in world.buffer.visible(frame=SESSION)
+                        if str(r.entity).startswith("event:arc_outcome_")
+                        and r.attribute in ("grade", "outcome_shape", "basis")]
+            # group by the LATEST receipt ENTITY first (Cx 380: latest-row-per-attr could mix a
+            # stale prior grade with a newer receipt that lacks one), then read that entity's attrs.
+            _latest = max((str(r.entity) for r in _rc_rows),
+                          key=lambda e: int(e.rsplit("_", 1)[-1]) if e.rsplit("_", 1)[-1].isdigit()
+                          else -1, default=None)
+            for _r in _rc_rows:
+                if str(_r.entity) == _latest:
+                    _prior_shape[_r.attribute] = _r.value
+        except Exception:  # noqa: BLE001
+            _prior_shape = {}
+        # #96 S2 SURFACING (Cx 414): ONE unsurfaced consequence callback rides the bridge —
+        # the founder's newspaper seam (the world showing the player their effect). The
+        # presentation receipt keeps a strong callback deliberate, never accidental spam.
+        _callback = None
+        try:
+            _cons = [e for _k in ("word_spreads", "reputation_changes", "debt_called",
+                                  "door_closed", "ally_returns")
+                     for e in reads.events(kind=_k)]
+            _surfaced = {str(r.entity) for r in world.buffer.visible(frame=SESSION)
+                         if str(r.attribute) == "surfaced_turn"}
+            _fresh_cons = [e for e in _cons if e.event_id not in _surfaced]
+            if _fresh_cons:
+                _ev = max(_fresh_cons, key=lambda e: (getattr(e, "at", 0) or 0))
+                # row-level read: event-entity attrs never fold via state() (the shape-
+                # receipt precedent) — scan visible rows for the detail directly.
+                _dtl = next((str(r.value) for r in world.buffer.visible()
+                             if str(r.entity) == _ev.event_id
+                             and str(r.attribute) == "detail"), None)
+                _callback = (_ev.kind.replace("_", " ")
+                             + (f" — {_dtl}" if _dtl else ""))
+                world.porcelain.ingest_structured(
+                    [{"entity": _ev.event_id, "attribute": "surfaced_turn",
+                      "value": turn, "valid_from": turn_time(turn)}], frame=SESSION)
+        except Exception:  # noqa: BLE001 — the callback is enrichment, never a gate
+            _callback = None
+        world.close()
 
-    _emit(on_stage, "Opening the next chapter")
-    checkpoint_episode_start(name, player_id)  # this episode's opening = the rollback point
-    meta["main_arc"] = new_id
-    meta["arc_ids"] = all_ids
-    meta["entry_epoch"] = epoch
-    if _ep2_scope:                              # scope the new chapter to its OWN arc (Cx 189 #2)
-        meta["arc_scope"] = _ep2_scope
-    # The cold-open continuation note (founder, 2026-06-26): bridge WHERE THE LAST STORY LANDED to
-    # WHERE THIS ONE IS HEADED, creatively — NOT the old time-pass + "you made a name" formula (it
-    # was 4-for-4 identical). Consumed by the opening briefing; never a stored row.
-    meta["continuation_intro"] = _continuation_intro(
-        prior_title, prior_outcome, prior_main, proposal, new_arc)
-    return meta
+        _emit(on_stage, "Opening the next chapter")
+        checkpoint_episode_start(name, player_id)  # this episode's opening = the rollback point
+        meta["main_arc"] = new_id
+        meta["arc_ids"] = all_ids
+        meta["entry_epoch"] = epoch
+        # #96 S3 (Cx 414): the new chapter gets its OWN title — from the proposal, with a
+        # deterministic differ if the generator echoed the old one.
+        _new_title = (proposal.get("title") or "").strip()
+        if _new_title and _new_title.lower() != (prior_title or "").strip().lower():
+            meta["title"] = _new_title
+        elif prior_title:
+            meta["title"] = f"{prior_title} — Chapter {len(all_ids)}"
+        # #95 (Cx 422): death_policy is PER-CHAPTER — re-derive against the new chapter's
+        # premise/hook (a shielded drawing-room story may go to war in ch3). Fail-open:
+        # a derivation hiccup keeps the prior chapter's policy.
+        try:
+            _dp = cohorts.classify_death_policy(
+                provider, meta.get("genre", ""),
+                ", ".join(meta.get("game_type") or []),
+                (proposal.get("hook") or proposal.get("theme") or meta.get("premise", "")))
+            meta["death_policy"] = (_dp.get("policy") or
+                                    meta.get("death_policy", "shielded")).strip()
+            meta["death_policy_reason"] = (_dp.get("reason") or "").strip()
+        except Exception:  # noqa: BLE001
+            logger.exception("continuation death-policy re-derivation skipped")
+        if _ep2_scope:                              # scope the new chapter to its OWN arc (Cx 189 #2)
+            meta["arc_scope"] = _ep2_scope
+        # The cold-open continuation note (founder, 2026-06-26): bridge WHERE THE LAST STORY LANDED to
+        # WHERE THIS ONE IS HEADED, creatively — NOT the old time-pass + "you made a name" formula (it
+        # was 4-for-4 identical). Consumed by the opening briefing; never a stored row.
+        meta["continuation_intro"] = _continuation_intro(
+            prior_title, prior_outcome, prior_main, proposal, new_arc,
+            prior_shape=_prior_shape, door_place=_door_place, callback=_callback)
+        return meta
+    finally:
+        from construct.arc import executor as _arc_executor
+        _arc_executor._ENTRY_EPOCH.reset(_epoch_tok)
 
 
 def next_turn_number(world: Any) -> int:

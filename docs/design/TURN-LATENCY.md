@@ -162,6 +162,34 @@ cache/Lever-1 (G6 deferral) remain the safer immediate path.**
 ## The four levers
 
 ### Lever 1 — DEFER post-render work behind a SESSION-LEVEL FINALIZATION BARRIER (#1 win, ~24s/turn)
+**STATUS: SHIPPED 2026-06-28 (Cx 265/266 review).** Implementation notes (how the three Cx 069/266
+requirements landed):
+- **Deferred surface:** `run_turn` returns `TurnResult(prose, trace, settle=<closure>)`; the closure
+  holds ONLY the LM-bearing finalization — `post_extract` → gate/promote/mirror, `compact_memory`,
+  the post-render `time_estimate`, the deferred `concealment_audit` field. `run_turn` no longer runs
+  it. (`construct/turnloop.py`, search "TURN-LATENCY dumbfire".)
+- **Turn-integrity record (req: durability before sendback):** the RECEIPT
+  (`event:turn_N.kind/pacing/player_boundary`) + the ARCHIVE (`arch:turn_N.player_said/prose`) are
+  written SYNCHRONOUSLY in `run_turn`, BEFORE the reply ships, with **`classify="rules"`**
+  (deterministic, `model=False` — NO model call lands on the pre-send path; Cx 268). This is a
+  **turn-integrity record, NOT a drainable pending-finalization replayer**: a crash in the settle
+  window can never lose a delivered turn or collide its number (`event:turn_N.kind` is durable, and
+  `arch:turn_N` preserves the prose), but the deferred LM finalization (fact promotion, transcript
+  window, compaction, post-render time advance) for that one turn IS lost — an accepted fail-open
+  future-feeding loss (Cx 268 non-blocking), not a replayable subsystem. The same `arch`/`event`
+  rows are written on the adjudication-denial early return (it also advances the turn number).
+- **Barrier (req: named gate, not Session.turn()-only):** `Session.flush_settle()` (idempotent,
+  exception-safe). Called: (1) at the very start of `Session.turn()` BEFORE `next_turn_number`/
+  terminal check (the numbering race); (2) at the TOP of `TransportCore.handle()` whenever a session
+  is cached — covers every command that reads/replaces/drops it (`/status`,`/note`,`/restart`,
+  `/wipe`,`/play`, continue) AND the outbox-recovery-then-command path; (3) `Session.close()`;
+  (4) post-send in each adapter (the latency win — overlaps the read).
+- **Owner thread (req: same-thread, PB is check_same_thread=True):** Telegram/loopback/CLI are
+  single-threaded (poll/REPL thread owns the connection). Discord now gives each player a dedicated
+  single-thread `ThreadPoolExecutor`; open/turn/flush/close all run on it (`_on_owner`), so settle
+  runs on the SAME owner thread as the turn that produced it.
+
+#### Original design (retained for context)
 After `narrate`, send the prose to the user IMMEDIATELY, then run the FINALIZER asynchronously
 (post_extract → gate → promote → mirror → `event:turn_N` receipt → transcript/archive → compact →
 time advance) while the user reads and types.

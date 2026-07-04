@@ -28,8 +28,10 @@ The macro target: *whatever makes high-quality, engaging live fiction WITHIN thi
 a different answer per genre. For Deduction, drawn from how classic detective fiction works:
 
 1. **The opening spoon-feeds the suspects.** The detective is informed → arrives at the crime
-   scene → the cast IS there to interview. **The first witness introduces the cast of
-   characters.**
+   scene → the cast IS there to interview. **The one who found/reported the body anchors the
+   opening with their firsthand account** — but each present figure speaks from their own role
+   (the render surfaces roles + a principle; it does NOT script a witness to introduce or marshal
+   the others — see §3b).
 2. **Context-driven initial presence:** some are present because they LIVE there; some because
    they REPORTED the incident.
 3. **Discovery-driven expansion:** anyone outside the initial set is NAMED during interviews
@@ -64,10 +66,19 @@ derived "suspect roster" stored as truth (Cx 055). Presence each turn stays the 
 - The cold open foregrounds EXACTLY the `at_scene` cast (the establishing/anchors read is
   already location-aware once §3a seeds locations). The narration must not present an unplaced
   suspect as in the room — engine-present set ↔ narrated-present set in lockstep.
-- **The first witness** (an authored `at_scene` role, e.g. the one who found the body) is the
-  fiction-facing affordance that NAMES the present cast and gestures at who else matters — a
-  natural opening monologue. It resolves to the ordinary establishing facts (the `at_scene`
-  suspects' presence + their hooks); no special structure.
+- **The first witness** (an authored `at_scene` role, e.g. the one who found the body) is INFO the
+  render surfaces (this person found/reported it), not a scripted narrator lead. It resolves to the
+  ordinary establishing facts (the `at_scene` cast's presence + their hooks); no special structure.
+- **UNVEIL INTELLIGENTLY, DON'T SCRIPT (founder 2026-07-01):** an earlier version made the first
+  witness "speak first and introduce the others by name" — which had a witness marshalling the room
+  and voicing the investigator's agenda (role inversion; the founder's "weird, right?"). The fix is
+  NOT another prescriptive lead-assignment rule; it is to hand the agent each present person's own
+  ROLE + standing (surface_role, who found the body, the player's relationship) as clean situation,
+  plus ONE principle — *each speaks and acts only from their own role and standing; the investigative
+  authority naturally frames why everyone is here, a witness gives their own account; no one voices
+  another's agenda* — then trust the agent to open the scene sensibly. (Render: `_opening_narration`
+  PRESENT block.) General lesson: when a scripted narrative rule misfires, remove the script and
+  surface the situation, don't layer a corrective rule.
 
 ### 3c. Discovery → reachability (off-scene suspects) — THREE LAYERS (Cx 057 #1)
 A clue/hook may NAME an off-scene suspect (the existing cross-suspicion hook_text already does
@@ -159,8 +170,9 @@ entities (one suspect's tell attributed to another). So:
    with a naming-clue from an at_scene suspect. Culprit `at_scene`/`nearby`/named-reachable.
 4. **`check_solvability`** — add the physical-reachability gate (§3d): every required holder
    reachable via presence-tier + discovery chain; culprit not stranded.
-5. **Cold open / `session._establishing_anchors`** — foreground `at_scene` cast; brief the
-   first-witness intro; never narrate an unplaced suspect as present (lockstep).
+5. **Cold open / `session._establishing_anchors`** — foreground `at_scene` cast; surface each
+   present figure's own role + who found/reported the body (info, not a lead script — each speaks
+   from their own standing); never narrate an unplaced suspect as present (lockstep).
 6. **`turnloop.py`** — on surfacing a clue/hook that names an off-scene suspect, write the
    route-affordance (whereabouts into `knows:<protagonist>`) + brief "you may seek them"; the
    absent-suspect honest fallback in interview delivery.
@@ -168,8 +180,9 @@ entities (one suspect's tell attributed to another). So:
 ## 5. Acceptance (the castjuicy method)
 Hand-author a small whodunit with: 3-4 `at_scene` suspects (incl. the first witness), 2-3
 discoverable off-scene suspects (each named by an at_scene clue), culprit reachable. Drive it
-live: confirm (a) the opening presents the at_scene suspects and the first witness introduces
-the cast; (b) the player can interrogate them and clues land; (c) an interview NAMES an
+live: confirm (a) the opening presents the at_scene suspects, surfaces who found/reported the
+body, and each present figure speaks from their own role/standing (no witness marshalling the
+room or voicing another's agenda); (b) the player can interrogate them and clues land; (c) an interview NAMES an
 off-scene suspect, a route opens, the player travels and questions them; (d) coverage builds to
 a genuine (non-`quiet_failure`) conclusion with the culprit surfaced. Log + surface to founder.
 

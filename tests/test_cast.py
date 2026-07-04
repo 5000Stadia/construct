@@ -699,3 +699,66 @@ def test_validate_beat_delivery_requires_live_and_reachable_holder():
 def test_validate_beat_delivery_empty_targets_is_noop():
     from construct.cast import validate_beat_delivery
     assert validate_beat_delivery([], _cast()) == []
+
+
+def test_pronouns_parse_and_identity_plan():
+    # #87 cast identity: authored pronouns parse (invalid falls to unauthored) and become
+    # timeless canon rows for person members only.
+    from construct.cast import cast_from_proposal, cast_identity_plan
+    cast, _ = cast_from_proposal({"pillars": [], "cast": [
+        {"id": "person:maud", "pronouns": "she/her", "clues": []},
+        {"id": "person:reed", "pronouns": "He/Him", "clues": []},     # normalized
+        {"id": "person:bell", "pronouns": "attack helicopter", "clues": []},  # invalid → ""
+        {"id": "obj:token", "pronouns": "they/them", "clues": []},    # non-person → no row
+    ]})
+    assert [n.pronouns for n in cast] == ["she/her", "he/him", "", "they/them"]
+    plan = cast_identity_plan(cast)
+    assert plan == [
+        {"entity": "person:maud", "attribute": "pronouns", "value": "she/her", "timeless": True},
+        {"entity": "person:reed", "attribute": "pronouns", "value": "he/him", "timeless": True},
+    ]
+
+
+def test_disambiguate_cast_identities_splits_colliding_conceptions():
+    # #92 (Cx 404 A): a proposal reusing an existing canon person id for a CONTRADICTORY
+    # conception is disambiguated — fresh id, and every proposal-local reference follows.
+    from construct.cast import disambiguate_cast_identities
+    canon = {"person:maud_greaves":
+             "chief of the St. Bride Inquiry Bureau, commanding scarce men and cabs",
+             "person:clerk": "records clerk of the bureau"}
+    proposal = {"pillars": [], "cast": [
+        {"id": "person:maud_greaves", "shape_role": "witness",
+         "surface_role": "costermonger who found the body", "clues": [
+             {"clue_id": "clue:a", "pillar_id": "pillar:x",
+              "fact": {"entity": "person:maud_greaves", "attribute": "saw",
+                       "value": "the foreman"}}]},
+        {"id": "person:nell", "shape_role": "witness", "surface_role": "match girl",
+         "clues": [
+             {"clue_id": "clue:b", "pillar_id": "pillar:x",
+              # a COLLEAGUE's clue naming the coster conception must follow the remap
+              "fact": {"entity": "fact:alibi", "attribute": "vouched_by",
+                       "value": "person:maud_greaves"}}]},
+        # compatible reuse (token overlap "clerk") — the merge stands
+        {"id": "person:clerk", "shape_role": "witness",
+         "surface_role": "the bureau records clerk", "clues": []},
+    ]}
+    out, remaps = disambiguate_cast_identities(
+        proposal, lambda pid: canon.get(pid), set(canon))
+    assert remaps == {"person:maud_greaves": "person:maud_greaves_2"}
+    ids = [m["id"] for m in out["cast"]]
+    assert "person:maud_greaves_2" in ids and "person:maud_greaves" not in ids
+    assert out["cast"][0]["clues"][0]["fact"]["entity"] == "person:maud_greaves_2"
+    assert out["cast"][1]["clues"][0]["fact"]["value"] == "person:maud_greaves_2"
+    assert out["cast"][2]["id"] == "person:clerk"              # compatible — untouched
+    # the ORIGINAL proposal is not mutated (raw-vs-persisted separation)
+    assert proposal["cast"][0]["id"] == "person:maud_greaves"
+
+
+def test_disambiguate_cast_identities_no_ops_when_safe():
+    from construct.cast import disambiguate_cast_identities
+    proposal = {"pillars": [], "cast": [
+        {"id": "person:new_face", "shape_role": "witness", "surface_role": "a porter",
+         "clues": []},
+    ]}
+    out, remaps = disambiguate_cast_identities(proposal, lambda pid: None, set())
+    assert remaps == {} and out is proposal          # unknown canon person — reuse safe

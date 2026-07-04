@@ -22,6 +22,7 @@ import math
 import os
 import sys
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 from construct import Session
 from construct.game import list_scenarios, scenario_path
@@ -151,8 +152,25 @@ class _Pipe:
         self._merge_window = merge_window
         self._sessions: dict[int, Session] = {}
         self._mailboxes: dict[int, _Mailbox] = {}
+        # OWNER-THREAD model (TURN-LATENCY dumbfire, Cx 266 #3): PB opens its SQLite with
+        # check_same_thread=True, so a player's world must be touched from ONE thread only.
+        # Each player gets a dedicated single-thread executor; open/turn/flush/close all run
+        # on it, so the deferred settle runs on the SAME owner thread as the turn that made it.
+        self._executors: dict[int, ThreadPoolExecutor] = {}
 
     # -- sessions ---------------------------------------------------------
+
+    def _executor_for(self, user_id: int) -> ThreadPoolExecutor:
+        ex = self._executors.get(user_id)
+        if ex is None:
+            ex = self._executors[user_id] = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix=f"pb-{user_id}")
+        return ex
+
+    async def _on_owner(self, user_id: int, fn, *args):
+        """Run a PB-touching callable on this player's dedicated owner thread (await it)."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor_for(user_id), lambda: fn(*args))
 
     def _open(self, user_id: int, scenario: str, *, fresh: bool) -> Session:
         old = self._sessions.pop(user_id, None)
@@ -199,7 +217,7 @@ class _Pipe:
             text, kind, channel = coalesce_leading_turns(mb.buf)
             try:
                 if kind == "cmd":
-                    await channel.send(self.handle_command(user_id, text))
+                    await channel.send(await self.handle_command(user_id, text))
                 else:
                     await self._play_turn(user_id, channel, text)
             except Exception:  # one bad unit never kills the worker
@@ -208,28 +226,43 @@ class _Pipe:
     async def _play_turn(self, user_id: int, channel, text: str) -> None:
         placeholder = await channel.send(TURNING)
         try:
-            session = self.session_for(user_id)
+            session = await self._on_owner(user_id, self.session_for, user_id)
             async with _best_effort_typing(channel):    # typing 429 must not kill the turn
-                result = await asyncio.to_thread(session.turn, text)
+                result = await self._on_owner(user_id, session.turn, text)
             parts = chunk(result.prose)
             await placeholder.edit(content=parts[0])
             for extra in parts[1:]:          # long narration: never truncate
                 await asyncio.sleep(INTERCHUNK_DELAY_SEC)   # don't shotgun → 429
                 await channel.send(extra)
+            # POST-SEND (TURN-LATENCY dumbfire): the prose is delivered; run the deferred
+            # bookkeeping on the player's OWNER thread now so its PB writes overlap the
+            # player reading — same thread as the turn (PB is check_same_thread=True), and
+            # the per-player serial worker means no cross-turn interleave.
+            await self._on_owner(user_id, session.flush_settle)
         except Exception as exc:  # bot stays up
             logger.exception("turn failed in discord transport")
             await placeholder.edit(content=f"(the turn could not complete: {exc})")
 
-    def handle_command(self, user_id: int, body: str) -> str:
-        return _handle_command(self, user_id, body) or HELP
+    async def handle_command(self, user_id: int, body: str) -> str:
+        # `_handle_command` opens/reads the player's session (PB touches) → owner thread.
+        return await self._on_owner(user_id, _handle_command, self, user_id, body) or HELP
 
     def close_all(self) -> None:
         for mb in self._mailboxes.values():
             if mb.task is not None:
                 mb.task.cancel()
         self._mailboxes.clear()
-        for s in self._sessions.values():
-            s.close()
+        # Close each world on its OWNER thread (the only thread allowed to touch its
+        # connection), draining the final pending settle, then retire the executor.
+        for uid, s in list(self._sessions.items()):
+            ex = self._executors.get(uid)
+            try:
+                (ex.submit(s.close).result(timeout=30) if ex is not None else s.close())
+            except Exception:
+                logger.exception("session close failed for user %s", uid)
+        for ex in self._executors.values():
+            ex.shutdown(wait=False)
+        self._executors.clear()
         self._sessions.clear()
 
 

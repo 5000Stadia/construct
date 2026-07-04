@@ -59,6 +59,34 @@ def test_changed_description_makes_a_fresh_asset(worlds):
     assert len(prov.calls) == 2
 
 
+def test_accruing_objects_stay_cached_same_location(worlds):
+    # FOUNDER live bug: the image kept re-sending while the player hadn't left the location,
+    # because the room ACCRUED examined objects/clues each turn and that churn flipped the
+    # freshness hash. Object/clue churn at the SAME location (same committed description) must
+    # NOT re-render — only a new location or a major fixture (a body) does.
+    prov = StubProvider([{"prompt": "a gaslit study"}])
+    a = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=prov,
+                           contents="a worn ledger; a brass key")
+    assert a.status == "fresh" and len(prov.calls) == 1
+    # next turn, same room, more objects examined/furnished → still CACHED, no new render
+    b = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=prov,
+                           contents="a worn ledger; a brass key; a torn map; a cold teacup")
+    assert b.status == "cached"
+    assert len(prov.calls) == 1  # never re-rendered for object churn
+
+
+def test_a_body_appearing_refreshes(worlds):
+    # The one content change the design DOES want to refresh on: a corpse appears in the room.
+    prov = StubProvider([{"prompt": "a quiet study"}, {"prompt": "a study with a body"}])
+    a = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=prov,
+                           contents="a worn ledger")
+    b = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=prov,
+                           contents="a worn ledger; the body of the clerk slumped at the desk")
+    assert a.status == "fresh" and b.status == "fresh"
+    assert b.description_hash != a.description_hash
+    assert len(prov.calls) == 2
+
+
 def test_house_style_always_appended(worlds):
     rec = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=_prov())
     assert rec.prompt.strip().endswith(".")

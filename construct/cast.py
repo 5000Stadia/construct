@@ -84,13 +84,18 @@ class CastNode:
     #: The place entity this member is in (a `place:*` id). For 'at_scene' the host overrides
     #: this with the crime-scene place; for nearby/offscene it's their authored whereabouts.
     location: str = ""
-    #: Whether this member is THE FIRST WITNESS — the at_scene figure who introduces the cast
-    #: of characters in the opening (genre-faithful spoon-feed; §3b). At most one per cast.
+    #: Whether this member is THE FIRST WITNESS — the at_scene figure who found/reported the body;
+    #: their firsthand account anchors the opening (§3b). It does NOT make them narrate the scene or
+    #: speak for others — the render surfaces this as info, not a lead script. At most one per cast.
     first_witness: bool = False
     #: Whether this member is the CULPRIT (the solution subject). The explicit deterministic
     #: subject the staging gate proves reachable (Cx 057 #2) — without it the gate can't prove
     #: the genre promise that the actual culprit surfaces as involved. At most one per cast.
     is_culprit: bool = False
+    #: The member's pronouns ("he/him" / "she/her" / "they/them") — decided at authoring and
+    #: seeded as ordinary canon identity (`cast_identity_plan`) so render voice can never
+    #: oscillate a character's gender mid-story (#87, the Tin Ear drift). Empty = unauthored.
+    pronouns: str = ""
 
 
 #: The presence tiers a cast member can occupy in play (INVESTIGATION-SHAPE.md §3a).
@@ -224,10 +229,10 @@ def check_solvability(required_pillar_ids: list[str], cast: tuple[CastNode, ...]
         first_witnesses = [n for n in cast if n.first_witness]
         if len(first_witnesses) != 1:
             problems.append(f"opening promise: need exactly ONE first_witness, found "
-                            f"{len(first_witnesses)} (the witness who introduces the cast)")
+                            f"{len(first_witnesses)} (the one who found/reported the body)")
         elif first_witnesses[0].presence != "at_scene":
             problems.append(f"opening promise: first_witness {first_witnesses[0].node_id} is "
-                            f"not at_scene (they must be present to introduce the cast)")
+                            f"not at_scene (they must be present to give their firsthand account)")
     return problems
 
 
@@ -377,6 +382,70 @@ def build_pillars(pillar_specs: list[tuple[str, str, bool]],
     return tuple(pillars)
 
 
+#: Function words + role-noise that never distinguish an identity (the #92 conflict
+#: detector): after stripping these, no token overlap between an existing canon role and a
+#: proposed surface_role means two DIFFERENT conceptions sharing one id.
+_IDENTITY_STOP = {"the", "a", "an", "of", "who", "and", "to", "in", "for", "with", "at",
+                  "man", "woman", "person", "one", "their", "his", "her", "from", "by"}
+
+
+def _identity_tokens(text: str) -> set[str]:
+    import re as _re
+    return {t for t in _re.split(r"[^a-z0-9]+", str(text).lower())
+            if len(t) > 3 and t not in _IDENTITY_STOP}
+
+
+def disambiguate_cast_identities(proposal: dict, identity_of, existing_ids) -> tuple[dict, dict]:
+    """IDENTITY COHERENCE GATE (#92, Cx 404 fix-shape A): a cast proposal may reuse an
+    existing canon person id ONLY for the same established person. When the canon identity
+    text (role/title) and the proposed conception (surface_role/shape_role) share NO
+    meaningful tokens, the proposal has authored a DIFFERENT character onto an existing
+    body (the Maud-the-chief / Maud-the-costermonger collision) — disambiguate, never
+    merge: the cast conception gets a fresh `person:<slug>_N` id, and EVERY proposal-local
+    reference to the old id (holder ids, clue-fact entities, entity-valued clue values)
+    follows the remap, so a colleague's clue about the costermonger can never write onto
+    the chief. Runs on the RAW proposal (before `cast_from_proposal`), so the persisted
+    `meta["cast"]` carries the fresh id too. Returns (proposal', {old_id: fresh_id});
+    ({}, unchanged) when nothing collides. Deterministic; no model call."""
+    items = proposal.get("cast") or []
+    remaps: dict[str, str] = {}
+    for n in items:
+        nid = str((n or {}).get("id") or "")
+        if not nid.startswith("person:"):
+            continue
+        canon_text = identity_of(nid)
+        if not canon_text:
+            continue  # unknown / identity-less canon person — reuse is safe
+        proposed = f"{n.get('surface_role', '')} {n.get('shape_role', '')}"
+        ct, pt = _identity_tokens(canon_text), _identity_tokens(proposed)
+        if not ct or not pt or (ct & pt):
+            continue  # same conception, or undecidable — the merge stands
+        k = 2
+        fresh = f"{nid}_{k}"
+        while (fresh in (existing_ids or set()) or fresh in remaps.values()
+               or any(fresh == str((m or {}).get("id")) for m in items)):
+            k += 1
+            fresh = f"{nid}_{k}"
+        remaps[nid] = fresh
+    if not remaps:
+        return proposal, {}
+    import copy as _copy
+    out = _copy.deepcopy(proposal)
+
+    def _sub(v):
+        return remaps.get(v, v) if isinstance(v, str) else v
+
+    for n in out.get("cast") or []:
+        n["id"] = _sub(n.get("id"))
+        for c in n.get("clues") or []:
+            f = c.get("fact") or {}
+            if "entity" in f:
+                f["entity"] = _sub(f.get("entity"))
+            if "value" in f:
+                f["value"] = _sub(f.get("value"))
+    return out, remaps
+
+
 def cast_from_proposal(proposal: dict) -> tuple[tuple[CastNode, ...],
                                                 list[tuple[str, str, bool]]]:
     """Parse a generation-cohort proposal into typed objects (the bridge from the model
@@ -413,11 +482,15 @@ def cast_from_proposal(proposal: dict) -> tuple[tuple[CastNode, ...],
         _presence = n.get("presence", "nearby")
         if _presence not in PRESENCE_TIERS:
             _presence = "nearby"  # fail-soft to the reachable middle tier
+        _pronouns = (n.get("pronouns") or "").strip().lower()
+        if _pronouns not in ("he/him", "she/her", "they/them"):
+            _pronouns = ""  # fail-soft: unauthored, never an invented identity
         cast.append(CastNode(node_id=nid, shape_role=n.get("shape_role", "witness"),
                              surface_role=n.get("surface_role", ""), holds_clues=tuple(clues),
                              presence=_presence, location=(n.get("location") or "").strip(),
                              first_witness=bool(n.get("first_witness", False)),
-                             is_culprit=bool(n.get("is_culprit", False))))
+                             is_culprit=bool(n.get("is_culprit", False)),
+                             pronouns=_pronouns))
     return tuple(cast), pillar_specs
 
 
@@ -462,6 +535,16 @@ def cast_seed_plan(cast: tuple[CastNode, ...]) -> list[tuple[str, list[dict]]]:
         if items:
             plan.append((f"knows:{node.node_id}", items))
     return plan
+
+
+def cast_identity_plan(cast: tuple[CastNode, ...]) -> list[dict]:
+    """CAST IDENTITY (#87): each person member's authored pronouns as a timeless canon
+    identity fact — ordinary world truth the render reads, so a character's gender can
+    never oscillate between scenes (the Tin Ear drift). Members without authored pronouns
+    yield no row (render falls back to whatever the prose establishes)."""
+    return [{"entity": n.node_id, "attribute": "pronouns", "value": n.pronouns,
+             "timeless": True}
+            for n in cast if n.node_id.startswith("person:") and n.pronouns]
 
 
 def learn_clue_items(clue: Clue) -> list[dict]:

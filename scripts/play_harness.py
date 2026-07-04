@@ -24,7 +24,7 @@ from construct.provider import CodexProvider
 from construct.session import Session
 
 #: The scenario to play — argv[1] overrides (so the harness can drive a freshly-built world).
-SCENARIO = sys.argv[1] if len(sys.argv) > 1 else "anchor"
+SCENARIO = sys.argv[1] if len(sys.argv) > 1 else "bodycase"
 #: F = follow the plot thread; P = push the edges (off-plot, stress coherence);
 #: K = draw on the character's lived knowledge (tests the engine's "approximate what
 #: this character would know" improv); C = move to resolve/conclude. ~18 = "at length".
@@ -57,7 +57,37 @@ _STANCE = {
 _SCHEMA = {"type": "object", "properties": {"input": {"type": "string"}},
            "required": ["input"]}
 
+#: PROBE DECK (founder 2026-07-01, eval suite): interaction classes the engine must handle —
+#: the player-agent weaves ONE in per turn WHEN IT FITS NATURALLY (never forced), so every
+#: eval run exercises the seams that live play has historically broken. Enabled via
+#: `probes` as argv[2] (any value) — vanilla runs stay the un-probed control.
+PROBES = [
+    "Dismiss a present character in-fiction ('you may go', 'leave us') — then later check "
+    "whether they honestly stay gone.",
+    "Invite a present character along on a move ('come with me', 'shall we…?') and travel.",
+    "Refer to an established place by its ROLE, not its name ('the scene of the crime', "
+    "'back to where we started', 'your office').",
+    "Ask an unaddressed follow-up question right after someone speaks — 'And when was that?' "
+    "— expecting the LAST SPEAKER to answer.",
+    "Ask a character to repeat something they already told you — a person should say 'as I "
+    "said…' in a word, not re-recite it.",
+    "Pick up a small object; carry it several turns; later set it down somewhere else — then "
+    "once more mention it to see if the world remembers where it now is.",
+    "Return to a location you already visited and see whether it, and whoever/whatever was "
+    "left there, is as you left it.",
+    "Assert something into existence by fiat that the story never established ('there's a "
+    "hidden door behind the shelf', or name a thing anachronistic to this world).",
+    "Attempt something physically uncertain/risky for your character and see how the outcome "
+    "is handled.",
+    "Press one present person hard on a specific topic they seem to be avoiding.",
+]
+
 prov = CodexProvider()
+USE_PROBES = len(sys.argv) > 2 and bool(sys.argv[2])
+_probe_note = ("\nOUTSTANDING TESTS (you are also QA: weave exactly ONE of these into your "
+               "move whenever it fits the fiction naturally — in character, never forced, "
+               "never meta; skip any that can't fit yet; prefer ones you haven't done):\n- "
+               + "\n- ".join(PROBES) + "\n") if USE_PROBES else ""
 
 
 def player_move(story_tail: str, stance: str) -> str:
@@ -73,7 +103,8 @@ def player_move(story_tail: str, stance: str) -> str:
         "knowledge (the world should fill it in), WITHOUT knowing the hidden plot.\n"
         "Read the story so far, then decide your protagonist's NEXT move.\n\n"
         f"STORY SO FAR (most recent — this is ALL you know):\n{story_tail}\n\n"
-        f"YOUR STANCE THIS TURN: {_STANCE[stance]}\n\n"
+        f"YOUR STANCE THIS TURN: {_STANCE[stance]}\n"
+        + _probe_note + "\n"
         "Write ONLY the player's input — one natural action, line of dialogue, or "
         "question, as a person would type it (first person or imperative, 1-2 sentences). "
         "No meta, no quotes, just the input.")
@@ -131,7 +162,45 @@ def main() -> None:
             story += f"\n\n> You: {inp}\n\n{r.prose}"
         except Exception as exc:  # noqa: BLE001
             w(f"\n## Turn {i} [{stance}] — ENGINE ERROR: {exc}\n")
+    # CHAPTER-2 CONTINUATION LEG (founder 2026-07-02: "live test the chapter 2 story
+    # continuation and grade it"): if the story LANDED, roll into the next episode the way the
+    # transport would — continue_episode → reopen → ch2 opening → a few ch2 turns — so the eval
+    # can grade the OUTRO→HOOK transition, ledger honesty, and the fresh exposition.
+    try:
+        _ended = False
+        from construct.adapter import PorcelainWorldReads
+        from construct.turnloop import terminal_outcome
+        from construct.arc.executor import arc_concluded
+        _reads = PorcelainWorldReads(s._world)
+        _ended = terminal_outcome(_reads) is not None or arc_concluded(_reads, s._arc)
+    except Exception as exc:  # noqa: BLE001
+        w(f"\n*(continuation check failed: {exc})*")
     s.close()
+    if _ended:
+        w("\n\n# ===== CHAPTER 2 CONTINUATION =====\n")
+        try:
+            from construct.game import continue_episode
+            meta2 = continue_episode(SCENARIO, prov, player_id="harness",
+                                     on_stage=lambda m: w(f"*build: {m}*"))
+            s2 = Session.open(SCENARIO, player_id="harness", provider=prov)
+            if meta2.get("continuation_intro"):
+                s2._meta["continuation_intro"] = meta2["continuation_intro"]
+            w("## CH2 OPENING\n\n" + s2.opening() + "\n")
+            story2 = s2.opening()
+            for j, st in enumerate(["F", "K", "F", "P"], 1):
+                try:
+                    inp = player_move(story2[-4500:], st)
+                    r2 = s2.turn(inp)
+                    w(f"\n## CH2 Turn {j} [{st}]\n\n> **Player:** {inp}\n\n"
+                      + (r2.prose or "(empty)") + "\n")
+                    story2 += f"\n\n> You: {inp}\n\n{r2.prose}"
+                except Exception as exc:  # noqa: BLE001
+                    w(f"\n## CH2 Turn {j} — ERROR: {exc}\n")
+            s2.close()
+        except Exception as exc:  # noqa: BLE001
+            w(f"\n*(continuation leg failed: {exc})*")
+    else:
+        w("\n*(story did not land a conclusion — no continuation leg this run)*")
     w("\n--- END ---")
     print("LOG:", log, flush=True)
 

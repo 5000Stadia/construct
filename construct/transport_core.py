@@ -19,6 +19,7 @@ IO (`getUpdates`/`sendMessage`, file queues) and exactly-once persistence
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -44,6 +45,14 @@ DEFAULT_FEEDBACK_DIR = Path("dev_inbox")
 #: before the process is replaced. Module-level so tests can zero it.
 REBOOT_DELAY_S = 1.5
 
+#: SCENE-IMAGERY delivery (founder image fix). The render started DURING the turn (it has had the
+#: whole turn to cook), so a short post-turn join catches the common case and shows the picture
+#: BEFORE the new-scene prose — without blocking the text reply on a slow render. If it isn't ready
+#: in `IMAGE_BEFORE_TEXT_S`, the text ships now and the picture is sent LATE (a follow-up photo) when
+#: the render finishes within `IMAGE_LATE_S`, instead of being dropped. Module-level so tests tune them.
+IMAGE_BEFORE_TEXT_S = 12.0
+IMAGE_LATE_S = 180.0
+
 
 def _affirmative(text: str) -> bool:
     """A yes-ish answer to the 'leave the story?' confirm."""
@@ -59,10 +68,11 @@ HELP = ("Just type what you want to do — no commands needed; the story respond
         "(restart fresh), /resume (continue), /status (time & place now; /status "
         "pin toggles the header atop each reply), /scenarios (your world), /dump "
         "(save this chat to a log), /ooc <question> (ask the engine out of "
-        "character — what's available, how it works), 📝 /note <text> (jot a note — "
-        "your journal follows you across adventures; /notes lists them, /del # removes "
-        "one), /exit (step out to the start menu — your game is saved), /feedback "
-        "<note> (flag the operator), /help.")
+        "character — what's available, how it works), 📓 /notebook (your character's "
+        "case-notes — the people, places, and things they've learned so far), 📝 /note "
+        "<text> (jot your own note — it follows you across adventures; /notes lists "
+        "them, /del # removes one), /exit (step out to the start menu — your game is "
+        "saved), /feedback <note> (flag the operator), /help.")
 
 #: The Construct's first words — a SIMPLE welcome (founder: "first message should
 #: be a simple greeting… if the user knows what's up they'll just load what they
@@ -85,6 +95,13 @@ WELCOME_IMAGE = Path(__file__).resolve().parent / "assets" / "welcome.png"
 BUILD_HEADS_UP = (
     "🌐 Constructing your world — the initial build may take ~20 minutes. "
     "I'll tell you the moment the doors open.")
+
+#: Fired the instant the character is settled (the name turn), BEFORE the opening scene
+#: renders — that first turn takes a bit (staging + the opening render), so the chat doesn't
+#: sit silent while it works (founder).
+OPENING_HEADS_UP = (
+    "✨ Settling you into the world — the opening scene is being prepared. "
+    "One moment…")
 
 
 @dataclass(frozen=True)
@@ -197,6 +214,15 @@ class TransportCore:
         pid = registry.player_for(self._conn, ev.platform, ev.external_id)
         if pid is None:
             return self._gate(ev, text, now=now)
+        # FINALIZATION BARRIER (TURN-LATENCY dumbfire, Cx 266 #2): before routing ANY event —
+        # a turn, a command that reads the session (/status, /note), or one that
+        # replaces/drops it (/restart, /wipe, /play, continue) — drain any prior turn's
+        # pending settle. The adapter normally already ran it post-send; this guarantees no
+        # command can read stale state or discard a session while its finalizer is pending
+        # (covers the outbox-recovery path that delivers a reply without settling). Idempotent.
+        _open = self._sessions.get(pid)
+        if _open is not None:
+            _open.flush_settle()
         # A live, readable transcript per player (USER/BOT lines) — written to
         # the gitignored log dir. /dump snapshots it on demand (operator ask).
         self._log(ev, "USER", ev.text)
@@ -217,15 +243,23 @@ class TransportCore:
             self._log(ev, "BOT", "\n".join(out.chunks))
             return out
         if pid in self._pending_continue:
-            # CONCLUDE→CONTINUE: the story ended; this message is the continue? yes/no.
-            self._pending_continue.discard(pid)
-            if _affirmative(low):
-                out = self._do_continue(pid, ev)
-            else:
+            # CONCLUDE→CONTINUE (founder 2026-07-02, auto-continue): the story ended; any
+            # in-fiction message ROLLS INTO the next chapter. COMMANDS PASS THROUGH and keep
+            # the state armed (live bug: a /feedback here was swallowed as a "no" and ended
+            # the founder's story). An explicit decline ("no"/"stop"/"quit") still rests it.
+            if low.startswith("/"):
+                pass  # fall through to command routing below; next chapter stays offered
+            elif low.strip() in ("no", "stop", "quit", "rest", "not now", "no thanks"):
+                self._pending_continue.discard(pid)
                 out = self._reply(ev, "Then the story rests here — a good place to leave it. "
                                       "Say /restart to play again, or start something new anytime.")
-            self._log(ev, "BOT", "\n".join(out.chunks))
-            return out
+                self._log(ev, "BOT", "\n".join(out.chunks))
+                return out
+            else:
+                self._pending_continue.discard(pid)
+                out = self._do_continue(pid, ev)
+                self._log(ev, "BOT", "\n".join(out.chunks))
+                return out
         if pid in self._pending_exit:
             # The player asked (out of character) to leave/start over; this message
             # is their yes/no. Affirm → step out; anything else → carry on.
@@ -272,6 +306,20 @@ class TransportCore:
             out = self._turn(pid, ev, text)
         self._log(ev, "BOT", "\n".join(out.chunks))
         return out
+
+    def settle(self, ev: InboundEvent) -> None:
+        """Run the just-played turn's DEFERRED bookkeeping (TURN-LATENCY dumbfire), AFTER
+        the reply has been sent. The adapter calls this immediately post-send so the PB
+        writes (extract→canon, mirror, transcript, compact, time) overlap the player's
+        reading instead of padding the wait. A no-op when there is no open play session or
+        nothing is pending; the next turn's start-of-turn join is the correctness backstop,
+        so this is purely the latency win. Never raises (the session swallows settle errors)."""
+        pid = registry.player_for(self._conn, ev.platform, ev.external_id)
+        if pid is None:
+            return
+        session = self._sessions.get(pid)
+        if session is not None:
+            session.flush_settle()
 
     def _do_restart(self, pid: str, ev: InboundEvent, answer: str) -> Outbound:
         """Answer to the `/restart` confirm (step one — how far back):
@@ -673,6 +721,8 @@ class TransportCore:
             return self._status(pid, ev, parts[1].strip().lower() if len(parts) > 1 else "")
         if cmd == "/ooc":
             return self._ooc(pid, ev, parts[1] if len(parts) > 1 else "")
+        if cmd in ("/notebook", "/journal", "/case"):
+            return self._notebook(pid)
         if cmd == "/notes":
             return self._notes(pid, ev, parts[1].strip().lower() if len(parts) > 1 else "")
         if cmd == "/note":
@@ -729,6 +779,20 @@ class TransportCore:
             return ""
 
     # -- /note, /notes: the player's journal (zero-turn, never canon) ---------
+    def _notebook(self, pid: str) -> str:
+        """`/notebook` — the CASE-BOARD (#83): the character's own knowledge (their
+        `knows:` frame) rendered as a diegetic notebook. Zero-turn, zero-time, zero
+        model calls; needs a live session (the notebook is the character's, not the
+        player's — /notes holds the player's own jottings)."""
+        session = self._sessions.get(pid)
+        if session is None:
+            return "📓 (resume your game first — the notebook belongs to your character.)"
+        try:
+            return session.journal()
+        except Exception:
+            logger.exception("/notebook failed for %s", pid)
+            return "📓 (the notebook wouldn't open — try again?)"
+
     def _note(self, pid: str, ev: InboundEvent, text: str, *, now: float = 0.0) -> str:
         """`/note <text>` records a player note for their own future reference,
         stamped with the current time|place. `/note` with no text → usage. Never
@@ -846,12 +910,20 @@ class TransportCore:
             except Exception:
                 logger.exception("status header failed for %s", pid)
         if getattr(reply, "ended", False):
-            # CONCLUDE→CONTINUE (founder): the story just landed — always OFFER the next
-            # chapter (a dangling thread continues, OR a fresh case finds the now-renowned
-            # protagonist). Their next message is the yes/no.
-            self._pending_continue.add(pid)
-            prose = (prose.rstrip() + "\n\n— — —\nThe case is closed, and word of it will "
-                     "travel. **Continue to the next chapter?** (yes / no)")
+            if not getattr(reply, "can_continue", True):
+                # #95 (Cx 422): a DEATH terminal is the end of this world's story — no
+                # next-chapter arm, no "the story goes on". The testament was the close.
+                prose = (prose.rstrip() + "\n\n— — —\n**— The End —**\n"
+                         "This story rests here. /exit returns to the menu whenever "
+                         "you're ready.")
+            else:
+                # CONCLUDE→CONTINUE (founder 2026-07-02: "should just say 'End Chapter #' and
+                # continue automatically — the player can quit whenever they want"): announce the
+                # chapter's END; the player's next in-fiction message ROLLS INTO the next chapter
+                # (no yes/no gate). /exit (or any command) still works as itself.
+                self._pending_continue.add(pid)
+                prose = (prose.rstrip() + "\n\n— — —\n**— End of Chapter —**\nThe story goes on: "
+                         "say anything to begin the next chapter, or /exit to rest here.")
         self._deliver_scene_image(ev, pid)
         return self._reply(ev, prose)
 
@@ -1059,7 +1131,11 @@ class TransportCore:
                                   "setup": setup})
             return self._reply(ev, result.reply)
 
-        # Ready → ingest the character as canon, then open the story.
+        # Ready → ingest the character as canon, then open the story. apply_character
+        # (grounding + relationship authoring) is itself slow, so ping BEFORE it; the
+        # opening render's own heads-up fires inside _opening_reply (all paths).
+        self._notify(ev, "✒️ Weaving who you are into the world — your character is being "
+                         "bound to the story…")
         try:
             session.apply_character(sheet)
         except Exception:
@@ -1175,11 +1251,40 @@ class TransportCore:
         if session is None:
             return
         try:
-            rec = session.pending_image()  # bounded join; ready record or None
-            if rec and getattr(rec, "asset_path", ""):
-                self._photo_fn(ev.chat_id, rec.asset_path, "")
+            holder = session.take_pending_image()  # the {rec, done} render holder, or None
         except Exception:
-            logger.exception("scene-image deliver failed for %s", pid)
+            logger.exception("scene-image take failed for %s", pid)
+            return
+        if not holder:
+            return
+        rec = holder.get("rec")
+        if not (rec and getattr(rec, "asset_path", "")):
+            return
+        chat_id, done, path = ev.chat_id, holder.get("done"), rec.asset_path
+
+        def _send_if_landed(caption: str = "") -> bool:
+            if Path(path).exists():
+                try:
+                    self._photo_fn(chat_id, path, caption)
+                    return True
+                except Exception:
+                    logger.exception("scene-image send failed for %s", pid)
+            return False
+
+        # SHORT join for the ideal "image → new-scene prose" layout; the render had the whole
+        # turn to cook, so this usually catches it. Never block the text reply on a slow one.
+        if done is None or done.wait(IMAGE_BEFORE_TEXT_S):
+            _send_if_landed()       # rides right before the prose → no caption needed
+            return
+        # Not ready quickly → ship the text now, send the picture LATE when it finishes (instead
+        # of dropping it). Daemon thread; touches no PB, only the photo sink. Caption it with the
+        # scene name (Cx 284) since it arrives AFTER the text, out of the image→prose order.
+        scene_name = str(getattr(rec, "place_name", "") or "")
+
+        def _late() -> None:
+            if done.wait(IMAGE_LATE_S):
+                _send_if_landed(scene_name)
+        threading.Thread(target=_late, daemon=True, name="scene-image-late").start()
 
     def _opening_reply(self, ev: InboundEvent, pid: str, session: Any,
                        *, preamble: str = "") -> Outbound:
@@ -1187,6 +1292,11 @@ class TransportCore:
         first, THEN the location picture, THEN the localized room narration — so the
         painting introduces the room before the prose walks you in. Falls back to one
         combined message when there's no picture (no backend / not ready / no sink)."""
+        # PLEASE-WAIT ON EVERY OPENING PATH (founder 2026-07-02): the opening render
+        # (staging + narrator + picture) runs long and used to leave SOME entry paths
+        # silent (saved-character restart, continuation). The heads-up lives HERE so
+        # every road to an opening announces itself. Best-effort; never logged as a turn.
+        self._notify(ev, OPENING_HEADS_UP)
         try:
             framing, scene = session.opening_parts()
         except Exception:

@@ -131,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     inv = sub.add_parser("invite", help="mint a one-time invite code for a transport")
     inv.add_argument("platform", choices=["telegram", "loopback"])
-    inv.add_argument("--scenario", default="anchor", help="scenario the invite grants")
+    inv.add_argument("--scenario", default="bodycase", help="scenario the invite grants")
 
     lb = sub.add_parser("loopback", help="run the offline self-test channel (file-driven transport)")
     lb.add_argument("--in", dest="inbound", default=None, help="inbound JSONL path")
@@ -387,6 +387,9 @@ def _world_loop(session, debug: bool) -> str:
                 print(reply.prose, file=sys.stderr)
                 continue
             print(reply.prose)
+            # POST-PRINT (TURN-LATENCY dumbfire): the prose is on screen; run the turn's
+            # deferred bookkeeping now so its PB writes happen while the player reads/types.
+            session.flush_settle()
             if debug and reply.trace is not None:
                 _print_trace(reply.trace)
     finally:
@@ -539,6 +542,7 @@ def _cmd_turn(args: argparse.Namespace) -> int:
     with Session.open(args.playthrough, provider=_provider()) as session:
         reply = session.turn(args.player_input)
         print(reply.prose)
+        session.flush_settle()  # complete the deferred bookkeeping (also runs on close())
         if args.debug and reply.trace is not None:
             _print_trace(reply.trace)
     return 0

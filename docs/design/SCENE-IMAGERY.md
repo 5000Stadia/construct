@@ -67,10 +67,17 @@ source of truth.
    subscription** → OpenAI Images (`OPENAI_API_KEY`, `gpt-image-1`) → none; force one
    with `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none). With **no backend the
    manifest is still produced** and play is byte-for-byte text-only.
-6. **Deliver before the prose.** When the turn returns, the transport joins the
-   in-flight render (`Session.pending_image`, bounded ~30 s) and — if the asset is
-   ready — sends the photo through the photo side-channel **before** the text reply
-   goes out. The picture lands first; the prose follows.
+6. **Deliver before the prose — but never block on it; never drop it.** When the turn
+   returns, the transport takes the render holder (`Session.take_pending_image`) and does a
+   SHORT join (`IMAGE_BEFORE_TEXT_S`, ~12 s — the render had the whole turn to cook). If
+   the asset is ready, the photo goes out **before** the text reply (picture first, prose
+   follows). If it isn't ready that quickly, the **text ships immediately** and a daemon
+   thread sends the photo **LATE** (`IMAGE_LATE_S`, ~180 s) when the render finishes —
+   captioned with the scene name, since it arrives after the prose — instead of being
+   dropped. A file-existence check means a failed render never sends a broken photo. (The
+   *opening* image still uses the bounded `pending_image()` — the cold open can wait.)
+   If a new location has NO committed description (an improv place reached by narrating a
+   trip), `_note_scene_image` furnishes one once so there is always a paint source.
 
 ## Reuse / refresh
 
@@ -120,10 +127,10 @@ needs a backend** (an `OPENAI_API_KEY`, a `CONSTRUCT_IMAGE_CMD`, or a wired
   configured backend that produces nothing — a failure, or the OpenAI billing hard
   limit — is **not** cached, so the scene **retries** on the next visit and images
   appear automatically once the backend recovers (no manual manifest-clear).
-- **Deferred:** the slow-but-*successful* render that finishes *after* the bounded
-  join — the asset is cached, but a cached scene isn't re-rendered, so its photo isn't
-  re-delivered on a later visit (acceptable while the backend stays inside the join
-  window). Re-showing a cached image on *return* to a prior location is likewise not
+- **Resolved (2026-06-29):** the slow-but-*successful* render that finishes *after* the
+  short before-text join is now **sent LATE** (a captioned follow-up photo within
+  `IMAGE_LATE_S`), not dropped — and the text reply is no longer blocked waiting on it.
+- **Deferred:** re-showing a cached image on *return* to a prior location is not
   yet wired (today an image shows on first entry to each place). `CONSTRUCT_IMAGE_CMD`
   prompt interpolation remains brittle (quotes/newlines/flag-like text) — prefer
   stdin/env/temp-file; the built-in OpenAI backend is unaffected.
@@ -132,8 +139,9 @@ needs a backend** (an `OPENAI_API_KEY`, a `CONSTRUCT_IMAGE_CMD`, or a wired
 
 - **Engine untouched** — reads the committed `place.description`; commits nothing new
   to canon. Pure host orchestration.
-- **Detection never taxes a turn; delivery is bounded** — detection is a pure hash
-  check (no model call); rendering runs off-thread, overlapping the turn's
+- **Detection never taxes a turn; delivery never blocks it** — detection is a fast hash
+  check (furnishes a description ONCE only if an improv location lacks one); rendering runs
+  off-thread, overlapping the turn's
   NPC/narration work. The transport then blocks up to the bounded join (~30 s) to keep
   the image *before* the prose; a slow/failed/absent generator falls through to
   text-only, never breaking the turn's text or its exactly-once delivery.

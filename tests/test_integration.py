@@ -15,7 +15,22 @@ from construct.arc import io as arc_io
 from construct.arc.conditions import InFrame, Occurred, TurnsQuiet
 from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
 from construct.provider import StubProvider, task_of
-from construct.turnloop import run_turn
+from construct.turnloop import run_turn as _run_turn
+
+# NB the malformed-id / narrator-voice predicate tests moved to tests/test_resolve.py (the predicates
+# now live in construct/resolve.py; the promote-gate copies were stripped — verified-then-strip, Cx 313).
+
+
+def run_turn(*args, **kwargs):
+    """Test wrapper: run a full turn INCLUDING the deferred post-narrate `settle`
+    bookkeeping (TURN-LATENCY dumbfire). Production runs `settle` post-send in the
+    adapter; these turn-loop tests assert on the tail's effects (canon promotion,
+    quarantine, mirror, transcript, turn row), so they complete the turn here."""
+    result = _run_turn(*args, **kwargs)
+    if getattr(result, "settle", None) is not None:
+        result.settle()
+    return result
+
 
 PLAYER = "person:player"
 PLAYER_FRAME = f"knows:{PLAYER}"
@@ -56,6 +71,7 @@ def world(tmp_path):
     w = World(tmp_path / "t.world", world_id="w:t", model=stub,
               stance="fiction", title="Integration Test World")
     w._extractions = extractions
+    w._stub = stub          # expose for model-call assertions (durability-classify counting)
     w.ingestor.cursor.advance(1.0)
     w.ingest_structured([
         {"entity": "place:study", "attribute": "kind", "value": "room", "timeless": True},
@@ -243,6 +259,61 @@ class TestArcRoundTrip:
         assert plain.failure_when is None
 
 
+class TestSettleDeferral:
+    def test_settle_defers_canon_write_until_called(self, world):
+        """TURN-LATENCY dumbfire: run_turn returns the prose immediately but HOLDS the
+        post-narrate bookkeeping (extract→canon promotion, the turn row) in a `settle`
+        callable. The narrator-asserted fact and the turn row land ONLY when settle()
+        runs — which the adapter triggers AFTER sending the reply, so the PB writes
+        overlap the player reading instead of padding the wait."""
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})                       # player input
+        world._extractions.append({"items": [                          # narrator prose
+            {"entity": "obj:lamp", "attribute": "kind", "value": "object"},
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "A lamp sits on the desk, newly noticed."},
+        ])
+        # NB: the raw run_turn (NOT the settle-completing test wrapper) so we can observe
+        # the BEFORE state.
+        result = _run_turn(world, arc, provider, "I look at the desk.", turn=1)
+        assert "lamp" in result.prose                       # prose ships immediately
+        assert callable(result.settle)                      # the LM finalization is deferred
+        # The TURN-INTEGRITY RECEIPT is SYNCHRONOUS (durable before sendback): the turn row
+        # next_turn_number reads + the archive of what was delivered are present immediately,
+        # so a crash in the settle window can never lose/collide the delivered turn.
+        assert len(world.porcelain.events(kind="turn", frame="session:main")) == 2  # turn_0 + this
+        assert world.porcelain.state(
+            "arch:turn_1", "prose", frame="session:main")["status"] == "known"
+        # But the LM-bearing finalization (promoting the narrator's new fact to canon) is DEFERRED.
+        assert world.porcelain.state("obj:lamp", "kind")["status"] != "known"
+        result.settle()
+        # AFTER settle: the deferred future-feeding writes have landed
+        assert world.porcelain.state("obj:lamp", "kind")["status"] == "known"
+
+    def test_sync_receipt_makes_no_durability_model_call(self, world):
+        """Cx 268: the synchronous pre-send receipt/archive must NOT touch the durability
+        MODEL (else a model call lands back before the reply ships). It is written with
+        `classify="rules"` (deterministic, model=False). Guard the property directly: the
+        receipt/archive row shape costs ZERO durability-classifier model calls."""
+        def _durability_calls():
+            return sum(1 for p, _s in world._stub.calls
+                       if p.startswith("Classify the lifetime"))
+        rows = [
+            {"entity": "event:turn_9", "attribute": "kind", "value": "turn"},
+            {"entity": "event:turn_9", "attribute": "pacing", "value": "steady"},
+            {"entity": "event:turn_9", "attribute": "player_boundary", "value": "ok"},
+            {"entity": "arch:turn_9", "attribute": "player_said", "value": "I look around."},
+            {"entity": "arch:turn_9", "attribute": "prose", "value": "A lamp sits there."},
+        ]
+        before = _durability_calls()
+        world.porcelain.ingest_structured(rows, frame="session:main", classify="rules")
+        assert _durability_calls() == before        # rules mode → no model call (the fix)
+
+
 class TestFullTurn:
     def test_one_turn_through_the_dag(self, world):
         arc = make_arc()
@@ -353,6 +424,257 @@ class TestFullTurn:
         assert ("obj:ledger", "seal") in result.trace.contradictions
         # new fact promoted (good improv preserved)
         assert world.porcelain.state("obj:candle", "kind")["status"] == "known"
+
+    def test_dropping_a_held_object_commits_it_into_the_scene(self, world):
+        # FOUNDER cohesion test: "set the letter-opener down" narrated but canon kept it held →
+        # it snapped back to the pocket next turn. A drop of a HELD object now commits obj.in =
+        # current place, so it STAYS where it was left.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:opener", "attribute": "kind", "value": "object"},
+                                 {"entity": "obj:opener", "attribute": "name", "value": "opener"},
+                                 {"entity": "obj:opener", "attribute": "in", "value": PLAYER}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "drops": "opener"},
+            {"prose": "You set the opener on the desk."},
+        ])
+        result = run_turn(world, arc, provider, "I set the opener down on the desk.", turn=2,
+                          scope=[PLAYER, "obj:opener", "place:study"])
+        assert result.trace.dropped == "obj:opener"
+        assert world.porcelain.locate("obj:opener")[0] == "place:study"  # left in place, not held
+
+    def test_deterministic_drop_wins_over_player_input_container(self, world):
+        # Cx 295 BLOCK: the PLAYER-INPUT extraction runs BEFORE the deterministic drop and may write
+        # the held object into a container it names ("set the pencil down on a table" →
+        # `obj:pencil in obj:table`, an unlocated furniture entity). That defeated the drop's
+        # "is it still held?" check, stranding the object under an unlocated table. The drop now reads
+        # the PRE-extraction held view and is authoritative: it commits `obj in pre_scene`.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:pencil", "attribute": "kind", "value": "pencil"},
+                                 {"entity": "obj:pencil", "attribute": "name", "value": "pencil"},
+                                 {"entity": "obj:pencil", "attribute": "in", "value": PLAYER}])
+        # player-input extraction (FIRST) relocates the held pencil into a named, UNLOCATED container
+        world._extractions.append({"items": [
+            {"entity": "obj:pencil", "attribute": "in", "value": "obj:table"}]})
+        world._extractions.append({"items": []})                       # narrator prose
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "drops": "pencil",
+             "asserts_or_reveals": True},
+            {"prose": "You set the pencil down on a table."},
+        ])
+        result = run_turn(world, arc, provider, "I set the pencil down on a table.", turn=2,
+                          scope=[PLAYER, "obj:pencil", "place:study"])
+        assert result.trace.dropped == "obj:pencil"                    # deterministic drop fired
+        assert world.porcelain.locate("obj:pencil")[0] == "place:study"  # in the scene, not obj:table
+
+    def test_drop_resolves_to_the_held_twin_not_a_fragmented_namesake(self, world):
+        # Cx 297 follow-on (found live): the take-mint made a collision-avoiding twin — the player
+        # HOLDS `obj:pencil_1` while a same-named `obj:pencil` sits elsewhere. Global `refer("the
+        # pencil")` picked the un-held `obj:pencil`, so the drop's held-check failed and the pencil
+        # followed the player. The drop now resolves the phrase against the HELD set first (you can
+        # only set down what you hold), so it drops the twin actually in hand.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([
+            {"entity": "obj:pencil", "attribute": "kind", "value": "pencil"},      # un-held namesake
+            {"entity": "obj:pencil", "attribute": "in", "value": "obj:desk"},
+            {"entity": "obj:pencil_1", "attribute": "kind", "value": "pencil"},     # the HELD twin
+            {"entity": "obj:pencil_1", "attribute": "in", "value": PLAYER}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "drops": "the pencil"},
+            {"prose": "You lay the pencil on the counter."},
+        ])
+        result = run_turn(world, arc, provider, "I set the pencil down.", turn=2,
+                          scope=[PLAYER, "obj:pencil", "obj:pencil_1", "place:study"])
+        assert result.trace.dropped == "obj:pencil_1"                    # the HELD twin, not the namesake
+        assert world.porcelain.locate("obj:pencil_1")[0] == "place:study"  # left in the scene
+        assert PLAYER not in (world.porcelain.locate("obj:pencil_1") or [])  # no longer held
+
+    def test_drop_briefs_narrator_object_no_longer_carried(self, world):
+        # Cx 299 non-blocking: after a drop, the narrator re-narrated the dropped object as still
+        # pocketed (pulled from transcript memory) because nothing told it the object had left the
+        # player's hands. The carry briefing is now EXCLUSIVE and a JUST SET DOWN line names the
+        # dropped object + where it stays — so the render doesn't put it back in hand next turn.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:opener", "attribute": "kind", "value": "object"},
+                                 {"entity": "obj:opener", "attribute": "name", "value": "opener"},
+                                 {"entity": "obj:opener", "attribute": "in", "value": PLAYER},
+                                 {"entity": "obj:lamp", "attribute": "kind", "value": "object"},
+                                 {"entity": "obj:lamp", "attribute": "name", "value": "lamp"},
+                                 {"entity": "obj:lamp", "attribute": "in", "value": PLAYER}])  # still carried
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "drops": "opener"},
+            {"prose": "You set the opener on the desk."},
+        ])
+        result = run_turn(world, arc, provider, "I set the opener down on the desk.", turn=2,
+                          scope=[PLAYER, "obj:opener", "obj:lamp", "place:study"])
+        assert result.trace.dropped == "obj:opener"
+        brief = _narrate_prompt(provider)
+        assert "JUST SET DOWN" in brief                    # narrator told it left the hands
+        assert "EXCLUSIVE" in brief                         # carry list (still holds lamp) is authoritative
+
+    def test_pronoun_phantom_holder_binds_to_protagonist(self, world):
+        # ENTITY-AUTHORITY (Cx 304, pin-9 inversion): extraction minted `obj.in = person:you` (a
+        # pronoun phantom). The RESOLVER now binds deixis ("you") to the protagonist at the write
+        # boundary, so the row becomes `obj:opener in <protagonist>` (stays held) — not a stranded
+        # phantom holder. Outcome preserved; enforcement moved from the gate band-aid to the resolver.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:opener", "attribute": "kind", "value": "object"},
+                                 {"entity": "obj:opener", "attribute": "in", "value": PLAYER}])
+        world._extractions.append({"items": []})                       # player input
+        world._extractions.append({"items": [                          # narrator prose extraction
+            {"entity": "obj:opener", "attribute": "in", "value": "person:you", "value_type": "entity"},
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You turn the opener over in your hand."},
+        ])
+        result = run_turn(world, arc, provider, "I consider the opener I'm holding.", turn=2,
+                          scope=[PLAYER, "obj:opener", "place:study"])
+        assert world.porcelain.state("obj:opener", "in")["fact"]["value"] == PLAYER  # stays held
+        assert "deixis_bound" in {r[2] for r in result.trace.resolver}  # resolver bound "you" → protagonist
+
+    def test_malformed_slash_id_dropped_by_resolver(self, world):
+        # ENTITY-AUTHORITY (Cx 304, pin-9 inversion): MALFORMED `:/` ids (`person:/you`,
+        # `place:/coffee_house`) are dropped by the RESOLVER before staging; a row whose value is
+        # malformed drops whole. Outcome: nothing malformed reaches canon.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})                       # player input
+        world._extractions.append({"items": [                          # narrator prose extraction
+            {"entity": "person:/you", "attribute": "in", "value": "place:/coffee_house", "value_type": "entity"},
+            {"entity": "obj:teacup", "attribute": "in", "value": "place:/coffee_house", "value_type": "entity"},
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You step into the warm coffee house."},
+        ])
+        result = run_turn(world, arc, provider, "I go into the coffee house.", turn=2,
+                          scope=[PLAYER, "place:study"])
+        reads = PorcelainWorldReads(world)
+        assert not reads.has_entity("person:/you")                      # never canonized
+        assert not reads.has_entity("place:/coffee_house")
+        assert not reads.has_entity("obj:teacup")                       # row dropped (malformed value)
+        assert "dropped_malformed" in {r[2] for r in result.trace.resolver}
+
+    def test_person_located_in_object_dropped_by_resolver(self, world):
+        # ENTITY-AUTHORITY (Cx 304, pin-9 inversion): `protagonist in obj:street` (person located
+        # INSIDE an object → the location desync) is dropped by the RESOLVER's kind expectation
+        # (`person:*.in` must be a place/person, never obj). Player stays where they were.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:street", "attribute": "kind", "value": "street"},
+                                 {"entity": PLAYER, "attribute": "in", "value": "place:study"}])
+        world._extractions.append({"items": []})                       # player input
+        world._extractions.append({"items": [                          # narrator prose extraction
+            {"entity": PLAYER, "attribute": "in", "value": "obj:street", "value_type": "entity"},
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You stand in the wet street."},
+        ])
+        result = run_turn(world, arc, provider, "I look around the street.", turn=2,
+                          scope=[PLAYER, "place:study", "obj:street"])
+        assert world.porcelain.state(PLAYER, "in")["fact"]["value"] == "place:study"  # stays put
+        assert "kind_mismatch" in {r[2] for r in result.trace.resolver}
+
+    def test_player_self_naming_does_not_mint_a_present_npc(self, world):
+        # FOUNDER live bug (2026-06-30, bodycase): "I am Bradford Clemense" minted
+        # person:bradford_clemense as a present NPC (the room nodded toward "Bradford" not the player).
+        # The PLAYER channel cannot conjure a person by fiat — the row is dropped, no phantom NPC.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": [                          # player-input extraction
+            {"entity": "person:bradford_clemense", "attribute": "kind", "value": "person",
+             "aliases": ["I", "Bradford Clemense"]},
+            {"entity": "person:bradford_clemense", "attribute": "name", "value": "Bradford Clemense"},
+        ]})
+        world._extractions.append({"items": []})                       # narrator prose
+        provider = StubProvider([
+            {"kind": "declaration", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "asserts_or_reveals": True},
+            {"prose": "The room regards your outburst warily."},
+        ])
+        run_turn(world, arc, provider, "I am Bradford Clemense as you well know.", turn=2,
+                 scope=[PLAYER, "place:study"])
+        assert not PorcelainWorldReads(world).has_entity("person:bradford_clemense")  # no phantom NPC
+
+    def test_player_chosen_identity_is_authoritative_in_briefing(self, world):
+        # FOUNDER 2026-06-30 ("player name wins, fully"): the player's interview-set identity must be
+        # AUTHORITATIVE in the narrate briefing — name + pronouns + background, read from the canon
+        # point-read (state()), not the player-frame YOU block. (The dirty-slot stale-name coexistence
+        # — where snapshot-collapse mis-picks "Miss Vale" but state() serves the player — is NOT
+        # injected here; it's verified on the live bodycase slot, Cx 320/322.)
+        arc = make_arc()
+        seed_arc(world, arc)
+        # canon (where the Foyer writes), read via the folded point-read state() — NOT the player-frame
+        # snapshot (which misses these) nor the snapshot-collapse dict (which mis-picks set-valued name;
+        # the stale-name divergence is verified on the live bodycase slot — Cx 320).
+        world.ingest_structured([
+            {"entity": PLAYER, "attribute": "name", "value": "Reese Okonkwo", "valid_from": 0.0},
+            {"entity": PLAYER, "attribute": "pronouns", "value": "they/them", "valid_from": 0.0},
+            {"entity": PLAYER, "attribute": "background",
+             "value": "a night-indexer who took the post to bury a file", "valid_from": 0.0}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You consider the room."},
+        ])
+        run_turn(world, arc, provider, "I look around.", turn=2, scope=[PLAYER, "place:study"])
+        brief = _narrate_prompt(provider)
+        assert "THE PLAYER CHARACTER IS Reese Okonkwo" in brief
+        assert "they/them" in brief
+        assert "night-indexer who took the post to bury a file" in brief  # background carried (canon, not YOU block)
+        assert "stale authored default" in brief        # supersession instruction present
+
+    def test_narrator_may_not_relocate_a_held_object(self, world):
+        # FOUNDER live cohesion bug: a player-held object relocated by NARRATOR prose into furniture
+        # (`obj:pencil in obj:desk`) AND a narrator-phantom variant (`obj:token in
+        # person:unknown_narrator`). The phantom-holder row is dropped by the RESOLVER (voice); the
+        # held→furniture relocation is caught by the promote-gate held-object guard. Both stay held.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:pencil", "attribute": "kind", "value": "pencil"},
+                                 {"entity": "obj:pencil", "attribute": "name", "value": "pencil"},
+                                 {"entity": "obj:pencil", "attribute": "in", "value": PLAYER}])
+        world._extractions.append({"items": []})                       # player input
+        world._extractions.append({"items": [                          # narrator prose extraction
+            {"entity": "obj:pencil", "attribute": "in", "value": "obj:desk", "value_type": "entity"},
+            {"entity": "obj:token", "attribute": "in", "value": "person:unknown_narrator", "value_type": "entity"},
+        ]})
+        world.ingest_structured([{"entity": "obj:token", "attribute": "kind", "value": "token"},
+                                 {"entity": "obj:token", "attribute": "name", "value": "token"},
+                                 {"entity": "obj:token", "attribute": "in", "value": PLAYER}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You glance over the desk, the pencil still in your hand."},
+        ])
+        result = run_turn(world, arc, provider, "I look over my desk.", turn=2,
+                          scope=[PLAYER, "obj:pencil", "obj:token", "place:study"])
+        assert world.porcelain.state("obj:pencil", "in")["fact"]["value"] == PLAYER  # stays held
+        assert world.porcelain.state("obj:token", "in")["fact"]["value"] == PLAYER   # stays held
+        assert "dropped_voice" in {r[2] for r in result.trace.resolver}  # phantom holder dropped by resolver
+        assert world.porcelain.state("obj:pencil", "in")["fact"]["value"] == PLAYER  # stays held
+        assert world.porcelain.state("obj:token", "in")["fact"]["value"] == PLAYER
 
     def test_gate_quarantines_unlicensed_arc_key_promotes_ordinary(self, world):
         # GATED-INGEST slice 2 (momentous default-deny, option A): a NEW, UNLICENSED
@@ -1072,6 +1394,1444 @@ class TestFullTurn:
         assert out["acts"] is True and out["action"] == "the witness rises"
         assert out["speaks"] is True and out["intent"] == "warn the detective"
 
+    def test_npc_turn_directs_present_npc_to_stay_available(self):
+        # PRESENCE-HOLD (founder, live): a present NPC must not exit the scene of its own
+        # accord before the player can engage — the npc_turn cohort carries the STAY
+        # AVAILABLE directive, and the peopled render directive holds presence.
+        from construct import cohorts
+        provider = StubProvider([
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        ])
+        cohorts.npc_turn(provider, "person:steward", "{}", "{}", "person:pc")
+        prompt = provider.calls[-1][0]
+        assert "STAY AVAILABLE" in prompt
+        assert "do not leave" in prompt.lower() and "self-removal" in prompt.lower()
+        # the runtime render directive holds presence on the narrator side too
+        assert "PRESENCE HOLDS" in cohorts.WORLD_IS_PEOPLED
+        assert "do not arrive and leave in the same breath" in cohorts.WORLD_IS_PEOPLED
+
+    def test_render_leash_carries_object_permanence(self):
+        # FOUNDER live bug: the player plucked a fibre off the boy, but later turns kept
+        # re-narrating it on his sleeve. The narrator must honor a completed player action
+        # on an object (taken/moved/opened) as persistent — CONTINUITY OF STATE.
+        from construct import cohorts
+        assert "CONTINUITY OF STATE" in cohorts.RENDER_LEASH
+        assert "back where it was" in cohorts.RENDER_LEASH
+        assert "Honor the player's completed actions" in cohorts.RENDER_LEASH
+
+    def test_render_style_forbids_fixating_on_established_detail(self):
+        # FOUNDER live bug: the narrator re-described the same clue (the silk tape / fibre) in
+        # florid detail EVERY turn ("why do you keep fixating on it!?"). An established detail is
+        # known; don't re-litigate it turn after turn — answer the current question.
+        from construct import cohorts
+        assert "DON'T FIXATE" in cohorts.RENDER_STYLE
+        assert "already seen and engaged" in cohorts.RENDER_STYLE.lower() or \
+               "ALREADY seen and engaged" in cohorts.RENDER_STYLE
+        assert "ANSWER WHAT THEY ASKED" in cohorts.RENDER_STYLE
+
+    def test_destination_directive_carries_foreshadow_restraint(self, world):
+        # FOUNDER live (the "poltergeist fibers everywhere / NPCs acting weird" fixation, mechanical):
+        # the foreshadow card must lay the trail SPARINGLY and NOT re-plant a clue the player has
+        # already seen — else the narrator re-surfaces the same prop every turn and bends NPCs to it.
+        from construct.adapter import PorcelainWorldReads
+        from construct.turnloop import _destination_directive
+        arc = make_arc()
+        seed_arc(world, arc)
+        d = _destination_directive(arc, PorcelainWorldReads(world))
+        assert "THE HIDDEN DESTINATION" in d        # arc conceals → the card is present
+        assert "RESTRAINT" in d
+        assert "re-plant" in d
+        assert "MOST turns plant nothing new" in d
+
+    def test_taking_an_ordinary_improv_object_grants_world_permanence(self, world):
+        # FOUNDER: "a mug from the bar doesn't not exist." A take of an ORDINARY object that
+        # isn't an established canon entity mints a fresh obj held by the player — it exists
+        # and persists. (The equipment_check gate, manner='take', says ordinary → grant.)
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})       # player input
+        world._extractions.append({"items": []})       # post-render
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "takes": "a mug"},
+            {"ordinary_equipment": True, "item_id": "obj:mug",
+             "reason": "an ordinary mug plainly present"},                  # equipment_check(take)
+            {"prose": "You lift a chipped mug from the bar."},
+        ])
+        result = run_turn(world, arc, provider, "I take a mug from the bar.", turn=2,
+                          scope=[PLAYER, "place:study"])
+        assert result.trace.took and result.trace.took.startswith("obj:")   # something was granted
+        held = world.porcelain.contents(PLAYER)
+        assert result.trace.took in held                                    # held by the player now
+        assert world.porcelain.state(
+            result.trace.took, "in")["fact"]["value"] == PLAYER             # and persisted in canon
+
+    def test_take_binds_a_present_object_not_a_twin(self, world):
+        # ENTITY AUTHORITY (Cx 304 minter unification): a take of an object ALREADY present in the
+        # scene binds THAT entity instead of minting a sibling. The live twin bug: a scene `obj:pencil`
+        # existed but `refer("plain pencil")` missed it by name, so the take minted `obj:pencil_1`. The
+        # bounded token matcher now binds the present pencil — no twin, no equipment_check mint call.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:pencil", "attribute": "kind", "value": "object"},
+                                 {"entity": "obj:pencil", "attribute": "name", "value": "pencil"},
+                                 {"entity": "obj:pencil", "attribute": "in", "value": "place:study"}])
+        world._extractions.append({"items": []})       # player input
+        world._extractions.append({"items": []})       # post-render
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "takes": "the plain pencil"},
+            {"prose": "You pick up the plain pencil from the desk."},   # NB no equipment_check stub:
+        ])                                                              # binding must not reach the minter
+        result = run_turn(world, arc, provider, "I take the plain pencil.", turn=2,
+                          scope=[PLAYER, "obj:pencil", "place:study"])
+        assert result.trace.took == "obj:pencil"                        # bound the present object
+        assert world.porcelain.state("obj:pencil", "in")["fact"]["value"] == PLAYER  # now held
+        reads = PorcelainWorldReads(world)
+        assert not reads.has_entity("obj:pencil_1")                     # no twin minted
+        assert not reads.has_entity("obj:plain_pencil")
+
+    def test_ambiguous_take_does_not_mint_a_sibling(self, world):
+        # Cx 306 blocker 1: two same-named present objects + "take the pencil" must NOT mint a third.
+        # The take's bind_or_mint returns ambiguous; the caller must only mint on `_why == "mint"`.
+        # No equipment_check stub — reaching the minter would exhaust the queue and error.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([
+            {"entity": "obj:pencil_a", "attribute": "kind", "value": "object"},
+            {"entity": "obj:pencil_a", "attribute": "name", "value": "pencil"},
+            {"entity": "obj:pencil_a", "attribute": "in", "value": "place:study"},
+            {"entity": "obj:pencil_b", "attribute": "kind", "value": "object"},
+            {"entity": "obj:pencil_b", "attribute": "name", "value": "pencil"},
+            {"entity": "obj:pencil_b", "attribute": "in", "value": "place:study"}])
+        world._extractions.append({"items": []})       # player input
+        world._extractions.append({"items": []})       # post-render
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "takes": "the pencil"},
+            {"prose": "You reach toward the pencils on the desk."},
+        ])
+        result = run_turn(world, arc, provider, "I take the pencil.", turn=2,
+                          scope=[PLAYER, "obj:pencil_a", "obj:pencil_b", "place:study"])
+        assert not result.trace.took                                     # nothing grabbed (ambiguous)
+        reads = PorcelainWorldReads(world)
+        assert not reads.has_entity("obj:pencil")                        # no third sibling minted
+        assert not reads.has_entity("obj:pencil_1")
+        assert any(r[2] == "ambiguous" for r in result.trace.resolver)
+
+    def test_free_text_does_not_retype_or_split_a_place(self, world):
+        # Cx 306 blocker 2: the DIRECT player-input path writes resolved rows straight to canon. An
+        # extracted `obj:street kind object` while `place:street` exists must NOT retype place:street
+        # to "object" nor mint a separate obj:street — the bound-kind drop + no-free-text-place-mint.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "place:street", "attribute": "kind", "value": "street"},
+                                 {"entity": "place:street", "attribute": "name", "value": "street"}])
+        world._extractions.append({"items": [                          # PLAYER-INPUT extraction (direct→canon)
+            {"entity": "obj:street", "attribute": "kind", "value": "object"},
+        ]})
+        world._extractions.append({"items": []})                       # post-render
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "asserts_or_reveals": True},
+            {"prose": "You look down the wet street."},
+        ])
+        run_turn(world, arc, provider, "I study the street.", turn=2,
+                 scope=[PLAYER, "place:street"])
+        # place:street keeps its kind; never retyped to 'object'; no obj:street twin created
+        assert world.porcelain.state("place:street", "kind")["fact"]["value"] == "street"
+        assert not PorcelainWorldReads(world).has_entity("obj:street")
+
+    def test_a_load_bearing_take_is_not_minted_by_fiat(self, world):
+        # The gate denies a SPECIFIC/load-bearing object: "take the vault key" is not granted
+        # into existence — the narrator handles it honestly. No phantom obj is minted.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "takes": "the iron vault key"},
+            {"ordinary_equipment": False, "item_id": "", "reason": "load-bearing artifact"},
+            {"prose": "There is no such key here to take."},
+        ])
+        result = run_turn(world, arc, provider, "I take the iron vault key.", turn=2,
+                          scope=[PLAYER, "place:study"])
+        assert not result.trace.took                                        # nothing granted
+        assert not [h for h in world.porcelain.contents(PLAYER) if h.startswith("obj:")]
+
+    def test_secret_take_guard_locks_a_short_protected_object_id(self, world):
+        # Cx 272 (the load-bearing bypass): the take grant's deterministic guard must catch a
+        # take that NAMES a protected arc object even via a SHORT id ("the map" → obj:map) that
+        # slipped the old >3-char token filter — so it can't be minted by fiat past the
+        # arc-blind model gate. Also: an ordinary unrelated take is NOT locked.
+        from construct.turnloop import _take_touches_secret
+        from construct.adapter import PorcelainWorldReads
+        from construct.arc.conditions import InFrame
+        from construct.arc.grammar import Beat, Phase, Weight
+        arc = replace(make_arc(), beats=(
+            Beat("beat:find", Phase.CRISIS, Weight.REQUIRED,
+                 achievable_via=InFrame(PLAYER_FRAME, "obj:map", "in", "place:study")),
+            Beat("beat:cipher", Phase.CRISIS, Weight.REQUIRED,
+                 achievable_via=InFrame(PLAYER_FRAME, "fact:secret", "cipher", "red/map")),))
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "cipher", "value": "red/map"}])
+        reads = PorcelainWorldReads(world)
+        # entity-id path (short protected object id), with punctuation (Cx 272/274)
+        assert _take_touches_secret("the map", arc, reads) is True
+        assert _take_touches_secret("the map!", arc, reads) is True
+        assert _take_touches_secret("the map?", arc, reads) is True
+        assert _take_touches_secret("grab map; now", arc, reads) is True
+        # attr/VALUE path with punctuation IN the value ("red/map") — Cx 276
+        assert _take_touches_secret("take red map", arc, reads) is True
+        assert _take_touches_secret("red/map", arc, reads) is True
+        assert _take_touches_secret("red map!", arc, reads) is True
+        assert _take_touches_secret("a mug from the bar", arc, reads) is False  # ordinary → free
+
+    def test_carried_objects_surface_to_the_narrator(self, world):
+        # Object permanence: what the player holds is told to the narrator, so it can't
+        # re-narrate a held thing back where it came from (the fibre-on-the-sleeve bug).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "obj:lantern", "attribute": "kind", "value": "object", "timeless": True},
+            {"entity": "obj:lantern", "attribute": "in", "value": PLAYER, "value_type": "entity"},
+            {"entity": "obj:lantern", "attribute": "name", "value": "brass lantern"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You look about the study, the lantern warm in your hand."},
+        ])
+        run_turn(world, arc, provider, "I look around.", turn=2, scope=[PLAYER, "place:study"])
+        prompt = _narrate_prompt(provider)
+        assert "WHAT YOU ARE CARRYING" in prompt
+        assert "brass lantern" in prompt
+
+    def test_open_scene_grounding_zooms_in_and_holds_the_call(self):
+        # CHARACTER-GROUNDING P3: a grounding open zooms into the player's inhabited space and
+        # does NOT surface the call-to-action; the non-grounding open lets it arise.
+        from construct import cohorts
+        prov = StubProvider([{"prose": "You stand in your office, ledgers at your elbow."}])
+        cohorts.open_scene(prov, "BRIEF", "person:pc", grounding=True)
+        gp = prov.calls[-1][0]
+        assert "ZOOM INTO THEIR INHABITED SPACE" in gp
+        assert "Do NOT surface the case" in gp
+        prov2 = StubProvider([{"prose": "x"}])
+        cohorts.open_scene(prov2, "BRIEF", "person:pc", grounding=False)
+        assert "LET THE CALL TO ACTION ARISE" in prov2.calls[-1][0]
+
+    def test_grounding_runway_holds_the_call_on_the_first_turn(self, world):
+        # CHARACTER-GROUNDING P4: the first play turn briefs the narrator to keep it grounded and
+        # hold the inciting incident; a later turn does not.
+        arc = make_arc()
+        seed_arc(world, arc)
+        for _ in range(4):
+            world._extractions.append({"items": []})
+        prov = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You take in your study, the lamp low."},
+        ])
+        run_turn(world, arc, prov, "I look around.", turn=1, scope=[PLAYER, "place:study"])
+        assert "GROUNDING RUNWAY" in _narrate_prompt(prov)
+        prov2 = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The study again."},
+        ])
+        run_turn(world, arc, prov2, "I look around.", turn=2, scope=[PLAYER, "place:study"])
+        assert "GROUNDING RUNWAY" not in _narrate_prompt(prov2)
+
+    def test_move_to_an_improv_place_commits_the_relocation(self, world):
+        # FOUNDER live: "I said I went to Harrow's office" but canon kept me at the post office. A
+        # move to a NAMED place that doesn't resolve to canon now MINTS it + commits protagonist.in,
+        # so the next turn renders the NEW scene (not the stale prior one with the wrong cast).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the bell yard office", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"verdict": "new", "match": ""},        # Cx 354 A: semantic bind fires, says new → mint
+            {"prose": "You climb the steep stair to the office."},
+        ])
+        run_turn(world, arc, provider, "I go to the bell yard office.", turn=2,
+                 scope=[PLAYER, "place:study"])
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0].startswith("place:")
+        assert chain[0] != "place:study"          # actually relocated, not stuck at the old scene
+        assert "office" in chain[0]
+
+    def test_move_secret_guard_ignores_descriptive_clue_words(self, world):
+        # FOUNDER live cohesion bug (2026-06-29): the move-mint reused the broad secret-TAKE guard,
+        # whose vocabulary is polluted by common words from DESCRIPTIVE clue values — a clue like
+        # "the old lodging house" put "house" in the secret set, blocking walking to a "coffee house".
+        # The narrow move guard blocks only the hidden ANSWER's entity-reference identities (the
+        # culprit, the lair), never descriptive prose. This contrasts the two guards on the SAME world.
+        from construct.turnloop import _take_touches_secret, _move_touches_secret
+        from construct.arc.conditions import InFrame
+        from construct.arc.grammar import Beat, Phase, Weight
+        arc = replace(make_arc(), beats=(
+            Beat("beat:hideout", Phase.CRISIS, Weight.REQUIRED,
+                 achievable_via=InFrame(PLAYER_FRAME, "fact:hideout", "desc", "the old lodging house")),
+        ) + make_arc().beats)
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "fact:hideout", "attribute": "desc",
+                                  "value": "the old lodging house"}])
+        reads = PorcelainWorldReads(world)
+        # the BROAD take-guard over-blocks on the descriptive "house"; the NARROW move-guard does not
+        assert _take_touches_secret("the coffee house", arc, reads) is True
+        assert _move_touches_secret("the coffee house", arc, reads) is False
+        # both still refuse to conjure the hidden ANSWER's place (rival = the entity-ref culprit)
+        assert _move_touches_secret("the rival's lair", arc, reads) is True
+
+    def test_move_to_a_fixture_is_in_scene_not_travel(self, world):
+        # Cx 325 / blind test: "step to the table" (a FIXTURE of the current scene) must NOT mint
+        # place:table and walk the player out — it's in-scene repositioning. The colocated cast stays.
+        from construct.turnloop import _dest_head, _FIXTURE_HEADS
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "name", "value": "Maud"},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the table", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "answer the question",
+             "line_hint": ""},                                          # witness npc_turn (she's PRESENT)
+            {"prose": "You step to the table; Maud watches."},
+        ])
+        result = run_turn(world, arc, provider, "I step to the table and ask Maud what I'm looking at.",
+                          turn=2, scope=[PLAYER, "person:witness", "place:study"])
+        assert result.trace.movement_status == "in_scene"
+        assert any(c.startswith("npc_turn") for c in result.trace.cohort_calls)  # witness present + active
+        assert world.porcelain.locate(PLAYER)[0] == "place:study"          # did NOT leave the room
+        assert not PorcelainWorldReads(world).has_entity("place:table")    # no fixture-place minted
+        # the colocated witness stays present (the cast doesn't evaporate)
+        assert world.porcelain.locate("person:witness")[0] == "place:study"
+
+    def test_resolved_scene_object_move_does_not_commit_person_in_object(self, world):
+        # Cx 327 BLOCK: if a same-scene obj:table already exists, refer("the table") RESOLVES it and
+        # the resolved-target branch would commit person:player in obj:table (the person-in-object
+        # desync / cast disappearance). The move path now gates commits to place: targets and absorbs
+        # a resolved scene-object as in-scene — no location row, the colocated cast stays.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "obj:table", "attribute": "kind", "value": "object", "timeless": True},
+            {"entity": "obj:table", "attribute": "name", "value": "table"},
+            {"entity": "obj:table", "attribute": "in", "value": "place:study"},
+            {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:witness", "attribute": "name", "value": "Maud"},
+            {"entity": "person:witness", "attribute": "in", "value": "place:study"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the table", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": True, "intent": "answer", "line_hint": ""},  # witness
+            {"prose": "You go to the table; Maud is here."},
+        ])
+        result = run_turn(world, arc, provider, "I go to the table.", turn=2,
+                          scope=[PLAYER, "obj:table", "person:witness", "place:study"])
+        assert world.porcelain.locate(PLAYER)[0] == "place:study"   # NOT in obj:table
+        assert result.trace.movement_status == "in_scene"
+        assert world.porcelain.locate("person:witness")[0] == "place:study"  # cast stays present
+
+    def test_person_id_fallback_is_title_cased(self):
+        # Founder blind test: a nameless `person:` was addressed lowercase ("clara vale"). The slug
+        # fallback now Title-Cases person ids (proper names); obj/place stay lowercase for prose.
+        from construct.arc.executor import _human
+        assert _human("person:clara_vale") == "Clara Vale"
+        assert _human("person:edmund_reed") == "Edmund Reed"
+        assert _human("obj:brass_token") == "brass token"      # object stays lowercase
+        assert _human("place:bluegate_yard") == "bluegate yard"
+
+    def test_dest_head_split(self):
+        # head extraction + the block-list: fixtures absorb in-scene; everything else (place heads
+        # AND unknown heads) travels, preserving improv travel ("Harrow's office", novel places).
+        from construct.turnloop import _dest_head, _FIXTURE_HEADS
+        assert _dest_head("the table") == "table" and "table" in _FIXTURE_HEADS
+        assert _dest_head("the rain barrel by the shed") == "barrel" and "barrel" in _FIXTURE_HEADS
+        # HEAD matters: "back lane by the sheds" → head 'lane' (a place), NOT a fixture → travels
+        assert _dest_head("back lane by the warehouse sheds") == "lane"
+        assert _dest_head("the coffee house on the corner") == "house"
+        assert _dest_head("Harrow's office") == "office"
+        assert not ({"lane", "house", "office"} & _FIXTURE_HEADS)        # place heads travel
+
+    def test_move_reuses_authored_place_with_descriptive_kind(self, world):
+        # Cx 325: a move to an authored place whose `kind` is DESCRIPTIVE ("yard", not literally
+        # "place") must REUSE it, not mint a `_1` duplicate.
+        from construct.turnloop import _grant_moved_place
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind", "value": "murder scene in a rain-wet yard"},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"}])
+        got, _seg = _grant_moved_place(world, PLAYER, "bluegate yard", at=2000.0)
+        assert got == "place:bluegate_yard"                                 # reused, not bumped
+        assert not PorcelainWorldReads(world).has_entity("place:bluegate_yard_1")
+
+    def test_compound_destination_mints_contained_place(self, world):
+        # #91 (Cx 387, the probe's parallel office): "the Liddell warehouse, to the foreman's
+        # office" must mint the office NESTED IN the established warehouse — never a floating
+        # top-level place that strands whoever is really there.
+        from construct.turnloop import _embedded_container, _grant_moved_place
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:liddell_warehouse", "attribute": "kind", "value": "warehouse",
+             "timeless": True},
+            {"entity": "place:liddell_warehouse", "attribute": "name",
+             "value": "the Liddell warehouse"},
+            {"entity": "person:liddell", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:liddell", "attribute": "in", "value": "place:liddell_warehouse"},
+        ])
+        roster = [("place:liddell_warehouse", "the Liddell warehouse — warehouse"),
+                  ("place:study", "study — room")]
+        # the matcher: unique container + the non-matching tail
+        assert _embedded_container("the Liddell warehouse, to the foreman's office", roster) \
+            == ("place:liddell_warehouse", "the foreman's office")
+        assert _embedded_container("the docks", roster) is None              # no brush
+        assert _embedded_container("the Liddell warehouse", roster) is None  # IS the container
+        got, _seg = _grant_moved_place(world, PLAYER,
+                                       "the Liddell warehouse, to the foreman's office",
+                                       at=2000.0, roster=roster)
+        assert got == "place:foreman_s_office"
+        chain = world.porcelain.locate(PLAYER)
+        assert chain[0] == "place:foreman_s_office"
+        assert "place:liddell_warehouse" in chain          # NESTED, not floating
+        # the stranded-NPC failure mode is gone: the man in the warehouse shares the chain
+        assert "place:liddell_warehouse" in world.porcelain.locate("person:liddell")
+
+    def test_run_turn_compound_destination_wins_over_container_reuse(self, world):
+        # #91 caller-order regression (Cx 390 blocker): on the REAL run_turn path the
+        # known-place reuse token-matched the container and flattened the player INTO the
+        # warehouse — the office never minted. Compound-contained detection must win:
+        # the player ends in the NESTED office, and the man in the warehouse is present.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:liddell_warehouse", "attribute": "kind", "value": "warehouse",
+             "timeless": True},
+            {"entity": "place:liddell_warehouse", "attribute": "name",
+             "value": "the Liddell warehouse"},
+            {"entity": "person:liddell", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:liddell", "attribute": "in", "value": "place:liddell_warehouse"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the Liddell warehouse, to the foreman's office",
+             "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+             "commitment": "", "npcs_dismissed": [], "moved_with": [], "joins": []},
+            # Liddell is colocated via the containment chain → his npc_turn fires
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "The foreman's office is close and sour with lamp-smoke."},
+        ])
+        r = run_turn(world, arc, provider,
+                     "Reed and I go to the Liddell warehouse, to the foreman's office.",
+                     turn=2, scope=[PLAYER, "place:study", "place:liddell_warehouse",
+                                    "person:liddell"])
+        assert r.trace.movement_status == "clear"
+        chain = world.porcelain.locate(PLAYER)
+        assert chain[0] == "place:foreman_s_office"            # the durable child scene
+        assert "place:liddell_warehouse" in chain              # nested, not flattened
+        # the container-only reuse path did NOT fire: the office exists as its own place
+        assert PorcelainWorldReads(world).has_entity("place:foreman_s_office")
+
+    def test_run_turn_compound_destination_blocked_route_no_commit(self, world, monkeypatch):
+        # #91 caller-level route discipline (Cx 390): a blocked way to the container means
+        # the compound move commits NOTHING — no office mint, player stays put.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:liddell_warehouse", "attribute": "kind", "value": "warehouse",
+             "timeless": True},
+            {"entity": "place:liddell_warehouse", "attribute": "name",
+             "value": "the Liddell warehouse"},
+        ])
+        import construct.turnloop as tl
+        monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: {
+            "status": "blocked", "via": "obj:gate",
+            "evidence": [{"entity": "obj:gate", "attribute": "state", "value": "chained"}]})
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the Liddell warehouse, to the foreman's office",
+             "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+             "commitment": "", "npcs_dismissed": [], "moved_with": [], "joins": []},
+            {"prose": "The river gate is chained fast."},
+        ])
+        r = run_turn(world, arc, provider,
+                     "Through to the Liddell warehouse, to the foreman's office.",
+                     turn=2, scope=[PLAYER, "place:study", "place:liddell_warehouse"])
+        assert r.trace.movement_status == "blocked"
+        assert world.porcelain.locate(PLAYER)[0] == "place:study"
+        assert not PorcelainWorldReads(world).has_entity("place:foreman_s_office")
+
+    def _tick_setup(self, world):
+        from construct.cast import CastNode
+        world.porcelain.ingest_structured([
+            {"entity": "place:market", "attribute": "kind", "value": "market", "timeless": True},
+            {"entity": "place:lane", "attribute": "kind", "value": "lane", "timeless": True},
+            {"entity": "person:maud", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:maud", "attribute": "in", "value": "place:lane"},
+            {"entity": "person:cray", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:cray", "attribute": "in", "value": "place:lane"},
+        ])
+        from construct.arc.executor import turn_time
+        world.porcelain.ingest_structured([
+            {"entity": "person:maud", "attribute": "last_seen_min", "value": 100.0,
+             "valid_from": turn_time(1)},
+            {"entity": "person:cray", "attribute": "last_seen_min", "value": 100.0,
+             "valid_from": turn_time(1)},
+        ], frame="session:main")
+        cast = {
+            "person:maud": CastNode("person:maud", surface_role="coster"),
+            "person:cray": CastNode("person:cray", surface_role="foreman", is_culprit=True),
+        }
+        return cast
+
+    def test_world_tick_moves_member_but_never_the_culprit(self, world):
+        # #84 (Cx 395/396): an eligible off-screen member moves as ordinary canon; the
+        # culprit's move is DROPPED (reachability by construction), never repaired.
+        from construct.turnloop import TurnTrace, _world_tick
+        arc = make_arc()
+        seed_arc(world, arc)
+        cast = self._tick_setup(world)
+        trace = TurnTrace(turn=3)
+        trace.movement_status = "clear"
+        provider = StubProvider([{"ticks": [
+            {"member": "person:maud", "kind": "moved",
+             "detail": "wheeled her barrow across to the market", "moves_to": "place:market",
+             "with_member": ""},
+            {"member": "person:cray", "kind": "moved", "detail": "slipped off",
+             "moves_to": "place:market", "with_member": ""},
+        ]}])
+        _world_tick(world, world.porcelain, arc, trace, provider, 3, cast=cast, npcs=[],
+                    entry_scene="place:lane", scene="place:study",
+                    live_reads=PorcelainWorldReads(world), minutes_now=200.0)
+        assert world.porcelain.locate("person:maud")[0] == "place:market"
+        assert world.porcelain.locate("person:cray")[0] == "place:lane"   # anchored
+        assert trace.world_tick == ["person:maud:moved"]
+
+    def test_world_tick_floor_and_unmet_and_leaks(self, world):
+        # #84 teeth: below the elapsed floor → no call at all; never-met member → skipped;
+        # a leaking `detail` (concealed vocabulary) → that tick dropped, clean one commits.
+        from construct.turnloop import TurnTrace, _world_tick
+        arc = make_arc()
+        seed_arc(world, arc)
+        cast = self._tick_setup(world)
+        # below the floor: seen 10 minutes ago → the cohort is never consulted
+        trace = TurnTrace(turn=3)
+        trace.movement_status = "clear"
+        provider = StubProvider([])
+        _world_tick(world, world.porcelain, arc, trace, provider, 3, cast=cast, npcs=[],
+                    entry_scene="place:lane", scene="place:study",
+                    live_reads=PorcelainWorldReads(world), minutes_now=110.0)
+        assert trace.world_tick == [] and not provider.calls
+        # above the floor: the leaking detail ("the culprit…" brushes concealed vocabulary)
+        # is dropped; the clean event commits as canon the notebook can never pre-know
+        trace2 = TurnTrace(turn=4)
+        trace2.movement_status = "clear"
+        provider2 = StubProvider([{"ticks": [
+            {"member": "person:maud", "kind": "sent_word",
+             "detail": "sent word naming the culprit of the affair", "moves_to": "",
+             "with_member": ""},
+            {"member": "person:cray", "kind": "finished_task",
+             "detail": "tallied the day's weights and locked the shed", "moves_to": "",
+             "with_member": ""},
+        ]}])
+        _world_tick(world, world.porcelain, arc, trace2, provider2, 4, cast=cast, npcs=[],
+                    entry_scene="place:lane", scene="place:study",
+                    live_reads=PorcelainWorldReads(world), minutes_now=200.0)
+        assert trace2.world_tick == ["person:cray:finished_task"]
+        rows = [r for r in world.buffer.visible()
+                if str(r.entity) == "event:tick_cray_4"]
+        assert any(r.attribute == "kind" and r.value == "finished_task" for r in rows)
+        assert not any(str(r.entity) == "event:tick_maud_4"
+                       for r in world.buffer.visible())
+
+    def test_world_tick_plot_only_place_never_a_destination(self, world):
+        # Cx 398 blocker 1: `buffer.visible()` without a frame is UNFILTERED — a place that
+        # exists only in plot:main must neither reach the prompt as a KNOWN PLACE nor be
+        # accepted as a canon movement destination.
+        from construct.turnloop import TurnTrace, _world_tick
+        arc = make_arc()
+        seed_arc(world, arc)
+        cast = self._tick_setup(world)
+        world.porcelain.ingest_structured(
+            [{"entity": "place:vault", "attribute": "kind", "value": "hidden vault",
+              "timeless": True}], frame="plot:main")
+        trace = TurnTrace(turn=3)
+        trace.movement_status = "clear"
+        provider = StubProvider([{"ticks": [
+            {"member": "person:maud", "kind": "moved", "detail": "slipped into the vault",
+             "moves_to": "place:vault", "with_member": ""},
+        ]}])
+        _world_tick(world, world.porcelain, arc, trace, provider, 3, cast=cast, npcs=[],
+                    entry_scene="place:lane", scene="place:study",
+                    live_reads=PorcelainWorldReads(world), minutes_now=200.0)
+        _wtk = next(p for (p, _s, _t) in provider.calls if task_of(p) == "wtk")
+        assert "place:vault" not in _wtk                       # never offered to the model
+        assert world.porcelain.locate("person:maud")[0] == "place:lane"   # never moved
+        assert trace.world_tick == []
+
+    def test_world_tick_met_with_player_patient_dropped(self, world):
+        # Cx 398 blocker 2: off-screen action is never about the player — a met_with whose
+        # patient is the protagonist (or any ineligible person) drops the whole meeting.
+        from construct.turnloop import TurnTrace, _world_tick
+        arc = make_arc()
+        seed_arc(world, arc)
+        cast = self._tick_setup(world)
+        trace = TurnTrace(turn=3)
+        trace.movement_status = "clear"
+        provider = StubProvider([{"ticks": [
+            {"member": "person:maud", "kind": "met_with",
+             "detail": "waylaid the detective by the stair", "moves_to": "",
+             "with_member": PLAYER},
+        ]}])
+        _world_tick(world, world.porcelain, arc, trace, provider, 3, cast=cast, npcs=[],
+                    entry_scene="place:lane", scene="place:study",
+                    live_reads=PorcelainWorldReads(world), minutes_now=200.0)
+        assert trace.world_tick == []
+        assert not any(str(r.entity).startswith("event:tick_maud")
+                       for r in world.buffer.visible())
+        # an eligible off-screen patient still commits (person:cray shares the lane)
+        trace2 = TurnTrace(turn=4)
+        trace2.movement_status = "clear"
+        provider2 = StubProvider([{"ticks": [
+            {"member": "person:maud", "kind": "met_with",
+             "detail": "compared tallies over the barrow", "moves_to": "",
+             "with_member": "person:cray"},
+        ]}])
+        _world_tick(world, world.porcelain, arc, trace2, provider2, 4, cast=cast, npcs=[],
+                    entry_scene="place:lane", scene="place:study",
+                    live_reads=PorcelainWorldReads(world), minutes_now=200.0)
+        assert trace2.world_tick == ["person:maud:met_with"]
+        _rows = [r for r in world.buffer.visible()
+                 if str(r.entity) == "event:tick_maud_4"]
+        assert any(r.attribute == "patient" and r.value == "person:cray" for r in _rows)
+
+    def test_tick_consequences_discovered_not_narrated(self, world):
+        # #84 REQUIRED PAIR (Cx 395/396 constraint 1): a tick consequence is DISCOVERED by
+        # going there — it is never omniscient narrator fuel from elsewhere.
+        arc = make_arc()
+        seed_arc(world, arc)
+        self._tick_setup(world)
+        from construct.arc.executor import turn_time
+        # a committed tick: maud moved to the market + a meanwhile event about it
+        world.porcelain.ingest_structured([
+            {"entity": "person:maud", "attribute": "in", "value": "place:market",
+             "value_type": "entity", "valid_from": turn_time(2)},
+            {"entity": "event:tick_maud_2", "attribute": "kind", "value": "met_with",
+             "valid_from": turn_time(2)},
+            {"entity": "event:tick_maud_2", "attribute": "agent", "value": "person:maud",
+             "value_type": "entity", "valid_from": turn_time(2)},
+            {"entity": "event:tick_maud_2", "attribute": "detail",
+             "value": "met the coal factor by the weigh-house", "valid_from": turn_time(2)},
+        ])
+        _scope = [PLAYER, "place:study", "place:market", "person:maud", "event:tick_maud_2"]
+        # NEGATIVE: a turn spent elsewhere — no prompt may carry the off-screen meanwhile
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The study is quiet."},
+        ])
+        run_turn(world, arc, provider, "I look over my notes.", turn=3, scope=_scope)
+        for (_p, _s, _t) in provider.calls:
+            assert "met the coal factor" not in _p
+            assert "person:maud · in · place:market" not in _p
+        # POSITIVE: going to the market DISCOVERS her — presence renders the changed world
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider2 = StubProvider([
+            {"kind": "action", "moves_to": "the market", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Maud is at her barrow by the weigh-house."},
+        ])
+        r2 = run_turn(world, arc, provider2, "I go to the market.", turn=4, scope=_scope)
+        assert world.porcelain.locate(PLAYER)[0] == "place:market"
+        _nar = next(p for (p, _s, _t) in reversed(provider2.calls) if task_of(p) == "nar")
+        assert "Maud" in _nar.split("PRESENT CHARACTERS")[-1]
+
+    def test_grant_move_blocked_route_to_container_does_not_commit(self, world, monkeypatch):
+        # #91 (Cx 387 hard constraint): the mint path obeys the same passability discipline —
+        # a blocked route to the embedded container means NO commit, status blocked.
+        from construct.turnloop import _grant_moved_place
+        import construct.turnloop as tl
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:liddell_warehouse", "attribute": "kind", "value": "warehouse",
+             "timeless": True},
+            {"entity": "place:liddell_warehouse", "attribute": "name",
+             "value": "the Liddell warehouse"},
+        ])
+        monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: {
+            "status": "blocked", "via": "obj:gate",
+            "evidence": [{"entity": "obj:gate", "attribute": "state", "value": "chained"}]})
+        got, seg = _grant_moved_place(
+            world, PLAYER, "the Liddell warehouse, to the foreman's office", at=2000.0,
+            p=world.porcelain, origin="place:study",
+            roster=[("place:liddell_warehouse", "the Liddell warehouse — warehouse")])
+        assert got is None and seg and seg["status"] == "blocked"
+        assert world.porcelain.locate(PLAYER)[0] == "place:study"   # never moved
+        assert not PorcelainWorldReads(world).has_entity("place:foreman_s_office")
+
+    def test_move_definite_description_binds_existing_place_not_mint(self, world):
+        # Cx 354 A (founder phantom-scene incident): "the scene of the crime" is a DEFINITE
+        # DESCRIPTION of the authored murder-scene place — zero token overlap, so the old path
+        # minted place:scene_of_the_crime (a phantom). The semantic bind must travel to the
+        # established place instead.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind",
+             "value": "murder scene in a rain-wet yard", "timeless": True},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"verdict": "existing", "match": "place:bluegate_yard"},   # the dst bind
+            {"prose": "You step out into the rain toward Bluegate Yard."},
+        ])
+        run_turn(world, arc, provider, "Shall we see to the scene of the crime?", turn=2,
+                 scope=[PLAYER, "place:study", "place:bluegate_yard"])
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0] == "place:bluegate_yard"      # bound, traveled
+        assert not PorcelainWorldReads(world).has_entity("place:scene_of_the_crime")
+
+    def test_move_definite_description_binds_place_outside_scope(self, world):
+        # Cx 356 BLOCKER regression: production bodycase's scope holds NO place:bluegate_yard —
+        # the roster must enumerate the WORLD's known places (canon + player frame), not just
+        # the turn snapshot scope, or the live incident recurs.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind",
+             "value": "murder scene in a rain-wet yard", "timeless": True},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"verdict": "existing", "match": "place:bluegate_yard"},
+            {"prose": "You head out to Bluegate Yard."},
+        ])
+        # scope deliberately EXCLUDES place:bluegate_yard (the production shape)
+        run_turn(world, arc, provider, "Shall we see to the scene of the crime?", turn=2,
+                 scope=[PLAYER, "place:study"])
+        # the roster offered the world-known place (it reached the dst prompt) and the bind landed
+        dst_prompt = next(p for (p, _s, _t) in provider.calls if task_of(p) == "dst")
+        assert "place:bluegate_yard" in dst_prompt
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0] == "place:bluegate_yard"
+        assert not PorcelainWorldReads(world).has_entity("place:scene_of_the_crime")
+
+    def test_episode_doorway_moves_time_and_place(self, world):
+        # #88 S4 (Cx 380 blocker): the chapter doorway is ENGINE TRUTH — time jumps to the next
+        # phase (elapsed_minutes increases) and the protagonist returns to the prior episode's
+        # OPENING place; no items are added. (This test FAILED before the 380 fix: the old leg
+        # called the clock API with wrong signatures and the fail-open swallowed it.)
+        # NB: built with construct's attribute_default (like production seals) — the accrue
+        # fold on elapsed_minutes needs the semantics hook; the plain fixture world lacks it.
+        import tempfile
+        from pathlib import Path
+        from patternbuffer import World
+        from patternbuffer.testing import StubModel, rule_classifier_fallback
+        from construct.game import _episode_doorway
+        from construct.semantics import attribute_default
+        from construct.clock import read_clock
+        _rule = rule_classifier_fallback()
+        w2 = World(Path(tempfile.mkdtemp()) / "door.world", world_id="w:door",
+                   stance="fiction", attribute_default=attribute_default,
+                   model=StubModel(fallback=lambda p, s: _rule(p, s)
+                                   if p.startswith("Classify the lifetime") else {"items": []}))
+        w2.ingestor.cursor.advance(1.0)
+        w2.ingest_structured([
+            {"entity": "place:study", "attribute": "kind", "value": "room", "timeless": True},
+            {"entity": "place:far_end", "attribute": "kind", "value": "room", "timeless": True},
+            {"entity": PLAYER, "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": PLAYER, "attribute": "in", "value": "place:study",
+             "valid_from": 1000.4},  # the episode-opening place (before epoch+0.5)
+        ])
+        w2.porcelain.ingest_structured([
+            {"entity": PLAYER, "attribute": "in", "value": "place:far_end",
+             "valid_from": 1010.0},  # the terminal scene — elsewhere
+        ])
+        _before = read_clock(w2).minutes
+        door = _episode_doorway(w2, PLAYER, 1000.0, 12)
+        assert read_clock(w2).minutes > _before             # TIME moved (engine truth)
+        assert door == "place:study"                        # the prior opening place
+        assert w2.porcelain.locate(PLAYER)[0] == "place:study"      # PLACE moved
+        held = w2.porcelain.contents(PLAYER) if hasattr(w2.porcelain, "contents") else []
+        assert not held                                      # ITEMS: nothing minted
+        w2.close()
+
+    def test_wrong_commitment_records_loss_even_when_frame_knows_truth(self, world):
+        # #88 S2 (Cx 375-C, the founder's won-after-wrong bug): the player's frame KNOWS the
+        # answer (world_condition satisfied — e.g. via interview delivery), but their ACCUSATION
+        # is graded WRONG → the recorded outcome must be arc_lost with the shape attrs; knowing
+        # the truth is not accusing rightly.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured(
+            [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+            frame=PLAYER_FRAME)             # world_condition TRUE — old code recorded "won"
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True,
+             "commitment": "I accuse the butler to his face"},
+            {"grade": "wrong", "rationale": "the butler is innocent; the rival did it"},
+            {"prose": "The accusation lands on the wrong man, and the room knows it."},
+        ])
+        r = run_turn(world, arc, provider, "Butler, you did this — I charge you!", turn=12,
+                     scope=[PLAYER, "place:study"], scenario_mode="win_loss")
+        assert r.trace.commitment_grade == "wrong"
+        assert r.trace.outcome == "lost"                          # the grade decided
+        reads = PorcelainWorldReads(world)
+        assert reads.events(kind="arc_lost", frame="session:main")   # binary = plumbing only
+        assert not reads.events(kind="arc_won", frame="session:main")
+        _shape = [(r.attribute, r.value) for r in world.buffer.visible(
+            entity="event:arc_outcome_12", frame="session:main")]
+        assert ("grade", "wrong") in _shape                       # the SHAPE receipt is durable
+        # S1 (#96, Cx 414): a GRADED commitment close keeps the RECKONING beat
+        _nar = next(pr for (pr, _s, _t) in reversed(provider.calls) if task_of(pr) == "nar")
+        assert "BEAT 1 — THE RECKONING SCENE" in _nar
+        assert "BEAT 1 — THE SETTLING" not in _nar
+
+    def test_unstaged_commitment_gets_clarification_beat(self, world):
+        # #88A (founder + Cx 375): an underspecified conclusory move gets ONE in-fiction
+        # clarification beat — no grade, no receipt; the session remembers it asked, so the
+        # NEXT attempt is judged as given (no loop).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "the rival did it"},
+            {"specified": False, "missing": ["audience"],
+             "clarification": "Say it to whom? The study is empty."},
+            {"prose": "Your words find no one; the study holds only lamplight."},
+        ])
+        r = run_turn(world, arc, provider, "THE RIVAL DID IT", turn=12,
+                     scope=[PLAYER, "place:study"])
+        assert r.trace.commitment_clarified          # the beat, not a judgment
+        assert not r.trace.commitment_grade
+        assert not r.trace.terminal
+        nar = next(p for (p, _s, _t) in reversed(provider.calls) if task_of(p) == "nar")
+        assert "Say it to whom" in nar
+        # second attempt: the receipt suppresses the gate — judged as given (here it BOUNCES on
+        # incomplete coverage, which IS a judgment path, not another clarification).
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider2 = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "I accuse the rival to his face"},
+            {"specified": False, "missing": ["audience"], "clarification": "should not be used"},
+            {"prose": "The accusation hangs in the air."},
+        ])
+        r2 = run_turn(world, arc, provider2, "Rival, you did it — I say it to your face.",
+                      turn=13, scope=[PLAYER, "place:study"])
+        assert not r2.trace.commitment_clarified     # gate did NOT re-fire
+
+    def test_ingest_raise_never_sinks_the_turn(self, world, monkeypatch):
+        # #89 (eval: hedgetest's CLIMAX crashed on a PB declaration raise): any in-turn
+        # ingest_structured raise drops its rows LOUDLY and the turn still ships prose.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": [
+            {"entity": PLAYER, "attribute": "took", "value": "the digitalis"}]})
+        world._extractions.append({"items": []})
+        _orig = world.porcelain.ingest_structured
+
+        def _boom(rows, **kw):
+            if any(r.get("attribute") == "took" for r in (rows or []) if isinstance(r, dict)):
+                raise ValueError("cannot declare semantics for attribute 'took' after "
+                                 "folded data already exists (a:952)")
+            return _orig(rows, **kw)
+
+        monkeypatch.setattr(world.porcelain, "ingest_structured", _boom)
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "Julian goes pale as the accusation lands."},
+        ])
+        r = run_turn(world, arc, provider, "Julian, you took the digitalis!", turn=2,
+                     scope=[PLAYER, "place:study"])
+        assert r.prose                                       # the turn SHIPPED
+        assert any("ingest" in d for d in r.trace.dropped_cohorts)   # loudly noted
+
+    def test_seek_a_person_move_travels_to_their_true_place(self, world):
+        # Founder live 2026-07-01 ("I go back to where Reed is"): the "where X is" wrapper
+        # defeated refer → no travel → the narrator conjured a ghost arrival. The unwrap strips
+        # it; the person→place redirect (Cx 003) then carries the player to X's REAL location.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:annex", "attribute": "kind", "value": "room", "timeless": True},
+            {"entity": PLAYER, "attribute": "in", "value": "place:annex"},
+            {"entity": "person:reed", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "where Reed is", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "You find Reed in the study."},
+        ])
+        run_turn(world, arc, provider, "I go back to where Reed is.", turn=2,
+                 scope=[PLAYER, "place:annex", "place:study", "person:reed"])
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0] == "place:study"        # traveled to Reed's true place
+
+    def test_dismissal_and_companion_move_exact_live_turn(self, world):
+        # Cx 363/365 test bar #1 (the exact live turn-14 shape): "You two may go… Sir? Shall we
+        # see to the scene of the crime?" → Maud/Nell get departed_scene events, Reed's `in`
+        # commits WITH the player at the bound destination, and neither dismissed NPC is present
+        # in the next turn's briefing.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind",
+             "value": "murder scene in a rain-wet yard", "timeless": True},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"},
+            {"entity": "person:maud", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:maud", "attribute": "in", "value": "place:study"},
+            {"entity": "person:nell", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:nell", "attribute": "in", "value": "place:study"},
+            {"entity": "person:reed", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:reed", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        _scope = [PLAYER, "place:study", "place:bluegate_yard",
+                  "person:maud", "person:nell", "person:reed"]
+        # classify: roster is npc_0=maud, npc_1=nell, npc_2=reed (sorted scope order)
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": ["npc_0", "npc_1"], "moved_with": ["npc_2"]},
+            {"verdict": "existing", "match": "place:bluegate_yard"},
+            # Reed arrives WITH the player → he is present at the new scene → npc_turn fires
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Maud takes Nell out into the dark; Reed walks with you to the yard."},
+        ])
+        r = run_turn(world, arc, provider,
+                     "You two may go. Sir? Shall we see to the scene of the crime?",
+                     turn=2, scope=_scope)
+        assert sorted(r.trace.npcs_departed) == ["person:maud", "person:nell"]
+        assert r.trace.npcs_moved_with == ["person:reed"]
+        assert world.porcelain.locate(PLAYER)[0] == "place:bluegate_yard"
+        assert world.porcelain.locate("person:reed")[0] == "place:bluegate_yard"  # came along
+        # next turn: dismissed NPCs are NOT in the briefing; Reed is
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider2 = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Reed crouches by the stain."},
+        ])
+        r2 = run_turn(world, arc, provider2, "I look around.", turn=3, scope=_scope)
+        nar = next(p for (p, _s, _t) in reversed(provider2.calls) if task_of(p) == "nar")
+        assert "Maud" not in nar.split("PRESENT CHARACTERS")[-1].split("\n\n")[0]
+        assert r2.prose
+
+    def test_dismissed_npc_absent_when_player_stays(self, world):
+        # Cx 363 test bar #3 (stay-after-dismissal): player dismisses and REMAINS — the
+        # dismissed NPC is absent from presence with NO fake destination minted.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:maud", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:maud", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": ["npc_0"], "moved_with": []},
+            {"prose": "Maud gathers her shawl and goes."},
+        ])
+        r = run_turn(world, arc, provider, "You may go, Maud.", turn=2,
+                     scope=[PLAYER, "place:study", "person:maud"])
+        assert r.trace.npcs_departed == ["person:maud"]
+        # presence next turn: alone (the departed_scene projection suppresses her)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider2 = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The room is quieter now."},
+        ])
+        run_turn(world, arc, provider2, "I look around.", turn=3,
+                 scope=[PLAYER, "place:study", "person:maud"])
+        nar = next(p for (p, _s, _t) in reversed(provider2.calls) if task_of(p) == "nar")
+        assert "PRESENT CHARACTERS: none besides you" in nar   # she's gone, honestly
+        # no fake destination: her `in` is untouched (projection, not relocation)
+        assert world.porcelain.locate("person:maud")[0] == "place:study"
+
+    def test_companions_do_not_move_on_blocked_route(self, world, monkeypatch):
+        # Cx 363 test bar #2: blocked route → player does not move and NO moved_with NPC moves.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind",
+             "value": "murder scene yard", "timeless": True},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"},
+            {"entity": "person:reed", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:reed", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        import construct.turnloop as tl
+        monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: {
+            "status": "blocked", "via": "obj:door1",
+            "evidence": [{"entity": "obj:door1", "attribute": "state", "value": "shut"}]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": ["npc_0"]},
+            {"verdict": "existing", "match": "place:bluegate_yard"},
+            # blocked → player stays at the study WITH Reed → his npc_turn still fires
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "The door will not give."},
+        ])
+        r = run_turn(world, arc, provider, "Sir? Shall we see to the scene of the crime?",
+                     turn=2, scope=[PLAYER, "place:study", "person:reed"])
+        assert r.trace.movement_status == "blocked"
+        assert r.trace.npcs_moved_with == []                       # nobody companion-committed
+        assert world.porcelain.locate(PLAYER)[0] == "place:study"
+        assert world.porcelain.locate("person:reed")[0] == "place:study"
+
+    def _seed_reed(self, world):
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind",
+             "value": "murder scene yard", "timeless": True},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"},
+            {"entity": "person:reed", "attribute": "kind", "value": "person", "timeless": True},
+            {"entity": "person:reed", "attribute": "in", "value": "place:study"},
+            {"entity": "person:reed", "attribute": "pronouns", "value": "he/him",
+             "timeless": True},
+        ])
+
+    def test_colocated_person_outside_scope_is_present(self, world):
+        # #94 campaign F12 (present-but-unseen): scope is a briefing boundary, not a truth
+        # boundary — a person CANONICALLY in the room must be present (candidates + npc
+        # turn + briefing) even when the episode scope omits them (the ch2 clerk who was
+        # served and then denied while Tin Ear stood colocated the whole run).
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:tin_ear", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:tin_ear", "attribute": "name", "value": "Tin Ear"},
+            {"entity": "person:tin_ear", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Tin Ear slides the ledger across the counter."},
+        ])
+        # scope OMITS person:tin_ear entirely — canon colocation must carry presence
+        r = run_turn(world, arc, provider, "I look over the counter.", turn=2,
+                     scope=[PLAYER, "place:study"])
+        assert r.prose
+        _nar = next(p for (p, _s, _t) in reversed(provider.calls) if task_of(p) == "nar")
+        assert "Tin Ear" in _nar.split("PRESENT CHARACTERS")[-1].split("\n\n")[0]
+
+    def test_self_question_routes_addressed_inward(self, world):
+        # Founder live 2026-07-03 ("my own memories should answer here"): a question about
+        # the player's OWN life is CHECKED at classify (`asks_self`) and routes to their own
+        # memory as a BINDING briefing block — outranking the last-speaker convention, even
+        # with an NPC present mid-conversation.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "person:julian", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:julian", "attribute": "in", "value": "place:study"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "question", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "", "asks_self": True},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "You had a room at the inn above the coach yard."},
+        ])
+        r = run_turn(world, arc, provider, "Where did I stay prior?", turn=2,
+                     scope=[PLAYER, "place:study", "person:julian"])
+        assert r.prose
+        _nar = next(p for (p, _s, _t) in reversed(provider.calls) if task_of(p) == "nar")
+        assert "ADDRESSED INWARD" in _nar
+        assert "their own memory answers" in _nar
+
+    def test_nested_colocated_person_outside_scope_is_present(self, world):
+        # #94 F12, Cx 408 yellow: the candidate SOURCE must match the presence AUTHORITY's
+        # containment shape — a person in a CHILD place of the player's scene is present
+        # even when scope omits both the person and the child place.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            # a child alcove nested INSIDE the player's current scene (the study)
+            {"entity": "place:alcove", "attribute": "kind", "value": "alcove",
+             "timeless": True},
+            {"entity": "place:alcove", "attribute": "in", "value": "place:study",
+             "value_type": "entity"},
+            {"entity": "person:nested", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:nested", "attribute": "name", "value": "Nestor"},
+            {"entity": "person:nested", "attribute": "in", "value": "place:alcove",
+             "value_type": "entity"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Nestor looks up from the alcove."},
+        ])
+        r = run_turn(world, arc, provider, "I take stock of the room.", turn=2,
+                     scope=[PLAYER, "place:study"])
+        assert r.prose
+        _nar = next(p for (p, _s, _t) in reversed(provider.calls) if task_of(p) == "nar")
+        assert "Nestor" in _nar.split("PRESENT CHARACTERS")[-1].split("\n\n")[0]
+
+    def test_invite_then_later_moves_carry_companion(self, world, monkeypatch):
+        # #82 (the Reed ping-pong, Cx 372/373): "stick with me" on a NON-move turn commits
+        # STANDING `accompanying` canon; EVERY later accepted move then carries the companion
+        # with no per-move wording — across multiple turns. (The pacing nudge is patched out —
+        # it fires on later quiet turns and would eat queue stubs; not under test here.)
+        import construct.cohorts as _ch
+        monkeypatch.setattr(_ch, "nudge_pick",
+                            lambda *a, **k: {"thread": "", "directive": "The wind shifts."})
+        arc = make_arc()
+        seed_arc(world, arc)
+        self._seed_reed(world)
+        _scope = [PLAYER, "place:study", "place:bluegate_yard", "person:reed"]
+        # turn 2 — the invitation, no move
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": [], "joins": ["npc_0"]},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Reed nods. 'With you, then.'"},
+        ])
+        r = run_turn(world, arc, provider, "Stick with me, Reed.", turn=2, scope=_scope)
+        assert r.trace.npcs_joined == ["person:reed"]
+        reads = PorcelainWorldReads(world)
+        assert reads.state("person:reed", "accompanying") == PLAYER
+        # turn 3 — a plain move, NO companion wording: the standing state carries him
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider2 = StubProvider([
+            {"kind": "action", "moves_to": "the yard", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": [], "joins": []},
+            # "the yard" token-matches place:bluegate_yard deterministically — no referee stub
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "You cross to the yard; Reed keeps pace."},
+        ])
+        r2 = run_turn(world, arc, provider2, "I head to the yard.", turn=3, scope=_scope)
+        assert r2.trace.npcs_moved_with == ["person:reed"]
+        assert world.porcelain.locate("person:reed")[0] == "place:bluegate_yard"
+        # COMPANION TEXTURE (#85): the standing companion is briefed as a companion, not a
+        # bystander — the npc decision knows it, and the narrate briefing tags it.
+        _npt = next(p for (p, _s, _t) in provider2.calls if task_of(p) == "npt")
+        assert "YOU ARE THE PLAYER'S COMPANION" in _npt
+        _nar = next(p for (p, _s, _t) in reversed(provider2.calls) if task_of(p) == "nar")
+        assert "[COMPANION — with the player by agreement]" in _nar
+        # CAST IDENTITY (#87): the seeded pronouns ride the presence line
+        assert "(he/him)" in _nar
+        # turn 4 — move again (back): still carried, no wording (survives across turns)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider3 = StubProvider([
+            {"kind": "action", "moves_to": "the study", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": [], "joins": []},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Back in the study, Reed shakes the rain off."},
+        ])
+        r3 = run_turn(world, arc, provider3, "Back to the study.", turn=4, scope=_scope)
+        assert r3.trace.npcs_moved_with == ["person:reed"]
+        assert world.porcelain.locate("person:reed")[0] == "place:study"
+
+    def test_dismissal_clears_standing_companionship(self, world, monkeypatch):
+        # #82: dismissal supersedes `accompanying` with the empty literal — a later move
+        # carries nobody, and the departed companion stays honestly gone.
+        import construct.cohorts as _ch
+        monkeypatch.setattr(_ch, "nudge_pick",
+                            lambda *a, **k: {"thread": "", "directive": "The wind shifts."})
+        arc = make_arc()
+        seed_arc(world, arc)
+        self._seed_reed(world)
+        _scope = [PLAYER, "place:study", "place:bluegate_yard", "person:reed"]
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": [], "joins": ["npc_0"]},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Reed falls in beside you."},
+        ])
+        run_turn(world, arc, provider, "You're with me now, Reed.", turn=2, scope=_scope)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider2 = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": ["npc_0"], "moved_with": [], "joins": []},
+            {"prose": "Reed touches his hat and goes."},
+        ])
+        r2 = run_turn(world, arc, provider2, "That's all for tonight, Reed. You may go.",
+                      turn=3, scope=_scope)
+        assert r2.trace.npcs_departed == ["person:reed"]
+        reads = PorcelainWorldReads(world)
+        assert not reads.state("person:reed", "accompanying")   # cleared (empty literal)
+        # a later move carries nobody
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider3 = StubProvider([
+            {"kind": "action", "moves_to": "the yard", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": [], "joins": []},
+            {"prose": "You go out to the yard alone."},
+        ])
+        r3 = run_turn(world, arc, provider3, "I head to the yard.", turn=4, scope=_scope)
+        assert r3.trace.npcs_moved_with == []
+        assert world.porcelain.locate("person:reed")[0] == "place:study"
+
+    def test_standing_companion_not_carried_on_blocked_route(self, world, monkeypatch):
+        # #82: the standing state obeys the same route gate as per-move wording — a blocked
+        # move carries nobody.
+        import construct.cohorts as _ch
+        monkeypatch.setattr(_ch, "nudge_pick",
+                            lambda *a, **k: {"thread": "", "directive": "The wind shifts."})
+        arc = make_arc()
+        seed_arc(world, arc)
+        self._seed_reed(world)
+        _scope = [PLAYER, "place:study", "place:bluegate_yard", "person:reed"]
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": [], "joins": ["npc_0"]},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "Reed falls in beside you."},
+        ])
+        run_turn(world, arc, provider, "Stay close, Reed.", turn=2, scope=_scope)
+        import construct.turnloop as tl
+        monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: {
+            "status": "blocked", "via": "obj:door1",
+            "evidence": [{"entity": "obj:door1", "attribute": "state", "value": "shut"}]})
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider2 = StubProvider([
+            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": "",
+             "npcs_dismissed": [], "moved_with": [], "joins": []},
+            {"verdict": "existing", "match": "place:bluegate_yard"},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "The door will not give."},
+        ])
+        r2 = run_turn(world, arc, provider2, "Through to the scene of the crime.",
+                      turn=3, scope=_scope)
+        assert r2.trace.movement_status == "blocked"
+        assert r2.trace.npcs_moved_with == []
+        assert world.porcelain.locate(PLAYER)[0] == "place:study"
+        assert world.porcelain.locate("person:reed")[0] == "place:study"
+
+    def test_bound_destination_respects_blocked_route(self, world, monkeypatch):
+        # Cx 358 BLOCKER: a semantically BOUND destination must run the same passability gate
+        # as ordinary resolved travel — a blocked route (shut door) means NO commit, status
+        # "blocked", obstruction on the trace; never a teleport.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind",
+             "value": "murder scene in a rain-wet yard", "timeless": True},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        import construct.turnloop as tl
+        _blocked = {"status": "blocked", "via": "obj:door1",
+                    "evidence": [{"entity": "obj:door1", "attribute": "state", "value": "shut"}]}
+        monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: dict(_blocked))
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"verdict": "existing", "match": "place:bluegate_yard"},
+            {"prose": "The door will not give."},
+        ])
+        r = run_turn(world, arc, provider, "Shall we see to the scene of the crime?", turn=2,
+                     scope=[PLAYER, "place:study"])
+        assert r.trace.movement_status == "blocked"
+        assert r.trace.movement_obstruction and \
+            r.trace.movement_obstruction.get("via") == "obj:door1"
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0] == "place:study"       # did NOT teleport through the door
+
+    def test_move_genuinely_new_place_still_mints(self, world):
+        # improv-travel preserved: verdict=new falls through to the movement-permanence mint.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:bluegate_yard", "attribute": "kind", "value": "yard",
+             "timeless": True},
+            {"entity": "place:bluegate_yard", "attribute": "name", "value": "Bluegate Yard"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the old mill on the hill", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"verdict": "new", "match": ""},
+            {"prose": "You climb to the old mill."},
+        ])
+        run_turn(world, arc, provider, "I head to the old mill on the hill.", turn=2,
+                 scope=[PLAYER, "place:study", "place:bluegate_yard"])
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0].startswith("place:") and chain[0] != "place:study"
+
+    def test_alone_scene_briefing_states_no_one_present(self, world):
+        # Cx 354 B2 (founder "why are nell and grieves here???"): an EMPTY colocated set must
+        # be stated in the narrate briefing so the narrator can't resurrect departed cast.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The room holds quiet around you."},
+        ])
+        run_turn(world, arc, provider, "I look around.", turn=2, scope=[PLAYER, "place:study"])
+        nar = next(p for (p, _s, _t) in reversed(provider.calls) if task_of(p) == "nar")
+        assert "PRESENT CHARACTERS: none besides you" in nar
+        assert "Do not stage earlier characters" in nar
+
+    def test_move_deictic_back_is_not_minted(self, world):
+        # Cx 288 nit: a deictic/directional move ("go back") must NOT mint `place:back` — the
+        # narrator handles it against the real geography.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "back", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You turn back the way you came."},
+        ])
+        run_turn(world, arc, provider, "I go back.", turn=2, scope=[PLAYER, "place:study"])
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0] == "place:study"          # no place:back minted; stayed put
+        assert world.porcelain.state("place:back", "kind")["status"] != "known"
+
+    def test_move_to_an_ambiguous_reference_is_not_minted(self, world):
+        # Cx 288 #2: an AMBIGUOUS reference (refer underdetermined WITH candidates) must NOT be
+        # resolved by slug convention into a mint — PB's reference contract stays honest.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:office_a", "attribute": "kind", "value": "room", "timeless": True},
+            {"entity": "place:office_a", "attribute": "name", "value": "office"},
+            {"entity": "place:office_b", "attribute": "kind", "value": "room", "timeless": True},
+            {"entity": "place:office_b", "attribute": "name", "value": "office"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "office", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "Which office did you mean?"},
+        ])
+        run_turn(world, arc, provider, "I go to the office.", turn=2, scope=[PLAYER, "place:study"])
+        assert world.porcelain.state("place:office", "kind")["status"] != "known"  # no slug-mint
+
+    def test_unresolved_undiscovered_suspect_location_is_not_minted(self):
+        # Cx review #1: the entitlement gate runs only on a RESOLVED target, so a guessed/UNRESOLVED
+        # variant of an undiscovered offscene suspect (or their location) must ALSO be denied the
+        # move-permanence mint — else the player teleports near them by naming a variant.
+        from types import SimpleNamespace
+        from construct.turnloop import _names_undiscovered_dest
+        node = SimpleNamespace(node_id="person:warden", location="place:keep", surface_role="warden")
+        cbi = {"person:warden": node}
+        name_of = lambda e: {"person:warden": "Warden Cray", "place:keep": "the old keep"}.get(e, "")
+        undiscovered = lambda n: True            # whereabouts not yet learned
+        assert _names_undiscovered_dest("the old keep", cbi, undiscovered, name_of) is True  # their place
+        assert _names_undiscovered_dest("warden cray's rooms", cbi, undiscovered, name_of) is True  # them
+        assert _names_undiscovered_dest("the bell yard office", cbi, undiscovered, name_of) is False  # other
+        # once discovered, the gate no longer blocks
+        assert _names_undiscovered_dest("the old keep", cbi, lambda n: False, name_of) is False
+
+    def test_match_known_place_reuses_instead_of_minting_a_twin(self):
+        # FOUNDER cohesion test bug: "return to my own office" minted a DUPLICATE office instead of
+        # reusing the existing one. _match_known_place token-matches a known place so a return home
+        # reuses it; an unknown name → None (genuine improv → mint); ambiguous → None (don't guess).
+        from types import SimpleNamespace
+        from construct.turnloop import _match_known_place
+        reads = SimpleNamespace(state=lambda e, a: "room")
+        name_of = lambda e: {"place:office": "the office", "place:study": "the study"}.get(e, "")
+        cands = {"place:office", "place:study", "person:x"}
+        assert _match_known_place("my own office", cands, reads, name_of) == "place:office"
+        assert _match_known_place("the bakery on the lane", cands, reads, name_of) is None
+        # ambiguous — two places both named "office" → don't guess
+        amb = SimpleNamespace(state=lambda e, a: "room")
+        assert _match_known_place("office", {"place:office_a", "place:office_b"},
+                                  amb, lambda e: "the office") is None
+
+    def test_move_to_a_secret_named_place_is_not_minted(self, world):
+        # The concealment guard holds: a move whose name brushes the arc's hidden vocabulary
+        # ("the rival's lair" — rival is the protected culprit) is NOT minted by fiat.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the rival's lair", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "You cannot simply find your way there."},
+        ])
+        run_turn(world, arc, provider, "I go to the rival's lair.", turn=2,
+                 scope=[PLAYER, "place:study"])
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0] == "place:study"   # stayed put — no secret place minted
+
     def test_present_npc_yields_exactly_one_npc_turn_call(self, world):
         # TURN-LATENCY Lever 4: a present NPC produces ONE npc_turn:<id> cohort call
         # (was npc_action:<id> + npc_intent:<id>), and the speak-intent still reaches
@@ -1095,8 +2855,8 @@ class TestFullTurn:
                           scope=["person:witness", PLAYER, "place:study"])
         npc_calls = [c for c in result.trace.cohort_calls if c.startswith("npc_")]
         assert npc_calls == ["npc_turn:person:witness:cheap"]
-        # present-cast briefing names the NPC (de-leaked id) + their want (Cx 091 #1)
-        assert "witness: wants deflect" in _narrate_prompt(provider)
+        # present-cast briefing names the NPC (de-leaked id, Title-Cased person name) + want (Cx 091 #1)
+        assert "Witness: wants deflect" in _narrate_prompt(provider)
 
     def test_silent_present_npc_is_still_named_in_the_briefing(self, world):
         # Cx 091 #1 (continuity): a present NPC who does NOT speak this turn must still be named
@@ -1488,18 +3248,22 @@ class TestFullTurn:
         assert r.exit_requested is True
         assert r.prose == ""
 
-    def test_ooc_is_answered_by_conduit_and_short_circuits(self, world):
+    def test_no_automatic_conduit_stays_in_fiction(self, world):
+        # Founder 2026-07-01: Conduit speaks ONLY via the explicit /ooc command. A stray
+        # classify 'ooc' verdict (legacy stub) must NOT break to the host persona — it falls
+        # through to the in-world action/narration path, keeping the player in the fiction. The
+        # trigger was an in-character line to a present partner ("do you have any more questions
+        # for these two?") getting mis-tagged OOC and answered by the host instead of the character.
         arc = make_arc()
         seed_arc(world, arc)
-        # classify → ooc, then the Conduit host reply (no narration cohort = the
-        # world does not advance on an OOC turn).
         provider = StubProvider([
             {"kind": "ooc", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
-            {"reply": "No — you haven't met the win or loss condition yet."},
+            {"prose": "Reed considers, then shakes his head. \"Nothing more from them for now.\""},
         ])
-        result = run_turn(world, arc, provider, "have I won yet?", turn=1)
-        assert result.prose.startswith("Conduit:")
-        assert "win or loss condition" in result.prose
+        result = run_turn(world, arc, provider, "do you have any more questions for these two?",
+                          turn=1)
+        assert not result.prose.startswith("Conduit:")   # host persona never auto-fires
+        assert "conduit" not in " ".join(result.trace.cohort_calls).lower()
 
 
 def test_names_entity_matches_narrated_names():
@@ -2004,8 +3768,14 @@ def test_render_blocks_stage1_collapsed_shape():
     # The two contradictions/overstatements are gone.
     assert "What you make real here becomes part of the world" not in RENDER_LEASH
     assert "ANSWER THIS TURN, do not re-establish" not in RENDER_STYLE
-    # Standing-rule mass shrank well below the old ~7.1k chars for the two blocks.
-    assert len(RENDER_STYLE) + len(RENDER_LEASH) < 4500
+    # DIALOGUE IS SPEECH, NOT THESIS (founder 2026-07-01, "reeds one liner is so lame"):
+    # characters never recite the theme as a tidy maxim/epigram — it lives in what they do.
+    assert "DIALOGUE IS SPEECH, NOT THESIS" in RENDER_STYLE
+    assert "never" in RENDER_STYLE and "epigram" in RENDER_STYLE
+    # NO HARD LENGTH BUDGET (founder ruling 2026-07-01): a char cap forced weird include/cut
+    # logic ("no room for the better clause"). Inclusion is judged on MERIT — every clause
+    # earns its place; elegance is proper details properly presented, not fewer chars. Context
+    # overload is guarded editorially (the Cx prompt-elegance reviews), not numerically.
 
 
 def test_narrate_conditional_blocks_gate():
@@ -2145,7 +3915,31 @@ def test_terminal_epilogue_names_cast_and_reveals(world):
                       scenario_mode="win_loss")
     assert result.trace.terminal is True
     narrate_prompt = _narrate_prompt(provider)
-    assert "EPILOGUE" in narrate_prompt
+    # #88 S3: the close is TWO BEATS — a reckoning scene, then the aftermath (was: "EPILOGUE").
+    # S1 (#96, Cx 414): this fixture closes via the WORLD CONDITION (no graded commitment
+    # landed), so beat 1 is the SETTLING — no verdict, no judgment scene. The RECKONING
+    # branch is pinned on the graded-commitment test.
+    assert "BEAT 1 — THE SETTLING" in narrate_prompt
+    assert "NO verdict, NO accusation" in narrate_prompt
+    assert "BEAT 1 — THE RECKONING SCENE" not in narrate_prompt
+    assert "BEAT 2 — THE AFTERMATH" in narrate_prompt
+    assert "unexpected BOON" in narrate_prompt          # the founder's mixed-outcome vocabulary
+    # S2 (#96, Cx 414): every ending writes deterministic caused-by consequence events
+    assert any(c.startswith("word_spreads:") for c in result.trace.consequences)
+    assert any(c.startswith("reputation_changes:") for c in result.trace.consequences)
+    _cons_rows = [r for r in world.buffer.visible()
+                  if str(r.entity).startswith("event:consequence_")]
+    assert any(r.attribute == "kind" and r.value == "word_spreads" for r in _cons_rows)
+    assert any(r.attribute == "detail" for r in _cons_rows)
+    # Cx 420 blocker: causality must live on the EVENT ENTITY (item-level caused_by
+    # lands on the assertion row) — events().caused_by carries the terminal receipt.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    _preads = _PWR(world)
+    for _kind in ("word_spreads", "reputation_changes"):
+        _evs = _preads.events(kind=_kind)
+        assert _evs and any(str(c).startswith("event:arc_outcome_")
+                            for c in (_evs[0].caused_by or [])), \
+            f"{_kind} event must be caused_by the terminal receipt"
     assert "person:rival" in narrate_prompt   # the cast (a fate for each)
     assert "THE TRUTH" in narrate_prompt       # concealment lifts at the curtain
     # E2 (Cx 139 #2 / 141): on a close turn the epilogue OWNS the render — the player's act FOLDS
@@ -2420,6 +4214,9 @@ def test_movement_relocates_player(world):
     world._extractions.append({"items": []})   # post-render extraction
     provider = StubProvider([
         {"kind": "action", "moves_to": "the flat", "requires": [], "needs_test": False, "uncertain_of": ""},
+        # F12 (present-but-unseen): the rival LIVES in the flat — arriving there, he is
+        # honestly present now (colocated ⇒ discovered), so his npc_turn fires.
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "You cross to the flat."},
     ])
     run_turn(world, arc, provider, "I leave the study and go to the flat.", turn=1)
@@ -2441,6 +4238,8 @@ def test_movement_to_a_person_redirects_to_their_place(world):
     world._extractions.append({"items": []})
     provider = StubProvider([
         {"kind": "action", "moves_to": "parker", "requires": [], "needs_test": False, "uncertain_of": ""},
+        # F12: Parker is honestly present at his own pantry when you arrive — npc_turn fires
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "You go find Parker in the pantry."},
     ])
     run_turn(world, arc, provider, "I go to Parker.", turn=1)
@@ -3325,3 +5124,744 @@ class TestWorldReshape:
             "fact:secret", "culprit")["fact"]["value"] == "person:rival"
         # ...but the concrete consequence DID commit upstream
         assert world.porcelain.state("person:rival", "mood")["fact"]["value"] == "rattled"
+
+
+# ---------------------------------------------------------------------------
+# #95 DEATH & THE TESTAMENT (DEATH-TESTAMENT.md, Cx 422)
+# ---------------------------------------------------------------------------
+
+_MORTAL_CLASSIFY = {
+    "kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+    "uncertain_of": "the drop from the parapet would kill",
+    "mortal_risk": True, "commits": False, "commitment": "",
+}
+
+
+def _stage_peril(world, scene="place:study"):
+    from construct.arc.executor import turn_time
+    world.porcelain.ingest_structured([
+        {"entity": "session:peril", "attribute": "scene", "value": scene,
+         "valid_from": turn_time(1)},
+        {"entity": "session:peril", "attribute": "cause",
+         "value": "the drop from the parapet", "valid_from": turn_time(1)},
+    ], frame="session:main")
+
+
+def test_first_mortal_risk_stages_never_kills(world, monkeypatch):
+    # Cx 422 bar 1: the FIRST life-risking turn stages (stakes unmistakable, the move
+    # lands SHORT of death) even on a forced terrible_failure — never a gotcha.
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "The ledge crumbles; you catch the gutter, bloodied but alive."},
+    ])
+    result = run_turn(world, arc, provider, "I leap across the gap.", turn=2,
+                      scope=[PLAYER, "place:study"], death_policy="mortal")
+    assert result.trace.peril == "staged"
+    assert result.trace.terminal_kind != "died" and not result.trace.terminal
+    assert not _PWR(world).events(kind="player_death", frame="session:main")
+    _np = _narrate_prompt(provider)
+    assert "MORTAL STAKES" in _np and "SHORT of death" in _np
+    # the marker persisted for the next turn's standing check
+    assert (_PWR(world).state("session:peril", "scene", frame="session:main")
+            == "place:study")
+
+
+def test_staged_mortal_terrible_failure_kills_with_testament(world, monkeypatch):
+    # Cx 422 bar 2: staged + mortal_risk + terrible_failure under policy `mortal` →
+    # the death receipt owns the terminal; THE FALL + THE TESTAMENT render; `died`
+    # consequences are caused_by the DEATH receipt (event-entity row, the 420 lesson).
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    from construct.turnloop import terminal_outcome
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    _stage_peril(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "The gutter gives. The yard comes up. The world goes on without you."},
+    ])
+    result = run_turn(world, arc, provider, "I press on across the parapet.", turn=2,
+                      scope=[PLAYER, "place:study"], death_policy="mortal",
+                      scenario_mode="win_loss")
+    assert result.trace.terminal is True
+    assert result.trace.terminal_kind == "died"
+    _preads = _PWR(world)
+    assert terminal_outcome(_preads) == "died"
+    assert _preads.events(kind="player_death", frame="session:main")
+    # no arc_won/arc_lost shape receipt — the death receipt owns the terminal
+    assert not _preads.events(kind="arc_won", frame="session:main")
+    assert not _preads.events(kind="arc_lost", frame="session:main")
+    _np = _narrate_prompt(provider)
+    assert "BEAT 1 — THE FALL" in _np and "BEAT 2 — THE TESTAMENT" in _np
+    assert "NO rescue invented" in _np
+    assert "BEAT 1 — THE RECKONING SCENE" not in _np
+    assert "BEAT 1 — THE SETTLING" not in _np
+    # died consequences, caused_by the death receipt on the EVENT ENTITY
+    assert any(c.startswith("word_spreads:died") for c in result.trace.consequences)
+    for _kind in ("word_spreads", "reputation_changes"):
+        _evs = _preads.events(kind=_kind)
+        assert _evs and any(str(c).startswith("event:player_death_")
+                            for c in (_evs[0].caused_by or []))
+
+
+def test_shielded_policy_wounds_never_kills(world, monkeypatch):
+    # Cx 422 bar 3: same staged fatal setup under `shielded` → wound/capture/ruin
+    # directive, no death receipt, story continues.
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    _stage_peril(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "The fall breaks your arm, not your neck."},
+    ])
+    result = run_turn(world, arc, provider, "I press on across the parapet.", turn=2,
+                      scope=[PLAYER, "place:study"], death_policy="shielded")
+    assert not result.trace.terminal and result.trace.terminal_kind != "died"
+    assert not _PWR(world).events(kind="player_death", frame="session:main")
+    _np = _narrate_prompt(provider)
+    assert "THE PRICE STOPS SHORT OF DEATH" in _np and "does NOT kill" in _np
+
+
+def test_premise_policy_folds_death_into_the_premise(world, monkeypatch):
+    # Cx 422 bar 4: under `premise` the death is rendered and TRANSFORMED by the
+    # story's own premise (the loop resets, the ghost persists) — never terminal.
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    _stage_peril(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "You die on the yard stones — and wake to the same grey morning."},
+    ])
+    result = run_turn(world, arc, provider, "I press on across the parapet.", turn=2,
+                      scope=[PLAYER, "place:study"], death_policy="premise")
+    assert not result.trace.terminal and result.trace.terminal_kind != "died"
+    assert not _PWR(world).events(kind="player_death", frame="session:main")
+    _np = _narrate_prompt(provider)
+    assert "DEATH, TRANSFORMED" in _np and "premise" in _np
+
+
+def test_death_ends_endless_mode_too(world, monkeypatch):
+    # Cx 422 bar 5 (permanence): an endless/freeplay world still STOPS at death.
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    from construct.turnloop import terminal_outcome
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    _stage_peril(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "The river takes you; the town keeps its own hours."},
+    ])
+    result = run_turn(world, arc, provider, "I press on into the flood.", turn=2,
+                      scope=[PLAYER, "place:study"], death_policy="mortal",
+                      scenario_mode="endless", endless=True)
+    assert result.trace.terminal is True and result.trace.terminal_kind == "died"
+    assert terminal_outcome(_PWR(world)) == "died"
+
+
+def test_peril_clears_on_non_risk_turn_then_restages(world, monkeypatch):
+    # Cx 422 bar 8: a non-risk turn releases the peril; a LATER lone mortal-risk turn
+    # stages again rather than killing (peril never stalks the player).
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    _stage_peril(world)
+    world._extractions.extend([{"items": []}, {"items": []},
+                               {"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "mortal_risk": False, "commits": False, "commitment": ""},
+        {"prose": "You step back from the edge and breathe."},
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "You climb out again; the gutter shifts under your weight."},
+    ])
+    r1 = run_turn(world, arc, provider, "I step back from the edge.", turn=2,
+                  scope=[PLAYER, "place:study"], death_policy="mortal")
+    assert r1.trace.peril == "cleared"
+    assert not (_PWR(world).state("session:peril", "scene",
+                                  frame="session:main") or "").strip()
+    r2 = run_turn(world, arc, provider, "I climb out onto the parapet again.", turn=3,
+                  scope=[PLAYER, "place:study"], death_policy="mortal")
+    assert r2.trace.peril == "staged"
+    assert r2.trace.terminal_kind != "died"
+    assert not _PWR(world).events(kind="player_death", frame="session:main")
+
+
+# ---------------------------------------------------------------------------
+# #93 VOCATIVE TITLE RESOLUTION (Cx 404 C-scope)
+# ---------------------------------------------------------------------------
+
+def _chief_and_witness(world, chief_at="place:office"):
+    """Canon: a unique title-holder (the chief of police) at `chief_at`, and a
+    clue-bearing witness present in the player's study. Returns the cast dict."""
+    from construct.cast import CastNode, Clue
+    world.porcelain.ingest_structured([
+        {"entity": "place:office", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:chief", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:chief", "attribute": "name", "value": "Chief Harrow"},
+        {"entity": "person:chief", "attribute": "role", "value": "chief of police"},
+        {"entity": "person:chief", "attribute": "in", "value": chief_at},
+        {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:witness", "attribute": "in", "value": "place:study"},
+    ])
+    return {
+        "person:witness": CastNode("person:witness", "witness", "the witness",
+            holds_clues=(Clue("clue:motive", "pillar:motive", ("fact:motive", "is", "debt"),
+                              coverage_effect="genuine", reveal_condition="none"),)),
+        "person:chief": CastNode("person:chief", "chief of police", "Chief Harrow",
+            holds_clues=(Clue("clue:orders", "pillar:motive", ("fact:orders", "is", "sealed"),
+                              coverage_effect="genuine", reveal_condition="none"),)),
+    }
+
+
+def test_vocative_to_absent_title_holder_suppresses_fallback_delivery(world):
+    # Cx 404 C: "'Chief!' with the chief absent does not deliver Reed's clue" — the
+    # sole-present-NPC fallback must not catch an address to someone who isn't here,
+    # and the narrator renders the honest not-here beat.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _chief_and_witness(world, chief_at="place:office")   # chief NOT in the study
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "The word hangs in the room; the chief is not here to catch it."},
+    ])
+    result = run_turn(world, arc, provider, "Chief!", turn=2, cast=cast,
+                      scope=["person:witness", "person:chief", PLAYER, "place:study"])
+    assert result.trace.vocative.endswith("(ABSENT)")
+    assert result.trace.learned_clues == []          # NO clue re-routed to the witness
+    assert not _PWR(world).assertion_in_frame(PLAYER_FRAME, "fact:motive", "is", "debt")
+    _np = _narrate_prompt(provider)
+    assert "CALLED FOR SOMEONE NOT HERE" in _np and "Chief Harrow" in _np
+    assert "SPOKEN TO BY TITLE" not in _np
+
+
+def test_vocative_to_present_title_holder_binds_and_delivers(world):
+    # Cx 404 C: 'Chief, …' with the chief PRESENT resolves the address to the canon
+    # title-holder — they get the floor (briefing) and their clue is deliverable.
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _chief_and_witness(world, chief_at="place:study")    # chief IS here
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"acts": False, "action": "", "speaks": True, "intent": "answer plainly",
+         "line_hint": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "Harrow turns from the window. 'Sealed orders, since you ask.'"},
+    ])
+    result = run_turn(world, arc, provider, "Chief, what were your orders?", turn=2,
+                      cast=cast,
+                      scope=["person:witness", "person:chief", PLAYER, "place:study"])
+    assert result.trace.vocative.endswith("(present)")
+    assert "clue:orders" in result.trace.learned_clues
+    _np = _narrate_prompt(provider)
+    assert "SPOKEN TO BY TITLE" in _np and "Chief Harrow" in _np
+
+
+def test_mid_sentence_title_word_is_never_an_address(world):
+    # Cx 404 C: address-syntax gate — 'my chief concern' must not resolve as a
+    # vocative (no suppression, no binding, ordinary turn).
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _chief_and_witness(world, chief_at="place:office")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"acts": False, "action": "", "speaks": True, "intent": "reassure",
+         "line_hint": ""},
+        {"prose": "The witness nods along as you lay out your concern."},
+    ])
+    result = run_turn(world, arc, provider,
+                      "My chief concern is the ledger and nothing else.", turn=2,
+                      cast=cast,
+                      scope=["person:witness", "person:chief", PLAYER, "place:study"])
+    assert result.trace.vocative == ""
+    _np = _narrate_prompt(provider)
+    assert "CALLED FOR SOMEONE NOT HERE" not in _np
+    assert "SPOKEN TO BY TITLE" not in _np
+
+
+def test_vocative_token_forms():
+    # the deterministic detector: leading / sole / trailing address forms in;
+    # interjections and mid-sentence uses out.
+    from construct.turnloop import _vocative_token
+    assert _vocative_token("Chief!") == "chief"
+    assert _vocative_token("Chief, where were you?") == "chief"
+    # Cx 427: interjection lead-ins, case-insensitive, with or without the comma
+    assert _vocative_token("Hey, Chief, what were your orders?") == "chief"
+    assert _vocative_token("hey, Chief, what were your orders?") == "chief"
+    assert _vocative_token("Hey Chief, what were your orders?") == "chief"
+    assert _vocative_token("Hey, what's the plan?") == ""
+    assert _vocative_token("What do you make of it, Chief?") == "chief"
+    assert _vocative_token("Doctor!") == "doctor"
+    assert _vocative_token("My chief concern is the ledger.") == ""
+    assert _vocative_token("Well, that's odd.") == ""
+    assert _vocative_token("I walk to the yard.") == ""
+
+
+# ---------------------------------------------------------------------------
+# #98 FIRST-MENTION PERMANENCE — settle wiring (Cx 415 test bar, wiring layer)
+# ---------------------------------------------------------------------------
+
+def test_narrated_named_venue_commits_stub_and_second_mention_binds(world):
+    # The founder's Hart-and-Bell case: narrator prose establishes a NAMED venue →
+    # a minimal stub commits (kind/name, non-present) and SURVIVES; the next turn's
+    # mention BINDS the stub (no duplicate); the player never relocates.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": []})                    # turn 2: player-input extract
+    world._extractions.append({"items": [                       # turn 2: post-render extract
+        {"entity": "place:hart_and_bell", "attribute": "kind", "value": "inn"},
+        {"entity": "place:hart_and_bell", "attribute": "name", "value": "The Hart and Bell"},
+        {"entity": "place:hart_and_bell", "attribute": "description",
+         "value": "a low coach-yard inn smelling of tallow"},
+    ]})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "Before the Hall, you kept a room at The Hart and Bell, above the "
+                  "coach yard."},
+    ])
+    r1 = run_turn(world, arc, provider, "I think back to where I stayed before.",
+                  turn=2, scope=[PLAYER, "place:study"])
+    assert r1.prose
+    p = world.porcelain
+    # the stub is REAL and MINIMAL: kind+name, no description, no presence
+    assert p.state("place:hart_and_bell", "name")["fact"]["value"] == "The Hart and Bell"
+    assert (p.state("place:hart_and_bell", "description").get("fact") or {}) == {} \
+        or p.state("place:hart_and_bell", "description").get("status") == "unknown"
+    assert p.locate(PLAYER)[0] == "place:study"                 # nobody relocated
+    # turn 3: the world mentions it again under a DIFFERENT extraction slug → binds
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": [
+        {"entity": "place:the_hart_and_bell", "attribute": "name",
+         "value": "The Hart and Bell"},
+        {"entity": "place:the_hart_and_bell", "attribute": "kind", "value": "inn"},
+    ]})
+    provider2 = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "The Hart and Bell keeps early hours; the ostlers would remember you."},
+    ])
+    r2 = run_turn(world, arc, provider2, "I recall the inn's mornings.", turn=3,
+                  scope=[PLAYER, "place:study"])
+    assert r2.prose
+    _ents = {str(r.entity) for r in world.buffer.visible()
+             if str(r.entity).startswith("place:") and "hart" in str(r.entity)}
+    assert _ents == {"place:hart_and_bell"}                     # ONE inn, no twin
+    _rcpts = [t for t in (r2.trace.resolver or []) if t[0] == "place:hart_and_bell"]
+    assert any(why == "bound" for (_e, _a, why) in _rcpts)
+
+
+def test_first_risk_shielded_never_stages_or_threatens_death(world, monkeypatch):
+    # Cx 426 blocker: a FIRST mortal-risk turn in a `shielded` chapter must not write
+    # a lethal-peril marker or tell the narrator death is on the table — the genre
+    # decides; the fatal draw caps at wound/capture/ruin.
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "The fall breaks your arm, not your neck."},
+    ])
+    result = run_turn(world, arc, provider, "I leap across the gap.", turn=2,
+                      scope=[PLAYER, "place:study"], death_policy="shielded")
+    assert result.trace.peril != "staged"
+    assert not (_PWR(world).state("session:peril", "scene",
+                                  frame="session:main") or "").strip()
+    assert not _PWR(world).events(kind="player_death", frame="session:main")
+    _np = _narrate_prompt(provider)
+    assert "MORTAL STAKES" not in _np and "it can kill" not in _np
+    assert "THE PRICE STOPS SHORT OF DEATH" in _np
+
+
+def test_first_risk_premise_folds_without_staging(world, monkeypatch):
+    # Cx 426: a `premise` chapter's first mortal-risk fatal draw folds into the
+    # premise directly (the loop IS the safety) — no marker, no death-table staging.
+    from construct import resolution
+    from construct.adapter import PorcelainWorldReads as _PWR
+    monkeypatch.setattr(resolution, "draw_tier", lambda *a, **k: "terrible_failure")
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        dict(_MORTAL_CLASSIFY),
+        {"prose": "You die on the stones — and wake to the same grey morning."},
+    ])
+    result = run_turn(world, arc, provider, "I leap across the gap.", turn=2,
+                      scope=[PLAYER, "place:study"], death_policy="premise")
+    assert result.trace.peril != "staged"
+    assert not (_PWR(world).state("session:peril", "scene",
+                                  frame="session:main") or "").strip()
+    assert not result.trace.terminal
+    _np = _narrate_prompt(provider)
+    assert "MORTAL STAKES" not in _np and "DEATH, TRANSFORMED" in _np
+
+
+def test_vocative_leadin_forms_absent_holder_still_suppresses(world):
+    # Cx 427 blocker: 'Hey, Chief, …' with the chief ABSENT must resolve and suppress
+    # the sole-present-NPC fallback exactly like the bare form.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _chief_and_witness(world, chief_at="place:office")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "The call goes unanswered; the chief is elsewhere tonight."},
+    ])
+    result = run_turn(world, arc, provider, "Hey, Chief, what were your orders?",
+                      turn=2, cast=cast,
+                      scope=["person:witness", "person:chief", PLAYER, "place:study"])
+    assert result.trace.vocative.endswith("(ABSENT)")
+    assert result.trace.learned_clues == []
+    assert not _PWR(world).assertion_in_frame(PLAYER_FRAME, "fact:motive", "is", "debt")
+    assert "CALLED FOR SOMEONE NOT HERE" in _narrate_prompt(provider)
+
+
+def test_vocative_leadin_forms_present_holder_binds(world):
+    # Cx 427: the commaed capitalized lead-in binds a PRESENT holder too.
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _chief_and_witness(world, chief_at="place:study")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"acts": False, "action": "", "speaks": True, "intent": "answer", "line_hint": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "Harrow answers without turning from the window."},
+    ])
+    result = run_turn(world, arc, provider, "Hey Chief, what were your orders?",
+                      turn=2, cast=cast,
+                      scope=["person:witness", "person:chief", PLAYER, "place:study"])
+    assert result.trace.vocative.endswith("(present)")
+    assert "clue:orders" in result.trace.learned_clues
+    assert "SPOKEN TO BY TITLE" in _narrate_prompt(provider)
+
+
+def test_frame_only_named_entity_never_enters_the_canon_bind_path(world):
+    # Cx 433 blocker regression: a place/person NAMED only in a private frame
+    # (knows:/plot:) must not be BOUND by the settle resolver — binding would let
+    # full prose rows (description etc.) attach past the stub trim, promoting
+    # private memory into world truth. The mention resolves through the STUB gate
+    # (minimal rows) instead, and the private frame stays private.
+    arc = make_arc()
+    seed_arc(world, arc)
+    # the inn exists ONLY in the player's memory frame — no canon rows at all
+    world.porcelain.ingest_structured([
+        {"entity": "place:hart_and_bell", "attribute": "name",
+         "value": "The Hart and Bell"},
+        {"entity": "place:hart_and_bell", "attribute": "secret",
+         "value": "where the letters were exchanged"},
+    ], frame=PLAYER_FRAME)
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": [
+        {"entity": "place:hart_and_bell", "attribute": "name",
+         "value": "The Hart and Bell"},
+        {"entity": "place:hart_and_bell", "attribute": "description",
+         "value": "a low coach-yard inn smelling of tallow"},
+    ]})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "Talk turns to The Hart and Bell, down in the village."},
+    ])
+    result = run_turn(world, arc, provider, "I mention the inn.", turn=2,
+                      scope=[PLAYER, "place:study"])
+    # never BOUND to the frame-only entity (bound would bypass the stub trim)
+    _rcpts = [t for t in (result.trace.resolver or [])
+              if t[0] == "place:hart_and_bell"]
+    assert _rcpts and not any(why == "bound" for (_e, _a, why) in _rcpts)
+    # the description never reached canon (stub minimality held)
+    _desc = world.porcelain.state("place:hart_and_bell", "description")
+    assert not (_desc.get("fact") or {}).get("value")
+    # the private frame row is still private, not canon
+    _secret = world.porcelain.state("place:hart_and_bell", "secret")
+    assert not (_secret.get("fact") or {}).get("value")
+
+
+# ---------------------------------------------------------------------------
+# #97 THE REMEMBRANCER (REMEMBRANCER.md, Cx 434)
+# ---------------------------------------------------------------------------
+
+def _mem_classify(**kw):
+    base = {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            "uncertain_of": "", "commits": False, "commitment": ""}
+    base.update(kw)
+    return base
+
+
+def test_self_question_is_answered_by_memory_turn_not_an_npc(world):
+    # Cx 434 bar: the self-question routes to memory_turn — its stirred memory rides
+    # the briefing as second-person interiority alongside ADDRESSED INWARD.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        _mem_classify(asks_self=True),
+        {"stirs": True, "memory": "a room above the coach yard, before the Hall",
+         "feeling": "familiarity"},
+        {"prose": "You remember the room above the coach yard."},
+    ])
+    result = run_turn(world, arc, provider, "Where did I stay before?", turn=2,
+                      scope=[PLAYER, "place:study"])
+    assert "memory_turn:cheap" in result.trace.cohort_calls
+    assert result.trace.memory.startswith("a room above the coach yard")
+    _np = _narrate_prompt(provider)
+    assert "YOUR OWN MIND THIS TURN" in _np and "coach yard" in _np
+    assert "ADDRESSED INWARD" in _np
+    # the memory participant is interiority ONLY — the pin on its contract
+    _mem_prompt = next(p for (p, _s, _t) in provider.calls if "OWN MEMORY" in p)
+    assert "Never dialogue" in _mem_prompt and "never an action" in _mem_prompt
+
+
+def test_memory_turn_gated_recall_fires_lookaround_does_not(world):
+    # Cx 434 constraint 2: explicit recall fires the participant; a generic
+    # look-around never does (no standing vibe trigger).
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []},
+                               {"items": []}, {"items": []}])
+    provider = StubProvider([
+        _mem_classify(recalls=True),
+        {"stirs": True, "memory": "rain drying on his coat at the first meeting",
+         "feeling": "old caution"},
+        {"prose": "The first meeting comes back to you."},
+        _mem_classify(),
+        {"prose": "The study sits quiet around you."},
+    ])
+    r1 = run_turn(world, arc, provider, "I think back to our first meeting.", turn=2,
+                  scope=[PLAYER, "place:study"])
+    assert "memory_turn:cheap" in r1.trace.cohort_calls
+    r2 = run_turn(world, arc, provider, "I glance around the room.", turn=3,
+                  scope=[PLAYER, "place:study"])
+    assert "memory_turn:cheap" not in r2.trace.cohort_calls
+    assert r2.trace.memory == ""
+
+
+def test_declared_memory_commits_frame_rows_and_offscene_person_stub(world):
+    # Cx 434 constraints 3+4 / the founder's retcon: "I remember my childhood friend
+    # John Johnson…" → knows:<prot> autobiography + a MINIMAL offscene canon person
+    # (kind/name/role via the #98 gate — never `in`, never present).
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        _mem_classify(recalls=True, declares_memory=True),
+        {"claims": [{"about": "self", "subject": "", "attribute": "childhood_promise",
+                     "value": "never to let it happen again"}],
+         "people": [{"name": "John Johnson", "relation": "childhood friend"}]},
+        {"stirs": True, "memory": "John's face, and the promise", "feeling": "resolve"},
+        {"prose": "The promise surfaces whole, with John's face attached."},
+    ])
+    result = run_turn(world, arc, provider,
+                      "I remember my childhood friend John Johnson. I promised I "
+                      "would never let this happen again.", turn=2,
+                      scope=[PLAYER, "place:study"])
+    p = world.porcelain
+    # the offscene stub: minimal, real, NOT placed anywhere
+    assert p.state("person:john_johnson", "name")["fact"]["value"] == "John Johnson"
+    assert p.state("person:john_johnson", "role")["fact"]["value"] == "childhood friend"
+    assert not (p.state("person:john_johnson", "in").get("fact") or {}).get("value")
+    # the autobiography is frame truth
+    assert _PWR(world).assertion_in_frame(
+        PLAYER_FRAME, PLAYER, "childhood_promise", "never to let it happen again")
+    assert _PWR(world).assertion_in_frame(
+        PLAYER_FRAME, PLAYER, "relationship_to_person:john_johnson", "childhood friend")
+    assert any(why == "memory_person_stubbed"
+               for (_e, _a, why) in (result.trace.resolver or []))
+
+
+def test_declared_world_claim_becomes_belief_never_canon_or_coverage(world):
+    # Cx 434 constraint 3: "I remember the mayor confessing" must not write canon,
+    # satisfy pillar coverage, or license a protected key; concealed-vocabulary
+    # values are screened at STORAGE time.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        _mem_classify(recalls=True, declares_memory=True),
+        {"claims": [
+            {"about": "world", "subject": "the mayor", "attribute": "confessed",
+             "value": "to the whole affair, years ago"},
+            # brushes the arc's concealed vocabulary (the hidden culprit) → screened
+            {"about": "world", "subject": "", "attribute": "culprit",
+             "value": "person:rival was the culprit all along"},
+        ], "people": []},
+        {"prose": "The recollection settles uneasily."},
+    ])
+    result = run_turn(world, arc, provider,
+                      "I remember the mayor confessing to the whole affair.", turn=2,
+                      scope=[PLAYER, "place:study"])
+    reads = _PWR(world)
+    # a BELIEF on the protagonist — never a row on a world entity
+    assert reads.assertion_in_frame(
+        PLAYER_FRAME, PLAYER, "believes_the_mayor_confessed", "to the whole affair, years ago")
+    assert not (world.porcelain.state("person:mayor", "confessed").get("fact") or {})
+    # arc coverage untouched: the world_condition fact never entered the frame
+    assert not reads.assertion_in_frame(PLAYER_FRAME, "fact:secret", "culprit", "person:rival")
+    assert result.trace.outcome is None                    # nothing concluded
+    # the concealed-vocabulary claim was screened at storage
+    assert any(why == "memory_screened" for (_e, _a, why) in (result.trace.resolver or []))
+
+
+def test_declared_memory_collision_quarantines_first_value_stands(world):
+    # Cx 434 constraint 5 / the founder's Westminster-Lancaster rule: a direct
+    # attribute collision quarantines — the FIRST establishment stands, the tension
+    # surfaces in fiction, never a silent overwrite.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []},
+                               {"items": []}, {"items": []}])
+    provider = StubProvider([
+        _mem_classify(recalls=True, declares_memory=True),
+        {"claims": [{"about": "self", "subject": "", "attribute": "childhood_home",
+                     "value": "Westminster"}], "people": []},
+        {"prose": "Westminster, in the narrow years."},
+        _mem_classify(recalls=True, declares_memory=True),
+        {"claims": [{"about": "self", "subject": "", "attribute": "childhood_home",
+                     "value": "Lancaster"}], "people": []},
+        {"stirs": True, "memory": "Westminster is what you remember",
+         "feeling": "unease"},
+        {"prose": "Lancaster sits oddly against what you remember."},
+    ])
+    run_turn(world, arc, provider, "I think back to my childhood home in Westminster.",
+             turn=2, scope=[PLAYER, "place:study"])
+    r2 = run_turn(world, arc, provider, "I think back to my childhood home in Lancaster.",
+                  turn=3, scope=[PLAYER, "place:study"])
+    reads = _PWR(world)
+    assert reads.assertion_in_frame(PLAYER_FRAME, PLAYER, "childhood_home", "Westminster")
+    assert not reads.assertion_in_frame(PLAYER_FRAME, PLAYER, "childhood_home", "Lancaster")
+    assert any(why == "memory_collision_quarantined"
+               for (_e, _a, why) in (r2.trace.resolver or []))
+    _np = _narrate_prompt(provider)
+    assert "THE MEMORY SITS ODDLY" in _np and "Westminster" in _np
+
+
+def test_declaration_kind_memory_still_commits(world):
+    # Cx 439 #1: the most literal retcon parse — classify says kind=declaration —
+    # must NOT take the canon-strict denial; the guarded memory channel runs.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        _mem_classify(kind="declaration", recalls=True, declares_memory=True),
+        {"claims": [{"about": "self", "subject": "", "attribute": "childhood_promise",
+                     "value": "never to let it happen again"}],
+         "people": [{"name": "John Johnson", "relation": "childhood friend"}]},
+        {"prose": "The promise surfaces whole, with John's face attached."},
+    ])
+    result = run_turn(world, arc, provider,
+                      "I remember my childhood friend John Johnson. I promised I "
+                      "would never let this happen again.", turn=2,
+                      scope=[PLAYER, "place:study"], mode="pure")
+    assert "canon-strict" not in result.prose               # never the generic denial
+    assert world.porcelain.state("person:john_johnson", "name")["fact"]["value"] \
+        == "John Johnson"
+    assert _PWR(world).assertion_in_frame(
+        PLAYER_FRAME, PLAYER, "childhood_promise", "never to let it happen again")
+
+
+def test_declaration_kind_collision_still_quarantines(world):
+    # Cx 439 #1 (second regression): the Westminster/Lancaster rule holds when the
+    # colliding declaration parses as kind=declaration.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []},
+                               {"items": []}, {"items": []}])
+    provider = StubProvider([
+        _mem_classify(kind="declaration", recalls=True, declares_memory=True),
+        {"claims": [{"about": "self", "subject": "", "attribute": "childhood_home",
+                     "value": "Westminster"}], "people": []},
+        {"prose": "Westminster, in the narrow years."},
+        _mem_classify(kind="declaration", recalls=True, declares_memory=True),
+        {"claims": [{"about": "self", "subject": "", "attribute": "childhood_home",
+                     "value": "Lancaster"}], "people": []},
+        {"prose": "Lancaster sits oddly against what you remember."},
+    ])
+    run_turn(world, arc, provider, "I think back to my childhood home in Westminster.",
+             turn=2, scope=[PLAYER, "place:study"], mode="pure")
+    r2 = run_turn(world, arc, provider, "I think back to my childhood home in Lancaster.",
+                  turn=3, scope=[PLAYER, "place:study"], mode="pure")
+    reads = _PWR(world)
+    assert reads.assertion_in_frame(PLAYER_FRAME, PLAYER, "childhood_home", "Westminster")
+    assert not reads.assertion_in_frame(PLAYER_FRAME, PLAYER, "childhood_home", "Lancaster")
+    assert any(why == "memory_collision_quarantined"
+               for (_e, _a, why) in (r2.trace.resolver or []))
+    assert "THE MEMORY SITS ODDLY" in _narrate_prompt(provider)
+
+
+def test_compact_memory_stub_default_does_not_collide():
+    # Cx 439 #2: narrative-memory compaction (task `mem`) must never receive the
+    # Remembrancer's silent default — an unstubbed compaction raises (queue
+    # exhaustion), exactly as before #97.
+    import pytest as _pytest
+
+    from construct import cohorts as _co
+    from construct.provider import ProviderTransportError, StubProvider as _SP
+    with _pytest.raises(ProviderTransportError):
+        _co.compact_memory(_SP([]), "", "older beat")
+
+
+def test_settle_reconstructs_name_evidence_when_extractor_omits_names(world):
+    # Cx 443 note folded in: the LIVE extractor shape — kind rows, slug ids, NO name
+    # rows — must still stub the proper-named venue through prose reconstruction,
+    # while lowercase-in-prose places stay denied. Pins the settle wiring itself.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": [                       # the probe's real shape
+        {"entity": "place:the_hart_and_bell", "attribute": "kind", "value": "inn"},
+        {"entity": "place:coach_yard", "attribute": "kind", "value": "coach_yard"},
+    ]})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "Before the Hall, you had a room at The Hart and Bell, above the "
+                  "coach yard."},
+    ])
+    r = run_turn(world, arc, provider, "I think back to where I stayed.", turn=2,
+                 scope=[PLAYER, "place:study"])
+    assert r.prose
+    p = world.porcelain
+    assert p.state("place:the_hart_and_bell", "name")["fact"]["value"] \
+        == "The Hart and Bell"                                  # reconstructed, cased
+    assert not (p.state("place:coach_yard", "kind").get("fact") or {})  # denied

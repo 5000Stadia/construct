@@ -71,6 +71,9 @@ class Reply:
     ended: bool = False  # the scenario reached its win/loss terminal (win_loss mode)
     exit_requested: bool = False  # player asked (OOC) to leave/start over
     image: Any = None  # SceneImage for this turn's location (SCENE-IMAGERY), or None
+    # #95 (Cx 422): transports must never infer "ended means continueable" — a death
+    # terminal ends the world's story for this player, no next chapter.
+    can_continue: bool = True
 
 
 class Session:
@@ -188,6 +191,12 @@ class Session:
         set_entry_epoch(self._entry_epoch)
         self._meta = meta
         self._closed = False
+        # TURN-LATENCY dumbfire: the prior turn's deferred bookkeeping (the post-narrate
+        # `settle` closure — extract→canon, mirror, transcript, compact, time). It runs
+        # POST-SEND (the adapter triggers it so it overlaps the player reading), and is
+        # JOINED defensively at the START of the next turn so a back-to-back message can
+        # never read canon before the prior turn finished writing it. None = nothing pending.
+        self._pending_settle: Any = None
 
     @classmethod
     def open(cls, scenario: str, player_id: str | None = None,
@@ -244,6 +253,17 @@ class Session:
         chain = self._world.porcelain.locate(self._arc.protagonist, as_of=self._horizon())
         return chain[0] if chain else None
 
+    def carrying(self) -> list[str]:
+        """Object ids currently held by the protagonist (obj.in == protagonist) at
+        the play horizon. Diagnostic accessor for the cohesion harness — pure reads,
+        no model call. Mirrors the WHAT YOU ARE CARRYING briefing's source."""
+        proto = self._arc.protagonist
+        try:
+            return [h for h in self._world.porcelain.contents(proto, as_of=self._horizon())
+                    if str(h).startswith("obj:")]
+        except Exception:
+            return []
+
     def status_line(self) -> str:
         """A one-line `time | location` status — the diegetic clock on the
         governing calendar + the current place's name. Pure reads (no model, no
@@ -259,6 +279,69 @@ class Session:
             where = (state_value(self._world.porcelain, loc, "name", as_of=self._horizon())
                      or loc.split(":", 1)[-1].replace("_", " "))
         return f"{when} | {where}" if where else when
+
+    def journal(self) -> str:
+        """The case-board notebook (#83): the protagonist's own `knows:` frame rendered
+        as their diegetic notebook. Pure reads at the play horizon (no model call, no
+        time progression) — safe for an at-any-time `/journal`. Own frame only, so the
+        surface can never spoil what the character hasn't learned."""
+        from construct.arc.executor import (
+            arc_protected_keys, concealed_tokens, turn_time, value_leaks,
+        )
+        from construct.foyer import state_value
+        from construct.journal import render_journal
+        proto = self._arc.protagonist
+        h = self._horizon()
+        # THE CONCEALMENT SCREEN, BY PROVENANCE (Cx 337 pattern): the authored frame can
+        # carry load-bearing answer rows (build residue — e.g. the culprit's own drives,
+        # written at build) that every render surface screens; the notebook must never be
+        # the back door to them. But a row LEARNED IN PLAY (valid_from above the opening
+        # stamp) reached the frame through the gated paths — the authorized clue delivery
+        # or the promote gate — so it is EARNED by construction and shows as-is (learned
+        # pillar clues sit on protected keys on purpose; screening those would hide the
+        # notebook's core content). Build-stamped rows get the full key + token screen.
+        _protected = arc_protected_keys(self._arc)
+        _ctoks = concealed_tokens(_protected)
+        _stamp = turn_time(0)
+
+        def _shows(r: Any) -> bool:
+            vf = getattr(r, "valid_from", None)
+            if h is not None and vf is not None and float(vf) > h:
+                return False  # beyond the play horizon
+            if vf is not None and float(vf) > _stamp:
+                return True   # learned in play — earned through the gated writes
+            return ((str(r.entity), str(r.attribute)) not in _protected
+                    and not value_leaks(str(getattr(r, "value", "")), _ctoks))
+
+        rows = [r for r in self._world.buffer.visible(frame=f"knows:{proto}") if _shows(r)]
+
+        def _name_of(ent: str) -> str | None:
+            try:
+                v = state_value(self._world.porcelain, ent, "name", as_of=h)
+                return str(v) if v else None
+            except Exception:  # noqa: BLE001
+                return None
+
+        try:
+            header = self.status_line()
+        except Exception:  # noqa: BLE001
+            header = ""
+        # #96 S3 (Cx 414): settled-history markers — a past chapter's answered entities
+        # render as closed knowledge, never as active leads.
+        _settled_ids: set = set()
+        try:
+            for r in self._world.buffer.visible(frame="session:main"):
+                if (str(r.entity).startswith("settled:episode_")
+                        and str(r.attribute) == "record"):
+                    rec = json.loads(str(r.value))
+                    for line in rec.get("settled", []):
+                        tok = str(line).split(" · ", 1)[0].strip()
+                        if ":" in tok:
+                            _settled_ids.add(tok)
+        except Exception:  # noqa: BLE001
+            _settled_ids = set()
+        return render_journal(rows, proto, name_of=_name_of, header=header,
+                              settled=_settled_ids)
 
     def character_setup(self) -> dict | None:
         """Inputs for the Foyer character-creation phase (CHARACTER-CREATION.md):
@@ -311,9 +394,17 @@ class Session:
             return None
 
     def apply_character(self, sheet: Any) -> None:
-        """Commit the Foyer's finished character sheet as canon BEFORE turn one."""
-        from construct.foyer import ingest_character
-        ingest_character(self._world, self._provider, self._arc.protagonist, sheet)
+        """Commit the Foyer's finished character sheet as canon BEFORE turn one, then GROUND
+        the character (CHARACTER-GROUNDING P2): the engine completes a concrete role + inhabited
+        place so the player knows who/where they are. Both run ONCE here at Foyer-done — NOT
+        per-turn (zero added play latency)."""
+        from construct.foyer import ground_character, ingest_character
+        proto = self._arc.protagonist
+        ingest_character(self._world, self._provider, proto, sheet)
+        ground_character(self._world, self._provider, proto,
+                         world_brief=self._meta.get("premise", ""),
+                         theme=self._meta.get("theme", ""),
+                         as_of=self._horizon())  # bind reads to the OPENING horizon (Cx 280)
 
     def concealed_truths(self) -> str:
         """A host-side digest of the story's HIDDEN answers — the conclusion's
@@ -376,14 +467,18 @@ class Session:
 
     def opening_parts(self) -> tuple[str, str]:
         """The cold open SPLIT for the founder's scene-image layout: `(framing, scene)`.
-        `framing` = title + the thematic intro (the back-of-book setup), shown BEFORE
-        the picture; `scene` = the localized cold-open ROOM narration ('you stand in
-        your office…'), shown AFTER the picture so the painting introduces the room and
-        the prose then walks you into it. Starts the scene-image render UP FRONT so it
-        generates while the (slow) narration is composed. NO forced 'aim'/objective
-        banner — the call to action arises in the fiction (founder)."""
+        `framing` = the story TITLE only, shown BEFORE the picture (a chapter heading, not
+        exposition); `scene` = the localized cold-open ROOM narration ('you stand in your
+        office…'), shown AFTER the picture so the painting introduces the room and the
+        prose walks you into it. NO premise/exposition crawl — the founder's rule (2026-06-29):
+        do NOT dump the back-of-book premise upfront (it spoils the case — 'Harrow has been
+        found dead…' — and pre-empts discovery); introduce the world DIEGETICALLY, through the
+        character's own experience. The `intro` still flavors the scene render as a non-verbatim
+        THEMATIC tone hint, but is never shown to the player as a crawl. Starts the scene-image
+        render UP FRONT so it generates while the (slow) narration is composed. NO forced
+        'aim'/objective banner — the call to action arises in the fiction (founder)."""
         title = self.title
-        intro = (self._meta.get("intro") or "").strip()
+        intro = (self._meta.get("intro") or "").strip()  # tone hint for the scene render ONLY
         # SCENE-IMAGERY: furnish + START the render now (furnish otherwise runs only
         # during a turn), before narration, so the picture renders in parallel.
         self._ensure_scene_description()
@@ -393,8 +488,7 @@ class Session:
             who = self._display_name(self._arc.protagonist)
             where = self._display_name(self.location())
             scene = f"You are {who}" + (f", at {where}." if where else ".")
-        framing = "\n\n".join(p for p in (title, intro) if p)
-        return framing, scene
+        return title, scene
 
     def opening(self) -> str:
         """The cold open as ONE string (CLI / non-image transports / tests): framing +
@@ -430,13 +524,15 @@ class Session:
             return min(namelike, key=len)            # the tightest name-like handle
         s = str(entity)
         if ":" in s:
-            return s.split(":", 1)[-1].replace("_", " ")   # humanized id beats a descriptive clause
+            local = s.split(":", 1)[-1].replace("_", " ")   # humanized id beats a descriptive clause
+            return local.title() if s.startswith("person:") else local  # person slug = a proper name
         return (vals["alias"] + vals["title"] + [s])[0]
 
     def _opening_narration(self, intro: str) -> str:
         """Render the cold open from the establishing anchors (by name, in voice).
         Fail-open: returns '' so opening() degrades to a clean banner."""
         from construct import cohorts
+        from construct.foyer import state_value
         anchors, names = self._establishing_anchors()
         # COLD-OPEN LOCKSTEP (INVESTIGATION-SHAPE.md §3b / Cx 059): the opening must foreground
         # EXACTLY the people the engine considers present, computed with the SAME _colocated the
@@ -444,15 +540,84 @@ class Session:
         # populated scene ALWAYS renders an opening that introduces the cast — the live staged
         # whodunit run failed because the opening bailed to a bare banner (empty anchors) and the
         # spoon-fed cast was never introduced, so the player wandered into the architecture.
-        present, absent_known = self._present_people(names)
+        present, absent_known, present_ids, absent_ids = self._present_people(names)
         if not (anchors or intro or present):
             return ""
         prot = self._arc.protagonist
-        who = names.get(prot) or self._display_name(prot)
+        # AUTHORITATIVE NAME via the folded point read (Cx 320): a stale narrator-polluted `name`
+        # row can sit in `names`/`_display_name`; `state()` serves the player's winning name.
+        who = (state_value(self._world.porcelain, prot, "name", as_of=self._horizon())
+               or names.get(prot) or self._display_name(prot))
         where = self.location()
         where_name = (names.get(where) or self._display_name(where)) if where else ""
+        # THE GEOGRAPHY OF SELF (founder live, 2026-07-03 — "whose house is this?"): the flat
+        # scene name hid the containment truth (the parlor IS Bobby's rooms WITHIN Brackenmere
+        # Hall), so the player inferred a separate house and read the true render as drift. Name
+        # the location CHAIN and instruct the open to make the roof-relationship unmistakable.
+        _chain = []
+        try:
+            _chain = [c for c in (self._world.porcelain.locate(
+                self._arc.protagonist, as_of=self._horizon()) or [])
+                if str(c).startswith("place:")]
+        except Exception:  # noqa: BLE001
+            _chain = []
+        _chain_names = [str(names.get(c) or self._display_name(c)) for c in _chain]
         brief = [f"YOU ARE VOICING: {who}"
                  + (f", who stands at {where_name}." if where_name else ".")]
+        # THE INTIMATE VERSION (founder 2026-07-03): the build authors the player's lived
+        # relationship to their starting ground (relationship_to_<place> rows in their own
+        # frame) — the causes, motivation, and history that brought them HERE. Surface it
+        # with the chain so the open explains the roof, not just names it.
+        _place_rel_lines: list[str] = []
+        from construct.adapter import PorcelainWorldReads as _PWR
+        _krd = _PWR(self._world, horizon=self._horizon())
+        for _pid, _pnm in zip(_chain, _chain_names):
+            try:
+                _rv = _krd.state(self._arc.protagonist, f"relationship_to_{_pid}",
+                                 frame=f"knows:{self._arc.protagonist}")
+            except Exception:  # noqa: BLE001
+                _rv = None
+            if _rv:
+                _place_rel_lines.append(f"- {_pnm}: {str(_rv)}")
+        if len(_chain_names) > 1 or _place_rel_lines:
+            brief.append(
+                "WHERE YOU ARE (geography of the player's own position — make it unmistakable "
+                "in the open)"
+                + (f": {_chain_names[0]} sits within {_chain_names[-1]}."
+                   if len(_chain_names) > 1 else ".")
+                + " If the larger place belongs to someone else, say so plainly — living or "
+                  "working under another's roof is a fact the character carries daily, never "
+                  "a puzzle left for the player to assemble."
+                + (("\nYOUR HISTORY WITH THIS GROUND (the causes and motivation that brought "
+                    "the player to live here — weave the intimacy in, never recite):\n"
+                    + "\n".join(_place_rel_lines)) if _place_rel_lines else ""))
+        # AUTHORITATIVE PLAYER IDENTITY (founder 2026-06-30, "player name wins, fully"): the player's
+        # interview-set name/pronouns supersede any authored-default personal name/gender embedded in
+        # the THEMATIC FRAME or anchors below (e.g. a build that hard-authored "Clara Vale"). The cast
+        # must address the player by THEIR chosen identity.
+        _ppron = (state_value(self._world.porcelain, prot, "pronouns", as_of=self._horizon())
+                  or state_value(self._world.porcelain, prot, "gender", as_of=self._horizon()) or "")
+        _pbg = state_value(self._world.porcelain, prot, "background", as_of=self._horizon()) or ""
+        _prole = state_value(self._world.porcelain, prot, "role", as_of=self._horizon()) or ""
+        brief.append(
+            f"THE PLAYER CHARACTER IS {who}" + (f" ({_ppron})" if _ppron else "")
+            + ". That is WHO they are — not how to address them every line: characters refer to "
+              "them naturally ('you', 'sir', a surname, nothing at all), the full name only where "
+              "a person would really use it"
+            + (f"; {_ppron} pronouns throughout" if _ppron else "")
+            + ". If the THEMATIC FRAME or any anchor below uses a DIFFERENT personal name or gender "
+              "for the protagonist, that is a stale authored default for the SAME person — never "
+              "use the other name."
+            + (f"\nTheir role: {_prole}" if _prole else "")
+            + (f"\nWhat brought them here (their own words): {_pbg}" if _pbg else ""))
+        # CHARACTER-GROUNDING P3 (Cx 280): hand the narrator the player's OWN place — its grounded
+        # description (the grounding step set this at seal) — so the cold open zooms into a concrete
+        # inhabited space, not a bare room.
+        if where:
+            _wd = state_value(self._world.porcelain, where, "description", as_of=self._horizon())
+            if _wd:
+                brief.append(f"YOUR PLACE (their own space — ground the open IN this, "
+                             f"weave it in, never quote raw): {where_name or where}: {_wd}")
         style = self._meta.get("style", "")
         if style:
             brief.insert(0, f"VOICE (write in this): {style}")
@@ -462,24 +627,68 @@ class Session:
         cont = (self._meta.pop("continuation_intro", "") or "").strip()
         if cont:
             brief.append(cont)
+        # WHAT THE PLAYER ALREADY KNOWS (founder 2026-06-30): the player's lived context — why
+        # they are here, the series of events, their standing, their relationships to the people
+        # present — read from their own knowledge frame. A character is NOT a stranger to their
+        # own life; the open must orient them in what they already know, woven into the prose.
+        situation, rels, absent_rels = self._player_grounding(names, present_ids, absent_ids)
+        # The STANDING GROUNDING DIRECTIVE — clean and singular (agent-prompt-elegance), governs
+        # EVERY game's open: orient the player in their character's lived knowledge so they can
+        # step in informed, never as a stranger to their own situation.
+        brief.append(
+            "GROUND THE PLAYER (every opening, before they take their turn): write the open so the "
+            "player understands their own situation as the character already would — woven into the "
+            "prose, never as a briefing or a list. Make clear who they are, the history and "
+            "circumstances they carry into this moment, who the people present are TO THEM, and why "
+            "one would speak with them. The character is not arriving as a stranger to their own "
+            "life — render the world as they already understand it (in plain terms a newcomer can "
+            "follow, not unglossed insider jargon), then hand them the turn. (The "
+            "active call-to-action surfaces on its own timing per the scene's pacing below; "
+            "grounding is the lived context they walk in with, not a plot summary.)")
+        if situation:
+            brief.append(
+                "WHAT YOU ALREADY KNOW (your own lived situation as you walk in — the background and "
+                "state of things; weave in, never recite as facts):\n"
+                + "\n".join(f"- {s}" for s in situation))
         if intro:
             brief.append(f"THEMATIC FRAME (the stakes — do not quote verbatim):\n{intro}")
         if anchors:
             brief.append("WHAT IS TRUE AND PRESENT (anchors — weave in by name, "
                          "never list):\n" + "\n".join(anchors))
         if present:
-            # the FIRST WITNESS leads the spoon-fed opening (genre-faithful: the one who found/
-            # reported it introduces the cast). INVESTIGATION-SHAPE.md §3b.
-            fw = next((nid for nid, n in (self._cast or {}).items()
-                       if getattr(n, "first_witness", False)), None)
-            fw_name = (names.get(fw) or self._display_name(fw)) if fw else ""
-            lead = (f" {fw_name} is the one who found/reported it — let THEM speak first and "
-                    f"introduce the others by name." if fw_name and fw_name in present else "")
+            # UNVEIL INTELLIGENTLY, DON'T SCRIPT (founder 2026-07-01): the old rule forced the first
+            # WITNESS to "speak first and introduce the others" — which had a costermonger marshalling
+            # the room and voicing the investigator's agenda. Beware such rules. Instead hand the
+            # agent each present person's own ROLE + standing (+ who found the body, + the player's
+            # relationship) as clean SITUATION, and ONE principle — each speaks from their own role —
+            # then trust it to open the scene sensibly.
+            # ALIGNED (id, name) pairs (Cx 333 #4) — a name→id dict collapses duplicate display names.
+            def _line(nid, n):
+                node = (self._cast or {}).get(nid)
+                role = str(getattr(node, "surface_role", "") or "").strip() if node else ""
+                found = getattr(node, "first_witness", False) if node else False
+                bits = []
+                if role:
+                    bits.append(role)
+                if found:
+                    bits.append("found and reported the body")
+                if rels.get(nid):
+                    bits.append(f"to you: {rels[nid]}")
+                return f"- {n}" + (" — " + "; ".join(bits) if bits else "")
             brief.append(
                 "PRESENT WITH YOU RIGHT NOW (these people — and ONLY these — are in the opening "
-                "scene; name and introduce each so the player knows who is here to question;"
-                + lead + " do NOT bring anyone not listed here into the room):\n"
-                + "\n".join(f"- {n}" for n in present))
+                "scene; name and introduce each so the player knows who is here, who they are to "
+                "the player, and why one would speak with them. Let the scene UNVEIL INTELLIGENTLY "
+                "rather than by a fixed script: each person speaks and acts only from their OWN role "
+                "and standing — the investigative authority naturally frames why everyone is here, a "
+                "witness gives their own firsthand account — and no one voices another's agenda or "
+                "orders. Do NOT bring anyone not listed here into the room):\n"
+                + "\n".join(_line(nid, n) for nid, n in zip(present_ids, present)))
+        if absent_rels:
+            brief.append(
+                "OTHERS YOU KNOW (people in your life not in this room — context for who the player "
+                "is, mention only naturally, do NOT stage them here):\n"
+                + "\n".join(f"- {r}" for r in absent_rels))
         if absent_known:
             brief.append(
                 "EXISTS BUT NOT HERE (mention only as people one might later seek out; NEVER "
@@ -489,8 +698,22 @@ class Session:
         if threads:
             brief.append("STILL LIVE (unresolved, in the air):\n"
                          + "\n".join(f"- {t}" for t in threads))
+        # CHARACTER-GROUNDING P3: a FRESH first entry (just out of the Foyer, no turns played,
+        # not a continuation) zooms into the player's inhabited space and HOLDS the call-to-action
+        # for a beat; a resume mid-story or a continued episode opens normally (already grounded).
+        # HOLD ONLY WHEN SOLO (Cx 333 #5): the held "zoom into your empty space, no one else, no
+        # hook" framing contradicts a staged open where cast is already present (the briefing-room
+        # whodunit open — founder feedback 2026-06-30). When people are in the room the case scene
+        # is already in motion; use the "ground first, then let the call arise" mode, which is
+        # compatible with the present cast and the lived-context grounding above.
+        from construct.game import next_turn_number
         try:
-            return cohorts.open_scene(self._provider, "\n\n".join(brief), prot).strip()
+            _fresh = not cont and not present and next_turn_number(self._world) <= 1
+        except Exception:
+            _fresh = False
+        try:
+            return cohorts.open_scene(self._provider, "\n\n".join(brief), prot,
+                                      grounding=_fresh).strip()
         except Exception:
             logger.warning("opening narration unavailable; clean-banner fallback",
                            exc_info=True)
@@ -500,23 +723,26 @@ class Session:
         """Split the in-scope people into (present, absent-but-known) by the SAME presence
         rule the turn loop applies (`turnloop._colocated`) — so the cold open foregrounds
         exactly who is colocated with the protagonist and treats the rest as elsewhere. Reuses
-        the turn-loop helper (no second 'present' definition; Cx 059). Returns display names."""
+        the turn-loop helper (no second 'present' definition; Cx 059). Returns display names,
+        plus the matching entity-id lists (the grounding pass needs ids to read relationships)."""
         scope = self._scope or []
         prot = self._arc.protagonist
         _h = self._horizon()
         try:
-            from construct.turnloop import _colocated
+            from construct.adapter import PorcelainWorldReads
+            from construct.turnloop import _colocated, _departed_from
             chain = self._world.porcelain.locate(prot, as_of=_h)
             scene = chain[0] if chain else None
+            _dep_reads = PorcelainWorldReads(self._world, horizon=_h)
         except Exception:
-            return [], []
+            return [], [], [], []
         if not scene:
-            return [], []
+            return [], [], [], []
 
         def _disp(e):
             return names.get(e) or self._display_name(e)
 
-        present, absent = [], []
+        present, absent, present_ids, absent_ids = [], [], [], []
         for e in sorted(scope):
             if not e.startswith("person:") or e == prot:
                 continue
@@ -524,11 +750,69 @@ class Session:
                 npc_chain = self._world.porcelain.locate(e, as_of=_h)
             except Exception:
                 continue
-            if _colocated(npc_chain, scene, chain):
+            if _colocated(npc_chain, scene, chain) and not _departed_from(
+                    self._world.porcelain, _dep_reads, e, scene, as_of=_h):
                 present.append(_disp(e))
+                present_ids.append(e)
             elif npc_chain:  # placed somewhere else — known to exist, not here
                 absent.append(_disp(e))
-        return present, absent
+                absent_ids.append(e)
+        return present, absent, present_ids, absent_ids
+
+    # identity attrs the open already voices elsewhere (the PLAYER CHARACTER block) — never
+    # re-listed as lived "situation" context.
+    _GROUNDING_SKIP_ATTRS = frozenset({
+        "name", "alias", "title", "pronouns", "gender", "background", "role", "kind", "in"})
+
+    def _player_grounding(self, names: dict, present_ids: list, absent_ids: list):
+        """The protagonist's LIVED CONTEXT for the cold open — read straight from the player's
+        knowledge frame (`knows:<prot>`), which IS 'what the player walks in already knowing':
+        their own situation (assignment, operating context, standing, the series of events that
+        put them here) and their established relationships to the people in the room. Generic
+        across games — surfaces whatever grounding the build/ingest wrote into the protagonist's
+        frame, minus the identity attrs voiced elsewhere and the arc's protected SOLUTION keys
+        (no spoilers in the open). Returns (situation_lines, {entity_id: relationship_phrase})."""
+        prot = self._arc.protagonist
+        _h = self._horizon()
+        p = self._world.porcelain
+        try:
+            from construct.arc.executor import arc_protected_keys
+            protected = arc_protected_keys(self._arc)
+        except Exception:
+            protected = set()
+        try:
+            snap = p.snapshot([prot], frame=f"knows:{prot}", as_of=_h)
+            facts = snap.get("facts", []) or []
+        except Exception:
+            facts = []
+
+        def _disp(e):
+            return names.get(e) or self._display_name(e)
+
+        # Screen freeform VALUES against the concealed vocabulary (Cx 333 #3): a relationship
+        # or situation value naming the hidden answer would bypass the (entity,attribute)
+        # protected-key filter, exactly as a live-thread alias does. Drop any such line.
+        concealed = self._concealed_tokens()
+        absent_set = set(absent_ids)
+        present_set = set(present_ids)
+        situation: list[str] = []
+        rels: dict[str, str] = {}          # present-cast id -> relationship phrase
+        absent_rels: list[str] = []        # known-elsewhere relationships, lower priority
+        for f in facts:
+            if f["entity"] != prot:
+                continue
+            attr, val = f["attribute"], str(f["value"]).strip()
+            if not val or (prot, attr) in protected or self._value_leaks(val, concealed):
+                continue
+            if attr.startswith("relationship_to_"):
+                target = attr[len("relationship_to_"):]      # an entity id, e.g. person:edmund_reed
+                if target in present_set:
+                    rels[target] = val
+                else:                                         # absent or out-of-scope acquaintance
+                    absent_rels.append(f"{_disp(target)} — {val}")
+            elif attr not in self._GROUNDING_SKIP_ATTRS:
+                situation.append(f"{attr.replace('_', ' ')}: {val}")
+        return situation, rels, absent_rels
 
     def _establishing_anchors(self, limit: int = 10):
         """By-NAME establishing facts + an entity→name map — grounding for the cold
@@ -623,6 +907,11 @@ class Session:
             e = f["entity"]
             if not e.startswith("event:"):
                 continue
+            if e.startswith("event:tick_"):
+                # DISCOVERY GATING (#84, Cx 395/396): an off-screen world-tick event is
+                # not re-entry awareness — the player discovers the changed world through
+                # presence and scene reads, never an omniscient "meanwhile" recital.
+                continue
             if f["attribute"] == "alias":
                 threads[e] = str(f["value"])
             elif f["attribute"] == "kind" and e not in threads:
@@ -642,24 +931,24 @@ class Session:
         return [t for e, t in threads.items() if not _leaks(t, e)][:limit]
 
     def _concealed_tokens(self) -> set[str]:
-        """Distinctive tokens of the arc's HIDDEN facts — drawn from each protected
-        entity id and attribute (NOT the value: a protected fact's value is often a
-        public name, which is not itself secret). Used to filter the cold open's
-        freeform live-thread aliases against the concealment set (Cx 022 #3)."""
+        """The arc's concealment vocabulary — delegates to the shared
+        `executor.concealed_tokens` so the render + build leak screens cannot drift
+        (Cx 337). Fail-open to empty on any arc read error."""
         try:
-            from construct.arc.executor import arc_protected_keys
-            keys = arc_protected_keys(self._arc)
+            from construct.arc.executor import arc_protected_keys, concealed_tokens
+            return concealed_tokens(arc_protected_keys(self._arc))
         except Exception:
             return set()
-        stop = {"the", "a", "an", "of", "to", "is", "in", "on", "status", "kind",
-                "name", "alias", "title", "fact", "event", "obj", "person", "place"}
-        toks: set[str] = set()
-        for (e, a) in keys:
-            for src in (e.split(":", 1)[-1], a):
-                for t in src.replace("_", " ").replace("-", " ").lower().split():
-                    if len(t) > 3 and t not in stop:
-                        toks.add(t)
-        return toks
+
+    def _value_leaks(self, text: str, concealed: set[str] | None = None) -> bool:
+        """True if freeform text brushes the arc's concealed vocabulary (Cx 333 #3) — the
+        same screen `live_threads` applies to freeform event aliases, reused for the grounding
+        block's freeform situation/relationship VALUES. Delegates to the shared
+        `executor.value_leaks` (Cx 337)."""
+        from construct.arc.executor import value_leaks
+        if concealed is None:
+            concealed = self._concealed_tokens()
+        return value_leaks(text, concealed)
 
     def establishing_lines(self, limit: int = 8) -> list[str]:
         """The establishing-set facts in scope, as of the entry
@@ -681,6 +970,11 @@ class Session:
         a long-lived transport (REPL/bot) survives the turn."""
         if self._closed:
             raise RuntimeError("session is closed")
+        # BACK-TO-BACK JOIN (TURN-LATENCY dumbfire): complete the PRIOR turn's deferred
+        # bookkeeping before THIS turn reads canon. The adapter normally already ran it
+        # post-send; this is the defensive join so a fast second message can't start a
+        # turn on stale canon (single PB connection → ordering is mandatory). Idempotent.
+        self._flush_settle()
         # Re-establish the scenario entry epoch on the contextvar for THIS turn's context
         # (obs #3 half 3) — turn_time stamping must sit above all pre-play valid_from.
         from construct.arc.executor import set_entry_epoch
@@ -689,13 +983,22 @@ class Session:
         # AS-OF PLAY HORIZON (B' S3): bind this turn's reads (terminal check + the whole turn
         # loop) to opening_as_of + n. None for legacy worlds — the head read, unchanged.
         horizon = self._horizon(n)
+        # #95 (Cx 422): death ends BOTH scenario modes — permanence. Checked before the
+        # win_loss-only gate so an endless world's death still stops, and no next-chapter
+        # offer ever arms (can_continue=False).
+        _t_kind = terminal_outcome(PorcelainWorldReads(self._world, horizon=horizon))
+        if _t_kind == "died":
+            return Reply(prose="(This story ended at its close — the world remembers.)",
+                         trace=None, ended=True, can_continue=False)
         # Only a WIN_LOSS scenario ends; endless/freeplay never short-circuits
         # (a stale terminal receipt from a prior mode must not freeze open play).
         if self._scenario_mode == "win_loss":
-            ended = terminal_outcome(PorcelainWorldReads(self._world, horizon=horizon))
-            if ended:
-                return Reply(prose=f"(The story has ended — you {ended}. "
-                                   f"Start fresh to play again.)", trace=None, ended=True)
+            if _t_kind:
+                # NO WIN/LOSE LANGUAGE (founder 2026-07-02 "no winning or losing please"):
+                # the conclusion's QUALITY lives in the epilogue prose (conclusion-as-effect);
+                # the ended-guard says only that the chapter closed. ended=True lets the
+                # transport offer the next chapter (auto-continue flow).
+                return Reply(prose="(This chapter has closed.)", trace=None, ended=True)
         try:
             result = run_turn(self._world, self._arc, self._provider, text, n,
                               scope=self._scope, mode=self._mode, endless=self._endless,
@@ -710,6 +1013,7 @@ class Session:
                               cast=self._cast or None,
                               side_arcs=self._side_arcs,
                               horizon=horizon,
+                              death_policy=self._meta.get("death_policy", "shielded"),
                               on_scene=self._note_scene_image)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
@@ -727,17 +1031,45 @@ class Session:
         # via the in-flight guard) also catches a description that CHANGED in place
         # (a reshape, a fire) where furnish didn't re-fire.
         self._note_scene_image()
+        # Hold the post-narrate bookkeeping; the adapter runs it post-send (see _flush_settle).
+        self._pending_settle = getattr(result, "settle", None)
         return Reply(prose=result.prose, trace=result.trace,
                      ended=bool(result.trace and result.trace.terminal),
+                     can_continue=not bool(
+                         result.trace
+                         and getattr(result.trace, "terminal_kind", "") == "died"),
                      exit_requested=getattr(result, "exit_requested", False),
                      image=self.last_image)
 
+    def flush_settle(self) -> None:
+        """Run the prior turn's deferred bookkeeping NOW (TURN-LATENCY dumbfire). The
+        transport calls this AFTER it has sent the reply, so the PB writes (extract→canon,
+        mirror, transcript, compact, time) overlap the player reading instead of padding
+        the turn the player waited on. Idempotent (runs a pending settle at most once),
+        exception-safe (a settle hiccup never tears down the session), and a no-op when
+        nothing is pending. Also called defensively at the start of the next turn and on
+        close() so the deferred work is never silently dropped."""
+        self._flush_settle()
+
+    def _flush_settle(self) -> None:
+        settle = self._pending_settle
+        self._pending_settle = None
+        if settle is None:
+            return
+        try:
+            settle()
+        except Exception:  # never let deferred bookkeeping break the live session
+            logger.exception("deferred settle failed for %s/%s",
+                             self.scenario, self.player_id)
+
     def _note_scene_image(self) -> Any:
-        """SCENE-IMAGERY hook: DETECT whether the location is new/changed (a fast,
-        pure hash check — NO model call) and, if so, START rendering its image in the
-        BACKGROUND so the generation overlaps the rest of the turn (founder: fire ASAP,
-        text-only meanwhile). The transport joins via `pending_image()` and shows a
-        fresh image JUST BEFORE the new scene's prose. Fail-open; idempotent per scene."""
+        """SCENE-IMAGERY hook: DETECT whether the location is new/changed (a fast hash
+        check) and, if so, START rendering its image in the BACKGROUND so the generation
+        overlaps the rest of the turn (founder: fire ASAP, text-only meanwhile). The
+        transport hands off via `take_pending_image()` and shows the image just before the
+        new scene's prose (or LATE if the render is slow). Usually no model call — but if the
+        location has NO committed description (an improv place reached by narrating a trip),
+        it furnishes one ONCE so the image has a paint source. Fail-open; idempotent per scene."""
         try:
             from construct import imagery
             from construct.foyer import state_value
@@ -748,6 +1080,14 @@ class Session:
                 return None
             desc = state_value(self._world.porcelain, loc, "description",
                                as_of=self._horizon()) or ""
+            if not desc:
+                # A location reached by NARRATING a trip (an improvised place) may have no
+                # committed description yet — and the image paints from the description, not the
+                # prose. Furnish one now so a new location always gets a picture (founder: "should
+                # I have gotten a new image for this new location?"). Memoized → fires at most once.
+                self._ensure_scene_description()
+                desc = state_value(self._world.porcelain, loc, "description",
+                                   as_of=self._horizon()) or ""
             contents = self._scene_contents(loc)
             if not (desc or contents):
                 return None
@@ -860,6 +1200,15 @@ class Session:
         threading.Thread(target=_run, daemon=True, name="scene-image").start()
         self._pending_image = holder
 
+    def take_pending_image(self) -> Any:
+        """Hand off the in-flight render HOLDER ({'rec', 'done'}) and clear the slot WITHOUT
+        waiting — the transport decides whether to join briefly (image-before-text) or send it
+        LATE when the render finishes, so the text reply is never blocked on a slow render and a
+        slow-but-successful image is delivered late instead of dropped (founder image fix). One-shot."""
+        holder = getattr(self, "_pending_image", None)
+        self._pending_image = None
+        return holder
+
     def pending_image(self, timeout: float = 75.0) -> Any:
         """Block (bounded) for the in-flight scene render and return the rendered
         SceneImage iff its asset file is ready, else None. One-shot — clears the slot,
@@ -902,6 +1251,9 @@ class Session:
 
     def close(self) -> None:
         if not self._closed:
+            # Flush any deferred bookkeeping before the world closes, so the last turn's
+            # facts/transcript/time are never lost when a session ends without a next turn.
+            self._flush_settle()
             self._world.close()
             self._closed = True
 

@@ -461,3 +461,185 @@ def test_continuation_intro_bridges_endpoints_without_a_formula():
     other = _continuation_intro("A Quiet Drowning", "lost", prior,
                                 {"hook": "A stranger waits on the stair with no name to give."}, new)
     assert intro != other
+
+
+def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatch):
+    """#88 S4 caller-level regression (Cx 382 blocker): on a PLAYED non-horizon slot with
+    entry_epoch=1000.0 and the terminal scene elsewhere, continue_episode must relocate the
+    protagonist to the ORIGINAL opening place (the raised write-epoch must not poison the
+    opening lookup) and advance diegetic time."""
+    from construct.arc import executor
+    from construct.arc.executor import TURN_EPOCH, set_entry_epoch
+    from construct.clock import read_clock
+    from construct.game import continue_episode, slot_path
+    from construct.semantics import attribute_default
+
+    monkeypatch.chdir(tmp_path)
+    _tok = executor._ENTRY_EPOCH.set(TURN_EPOCH)  # continue_episode raises it; restore after
+    (tmp_path / "worlds").mkdir()
+    spath = tmp_path / "worlds" / "doorcase.world"
+    rule = rule_classifier_fallback()
+    w = World(spath, world_id="w:doorcase", stance="fiction",
+              attribute_default=attribute_default,
+              model=StubModel(fallback=lambda pr, sc: rule(pr, sc)
+                              if pr.startswith("Classify the lifetime") else {"items": []}))
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:office", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": PLAYER, "attribute": "kind", "value": "person", "timeless": True},
+    ])
+    # main arc in the plot frame (continue reads it to seed the next chapter)
+    shape = ConclusionShape("shape:main", "drive_inverted", (PLAYER, "a", "b"),
+                            world_condition=InFrame(f"knows:{PLAYER}", "fact:x", "k", "v"),
+                            premise=InFrame("canon", "fact:x", "kind", "proposition"),
+                            refusal_variant_id="shape:refused")
+    refusal = Clock("clock:refusal", TurnsQuiet(15),
+                    effects=({"entity": "event:concludes", "attribute": "kind",
+                              "value": "refusal_conclusion"},), bound_to="arc:main",
+                    rung=Rung.REFUSAL)
+    arc = Arc(arc_id="arc:main", protagonist=PLAYER, shape=shape, beats=(), clocks=(),
+              refusal_clock=refusal, climax_ready_k=1, climax_ready_beats=())
+    w.porcelain.ingest_structured(arc_io.arc_to_items(arc) + arc_io.index_items(arc))
+    set_entry_epoch(1000.0)
+    # the PLAYED history: opened at place:office, ended on place:roof; terminal receipt exists
+    w.porcelain.ingest_structured([
+        {"entity": "place:roof", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": PLAYER, "attribute": "in", "value": "place:office", "valid_from": 1000.4},
+        {"entity": PLAYER, "attribute": "in", "value": "place:roof", "valid_from": 1005.0},
+    ])
+    w.porcelain.ingest_structured([
+        {"entity": "event:turn_0", "attribute": "kind", "value": "turn", "valid_from": 1000.0},
+        {"entity": "event:turn_5", "attribute": "kind", "value": "turn", "valid_from": 1005.0},
+        {"entity": "event:arc_outcome_5", "attribute": "kind", "value": "arc_won",
+         "valid_from": 1005.0},
+        {"entity": "event:arc_outcome_5", "attribute": "grade", "value": "vindicated",
+         "valid_from": 1005.0},
+    ], frame=SESSION)
+    w.close()
+    spath.with_suffix(".meta.json").write_text(json.dumps(
+        {"title": "Door Case", "protagonist": PLAYER, "arc_scope": [PLAYER],
+         "mode": "pure", "scenario_mode": "win_loss", "entry_epoch": 1000.0}))
+    import shutil
+    shutil.copyfile(spath, slot_path("doorcase", "u1"))
+
+    prop = dict(VALID_PROPOSAL); prop["protagonist"] = PLAYER
+    # #90 (Cx 387): the hook's on-stage person must be made REAL at the doorway place
+    prop["hook_cast"] = [{"id": "person:shawl_witness", "name": "Ada Finch",
+                          "role": "frightened inquest witness"}]
+    # #96 S3 (Cx 414): the continuation proposes its OWN title
+    prop["title"] = "The Weight of Brass"
+    # #96 S2: a prior-ending consequence event awaits its ONE bridge callback
+    w2s = World(spath, world_id="w:doorcase", stance="fiction",
+                model=StubModel(fallback=lambda p_, s_: rule_classifier_fallback()(p_, s_)
+                                if p_.startswith("Classify the lifetime") else {"items": []}))
+    w2s.porcelain.ingest_structured([
+        {"entity": "event:consequence_word_5", "attribute": "kind",
+         "value": "word_spreads", "valid_from": 1005.0},
+        {"entity": "event:consequence_word_5", "attribute": "detail",
+         "value": "the answer held, and word of who found it travels", "valid_from": 1005.0},
+    ])
+    # #96 S4: a played ledger exists → the personal-threads extraction runs over it
+    w2s.porcelain.ingest_structured([
+        {"entity": "session:narrative_memory", "attribute": "text",
+         "value": "You promised Ada Finch you would clear her brother's name.",
+         "value_type": "literal", "valid_from": 1005.0},
+    ], frame=SESSION)
+    w2s.close()
+    shutil.copyfile(spath, slot_path("doorcase", "u1"))
+
+    class _DoorProvider(_GenProvider):
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            if prompt.startswith("Classify the lifetime"):
+                return rule(prompt, schema)   # the REAL rule classifier (clock writes need it)
+            if task_of(prompt) == "pth":      # #96 S4: the personal-threads extraction
+                return {"threads": [{"thread": "promised Ada Finch to clear her "
+                                               "brother's name", "status": "open"}]}
+            return await super().complete(prompt, schema, tier=tier, deliberate=deliberate)
+
+    _door = _DoorProvider(prop)
+    meta = continue_episode("doorcase", _door, player_id="u1")
+    # the raised continuation epoch is a SCOPED write context (Cx 383) — it must not
+    # outlive the call (the test's own token guard below would mask a production leak).
+    assert executor.current_epoch() == TURN_EPOCH
+    w2 = World(slot_path("doorcase", "u1"), world_id="w:doorcase", stance="fiction",
+               model=StubModel(fallback=lambda p, s: rule_classifier_fallback()(p, s)
+                               if p.startswith("Classify the lifetime") else {"items": []}))
+    try:
+        assert w2.porcelain.locate(PLAYER)[0] == "place:office"   # BACK at the opening place
+        assert read_clock(w2).minutes > 0                          # time truly advanced
+        assert "the new chapter opens at office" in meta["continuation_intro"]
+        # #90: the hook witness is REAL — canon-present at the doorway place and IN the
+        # episode scope (an unscoped hook person would be invisible to presence/npc turns)
+        assert w2.porcelain.locate("person:shawl_witness")[0] == "place:office"
+        from construct.adapter import PorcelainWorldReads as _PWR
+        _sc = _PWR(w2).state("session:episode", "arc_scope", frame=SESSION)
+        assert "person:shawl_witness" in json.loads(_sc)
+        # #96 S3: the new chapter took its OWN title; the gen prompt carried CLOSED HISTORY
+        assert meta["title"] == "The Weight of Brass"
+        _gen = next(p_ for (p_, _s2, _t2) in _door.calls if task_of(p_) == "gen")
+        assert "CLOSED HISTORY" in _gen and "never re-opened" in _gen.lower()
+        # #96 S2: the bridge surfaced the consequence callback + wrote its receipt
+        assert "A CONSEQUENCE CALLBACK" in meta["continuation_intro"]
+        assert "word of who found it travels" in meta["continuation_intro"]
+        # receipt read row-level: event-entity attrs don't fold via state()
+        assert any(str(r.entity) == "event:consequence_word_5"
+                   and str(r.attribute) == "surfaced_turn"
+                   for r in w2.buffer.visible(frame=SESSION))
+        # #96 S3: the settled-history record persisted — the answered premise is CLOSED
+        # HISTORY the notebook and future opens read, never a mystery to reopen
+        _settled_rec = next((str(r.value) for r in w2.buffer.visible(frame=SESSION)
+                             if str(r.entity).startswith("settled:episode_")
+                             and str(r.attribute) == "record"), None)
+        assert _settled_rec is not None
+        assert "fact:x" in _settled_rec and "ANSWERED" in _settled_rec
+        # #96 S4: the promise made in the ledger rides the generator prompt as a thread
+        # to HONOR, and persists as a session literal for future opens
+        assert "PERSONAL THREADS TO HONOR" in _gen
+        assert "promised Ada Finch" in _gen and "[open]" in _gen
+        _threads_rec = next((str(r.value) for r in w2.buffer.visible(frame=SESSION)
+                             if str(r.entity) == "session:personal_threads"
+                             and str(r.attribute) == "record"), None)
+        assert _threads_rec is not None and "Ada Finch" in _threads_rec
+    finally:
+        w2.close()
+        executor._ENTRY_EPOCH.reset(_tok)
+
+
+def test_continue_episode_refuses_after_player_death(tmp_path, monkeypatch):
+    """#95 (Cx 422 bar 7): the story ended at the protagonist's death — continue_episode
+    refuses BEFORE any generator or prompt work (permanence: no next chapter)."""
+    import pytest
+
+    from construct.game import continue_episode, slot_path
+    from construct.semantics import attribute_default
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "worlds").mkdir()
+    spath = tmp_path / "worlds" / "deadcase.world"
+    rule = rule_classifier_fallback()
+    w = World(spath, world_id="w:deadcase", stance="fiction",
+              attribute_default=attribute_default,
+              model=StubModel(fallback=lambda pr, sc: rule(pr, sc)
+                              if pr.startswith("Classify the lifetime") else {"items": []}))
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:office", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": PLAYER, "attribute": "kind", "value": "person", "timeless": True},
+    ])
+    w.porcelain.ingest_structured([
+        {"entity": "event:turn_3", "attribute": "kind", "value": "turn", "valid_from": 1003.0},
+        {"entity": "event:player_death_3", "attribute": "kind", "value": "player_death",
+         "valid_from": 1003.0},
+    ], frame=SESSION)
+    w.close()
+    spath.with_suffix(".meta.json").write_text(json.dumps(
+        {"title": "Dead Case", "protagonist": PLAYER, "arc_scope": [PLAYER],
+         "mode": "pure", "scenario_mode": "win_loss"}))
+    import shutil
+    shutil.copyfile(spath, slot_path("deadcase", "u1"))
+
+    prov = _GenProvider()
+    with pytest.raises(RuntimeError, match="death"):
+        continue_episode("deadcase", prov, player_id="u1")
+    assert not any(task_of(p) == "gen" for (p, _s, _t) in prov.calls), \
+        "the refusal must come before any generator work"

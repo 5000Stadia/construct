@@ -43,17 +43,36 @@ CLASSIFY_SCHEMA = {
     "type": "object",
     "properties": {
         "kind": {"type": "string",
-                 "enum": ["action", "question", "ooc", "declaration", "exit"]},
+                 "enum": ["action", "question", "declaration", "exit"]},
+        "moved_with": {"type": "array", "items": {"type": "string"},
+                       "description": "when the player's move PLAINLY includes present "
+                                      "companions ('Sir? Shall we…', 'we head out'): the "
+                                      "npc candidate id(s) coming along; else empty"},
+        "npcs_dismissed": {"type": "array", "items": {"type": "string"},
+                           "description": "present npc candidate id(s) the player sends away "
+                                          "('you two may go', 'leave us'); else empty"},
+        "joins": {"type": "array", "items": {"type": "string"},
+                  "description": "present npc candidate id(s) the player invites to STAY "
+                                 "WITH / accompany them from here on ('stick with me', "
+                                 "'you're with me now', 'stay close') — companionship, "
+                                 "with or without a move this turn; else empty"},
         "moves_to": {"type": "string",
-                     "description": "if the action moves the player to a "
-                                    "place, that place exactly as the player "
-                                    "named it; empty string otherwise"},
+                     "description": "if the action moves the player to a place, that "
+                                    "place exactly as the player named it. An action "
+                                    "SET at a new location relocates the player even "
+                                    "when its verb is inspection — 'I stop at the "
+                                    "crossway and check the hatch' / 'at the counter, "
+                                    "I listen' MOVES them there; set moves_to to that "
+                                    "place. Empty string only when the action truly "
+                                    "stays where they already are"},
         "requires": {"type": "array", "items": {"type": "string"},
-                     "description": "specific items the player claims to USE "
-                                    "or produce FROM THEIR POSSESSION for "
-                                    "this action ('the iron vault key'); "
-                                    "empty for actions needing nothing "
-                                    "specific (walking, talking, looking)"},
+                     "description": "specific items the player claims to USE or produce "
+                                    "FROM THEIR POSSESSION for THIS action NOW ('the "
+                                    "iron vault key'). NEVER an item in a promised, "
+                                    "future, or hypothetical action — 'if I bring a "
+                                    "parcel on Sunday' claims nothing now. Empty for "
+                                    "actions needing nothing specific (walking, "
+                                    "talking, looking)"},
         "needs_test": {"type": "boolean",
                        "description": "true ONLY for an ACTION whose outcome is "
                        "UNCERTAIN — real resistance in the world or a genuine unknown "
@@ -68,6 +87,12 @@ CLASSIFY_SCHEMA = {
                          "description": "if needs_test, ONE short clause naming what "
                          "resists or what's at stake ('the pit may be too wide'); "
                          "empty otherwise"},
+        "mortal_risk": {"type": "boolean",
+                        "description": "true ONLY when the move risks the PLAYER "
+                        "CHARACTER'S LIFE given what is established in the scene — "
+                        "charging an armed man, a fall that would kill, staying in "
+                        "the fire. Mere injury, embarrassment, or risk to OTHERS is "
+                        "false. Almost all turns: false."},
         "uses_protagonist_knowledge": {"type": "boolean",
                          "description": "true when this turn asks the narrator to VOLUNTEER "
                          "ordinary/professional/local knowledge the PROTAGONIST would already "
@@ -77,6 +102,24 @@ CLASSIFY_SCHEMA = {
                          "plainly know. FALSE for generic look-around, plain wait, simple "
                          "movement/taking, idle dialogue, questioning an NPC (the answer is the "
                          "NPC's), OOC, and record questions answered directly from canon."},
+        "asks_self": {"type": "boolean",
+                      "description": "true when the player's line asks about THEIR OWN life, "
+                      "memory, or circumstances — 'where did I stay before?', 'how do I know "
+                      "her?', 'why am I here?', 'I think back to…'. Addressed INWARD no matter "
+                      "who spoke last; the character's own memory owns the answer. FALSE for "
+                      "questions about other people, the world, or the case."},
+        "recalls": {"type": "boolean",
+                    "description": "true when the player DELIBERATELY reaches into their own "
+                    "memory this turn — thinks back, remembers, reminisces ('I think back to "
+                    "my first meeting with him', 'I remember that morning'). FALSE for "
+                    "ordinary looking, movement, talk, or questions about the present."},
+        "declares_memory": {"type": "boolean",
+                    "description": "true ONLY when the player's recall ASSERTS NEW "
+                    "autobiography — names a person, place, promise, or fact of their own "
+                    "past not yet established ('I remember my childhood friend John Johnson. "
+                    "I promised I would never let this happen again'). A recall that merely "
+                    "reaches for what is already known is `recalls` without this. Most "
+                    "turns: false."},
         "reshape_attempt": {"type": "boolean",
                        "description": "true ONLY when the action reaches for the MIRACULOUS — "
                        "to OVERTURN a world fact the story treated as settled: revive the dead, "
@@ -97,6 +140,10 @@ CLASSIFY_SCHEMA = {
                   "description": "the object the player PICKS UP / takes into their "
                   "possession this turn (lifts, grabs, pockets, tucks under their arm), "
                   "as they named it ('the ledger'); empty if they take nothing."},
+        "drops": {"type": "string",
+                  "description": "the object the player SETS DOWN / drops / leaves / puts "
+                  "down / places here this turn (the inverse of takes), as they named it "
+                  "('the letter-opener'); empty if they set nothing down."},
         "asserts_or_reveals": {"type": "boolean",
                   "description": "true if this input could ESTABLISH or CHANGE a world fact "
                   "that isn't already captured by moves_to/takes — i.e. the player asserts "
@@ -189,6 +236,21 @@ KNOWS_SCHEMA = {
 }
 
 
+PLAYER_RELATIONSHIPS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "relationships": {"type": "array", "items": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string"},        # the EXACT cast entity id
+                "relationship": {"type": "string"},   # the player's standing 2nd-person relationship
+            },
+            "required": ["target", "relationship"],
+        }},
+    },
+    "required": ["relationships"],
+}
+
 INTERVIEW_SCHEMA = {
     "type": "object",
     "properties": {
@@ -251,13 +313,21 @@ AUTHOR_CAST_SCHEMA = {
                 "id": {"type": "string", "description": "USUALLY person:<slug> (a character). For "
                        "DISCOVERY/exploration and physical-evidence shapes a holder may instead be "
                        "obj:<slug> (an artifact/sign/inscription) or place:<slug> (a site/stratum/"
-                       "chamber) that the player EXAMINES rather than questions. A person must "
-                       "exist in canon; an obj:/place: holder you introduce is admitted as canon "
-                       "at staging (give it a clear location so it is reachable)."},
+                       "chamber) that the player EXAMINES rather than questions. A person holder "
+                       "must be an EXISTING canon person:* id — and reuse it ONLY when this cast "
+                       "member IS that same established person (same role and identity; never a "
+                       "different character wearing a known name — the host will split such a "
+                       "collision into a separate person). An obj:/place: holder you introduce is "
+                       "admitted as canon at staging (give it a clear location so it is "
+                       "reachable)."},
                 "shape_role": {"type": "string",
                                "description": "the shape's label: witness/suspect, rival/"
                                               "mentor, guide/informant, site/stratum/artifact, etc."},
                 "surface_role": {"type": "string", "description": "their plain role in-world"},
+                "pronouns": {"type": "string", "enum": ["he/him", "she/her", "they/them"],
+                             "description": "the member's pronouns — decided HERE, once; the "
+                             "render holds them consistent for the whole story (a character's "
+                             "gender must never drift between scenes)"},
                 "presence": {"type": "string", "enum": ["at_scene", "nearby", "offscene"],
                              "description": "where they are in PLAY so they can be reached: "
                              "'at_scene' = present at the crime scene from turn 1 (lives there/"
@@ -269,9 +339,11 @@ AUTHOR_CAST_SCHEMA = {
                              "offscene so the player can travel there; ignored for at_scene, "
                              "who are placed at the crime scene). A real place entity."},
                 "first_witness": {"type": "boolean",
-                                  "description": "true for exactly ONE at_scene member — the "
-                                  "witness who introduces the cast of characters in the opening "
-                                  "(found the body / reported it). Genre-faithful spoon-feed."},
+                                  "description": "true for exactly ONE at_scene member — the one "
+                                  "who found the body / reported it. Their firsthand account "
+                                  "anchors the opening; it does NOT make them narrate the scene "
+                                  "or speak for others (each present figure acts from their own "
+                                  "role)."},
                 "is_culprit": {"type": "boolean",
                                "description": "true for exactly ONE member — the actual culprit/"
                                "solution subject. They MUST be reachable (at_scene, nearby, or "
@@ -417,8 +489,8 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
         "were never reachable): set each member's `presence` + `location`. The OPENING SPOONS "
         "the suspects — the detective arrives at the crime scene and the cast is THERE to "
         "interview: put a HANDFUL (>=2) `at_scene` (they live there / reported it), and flag "
-        "exactly one of them `first_witness` (the one who found the body, who introduces the "
-        "others). Other suspects may be `nearby` or `offscene`, but EACH such member needs a "
+        "exactly one of them `first_witness` (the one who found the body / reported it — their "
+        "firsthand account anchors the opening). Other suspects may be `nearby` or `offscene`, but EACH such member needs a "
         "real `location` (place:<slug>) AND must be NAMED by a clue some at_scene/reachable "
         "member holds (so the player discovers them, then goes to visit) — the clue's fact "
         "should reference that person's id. Flag exactly one member `is_culprit`; the culprit "
@@ -435,7 +507,7 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
         "BEFORE YOU RETURN, VERIFY every item (a miss forces a costly re-author):\n"
         "□ EXACTLY ONE member has is_culprit=true, and they are reachable (at_scene/nearby, or "
         "offscene-but-named-by-a-reachable-clue);\n"
-        "□ EXACTLY ONE at_scene member has first_witness=true (they introduce the others);\n"
+        "□ EXACTLY ONE at_scene member has first_witness=true (the one who found/reported it);\n"
         "□ at least TWO members are at_scene (the opening spoons them);\n"
         "□ every REQUIRED pillar has a genuine clue with reveal_condition 'none' or 'pressure', "
         "held by an at_scene or nearby member (never stranded on an unreachable holder);\n"
@@ -921,9 +993,14 @@ def foyer_turn(provider: Provider, history: str, sheet_so_far: str, latest: str,
         "that PAINTS THE PICTURE as you go: briefly acknowledge their last answer, then "
         "frame the NEXT single question with a SMALL, FRESH diegetic detail (a new "
         "sensory beat, an object, a felt moment — never re-summarizing the premise). "
-        "The interview MOVES FORWARD like a real conversation — name → pronouns → then, "
-        "if it adds something, ONE light touch of who-they-are (where from, or why this "
-        "role). Never stack questions.\n"
+        "The interview MOVES FORWARD like a real conversation — name → pronouns → then ONE "
+        "GROUNDING beat (the Picard 'declare your post' moment): frame WHO THEY ARE in this "
+        "world — 'you are [their role]' — as a generalized vibe, and ask, open-ended, what "
+        "BROUGHT THEM to this work or place (their standing motivation: why this calling, what "
+        "drew them here). This grounds the character before the story. Do NOT reveal, hint at, "
+        "or invent any specific case, crime, mystery, or plot — that's for play to unfold; this "
+        "is just who they are and why. Capture their answer as `background`. Never stack "
+        "questions.\n"
         "- EXCEPTION — the PRONOUNS question stays PLAIN and light: just the menu "
         "('1. Male (he/him)  2. Female (she/her)  3. Non-binary / other'), no scenic "
         "dressing. Forcing diegetic flavor onto gender gets silly and oddly "
@@ -1087,22 +1164,40 @@ EQUIPMENT_SCHEMA = {
 }
 
 
-def equipment_check(provider: Provider, *, actor: str, item: str, scene: str) -> dict:
-    """Adjudicate whether a player may simply HAVE an item they reach for (IMPROV-AND-
-    AUTHORITY): ordinary role/personal equipment is GRANTED (improvise existence, the
-    world adapts), but a specific established-world or load-bearing object is not minted
-    by fiat. Cheap tier; `item`/`scene` are untrusted — read as the claim to judge."""
+def equipment_check(provider: Provider, *, actor: str, item: str, scene: str,
+                    manner: str = "carry") -> dict:
+    """Adjudicate whether a player may simply HAVE an item (IMPROV-AND-AUTHORITY): an
+    ordinary item is GRANTED (improvise existence, the world adapts), but a specific
+    established-world or load-bearing object is not minted by fiat. `manner` selects the
+    judgment: "carry" — the actor PRODUCES role/personal gear they'd plausibly already
+    have; "take" — the actor PICKS UP an ordinary object plainly present in this scene (a
+    mug on the bar, a candlestick, a rag). Cheap tier; `item`/`scene` are untrusted."""
     item = (item or "").strip()[:200]
+    if manner == "take":
+        ask = (
+            "You are a tabletop GM deciding whether a player may PICK UP an object they "
+            "reach for in the SCENE. GRANT (ordinary_equipment=true) an ordinary, "
+            "unremarkable thing that would plainly be PRESENT in a place like this — a mug "
+            "on a bar, a candlestick, a rag, a stone, a tankard, a stick of chalk. The "
+            "world contains countless such ordinary things even when the briefing didn't "
+            "name them; let the player take them and the world remembers. DENY (false) "
+            "only a SPECIFIC established-world object, a unique or named artifact, someone "
+            "else's significant property, or anything load-bearing to the stakes or that "
+            "would bypass a lock/clue/mystery (the iron vault key, the murder weapon, the "
+            "hidden dossier, a guard's sidearm). For an ordinary present thing, lean "
+            "GRANT; only the load-bearing/specific/named gives pause → DENY.")
+    else:
+        ask = (
+            "You are a tabletop GM deciding whether a player may simply HAVE an item they "
+            "reach for in the fiction. GRANT (ordinary_equipment=true) only ROLE/PERSONAL "
+            "equipment the actor would plausibly already carry given who they are — a "
+            "physician's bag and common remedies, a detective's notebook, a traveler's "
+            "knife. DENY (false) a SPECIFIC established-world object, a unique or named "
+            "artifact, someone else's property, or anything that would bypass the world's "
+            "locks or stakes or is load-bearing to a mystery (the iron vault key, the "
+            "murder weapon, the hidden dossier). When in doubt, DENY.")
     return complete_sync(provider,
-        "You are a tabletop GM deciding whether a player may simply HAVE an item they "
-        "reach for in the fiction. GRANT (ordinary_equipment=true) only ROLE/PERSONAL "
-        "equipment the actor would plausibly already carry given who they are — a "
-        "physician's bag and common remedies, a detective's notebook, a traveler's "
-        "knife. DENY (false) a SPECIFIC established-world object, a unique or named "
-        "artifact, someone else's property, or anything that would bypass the world's "
-        "locks or stakes or is load-bearing to a mystery (the iron vault key, the "
-        "murder weapon, the hidden dossier). When in doubt, DENY.\n\n"
-        f"THE ACTOR: {actor}\nITEM CLAIMED: {item}\nSCENE: {scene}",
+        ask + f"\n\nTHE ACTOR: {actor}\nITEM: {item}\nSCENE: {scene}",
         EQUIPMENT_SCHEMA, tier="cheap", task="eqp")
 
 
@@ -1453,6 +1548,66 @@ def author_premise(provider: Provider, digest: str, theme: str,
         PREMISE_SCHEMA, tier="main", deliberate=True, task="prm")
 
 
+GROUND_CHARACTER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "role_summary": {"type": "string", "description": "the character's concrete "
+            "role/profession in a short phrase — not 'an investigator' but what they "
+            "actually DO and how they're known ('a chartered accountant in independent "
+            "practice', 'a consulting alienist'). Grounded and specific."},
+        "background": {"type": "string", "description": "1-2 sentences: who they are, and "
+            "the STANDING MOTIVATION that makes it natural such a person is drawn into the "
+            "kind of events this world holds (a discreet reputation, an auditor's eye for "
+            "what doesn't balance, a restless conscience, a debt). NO plot, no specific case."},
+        "place_name": {"type": "string", "description": "the NAME of the space they inhabit "
+            "right now, if it has one ('Pym & Co.', 'the Bleakstone Square rooms'); empty for "
+            "a plainly unnamed private space."},
+        "place_kind": {"type": "string", "description": "what kind of space it is — 'office', "
+            "'study', 'shop', 'quarters', 'workshop', 'surgery'."},
+        "place_description": {"type": "string", "description": "2-3 sentences: what the space "
+            "concretely IS — the business/service/household and how it presents to the world, "
+            "and the room itself as the character knows it daily. Lived-in and specific. NO plot."},
+    },
+    "required": ["role_summary", "background", "place_kind", "place_description"],
+}
+
+
+def ground_character(provider: Provider, *, role: str, name: str, world_brief: str,
+                     sheet_summary: str, place_label: str, theme: str = "") -> dict:
+    """CHARACTER-GROUNDING (the Picard model): the calm BEFORE the story, where a captain is
+    outfitted, declares their post, and steps into their own ready room. From the WORLD, the
+    ROLE, and anything the player already said, author a GROUNDED, concrete identity — who they
+    are (profession + a standing motivation that makes the call-to-action coherent) and the
+    concrete SPACE they inhabit (its name, what it IS, the room itself). Honors the player's
+    specifics; completes the gaps; never touches the plot. Authoring → good tier."""
+    return complete_sync(provider,
+        "You are GROUNDING a player's character in the world, in the calm BEFORE the story "
+        "begins — the moment a captain is outfitted, declares their post, and steps into their "
+        "own ready room. From the WORLD, the ROLE, and ANYTHING THE PLAYER HAS ALREADY SAID "
+        "about themselves, author a concrete, grounded identity so the player knows EXACTLY who "
+        "they are and where they live and work:\n"
+        "- their ROLE/profession, specifically — not a vague archetype but what they actually "
+        "DO and how they are known — plus a STANDING MOTIVATION that makes it natural such a "
+        "person is drawn into the kind of events this world holds (a reputation, a habit of "
+        "noticing, a debt, an appetite). This is who they ARE, not what they will face.\n"
+        "- the CONCRETE SPACE they inhabit RIGHT NOW: its name (if any), what it IS (the "
+        "business / service / household and how it presents), and the room itself as they know "
+        "it daily — lived-in and specific (answer the player's 'what even is my office?').\n"
+        "HONOR what the player already specified — COMPLETE the gaps, never overwrite their "
+        "stated choices. Ground every claim in THIS world (the brief); invent nothing it does "
+        "not support. Do NOT reveal, hint at, or reference any specific case, crime, mystery, "
+        "or plot — this is grounding, the calm before the call. Concrete and lived-in, in the "
+        "world's register.\n\n"
+        f"WORLD (ground in this): {world_brief or '(paint from the theme)'}\n"
+        f"THEME (tone only): {theme or '(general)'}\n"
+        f"THE ROLE: {role or '(unspecified — give them a fitting one)'}\n"
+        f"THE CHARACTER (name + anything the player said — honor it):\n"
+        f"{sheet_summary or '(only a name so far)'}\n"
+        f"WHERE THEY ARE RIGHT NOW (the space to ground concretely): "
+        f"{place_label or '(their own place)'}",
+        GROUND_CHARACTER_SCHEMA, tier="main", task="grd")
+
+
 def author_flavor(provider: Provider, digest: str, entity_ids: list[str]) -> dict:
     """Session-zero narrative-flavor extraction (NARRATIVE-FLAVOR-INGEST): run
     ONCE at ingest to distill the fiction's concentrated genre/style juice into
@@ -1482,8 +1637,10 @@ GEN_ARC_SCHEMA = {
     "type": "object",
     "properties": {
         "protagonist": {"type": "string",
-                        "description": "the entity id (person:*) whose situation this "
-                        "new thread is — an NPC already in play, NOT the player"},
+                        "description": "the entity id (person:*) whose situation this new "
+                        "thread is — for a SIDE thread, an NPC already in play (not the "
+                        "player); for a CHAPTER CONTINUATION, the prompt names the "
+                        "continuing player character and you MUST use exactly that id"},
         "delta_type": {"type": "string",
                        "enum": ["drive_inverted", "desire_at_cost", "desire_renounced",
                                 "identity_accepted", "homecoming_changed"]},
@@ -1514,6 +1671,26 @@ GEN_ARC_SCHEMA = {
                  "description": "ONE diegetic sentence the narrator can render as this "
                  "development ARRIVING in the scene — concrete, in the world's voice, "
                  "NOT a system announcement. No entity ids."},
+        "title": {"type": "string",
+                  "description": "for a CHAPTER CONTINUATION: the new chapter's OWN title "
+                                 "— evocative, in the world's voice, never the prior "
+                                 "chapter's title; empty for a side thread"},
+        "hook_cast": {
+            "type": "array",
+            "description": "the person(s) your hook puts ON STAGE at the opening (a "
+                           "caller at the door, a witness, a messenger) — at most two. "
+                           "Declare them here and they are made REAL and present; a person "
+                           "your hook stages but does not declare will NOT exist. Empty if "
+                           "the hook arrives without anyone new.",
+            "items": {"type": "object", "properties": {
+                "id": {"type": "string",
+                       "description": "person:<slug> — an existing id from AVAILABLE IDS "
+                                      "to bring someone known, or a fresh person:<slug> "
+                                      "for a newcomer"},
+                "name": {"type": "string", "description": "their name as spoken"},
+                "role": {"type": "string", "description": "their plain role in-world"},
+            }, "required": ["id", "name", "role"]},
+        },
     },
     "required": ["protagonist", "delta_type", "tension", "beats", "hook"],
 }
@@ -1565,7 +1742,10 @@ def generate_arc(provider: Provider, *, trigger: str, fuel: str,
         f"HARD RULE: every entity id you name (the protagonist, the tension entity, "
         f"a `player_learns` beat's entity) MUST appear in AVAILABLE IDS verbatim. For "
         f"a beat with no matching fact, use `event_occurs` with a plausible event "
-        f"kind. Keep it small and concrete — a single complication, not a saga.\n\n"
+        f"kind. Keep it small and concrete — a single complication, not a saga.\n"
+        f"If the hook puts a PERSON on stage at the opening (a caller, a witness at the "
+        f"door), declare them in `hook_cast` — they will be made real and present; a "
+        f"person the hook stages but does not declare will not exist to be spoken to.\n\n"
         f"WORLD VOICE: {style or '(neutral)'}\n"
         f"PRESENT CHARACTERS (their drives are the richest fuel):\n{present_characters}\n\n"
         f"AVAILABLE IDS (use these exact strings):\n{available_ids}\n\n"
@@ -1678,6 +1858,44 @@ def seed_knows(provider: Provider, character: str, digest: str) -> dict:
         f"WORLD DIGEST:\n{digest}\n\nCHARACTER: {character}",
         KNOWS_SCHEMA, tier="main", task="skn")
 
+
+def author_player_relationships(provider: Provider, protagonist_role: str,
+                                roster: list[dict], digest: str) -> dict:
+    """Author the PLAYER's standing relationship to each cast member, AS THE STORY OPENS —
+    the lived connection the player walks in already carrying (OPENING-GROUNDING, founder
+    2026-06-30). One call over the whole roster; each becomes a `relationship_to_<id>` fact in
+    the player's frame, which the cold open weaves in so a present character is introduced as
+    who-they-are-TO-the-player, not a stranger. NON-SPOILER: this is the player's KNOWN
+    standing, never the solution — a witness the player hasn't met is honestly 'a name you've
+    been sent to question', never 'the culprit'. Character understanding → good tier."""
+    lines = "\n".join(
+        f"- {r['id']}  (their public role: {r.get('surface_role') or r.get('shape_role') or 'person'})"
+        for r in roster)
+    return complete_sync(provider,
+        f"You are establishing what the PLAYER already knows about the people they will meet "
+        f"as the story opens. The player's own role: {protagonist_role or 'the protagonist'}.\n\n"
+        f"For EACH person below, write the player's STANDING RELATIONSHIP to them at the "
+        f"opening — the lived connection the player walks in already carrying: who this person "
+        f"is TO the player and why the player would speak with them. Write in SECOND PERSON, "
+        f"present tense, one clause each ('your newly assigned bureau partner on the case'; "
+        f"'the bureau chief you answer to'; 'a dockside witness you've been sent to question'). "
+        f"If the player would NOT yet know this person, say so plainly ('a name on your list "
+        f"you have not yet met') — that is itself grounding (it tells the player why to seek "
+        f"them out). Use the EXACT entity id shown as `target`.\n\n"
+        f"PLACES may appear in the list too (the opening location and any roof it sits "
+        f"under). For a place, write the player's INTIMATE lived relationship — the causes, "
+        f"motivation, and history that brought them to live or work HERE at this moment "
+        f"('the rooms Lord Brackenmere let you keep these three years, since your practice "
+        f"outgrew grief'; 'the hall whose master trusted you when no one else would'). The "
+        f"player LIVES this ground — give them more intimacy with it, not less. One or two "
+        f"clauses, specific and personal, still strictly non-spoiling.\n\n"
+        f"HARD RULE — NON-SPOILER: this is only what the player ALREADY knows at the opening. "
+        f"NEVER reveal or hint that anyone is guilty, lying, hiding something, or is the answer "
+        f"to the mystery — the player discovers that in play. Keep every relationship to the "
+        f"plain, known standing.\n\n"
+        f"WORLD DIGEST:\n{digest}\n\nPEOPLE (write one relationship per id):\n{lines}",
+        PLAYER_RELATIONSHIPS_SCHEMA, tier="main", task="rel")
+
 RENDER_LEASH = (
     "THE NARRATOR'S LICENSE: the briefing is the established truth — never contradict it, "
     "and never reveal anything beyond it (a secret you were not given is one you cannot "
@@ -1704,6 +1922,13 @@ RENDER_LEASH = (
     "not place here, say so honestly rather than conjuring it — but ordinary grounded "
     "details the briefing leaves open are still fair improv. Ordinary details you add may "
     "be remembered by the host; never use prose to alter established or protected facts. "
+    "CONTINUITY OF STATE (binding): whatever the story so far has already established as "
+    "DONE to a thing STANDS — if the player or the world took, moved, pocketed, broke, "
+    "opened, lit, or shifted something, it stays that way going forward. Never silently "
+    "restore an earlier state or narrate a taken/moved object back where it was: a fibre "
+    "the player plucked from a sleeve is now in their hand, NOT back on the sleeve; a door "
+    "they opened stays open; a thing they pocketed is in their pocket. Honor the player's "
+    "completed actions on the world as real and persistent. "
     "Stay in voice; second person, present tense."
 )
 
@@ -1714,10 +1939,29 @@ RENDER_STYLE = (
     "(doors, halls, exits). CLARITY is the job; the world's voice and genre are the "
     "FLAVOR you deliver it IN, never instead of it — most sentences plain and concrete, a "
     "striking image at most once a paragraph, never a fact the player must decode a "
-    "metaphor to learn, never a sentence that is all mood and no information. Prefer "
+    "metaphor to learn, never a sentence that is all mood and no information. DIALOGUE IS "
+    "SPEECH, NOT THESIS: characters talk like people, in their own idiom — never hand one a "
+    "tidy moral, maxim, or summing-up epigram ('that is how we keep an honest case from "
+    "becoming a convenient one'); the story's theme lives in what people DO and choose, never "
+    "recited aloud. Cut any line that sounds like the author admiring the point. Prefer "
     "concrete nouns and plain verbs; the player should picture the layout clearly. GROUND "
     "the scene on entry, movement, an explicit look-around, or a real change — otherwise "
-    "answer the player's current move directly, without recapping the room. PERSPECTIVE: "
+    "answer the player's current move directly, without recapping the room. DON'T FIXATE: a "
+    "detail the player has ALREADY seen and engaged (a clue or object — the fibre, the tape) is "
+    "KNOWN; don't re-describe it every turn, keep steering back to it, or inflate an inert thing "
+    "into something ominous or ALIVE ('the threads began speaking'). ANSWER WHAT THEY ASKED — not "
+    "the same clue re-injected each turn. THE CONVERSATION ADVANCES: what a character has said is "
+    "SAID — no one restates established facts as if new (a witness doesn't re-give the name, "
+    "trade, and lodging she gave a minute ago), and no one asks for what was just given. Each "
+    "reply ADDS something — a new fact, a decision, a feeling, a refusal — or yields the floor; "
+    "if the player asks for what's already told, the character may say so in a word ('As I "
+    "said — the lodging-house off the Highway'), never a recital. And no one RE-RECOGNIZES a "
+    "name or fact already in the conversation — least of all one they raised themselves ('Mr "
+    "Liddell? I know that name!' from the very witness who named him is a glitch, not a beat). PROPORTION: match the reply "
+    "to the move — a quick word, glance, or question gets a tight beat (a line or two), not a "
+    "fresh tableau; when nothing in the scene has changed, do not re-describe it. And never "
+    "re-preach your OWN framing from recent turns — the stakes, what the case 'now comes down "
+    "to', what the hour demands: said once is said; find a new detail or say less. PERSPECTIVE: "
     "state the world's objective facts plainly ('the gas burns low'); render the player's "
     "presence, what they perceive, and how others regard them in SECOND PERSON ('low on "
     "the jamb, you notice a single black fibre' — not 'a fibre clings to the jamb'; 'she "
@@ -1727,7 +1971,13 @@ RENDER_STYLE = (
     "leave by the door') — they decide. A choice surfaces only when the fiction forces one "
     "right now, and then through the SCENE ITSELF — an NPC's question ('are we square here, "
     "or do we keep at it?'), a door swinging shut, a deadline — never a narrator's listed "
-    "menu."
+    "menu. EARNED, NOT PERFORMED: any gesture or sentence-shape used as a REFLEX reads as "
+    "performance — the tapped pencil or tightened jaw standing in for feeling, the 'not X, "
+    "but Y' hedge as characterization, the abstract dread-closer, the stagey reveal (slid "
+    "papers, pointed pauses, meaningful looks), a character left frozen 'waiting' to end "
+    "the beat, the balanced three-part sentence as default music. Each is fine once and "
+    "poison as rhythm. The cure is one rule: EVERY CLAUSE DELIVERS A NEW FACT — and when in "
+    "doubt, end on the concrete thing, not the dread it portends."
 )
 
 
@@ -1742,7 +1992,9 @@ PROTAGONIST_COMPETENCE = (
     "duty register first' / 'You've taken your tea in that back room a hundred times; the "
     "kettle sticks.' Step in and assume what your character knows. NEVER make another "
     "character recite, out of character, something the protagonist would already know — "
-    "that breaks the NPC and is worse storytelling. Other characters reveal only what "
+    "that breaks the NPC and is worse storytelling. When the player ASKS about their own "
+    "life ('where did I stay?', 'why am I here?'), their own memory answers FIRST — the "
+    "question was addressed inward, not to the room. Other characters reveal only what "
     "THEY uniquely know or what is genuinely new to the protagonist; the protagonist's "
     "own competence is narrated as theirs. This volunteers commonplace and professional "
     "knowledge ONLY — never a concealed answer the briefing withholds."
@@ -1759,7 +2011,24 @@ WORLD_IS_PEOPLED = (
     "policy. Let each character's stance toward the player SHIFT with what passes between "
     "them — trust earned, suspicion provoked, a grudge formed, a wall going up — and carry "
     "it forward into how they treat the player next. Bureaucracy and procedure can be a "
-    "real texture of a world, but they are never a substitute for a human response."
+    "real texture of a world, but they are never a substitute for a human response. "
+    "PRESENCE HOLDS (binding): a character who is HERE stays here and engageable — they "
+    "do not arrive and leave in the same breath, and they do not slip out before the "
+    "player has had a turn to react to them. When someone arrives, or a moment opens that "
+    "the player could step into, present it and let it BREATHE on the player's cue: render "
+    "the world's side and STOP — never fast-forward a person in and back out of reach in "
+    "one beat. People leave only when the player or an established deadline drives it. "
+    "WHO IS BEING SPOKEN TO: an unaddressed reply or follow-up question from the player goes "
+    "to whoever spoke LAST — the natural turn of conversation — unless the wording or context "
+    "plainly aims it at someone else. If it is genuinely ambiguous, a character may ask "
+    "('You mean me, sir?') rather than the wrong one seizing the floor. ONE EXCEPTION OUTRANKS "
+    "the convention: a question about the player's OWN life, memory, or circumstances ('where "
+    "did I stay before?', 'how do I know her?') is answered by THEIR OWN MEMORY, in second "
+    "person, FIRST — never handed to a character to recite; someone present may then add only "
+    "what THEY uniquely know (the arrangement made, the message sent), after the memory has "
+    "answered. And the memory may honestly come up EMPTY — 'you contemplate it and are "
+    "unsure' is a grounded, valid answer; if the words weren't directed at a character, the "
+    "self is who is left, certain or not."
 )
 
 
@@ -1793,7 +2062,7 @@ def player_constraint(protagonist: str) -> str:
 
 
 def classify(provider: Provider, player_input: str, actor: str = "",
-             ask_candidates: list = ()) -> dict:
+             ask_candidates: list = (), npc_candidates: list = ()) -> dict:
     """Returns {kind, moves_to, requires, needs_test, uncertain_of, ...} — movement intent
     AND the assured-vs-uncertain resolution judgment ride the same cheap call (no extra
     latency; letter 026 + ACTION-RESOLUTION.md). `actor` is the protagonist's
@@ -1805,6 +2074,19 @@ def classify(provider: Provider, player_input: str, actor: str = "",
     HOST still gates eligibility (reveal-condition/presence) — this only PICKS the topic."""
     actor_note = (f"\nTHE CHARACTER (judge proficiency against this — what they should "
                   f"plainly be able to do needs NO test): {actor}\n" if actor else "")
+    npc_note = ""
+    if npc_candidates:
+        _nlines = "\n".join(f"  {oid}: {desc}" for oid, desc in npc_candidates)
+        npc_note = (
+            "\nPRESENT PEOPLE — characters in the scene with the player (opaque ids; PLAYER-"
+            "DRIVEN CAST MOVEMENT, Cx 363/365). If the player's move PLAINLY brings one or more "
+            "of them along ('Sir? Shall we…', 'we head out', 'come with me'), set `moved_with` to "
+            "those id(s). If the player PLAINLY sends one or more away ('you two may go', 'leave "
+            "us', 'dismissed'), set `npcs_dismissed` to those id(s). If the player invites one or "
+            "more to STAY WITH them as a companion from here on ('stick with me', 'you're with me "
+            "now', 'stay close') — with or without moving this turn — set `joins` to those id(s). "
+            "Only ids from this list; only when the wording plainly says so; all empty otherwise:\n"
+            + _nlines + "\n")
     ask_note = ""
     if ask_candidates:
         _lines = "\n".join(f"  {oid}: {desc}" for oid, desc in ask_candidates)
@@ -1816,6 +2098,7 @@ def classify(provider: Provider, player_input: str, actor: str = "",
             "matching only — never quote them, never treat them as facts:\n" + _lines + "\n")
     return complete_sync(provider,
         ask_note +
+        npc_note +
         actor_note +
         f"Classify this player input from an interactive-fiction session "
         f"by INTENT, not punctuation. The player is INSIDE the story unless they "
@@ -1833,10 +2116,6 @@ def classify(provider: Provider, player_input: str, actor: str = "",
         f"about world state ('is the vault locked?', 'where did I leave the key?', "
         f"'who is Cray?') — NOT a question put TO a character present in the scene "
         f"(that is interrogation = action).\n"
-        f"- ooc: ONLY meta addressed to the system/session, never the world — "
-        f"save/quit/help, 'how do I play?', 'what can I do?', confusion about the "
-        f"interface, 'who is Cray again?' asked of the operator (not of someone in "
-        f"the scene).\n"
         f"- declaration: the player tries to AUTHOR a new world fact by fiat ('there "
         f"is a hidden door behind the desk') — distinct from the character merely "
         f"SAYING something (that is action).\n"
@@ -1844,12 +2123,14 @@ def classify(provider: Provider, player_input: str, actor: str = "",
         f"DIFFERENT/new one — 'can we do a new story?', 'I want to quit', 'let me "
         f"play something else', 'start over', 'take me back to the menu'. This is "
         f"about leaving the SCENARIO, not anything the character does in it.\n"
-        f"These are illustrations, not an exhaustive rulebook. Players slip in and "
-        f"out of character fluidly and phrase things naturally — read their INTENT "
-        f"and trust your judgment; you should just GET whether they're speaking as "
-        f"their character or stepping outside the story. Lean on subtlety. When "
-        f"genuinely torn between in-character (action) and meta (ooc), default to "
-        f"keeping them inside the fiction.\n\n"
+        f"These are illustrations, not an exhaustive rulebook. Players phrase things "
+        f"naturally — read their INTENT and trust your judgment. A line the player "
+        f"speaks to, or asks of, someone PRESENT (by name, 'you', 'sir') is in-character "
+        f"dialogue = ACTION; they answer in the fiction — even a question about what to do "
+        f"next put to a companion is dialogue, not a query to the operator. Genuine meta "
+        f"about the game/session (save, quit, help) has its own channel (the player types "
+        f"/ooc); anything typed WITHOUT /ooc stays inside the fiction — always keep them in "
+        f"the story.\n\n"
         f"Additionally: if the action MOVES the player somewhere, set "
         f"moves_to to the destination exactly as the player named it "
         f"('the wellhead', 'my quarters'); otherwise empty string. Walking "
@@ -1870,11 +2151,18 @@ def classify(provider: Provider, player_input: str, actor: str = "",
         f"Additionally: set `takes` to the object the player PICKS UP or takes into "
         f"possession this turn (grabs, lifts, pockets, tucks under arm), as named; empty "
         f"if they take nothing.\n"
+        f"Additionally: set `drops` to the object the player SETS DOWN this turn — drops, "
+        f"leaves, puts/sets down, places, lays, returns, or hands off from their possession "
+        f"(the inverse of takes), as named ('set the letter-opener down', 'leave the lantern "
+        f"here'); empty if they set nothing down.\n"
         f"Additionally: set `examines_target` to the ONE specific thing the player CLOSELY "
         f"investigates this turn — a particular object, mark, trace, or detail they "
         f"scrutinize/inspect/follow up on ('the wet ring', 'the forced lock') — named as they "
         f"referred to it; EMPTY for a generic look-around, movement, talk, or anything not "
-        f"focused on inspecting one detail.\n\n"
+        f"focused on inspecting one detail.\n"
+        f"Additionally: set `mortal_risk` TRUE only when the move risks the player "
+        f"character's own LIFE given what the scene has established — not mere injury, "
+        f"not risk to others. Almost always false.\n\n"
         f"INPUT: {player_input}",
         CLASSIFY_SCHEMA, tier="cheap", task="cls")
 
@@ -2001,26 +2289,345 @@ def detect_events(provider: Provider, action: str, outcome: str,
         DETECT_EVENTS_SCHEMA, tier="cheap", task="evt")
 
 
+STAGE_GATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "specified": {"type": "boolean"},
+        "missing": {"type": "array", "items": {
+            "type": "string",
+            "enum": ["audience", "addressee", "place", "means", "target"]}},
+        "clarification": {"type": "string",
+                          "description": "ONE diegetic beat the narrator can render asking for "
+                                         "the concrete missing piece — in-world, never meta"},
+    },
+    "required": ["specified", "missing", "clarification"],
+}
+
+
+def commitment_stage_gate(provider: Provider, player_input: str, commitment: str,
+                          place: str, present: str, commitment_kind: str) -> dict:
+    """THE CLARIFICATION GATE (#88A, founder + Cx 375): a conclusory commitment given in a few
+    ambiguous words ('REED DID IT' alone in an alley; 'I ruin their wedding!') must be made
+    CONCRETE before it is judged — better fiction and fairer judgment from the same beat.
+    PUBLIC staging context only (never the hidden answer). Cheap: a practical checklist, not
+    literary judgment."""
+    return complete_sync(provider,
+        f"A player in an interactive fiction is making their DECISIVE, story-concluding move "
+        f"({commitment_kind or 'a conclusory commitment'}). Judge ONLY whether the move is "
+        f"CONCRETE enough to carry out as staged — practically, not literarily:\n"
+        f"- audience/addressee: is it said TO someone who can receive it (a person, an "
+        f"authority)? A declaration alone in an empty place reaches no one.\n"
+        f"- place: is this a place where the move can land?\n"
+        f"- means/target: is WHAT they do (and to whom/what) plain?\n"
+        f"THE MOVE: {player_input}\nTHE COMMITMENT AS UNDERSTOOD: {commitment}\n"
+        f"WHERE THEY ARE: {place or 'unknown'}\nWHO IS PRESENT: {present or 'no one'}\n\n"
+        f"If anything essential is missing, specified=false, list the missing categories, and "
+        f"write ONE in-world clarification beat (a character asking, or the world making the "
+        f"gap plain — 'Say it to whom? The yard is empty.'). If it is concrete enough — even "
+        f"if unwise or wrong — specified=true (wrongness is judged elsewhere; you judge only "
+        f"STAGING).",
+        STAGE_GATE_SCHEMA, tier="cheap", task="csg")
+
+
+RESOLVE_DEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["existing", "new", "ambiguous"]},
+        "match": {"type": "string",
+                  "description": "when verdict=existing: the EXACT place id from the roster"},
+    },
+    "required": ["verdict", "match"],
+}
+
+
+def resolve_destination(provider: Provider, phrase: str, roster: list) -> dict:
+    """SEMANTIC destination bind (Cx 354 A, founder phantom-scene incident): a move destination
+    may be a DEFINITE DESCRIPTION referring to an established place by ROLE ("the scene of the
+    crime" → the authored murder-scene yard) — token matching can't bind it, and minting a
+    duplicate forks the world. ONE cheap call, ONLY on the zero-candidate move path: reference
+    to an existing roster place / genuinely new / ambiguous. The caller pre-screens the roster
+    (entitled places only, concealed values dropped)."""
+    lines = "\n".join(f"- {pid}: {label}" for pid, label in roster)
+    return complete_sync(provider,
+        f"A player in an interactive fiction wants to go to: \"{phrase}\".\n"
+        f"KNOWN PLACES (id: what it is):\n{lines}\n\n"
+        f"Is the player's phrase a REFERENCE to one of the known places (a definite "
+        f"description, role, or paraphrase — e.g. 'the scene of the crime' refers to an "
+        f"established murder-scene place), a GENUINELY NEW place this story never established, "
+        f"or AMBIGUOUS (could equally be more than one)? Bind only on a clear referent.",
+        RESOLVE_DEST_SCHEMA, tier="cheap", task="dst")
+
+
 def npc_turn(provider: Provider, npc_id: str, sheet: str, scene: str,
-             protagonist: str) -> dict:
+             protagonist: str, recent: str = "", companion: bool = False) -> dict:
     """TURN-LATENCY Lever 4: the folded per-NPC call. MERGES the world-action
     decision (`npc_world_action`) and the speak-intent (`npc_intent`) into ONE
     cheap-tier call, returning the combined {acts, action, speaks, intent,
-    line_hint}. One model call per present NPC instead of two."""
+    line_hint}. One model call per present NPC instead of two. `recent` (founder
+    2026-07-01, 'dialogue and facts repeating'): the last exchanges, so the NPC's
+    intent ADVANCES the conversation instead of re-asking/restating what was just said.
+    `companion` (#85): this character is ACCOMPANYING the player by standing agreement —
+    they live in the scene rather than wait to be addressed."""
+    recent_note = (f"\nTHE CONVERSATION JUST NOW (what has ALREADY been said — do not ask for "
+                   f"or restate anything given here; your intent must ADD something new, or "
+                   f"stay silent):\n{recent}\n" if recent else "")
+    companion_note = (
+        "\nYOU ARE THE PLAYER'S COMPANION right now (travelling with them by agreement): react "
+        "to what happens, notice things within your own competence, and interject or murmur an "
+        "aside freely when you have something to add — you need not wait to be addressed. A "
+        "quick beat, not a speech; their partner, not their narrator.\n" if companion else "")
     return complete_sync(provider,
         f"You are {npc_id}. CHARACTER SHEET (your entire knowledge and dispositions "
-        f"— you know NOTHING beyond this):\n{sheet}\n\nCURRENT SCENE:\n{scene}\n\n"
+        f"— you know NOTHING beyond this):\n{sheet}\n\nCURRENT SCENE:\n{scene}\n"
+        + recent_note + companion_note + "\n"
         f"Decide this character's behaviour this turn, driven by their OWN "
         f"dispositions, in TWO parts:\n"
         f"1. A PHYSICAL action right now (moving, taking, doing — not talking): set "
         f"`acts` and describe it in `action` (third-person, factual; empty if "
         f"acts=false). Most turns: acts=false.\n"
+        f"   STAY AVAILABLE: you are HERE with the player, who must get the chance to "
+        f"engage you. Do NOT leave, exit, excuse yourself, or otherwise remove yourself "
+        f"from the scene of your own accord — a physical `action` is IN-SCENE business "
+        f"(you wait, fidget, pour a drink, glance at the door, examine something, turn "
+        f"away), never self-removal. You leave the scene ONLY when the player drives it "
+        f"(they dismiss you, leave themselves, or provoke you out) or an established "
+        f"deadline forces it — and even then not before they have had a turn to react.\n"
         f"2. Whether they SPEAK this turn and what they want: set `speaks`, put what "
         f"the character wants from this exchange in `intent` (empty if silent), and "
         f"any optional voice flavor in `line_hint`.\n"
         f"Never speak, act, script, or presume anything done or said FOR "
         f"{protagonist} (the player's character).",
         NPC_TURN_SCHEMA, tier="cheap", task="npt")
+
+
+PERSONAL_THREADS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "threads": {"type": "array", "items": {"type": "object", "properties": {
+            "thread": {"type": "string",
+                       "description": "one PERSONAL commitment of the player character: "
+                                      "a promise made, bond formed, debt incurred, "
+                                      "relationship begun or changed — WHO and WHAT, one "
+                                      "clause ('promised to meet Tin at the rail end "
+                                      "after close')"},
+            "status": {"type": "string", "enum": ["open", "paid_off"]},
+        }, "required": ["thread", "status"]}},
+    },
+    "required": ["threads"],
+}
+
+
+def extract_personal_threads(provider: Provider, history: str) -> dict:
+    """#96 S4 (Cx 414 constraint 4): structured extraction of the player's PERSONAL
+    threads from the episode ledger — promises, bonds, debts, changed relationships —
+    so continuation fuel carries them first-class instead of lossy prose memory. Names
+    threads for the AUTHOR prompt only; writes no canon. The player's story is the
+    story: personal commitments are never optional flavor a case generator may drop."""
+    return complete_sync(provider,
+        "From this adventure's history, extract the PLAYER CHARACTER's PERSONAL threads: "
+        "promises they made, bonds formed, debts incurred, relationships begun or "
+        "changed — and whether each is still OPEN or was paid off by the end. Only "
+        "genuinely personal commitments (a meeting promised, a trust earned, an enemy "
+        "made) — never case facts or clues. An empty list is a fine answer.\n\n"
+        "THE HISTORY:\n" + history[:4500],
+        PERSONAL_THREADS_SCHEMA, tier="cheap", task="pth")
+
+
+MEMORY_TURN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "stirs": {"type": "boolean",
+                  "description": "does the character's own mind genuinely contribute "
+                                 "this beat? Most beats: false — silence is the "
+                                 "default, a stirred memory must be EARNED by the "
+                                 "moment"},
+        "memory": {"type": "string",
+                   "description": "if stirs: the memory/connection/felt familiarity "
+                                  "that surfaces, grounded ONLY in the sheet — one or "
+                                  "two clauses, second-person interiority. NEVER "
+                                  "dialogue, NEVER an action, NEVER new facts. If the "
+                                  "memory holds no answer, honest uncertainty IS the "
+                                  "contribution ('you turn it over and find nothing "
+                                  "certain'). Empty when not stirring."},
+        "feeling": {"type": "string",
+                    "description": "if stirs: the single felt quality riding it "
+                                   "(unease, warmth, old guilt, familiarity); empty "
+                                   "otherwise"},
+    },
+    "required": ["stirs", "memory", "feeling"],
+}
+
+
+def memory_turn(provider: Provider, protagonist: str, sheet: str, scene: str,
+                player_input: str, tensions: str = "") -> dict:
+    """#97 THE REMEMBRANCER (REMEMBRANCER.md, Cx 434): the protagonist's own memory as
+    a silent turn participant, symmetric with `npc_turn` — the sheet is the SCREENED
+    `knows:<prot>` digest; the output is interiority only (never dialogue, never
+    action, never invention beyond the sheet + ordinary plausible autobiography).
+    Gated (asks_self / recalls / declares / protagonist-knowledge turns), cheap tier."""
+    return complete_sync(provider,
+        f"You are the character's OWN MEMORY AND AWARENESS — not a narrator, not a "
+        f"character who speaks. Given what this character actually knows (the sheet) "
+        f"and what just happened, decide whether their own mind contributes this "
+        f"beat: a memory surfacing, a connection noticed, a felt familiarity or "
+        f"unease GROUNDED in the sheet. Silence is the default — stir only when the "
+        f"moment genuinely reaches into what they know. Never dialogue, never an "
+        f"action, never a fact the sheet doesn't hold (honest uncertainty is a valid "
+        f"contribution when the player reaches for something the memory doesn't "
+        f"have). A flicker, not a flashback."
+        + (f"\nTENSION TO REFLECT (a just-declared memory sits oddly against what is "
+           f"established — surface it as felt tension, never a lecture): {tensions}"
+           if tensions else "") +
+        f"\n\nTHE CHARACTER: {protagonist}\n"
+        f"WHAT THEY KNOW (the sheet — the ONLY ground):\n{sheet}\n\n"
+        f"THE SCENE NOW: {scene}\n"
+        f"THE PLAYER'S MOVE: {player_input}",
+        # `rmb`, NOT `mem` (Cx 439 #2): narrative-memory compaction already owns `mem`
+        # — sharing the tag let the StubProvider default answer compaction with the
+        # Remembrancer shape.
+        MEMORY_TURN_SCHEMA, tier="cheap", task="rmb")
+
+
+MEMORY_CLAIMS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "claims": {"type": "array", "items": {"type": "object", "properties": {
+            "about": {"type": "string", "enum": ["self", "world"],
+                      "description": "self = the character's own life/shape (their "
+                                     "home, past, vow, wound, relationship); world = "
+                                     "a claim about OTHER people or events ('the "
+                                     "mayor confessed')"},
+            "subject": {"type": "string",
+                        "description": "who/what the claim is about, as named; empty "
+                                       "for the character themself"},
+            "attribute": {"type": "string",
+                          "description": "one snake_case key ('childhood_home', "
+                                         "'promise', 'first_meeting')"},
+            "value": {"type": "string"},
+        }, "required": ["about", "subject", "attribute", "value"]}},
+        "people": {"type": "array", "items": {"type": "object", "properties": {
+            "name": {"type": "string",
+                     "description": "a person of the character's past named with a "
+                                    "PROPER PERSONAL NAME, exactly as given ('John "
+                                    "Johnson') — never a description ('my old friend')"},
+            "relation": {"type": "string",
+                         "description": "their relation to the character, one clause"},
+        }, "required": ["name", "relation"]}},
+    },
+    "required": ["claims", "people"],
+}
+
+
+def extract_memory_claims(provider: Provider, player_input: str,
+                          protagonist: str) -> dict:
+    """#97 retcon half (Cx 434 constraint 3): structured extraction of a DECLARED
+    memory's claims — what the player just authored about their character's past.
+    Pure extraction; ALL authority decisions (screens, collisions, stubs) are the
+    deterministic caller's."""
+    return complete_sync(provider,
+        "The player just DECLARED a memory of their character's own past. Extract "
+        "exactly what it asserts — nothing inferred, nothing embellished.\n"
+        "- `claims`: each asserted fact, tagged `self` (their own life: home, past, "
+        "vow, wound, bond) or `world` (about other people/events).\n"
+        "- `people`: persons of their past named with a PROPER PERSONAL NAME, with "
+        "the relation. A described-but-unnamed figure ('an old friend') is NOT "
+        "listed.\n\n"
+        f"THE CHARACTER: {protagonist}\n"
+        f"THE DECLARATION: {player_input}",
+        MEMORY_CLAIMS_SCHEMA, tier="cheap", task="mcl")
+
+
+DEATH_POLICY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "policy": {"type": "string", "enum": ["mortal", "premise", "shielded"]},
+        "reason": {"type": "string",
+                   "description": "one clause naming why this genre/premise gets this "
+                                  "policy"},
+    },
+    "required": ["policy", "reason"],
+}
+
+
+def classify_death_policy(provider: Provider, genre: str, game_types: str,
+                          premise: str) -> dict:
+    """#95 (DEATH-TESTAMENT.md, Cx 422): one build-time judgment of whether the player
+    character's death ends this story. Per-chapter granularity — continuation re-derives.
+
+    - `mortal`: death is narratively THE END here (action, adventure, fantasy quest,
+      survival, thriller, war) — a staged fatal outcome terminates the story.
+    - `premise`: the story's PREMISE transforms death (a time loop, a ghost, a
+      resurrection mechanic) — death folds into that mechanism, never terminal.
+      The premise TRUMPS genre when both apply.
+    - `shielded`: on-screen player death is not in the genre's contract (cozy mystery,
+      romance, drawing-room intrigue, comedy of manners) — peril caps at wounds,
+      capture, or ruin, in the classic conventions."""
+    return complete_sync(provider,
+        "Decide the DEATH POLICY for this interactive fiction: does the player "
+        "character's death END the story?\n"
+        "- mortal: death would narratively BE the end (action, adventure, fantasy "
+        "quest, survival, thriller, war stories).\n"
+        "- premise: the story's premise TRANSFORMS death (a time loop that resets, a "
+        "ghost protagonist, an established resurrection mechanic). The premise trumps "
+        "genre.\n"
+        "- shielded: on-screen death of the protagonist is not in this genre's "
+        "contract (cozy mystery, romance, drawing-room intrigue) — peril caps at "
+        "wounds, capture, or ruin.\n\n"
+        f"GENRE: {genre or '(unstated)'}\n"
+        f"GAME TYPES: {game_types or '(unstated)'}\n"
+        f"PREMISE: {premise or '(unstated)'}",
+        DEATH_POLICY_SCHEMA, tier="cheap", task="dpol")
+
+
+WORLD_TICK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "ticks": {
+            "type": "array",
+            "description": "at most ONE entry per person; a person who would simply keep "
+                           "at their business gets NO entry",
+            "items": {"type": "object", "properties": {
+                "member": {"type": "string",
+                           "description": "the person id, from THE PEOPLE verbatim"},
+                "kind": {"type": "string",
+                         "enum": ["moved", "met_with", "sent_word", "finished_task",
+                                  "closed_up"]},
+                "detail": {"type": "string",
+                           "description": "one plain factual clause of what they did — "
+                                          "ordinary, concrete, true to their dispositions; "
+                                          "no drama, no secrets, never about the player"},
+                "moves_to": {"type": "string",
+                             "description": "kind=moved only: the destination place id "
+                                            "from KNOWN PLACES verbatim; else empty"},
+                "with_member": {"type": "string",
+                                "description": "kind=met_with only: the other person id — "
+                                               "an established off-screen person, NEVER "
+                                               "the player's character; else empty"},
+            }, "required": ["member", "kind", "detail"]},
+        },
+    },
+    "required": ["ticks"],
+}
+
+
+def world_tick(provider: Provider, members: list, places: list, elapsed_note: str) -> dict:
+    """WORLD-MOVES-WITHOUT-YOU (#84, WORLD-TICK.md): while the player is elsewhere, what
+    did these off-screen people plausibly DO? One cheap call; small ordinary consequences
+    only — the host screens and commits them as canon, and the player DISCOVERS them by
+    returning. Genre-blind: each member's sheet carries the flavor."""
+    _mlines = "\n".join(f"  {mid} (at {where or 'an unknown place'}):\n    {sheet}"
+                        for mid, where, sheet in members)
+    _plines = "\n".join(f"  {pid}: {label}" for pid, label in places)
+    return complete_sync(provider,
+        f"The player's story has moved elsewhere; the world keeps living. {elapsed_note}\n\n"
+        f"THE PEOPLE (their dispositions decide — most people simply keep at their "
+        f"business and get NO entry):\n{_mlines}\n\n"
+        f"KNOWN PLACES (the only valid `moves_to` destinations):\n{_plines}\n\n"
+        f"For AT MOST one small, ordinary, plausible off-screen action per person — a "
+        f"move, a meeting, word sent, a task finished, a closing-up — emit a tick. "
+        f"Concrete and physical/social, never dramatic revelations, never anything "
+        f"about or toward the player. Empty `ticks` is a perfectly good answer.",
+        WORLD_TICK_SCHEMA, tier="cheap", task="wtk")
 
 
 def nudge_pick(provider: Provider, rung: str, threads: list[str], scene: str,
@@ -2086,32 +2693,6 @@ def weave_pick(provider: Provider, scene: str, cards: list[str], floor_debt: lis
         WEAVE_SCHEMA, tier="cheap", task="wve")
 
 
-CONDUIT_SCHEMA = {
-    "type": "object",
-    "properties": {"reply": {"type": "string"}},
-    "required": ["reply"],
-}
-
-
-def conduit_reply(provider: Provider, ooc_text: str, state_note: str) -> str:
-    """Conduit — the HOST persona — answering an OUT-OF-CHARACTER question (game
-    state, what's possible, help). Speaks as the host of the fiction, NOT a
-    character and NOT the narrator; brief and plain. It MAY state whether a
-    win/loss terminal has been reached and the mode of play, but NEVER reveals the
-    hidden win condition, the mechanism, or any concealed story answer."""
-    result = complete_sync(provider,
-        "You are Conduit, the HOST of an interactive-fiction session — not a "
-        "character in the story, not the narrator. The player has stepped OUT of "
-        "character to ask you something (game state, what's possible, or help). "
-        "Answer briefly and plainly as the host. You MAY say whether a win/loss "
-        "terminal has been reached and the general mode of play; you must NEVER "
-        "reveal the hidden win condition, the solution, or any concealed answer. If "
-        "they ask 'have I won / lost yet?', answer from the state below. Do not "
-        "narrate scene or speak as a character.\n\n"
-        f"SESSION STATE (ground your answer; do not quote raw):\n{state_note}\n\n"
-        f"PLAYER (out of character): {ooc_text}",
-        CONDUIT_SCHEMA, tier="cheap", task="cnd")
-    return result["reply"]
 
 
 #: Control/meta signatures that must NEVER appear in player-facing prose. The play
@@ -2150,22 +2731,26 @@ def _clean_prose(text: str) -> str:
     return cleaned or text  # never return empty
 
 
-def open_scene(provider: Provider, briefing: str, protagonist: str) -> str:
+def open_scene(provider: Provider, briefing: str, protagonist: str,
+               *, grounding: bool = True) -> str:
     """The COLD OPEN — an elegant establishing narration the player steps into,
     rendered from the world's standing anchors (never shown raw). Sets who/where
     and the felt moment in the world's voice; opens a situation without acting or
-    deciding for the player. Player-facing prose → quality-bearing (high effort)."""
-    result = complete_sync(provider,
-        f"You are the narrator opening a work of interactive fiction. From the "
-        f"ESTABLISHING BRIEFING (the world's standing truth — your anchors, never to "
-        f"be quoted as a list or as raw ids), write the COLD OPEN: 1-3 grounded, "
-        f"clear paragraphs that place the player in this world and moment — who they "
-        f"are (as 'you'), where they literally stand, what is plainly around them, and "
-        f"what presses on the moment. Concrete first, mood second (see STYLE below — "
-        f"let it breathe; do not drench every line). Set a scene worth stepping into, "
-        f"in the world's established voice. Do NOT take "
-        f"action or make decisions FOR the player; end poised on the threshold of "
-        f"their first move. Do not restate an 'aim' or enumerate facts.\n"
+    deciding for the player. Player-facing prose → quality-bearing (high effort).
+    `grounding` (CHARACTER-GROUNDING P3, default): zoom into the player's OWN inhabited
+    space as a moment to take from, and HOLD the call-to-action for a beat (it lands a
+    turn later) — so the player is grounded in who/where they are before the story."""
+    call_to_action = (
+        f"ZOOM INTO THEIR INHABITED SPACE — HOLD THE CALL (CHARACTER-GROUNDING, founder's "
+        f"Picard model): the player has just settled WHO they are; now they step into the "
+        f"space they inhabit (their office, their rooms, their post). Render THAT — their "
+        f"own concrete place, their things, the ordinary texture of their world and role — "
+        f"as a grounded, low-pressure MOMENT FOR THEM TO TAKE FROM (look around, touch their "
+        f"world, get their bearings). Do NOT surface the case, the mystery, the inciting "
+        f"incident, or any call-to-action YET — that lands a beat later, once they're "
+        f"settled. End simply poised in their own space, theirs to act in. NO wrongness, no "
+        f"hook, no thread to pull — just their grounded world."
+        if grounding else
         f"GROUND FIRST, THEN LET THE CALL TO ACTION ARISE (founder): there is NO "
         f"objective banner — the player must first understand the SETTING and WHERE "
         f"THEY ARE and feel grounded. A good story starts BEFORE the case lands "
@@ -2176,7 +2761,30 @@ def open_scene(provider: Provider, briefing: str, protagonist: str) -> str:
         f"in plain sight). Surface the QUESTION (what's suspicious), never the ANSWER. "
         f"Do not announce it as a goal or a quest; let it stir in the fiction and "
         f"leave them wanting to pull on it. It deepens over the next beats — the open "
-        f"only plants the first seed.\n"
+        f"only plants the first seed.")
+    result = complete_sync(provider,
+        f"You are the narrator opening a work of interactive fiction. From the "
+        f"ESTABLISHING BRIEFING (the world's standing truth — your anchors, never to "
+        f"be quoted as a list or as raw ids), write the COLD OPEN: 1-3 grounded, "
+        f"clear paragraphs that place the player in this world and moment — who they "
+        f"are (as 'you'), where they literally stand, what is plainly around them, and "
+        f"what presses on the moment. Concrete first, mood second (see STYLE below — "
+        f"let it breathe; do not drench every line). PLAIN, NOT OPAQUE: a metaphor must "
+        f"carry a concrete fact or be cut ('a table scarred with ink and knife-nicks' shows "
+        f"the room; 'old caution worn into the grain' shows nothing) — and a word of the "
+        f"character's trade a newcomer wouldn't know (plain-clothes work, a canvass) must be "
+        f"made concrete in the same breath, the DOING not the bare label, so the player "
+        f"learns it from what is happening rather than being left to already know it. "
+        f"Set a scene worth stepping into, "
+        f"in the world's established voice. Do NOT take "
+        f"action or make decisions FOR the player. END BY TURNING TO THE PLAYER (founder): "
+        f"when people are present, close on a present character (or the scene itself) "
+        f"handing them the moment — a natural, in-voice invitation toward an obvious first "
+        f"step ('Well then — shall we see the yard before the rain takes it?'). An "
+        f"INVITATION, never a menu and never a command; the choice stays theirs, and "
+        f"declining or doing something else entirely must feel just as open. "
+        f"Do not restate an 'aim' or enumerate facts.\n"
+        f"{call_to_action}\n"
         f"CONCEALMENT: render only what the player would PERCEIVE on arrival — the "
         f"room, who is present, the mood, ambient detail. Do NOT state hidden "
         f"EVIDENCE or CONCLUSIONS: who signed what, who falsified what, who is behind "

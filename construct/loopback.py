@@ -83,6 +83,7 @@ def pump(conn, core: TransportCore, inbound_path: Path, outbox_path: Path,
         out = core.handle(ev, now=now_fn())
         registry.record_outbox(conn, core._platform, uid, out.chat_id, out.chunks)
         _flush(conn, core._platform, outbox_path)  # deliver this reply now
+        core.settle(ev)  # POST-SEND: run the turn's deferred bookkeeping now (overlaps reading)
         ran += 1
     return ran
 

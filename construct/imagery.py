@@ -120,6 +120,21 @@ def _hash(description: str) -> str:
     return hashlib.sha256((description or "").strip().encode("utf-8")).hexdigest()[:16]
 
 
+#: Tokens that mark a MAJOR visual fixture whose appearance should refresh the scene image
+#: (the one content change the design calls out — "a body appearing"). Ordinary object/clue
+#: churn must NOT refresh (founder: the image kept re-sending without leaving the location).
+_CORPSE_TOKENS = ("corpse", "body", "dead ", "the dead", "cadaver", "remains", "slain", "victim")
+
+
+def _major_fixture_key(contents: str) -> str:
+    """A COARSE, stable signal folded into the freshness hash: whether a corpse/body is in
+    the room. Returns "corpse" or "" — so a body appearing refreshes the image, but the
+    room slowly accruing examined objects/clues does NOT (that churn was re-rendering the
+    same location every turn)."""
+    low = (contents or "").lower()
+    return "corpse" if any(t in low for t in _CORPSE_TOKENS) else ""
+
+
 def manifest_path(scenario: str) -> Path:
     return WORLDS_DIR / f"{_slug(scenario)}.images.json"
 
@@ -173,14 +188,17 @@ def plan_scene(scenario: str, place_id: str | None, place_name: str,
                description: str | None, *, world_brief: str = "",
                genre: str = "", contents: str = "") -> SceneImage | None:
     """FAST, pure detection (no model call) — safe to call every turn. Returns a
-    :class:`SceneImage` flagged ``fresh`` (new/changed location OR changed contents →
+    :class:`SceneImage` flagged ``fresh`` (new/changed location OR a body appears →
     the caller should :func:`render` it) or ``cached`` (unchanged → do nothing), or
-    None when disabled / nothing to depict. The hash folds in the room CONTENTS, so a
-    body appearing (or any change to what's in the room) refreshes the image."""
+    None when disabled / nothing to depict. Freshness keys on the committed place
+    DESCRIPTION plus a COARSE major-fixture flag (a corpse present) — NOT the full
+    object list, so a room that merely accrues examined objects/clues across turns stays
+    cached (founder: the image kept re-sending without leaving the location). The full
+    ``contents`` still feeds the render prompt, so the picture still depicts what's there."""
     description, contents = (description or "").strip(), (contents or "").strip()
     if not enabled() or not place_id or not (description or contents):
         return None
-    h = _hash(description + "\x1f" + contents)
+    h = _hash(description + "\x1f" + _major_fixture_key(contents))
     prior = _load_manifest(scenario).get(place_id)
     if prior and prior.get("description_hash") == h and prior.get("prompt"):
         return SceneImage(place_id=place_id, place_name=place_name, description_hash=h,
