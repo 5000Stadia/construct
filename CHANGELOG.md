@@ -2,6 +2,58 @@
 
 Notable changes to The Construct. Pre-1.0; dates are development milestones, not releases.
 
+## Unreleased (2026-07)
+
+### Added
+- **Death & the testament** — a per-chapter `death_policy` (`mortal` / `premise` / `shielded`)
+  decides whether the player character's death ends the story, is transformed by the premise
+  (time loops, ghosts), or is capped by genre convention. Mortal peril must be *staged* — the
+  world makes the stakes unmistakable and lands the first risk short of death; only persistence
+  into staged peril can kill, and only on the deck's terrible-failure tier. A death renders THE
+  FALL + THE TESTAMENT (the world after you, and your effect on it) and is permanent: death ends
+  endless worlds too, and no next chapter is ever offered. `docs/design/DEATH-TESTAMENT.md`.
+- **The Remembrancer** — the protagonist's own memory as a silent turn participant, symmetric
+  with NPC engines: a concealment-screened `knows:` digest contributing felt interiority only
+  (never dialogue, never action), gated to self-questions, deliberate recall, declarations, and
+  protagonist-knowledge turns. Includes **player-authored memory (retcon)**: "I remember my
+  childhood friend John Johnson" commits real autobiography through a guarded channel — world
+  claims become beliefs that can never satisfy arc coverage, protected/concealed material is
+  screened at storage, named past people are admitted as minimal offscene canon stubs, and
+  direct contradictions quarantine in favor of the first established truth (surfaced as
+  in-fiction tension, never a silent overwrite). `docs/design/REMEMBRANCER.md`.
+- **First-mention permanence** — a proper-named detail the world establishes ("The Hart and
+  Bell") commits immediately as a minimal, non-present place/person stub through the Entity
+  Authority seam; engagement paints the rest. The gate's evidence is real casing — recovered
+  from the prose itself when the lean extractor omits name rows — and fail-closed: generic
+  descriptions ("the street") still never mint. Narration-channel only; player input still
+  cannot conjure people or places. `docs/design/ENTITY-AUTHORITY.md` (Cx 415 amendment).
+- **Consequence callbacks & settled history** — every ending writes deterministic canon
+  consequence events (word spreads, reputation shifts) with causal receipts; the next chapter's
+  opening carries exactly ONE unsurfaced callback (the newspaper seam), receipt-gated against
+  repetition. Answered questions become settled history the generator is prohibited from
+  re-opening as mystery; the notebook marks them closed; personal promises are extracted as
+  first-class continuation fuel the next chapter must honor or consciously pay off.
+- **Vocative title resolution** — "Chief!" resolves to the unique canon title-holder,
+  address-syntax-gated ("my chief concern" never matches). Present → they take the floor and
+  their knowledge delivers; absent → no present character answers in their stead, and the
+  address lands on their absence honestly.
+- **Ending voice branches** — a commitment-owned close gets the RECKONING scene; a silent /
+  world-event close gets THE SETTLING (the world registering the matter closing — no verdict,
+  no judgment scene the player never convened).
+
+### Evaluation & method
+- **Adversarial critic campaign** — player-agents primed to break immersion and file their own
+  `/feedback` reports, including deliberate off-path runs and chapter-2 continuations; every
+  filing independently triaged against engine ground truth (`docs/design/eval/09`).
+- **The optimal-IF synthesis** — the corpus distilled into five portable pillars
+  (`docs/design/OPTIMAL-IF-EXPERIENCE.md`).
+- **Cast identity coherence gate** at build (one id can no longer be authored as two people);
+  containment-aware presence (a person in an alcove within the study is present in the study).
+
+### Changed
+- The default shipped world is **The Rain in Bluegate Yard** (`bodycase`); the original anchor
+  world is retired to `worlds/attic/`.
+
 ## Unreleased (2026-06)
 
 ### Added

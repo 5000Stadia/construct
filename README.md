@@ -1,169 +1,196 @@
-# construct
+<div align="center">
 
-> **The Construct** — an interactive-fiction engine that loads a stored world into a *played, remembered* holonovel.
->
-> Step into a book, or a world built from a conversation. Put something in a drawer, wander for an hour, come back — it's still there. The world remembers, so the model doesn't have to.
+# The Construct
 
-**Status: pre-1.0, first-playable.** The engine plays end-to-end on a real model, and its five-probe acceptance set passes 5/5 in live play (below). Built on [**pattern-buffer**](https://github.com/5000Stadia/pattern-buffer), the append-only world-state engine. Not yet on PyPI.
+**An interactive-fiction engine where the world's truth is a database and the model is only a voice.**
 
----
+Step into a book, or a world built from one conversation. Put something in a drawer, wander for an hour, come back — it's still there. The world remembers, so the model doesn't have to.
 
-## What it is
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://img.shields.io/badge/tests-720%2B%20green-brightgreen.svg)](#engineering-proof)
+[![Substrate](https://img.shields.io/badge/substrate-pattern--buffer-8A2BE2.svg)](https://github.com/5000Stadia/pattern-buffer)
+[![Status](https://img.shields.io/badge/status-research%20active-blueviolet.svg)](#project-status)
 
-Interactive fiction has always had to pick a failure: hand-authored worlds are rich but rigid (every path pre-written), and generated worlds are free but amnesiac (AI Dungeon contradicts itself within twenty turns). The Construct is neither, because it separates two jobs:
-
-- **pattern-buffer** holds the world's *truth* — an append-only log of who/what/where, with object permanence, knowledge frames, and as-of queries. Nothing is forgotten; nothing is invented over canon.
-- **The Construct** turns that truth into a *played experience* — it narrates the scene, voices the characters, drives a hidden story arc, and keeps the whole thing coherent turn after turn.
-
-The name is the metaphor: like the Construct in *The Matrix*, it's the runtime that loads any world from stored data into a lived one. The vocabulary stacks:
-
-> **pattern-buffer** holds the pattern → **the Construct** loads it into a played → **holonovel**.
-
-A *holonovel* is a single played world — ingested from a book, or built live through an interview. The Construct is the engine that presents them.
+</div>
 
 ---
 
-## Proven in live play (not just unit-tested)
+## The research question
 
-The real acceptance gate isn't a test suite — it's a person (here, an AI tester) in the player's seat, doing what no eval can. The five-probe set, all verified live:
+Interactive fiction has always had to pick a failure. Hand-authored worlds are rich but rigid — every path pre-written. LLM-generated worlds are free but amnesiac — they contradict themselves within twenty turns, invent doors that were never there, and forget the spoon you set down. The failure isn't a model-quality problem; it's an **architecture** problem: the same context window is being asked to be the world's memory, its referee, and its voice.
 
-| Probe | Result |
-|---|---|
-| **Object permanence** — put a spoon on a table, leave, return | **PASS** — fold-verified, the spoon is there |
-| **Loop closure** — a room is the *same* room when you walk back in | **PASS** — memoized furnishing, round-trip |
-| **Frame non-leak** — you only ever know what your character knows | **PASS** — structural, every turn |
-| **Player agency** — refuse the story and it pushes the *world* at you, never your character | **PASS** — two refusal modes, structurally enforced |
-| **Adjudication** — you can't unlock a vault with a key you don't have | **PASS** — the world refuses, with the honest reason |
+The Construct is a working answer to: *what does long-form generative fiction look like when those jobs are separated?*
 
-Each turn runs a deterministic spine with model calls only at the boundaries (narration and character), and turns in well under a minute. The whole live-test arc — including the eight issues play surfaced and the fixes — is recorded honestly in the design docs.
+- **[pattern-buffer](https://github.com/5000Stadia/pattern-buffer)** holds the world's *truth* — an append-only assertion log with object permanence, per-character knowledge frames, event causality, and as-of queries. Nothing is forgotten; nothing is invented over canon.
+- **The Construct** turns that truth into a *played experience* — a host that classifies the player's move, adjudicates it against the map, advances a hidden story arc, composes a grounded briefing, and only then lets a model narrate. The model never holds state; it renders it.
+
+The name is the metaphor: like the Construct in *The Matrix*, it's the runtime that loads any stored world into a lived one. **pattern-buffer** holds the pattern → **the Construct** loads it into a played → **holonovel**.
+
+```mermaid
+flowchart LR
+  P((Player)) --> C[classify]
+  C --> A[adjudicate<br/>map-governs]
+  A --> W[(pattern-buffer<br/>canon + frames)]
+  W --> K[clocks · beats ·<br/>hidden arc]
+  K --> B[grounded briefing<br/>truth only, spoilers absent]
+  B --> N[narrate<br/>the only expensive call]
+  N --> E[extract → Entity Authority<br/>resolve → commit]
+  E --> W
+  M[the Remembrancer<br/>NPC engines · world tick] -.cheap, parallel.-> B
+```
 
 ---
 
-## How it works (architecture)
+## The design bet: structural absence over instruction
 
-The Construct is a **host** over pattern-buffer — it orchestrates the engine, it doesn't reimplement it. Object permanence, frames, identity, and as-of queries are all *inherited*. What the Construct owns:
+Every hard problem in this genre — spoilers, secret-leaking, railroading, contradiction — is conventionally attacked with prompt rules ("don't reveal the killer"). Rules erode under pressure. The Construct's recurring move is to make the failure **impossible to express** rather than forbidden:
 
-- **The turn loop** — a serial mutation spine (classify the player's action → commit it → advance clocks → evaluate the arc) followed by a parallel assembly fan-out (compose the narrator's grounded briefing from the world's truth) and a single render. Writes go first; the narrator sees the *final* world.
-- **A six-cohort architecture** (the [Kernos](https://github.com/5000Stadia/Kernos) pattern): classify, ingest, scene-assembler, navigator, beat-evaluator, and per-character NPC engines — small, single-purpose, fail-open. Only the narrator and characters use the expensive model; everything upstream is cheap or deterministic.
-- **The arc layer** — a story's destination authored into a hidden `plot:` frame the player can't see, navigated by a pacing ladder with anti-railroading guards. The arc pushes the world *at* you; it cannot move *you*. Its conclusion is shaped per-genre (a deduction's accusation, a bond's reconciliation), and lands as an *effect* — the epilogue's tone (triumph, costly, bittersweet) is improvised from what coverage the play actually earned, never a computed win/loss verdict.
-- **The conclusion clock** — a story ends on its own *decisive event* — "IT" — authored from what that story is about: name the killer, the protectee falls, the bomb's hour passes. **Turns never force a close.** A detective can study a clue for three hundred turns; the case ends when it's whole and the player says so. Time is a *per-story thread* — a soft diegetic deadline (the King's dinner, the bomb) authored only when time genuinely belongs to the story; a leisurely mystery has none, and the in-world clock still governs only *texture* (it's 9 PM, so the witness keeps till morning).
-- **Numeric constraints (gauges)** — when the drama is a number moving toward a line (oxygen draining, a speed floor, fuel burning), a gauge folds a live total from signed per-turn deltas and a threshold condition ends or colors the story when it's crossed — surfaced as mounting pressure, never a HUD.
-- **Episodic continuation** — a concluded story offers the next chapter: same protagonist and world, the whole prior adventure as the lead-in, a reputation callback ("you made a name on that one"), and a fresh hidden arc woven over the carried-forward world.
-- **A provider-agnostic model interface** — bring any LLM; ships with a zero-credit ChatGPT-subscription default.
+- Characters can't leak secrets because the secrets were **never in their context window** — each NPC decides its beat from its own `knows:` frame, nothing more.
+- The narrator can't spoil the arc because the hidden `plot:` frame is **never in its briefing**.
+- The story can't puppet your character because your character is **never handed to it** as a scene entity.
+- Prose can't mint phantom places because free-text extraction passes through a single resolver seam that **cannot type-slip** — bind to a known entity, mint once with the right kind, or drop.
 
-The hardest problems each got solved by the same move — **structural absence over instruction**: characters can't leak secrets because the secrets were never in their window; the narrator can't spoil the arc because the plot frame is never in its briefing; the story can't puppet your character because your character is never handed to it as a scene entity.
+Where a rule would have been added, a doorway was narrowed instead. The design docs record each of these as a named decision with the live failure that forced it.
 
-## Documents
+---
 
-- **[docs/CONCEPT.md](docs/CONCEPT.md)** — the founding brief: vision, session-zero, host architecture, the arc layer.
-- **[docs/design/ARC-LAYER.md](docs/design/ARC-LAYER.md)** — pacing-as-navigation: the hidden-arc design and its anti-railroading guards.
-- **[docs/design/CONCLUSION-AND-OUTCOME.md](docs/design/CONCLUSION-AND-OUTCOME.md)** — the conclusion clock: "IT closes the story," turns never force a close, time as a per-story thread, conclusion-as-effect.
-- **[docs/design/STORY-SHAPES.md](docs/design/STORY-SHAPES.md)** — the nine genre shapes and how each earns its payoff; **[GAME-TYPE-TAXONOMY.md](docs/design/GAME-TYPE-TAXONOMY.md)** — the play-style cards.
-- **[docs/design/DIEGETIC-TIME.md](docs/design/DIEGETIC-TIME.md)** — the story clock (pressure vs. texture); **[GAUGE-PRIMITIVE.md](docs/design/GAUGE-PRIMITIVE.md)** — numeric constraints as a live dramatic axis.
-- **[docs/design/EPISODIC-CONTINUATION.md](docs/design/EPISODIC-CONTINUATION.md)** — concluding a story and continuing to the next chapter.
-- **[docs/design/TURN-LOOP.md](docs/design/TURN-LOOP.md)** · **[SESSION-ZERO.md](docs/design/SESSION-ZERO.md)** · **[PROVIDER-INTERFACE.md](docs/design/PROVIDER-INTERFACE.md)** · **[CLI.md](docs/design/CLI.md)**
-- **[docs/DISCORD.md](docs/DISCORD.md)** — play from your phone over an outbound-only Discord bot (setup guide).
-- **[docs/LEXICON.md](docs/LEXICON.md)** — the working vocabulary.
+## Architectural contributions
 
-## Play it
+The substrate (permanence, frames, time) is pattern-buffer's. What the Construct contributes is the layer nobody had: **the drama engine over a truth store.**
+
+|  |  |
+| --- | --- |
+| **The hidden arc layer** | A story's destination authored into a private `plot:` frame the player never sees, navigated by beats, clocks, and a pacing ladder with anti-railroading guards. The arc pushes the world *at* you; it structurally cannot move *you*. |
+| **Conclusion-as-effect** | No win/loss verdict is ever computed and announced. A story ends on its own decisive event ("IT"), and the ending's *character* — triumphant, costly, bittersweet, quietly failed — is derived from which of the story's load-bearing causes the player actually established. Turns never force a close: a detective can study one clue for three hundred turns. |
+| **Entity Authority** | One coreference-and-typing-disciplined seam every free-text canon write must pass: bind-before-mint against a canon roster, channel-scoped mint permissions (player input cannot conjure people; prose cannot conjure places), ambiguity never mints. The misshapen entity graph becomes impossible to create instead of cleaned up after. |
+| **First-mention permanence** | A proper-named detail the world establishes ("The Hart and Bell") commits immediately as a minimal, non-present stub — engagement paints the rest. The gate's evidence is real casing recovered from prose, fail-closed; generic descriptions ("the street") still never mint. |
+| **The Remembrancer** | The protagonist's own memory as a silent turn participant, symmetric with NPC engines: a screened knowledge-frame digest, contributing only felt interiority. It owns self-questions mechanically, and it powers **player-authored retconning** — "I remember my childhood friend John Johnson" commits real autobiography through a guarded channel where world-claims become beliefs that can never satisfy the mystery, and contradictions quarantine in favor of the first established truth. |
+| **Knowledge frames as gameplay** | Interviewing a witness is mechanically real: authored clues sit in *their* frame, gated by reveal conditions, and surface into *yours* only when your questioning earns them — which is what advances the case. A diegetic notebook renders your frame back to you as the case-board. |
+| **Deterministic resolution deck** | Uncertain actions draw from a pre-rolled, seeded 100-tier outcome bag (fail-forward: every failure opens something) — drama without a per-check model call and fully replayable. |
+| **Death as staged permanence** | A per-chapter `death_policy` decides whether death ends the story (action/adventure), is transformed by the premise (time loops, ghosts), or is capped by genre convention (cozy mystery → wounds, capture, ruin). Mortal peril must be *staged* — the world warns before it kills — and a death ends in a testament epilogue: the world after you, and your effect on it. No respawn, no next chapter. |
+| **Episodic continuation with settled history** | A concluded story offers the next chapter over the same evolved world: consequences of your ending ride forward as canon events with causal receipts, answered questions become closed history that is *never re-opened as mystery*, and personal promises are extracted as first-class fuel the next chapter must honor or consciously pay off. |
+| **Diegetic time as the only clock** | Turns are free; only in-world time can pressure a story, and only when a deadline genuinely belongs to it (the bomb, the King's dinner). Numeric stakes (oxygen, fuel) are gauges folded from signed per-turn deltas — surfaced as mounting pressure, never a HUD. |
+| **A living world** | Off-screen characters move on their own schedule (committed through the same gated doorway, discovered rather than narrated), companions interject unprompted, and presence *holds* — a character who is here stays engageable rather than evaporating between turns. |
+
+---
+
+## Evaluation methodology
+
+The claim of a system like this can't be proven by unit tests alone — the product is a *felt experience over hundreds of turns*. The project's evaluation stack, all in-repo and reproducible:
+
+- **A structured live-eval suite** — 5 scenarios × 18-turn schedules (follow-the-thread / push-the-edges / draw-on-character-knowledge / conclude) driven by an LLM player, with per-scenario assessments and a consolidated engineering report: [`docs/design/eval/`](docs/design/eval/00-CONSOLIDATED-REPORT.md).
+- **An adversarial critic campaign** — player-agents *primed to break immersion and file their own bug reports* through the in-game `/feedback` channel, including deliberate off-path runs (pursuing a romance the story never offered) and cross-chapter continuations. Every filing was independently triaged against engine ground truth before anything was "fixed": [`eval/09-critic-campaign.md`](docs/design/eval/09-critic-campaign.md).
+- **A five-probe live acceptance set** — object permanence, loop closure, frame non-leak, player agency, honest adjudication — passed 5/5 in live play and re-verified as the engine grew.
+- **A generalized synthesis** — the campaign's findings distilled into five portable pillars of the optimal interactive-fiction experience (truth-keeping, the player's story is the story, proportion, initiative, the ending is the payoff): [`docs/design/OPTIMAL-IF-EXPERIENCE.md`](docs/design/OPTIMAL-IF-EXPERIENCE.md).
+- **720+ test functions across 35 files** — including structural pins for every invariant the design docs promise (frame non-leak, protected-key concealment, mint-channel discipline, terminal precedence, no-reopen of settled history).
+
+### Development methodology
+
+The engine was built through a **multi-agent adversarial review loop**: every substantive design goes to an independent reviewer model as a written spec letter before implementation, and every build goes back as a diffable report reviewed against the real worktree — with explicit BLOCKED / YELLOW / GREEN verdicts. The full correspondence (440+ numbered letters) is the project's decision record; blockers the reviewer caught on this codebase include a frame-privacy leak in a resolver roster, a policy gate that mis-fired on first contact, and an event-causality write that silently landed on the wrong row. Nothing ships on self-review.
+
+---
+
+## Proven in live play
+
+The shipped example, ***The Rain in Bluegate Yard*** — a complete original Victorian murder mystery (London, 1888; a dock messenger dead in Bluegate Yard; a plain-clothes bureau racing the Met) — plays end-to-end on a real model: grounded cold open, earned clue trail, companion texture, a staged conclusion scene, a consequence-bearing epilogue, and a next chapter grown from the wake of the first. Three further worlds (a dark-fantasy pilgrimage, an undersea survival thriller, a country-house death) exercise the other genre shapes.
+
+Worlds are built, not hand-coded: drop any prose document in and it becomes a playable world, or build one live from a one-line brief through the session-zero interview.
+
+---
+
+## Quick start
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-construct play anchor          # step into The Last Honest Meter as Officer Marn
+construct start                 # guided menu: pick a world, make a character, play
+construct play bodycase         # or jump straight into The Rain in Bluegate Yard
 ```
 
-That drops you into an interactive prompt — just type what you do, line after line:
-
-```
-  The Last Honest Meter
-You are person:marn, at place:council_tier.
-
-Type what you do. (:help for commands, :quit to leave.)
-
-> I look around the council tier
-[narration]
-> I set my brass spoon on the table and head for the wellhead
-[narration]
-> :quit
-The world holds. (saved)
-```
-
-Bare `construct play anchor` **resumes** where you left off (every turn is saved); add `--fresh` to start over, or `--debug` to see each turn's receipts. In-session commands: `:debug on|off`, `:help`, and `:quit` / `:exit` / `Ctrl-D`.
-
-For scripting or automated testing there's also a one-shot form — one turn per invocation, the same machinery:
+Type what you do, line after line. Every turn is saved; bare `construct play` resumes. `--debug` shows each turn's receipts — every write the turn committed, and why.
 
 ```bash
-construct turn anchor "I look around." --debug   # one turn; --debug shows the turn's receipts
-construct scenarios                              # list the scenario library
+construct import path/to/your-story.md          # any .txt/.md becomes a playable world
+construct new --interview "a drowned harbor town with a harbor-master's secret"
+construct turn bodycase "I look around." --debug # one-shot form for scripting/tests
 ```
 
-The shipped example world, *The Last Honest Meter*, is a complete original noir mystery — a drought-stricken settlement, a master water-meter that died the night an honest technician did. Play it. Put something down and come back for it.
-
-### Build a world from your own document
-
-Drop in any prose (`.txt`/`.md`) and it becomes a playable world in the library, alongside the example:
-
-```bash
-construct import path/to/your-story.md     # ingest one document into the library
-construct import --watch                    # watch the import/ folder; ingest drops as they land
-construct new --interview "a drowned harbor town with a harbor-master's secret"  # build LIVE from a brief
-```
-
-You can also just **DM a `.txt`/`.md` to the Discord bot** and it ingests into the library the same way. Either path narrates its progress in plain, evocative stages — a progress bar that reads like the world coming into being, not engine jargon:
-
-```
-· [1/12] Authoring the source story…
-· [2/12] Ingesting it into the pattern-buffer…
-· [3/12] Entering people, places & things into the pattern-buffer…
-· [4/12] Reconciling identities (coreference)…
-· [5/12] Recording how the places connect…
-· [6/12] Weaving the hidden arc into a private frame…
-· [7/12] Seeding each character's knowledge frame…
-· [8/12] Composing your way in…
-· [9/12] Classifying what's durable vs. fleeting…
-· [10/12] Distilling tone & texture…
-· [11/12] Sealing the world snapshot…
-· [12/12] Final checks before the doors open…
-```
-
-The `[k/12]` marks overall progress through the build, and each line names a real
-pattern-buffer operation (ingest, identity coreference, per-character knowledge
-frames, the durability fold, the sealed snapshot) as it happens.
-
-The progress lines double as a window on the engine underneath — each names a real
-pattern-buffer operation (ingest, identity coreference, per-character knowledge
-frames, the durability fold, the sealed snapshot) as it happens.
-
-### Play from your phone (Discord)
-
-You can also play by DMing a Discord bot — an **outbound-only** transport, so nothing on your machine is exposed to the inbound internet (no port, no tunnel, no public URL). It's a dumb pipe over the same engine: your message in, the rendered scene back. Setup is a copy-pasteable five minutes — see **[docs/DISCORD.md](docs/DISCORD.md)**.
-
-```bash
-pip install -e '.[discord]'
-export CONSTRUCT_DISCORD_TOKEN="your-bot-token"   # never committed
-python -m construct.discord_bot                   # then DM the bot
-```
-
-DM the bot a `.txt`/`.md` document and it builds that world into the library (narrating the six stages back to you), then tells you how to play it — same engine, no port exposed.
-
-### One play surface, many front ends
-
-The REPL, the one-shot CLI, and the Discord bot are all thin clients of one small **session API** — bring a fourth (web, MCP) the same way:
+**Play from your phone:** Telegram (`construct setup telegram`, then `construct telegram`) or Discord ([docs/DISCORD.md](docs/DISCORD.md)) — both outbound-only transports (no port, no tunnel), thin clients over the same session API:
 
 ```python
 from construct import Session
-s = Session.open("anchor", player_id="me")   # load/resume that player's slot
-print(s.turn("I look around.").prose)         # the same machinery every front end uses
+s = Session.open("bodycase", player_id="me")
+print(s.turn("I look around.").prose)
 s.close()
 ```
 
+Bring any LLM behind the provider interface; ships with a zero-marginal-cost ChatGPT-subscription default.
+
+---
+
+## Documents
+
+The project is **design-first**: 58 design documents, each recording a decision, the live failure that motivated it, and the review verdict it shipped under.
+
+- **[docs/CONCEPT.md](docs/CONCEPT.md)** — the founding brief: vision, host architecture, the arc layer.
+- **[docs/design/00-INDEX.md](docs/design/00-INDEX.md)** — the curated map of all design docs, by layer.
+- **[docs/design/OPTIMAL-IF-EXPERIENCE.md](docs/design/OPTIMAL-IF-EXPERIENCE.md)** — the research synthesis: five pillars of the optimal interactive-fiction experience, grounded in the evaluation corpus.
+- **[docs/design/eval/](docs/design/eval/00-CONSOLIDATED-REPORT.md)** — the evaluation suite: consolidated report, per-scenario assessments, the critic campaign.
+- **[docs/LEXICON.md](docs/LEXICON.md)** — the working vocabulary.
+
+**For technical reviewers:** this README → [ARC-LAYER](docs/design/ARC-LAYER.md) → [CONCLUSION-AND-OUTCOME](docs/design/CONCLUSION-AND-OUTCOME.md) → [ENTITY-AUTHORITY](docs/design/ENTITY-AUTHORITY.md) → [OPTIMAL-IF-EXPERIENCE](docs/design/OPTIMAL-IF-EXPERIENCE.md) → the [eval suite](docs/design/eval/00-CONSOLIDATED-REPORT.md).
+
+---
+
+## Engineering proof
+
+- **720+ test functions, 35 files, zero live model calls in the suite** — engine extraction via pattern-buffer's `StubModel`, host cohorts via a canned provider; the full suite runs in under two minutes.
+- **Deterministic spine, model calls only at the boundaries.** Classification, adjudication, arc evaluation, entity resolution, and all bookkeeping are deterministic or cheap-tier; the expensive model renders prose and voices characters, nothing else. Turn latency is protected by a deferred-settle design: post-narration bookkeeping overlaps the player reading.
+- **Fail-open discipline everywhere it must be.** No enrichment call may sink a turn; the climax cannot be lost to a provider hiccup; every dropped cohort is receipted in the turn trace.
+- **Receipts-first debugging.** Every turn emits a structured trace — writes, resolver decisions with reasons, clocks fired, clues surfaced, cohort calls — the same record the debug CLI, the tests, and the eval reports all read.
+- **Honest failure records.** The eval reports and design docs record what broke and what it cost, by name, next to what shipped — including a full fresh-eyes architecture audit ([AUDIT-2026-07-FRESH-EYES](docs/design/AUDIT-2026-07-FRESH-EYES.md)).
+
+---
+
+## Capability status
+
+| Surface | Status | Notes |
+| --- | --- | --- |
+| Turn loop (classify → adjudicate → arc → narrate → commit) | Live | Deterministic spine; model at the boundaries only |
+| World ingestion (document → playable world) | Live | Build narrated in plain stages; identity-coherence gate at build |
+| Session-zero interview + character creation (the Foyer) | Live | Play-as-anyone; name/pronouns/background authoritative over authored defaults |
+| Hidden arc: beats, clocks, pacing, convergence | Live | Anti-railroading guards; refusal handled diegetically |
+| Interview/examine clue delivery + case-board notebook | Live | Topic-aware; earned-only; the notebook is the player's own frame |
+| Conclusion-as-effect + epilogue + episodic continuation | Live | Settled history never re-opens; consequences carry causal receipts |
+| Death & the testament (per-chapter policy) | Live | Staged peril; premise-transformed death for loop/ghost shapes |
+| The Remembrancer + player-authored memory (retcon) | Live | Contradictions quarantine; world-claims become beliefs |
+| Entity Authority + first-mention permanence | Live | Channel-scoped minting; prose-casing evidence, fail-closed |
+| Gauges, diegetic time, world-tick, companions | Live | — |
+| Scene imagery (per-location AI illustration) | Live | Oil-painting style; regenerates only when the scene truly changes |
+| Telegram / Discord / CLI / REPL transports | Live | One session API; outbound-only, no inbound exposure |
+| Multi-player shared worlds | Designed, not built | [Design notes](docs/design/) — deferred to the substrate's multi-observer work |
+| Narrator-authored NPC movement (the narration seam) | Specified, gated | The highest-leverage known gap; named in the synthesis doc |
+
+---
+
 ## Family
 
-- **[pattern-buffer](https://github.com/5000Stadia/pattern-buffer)** — the world-state engine the Construct is built on.
-- **[Kernos](https://github.com/5000Stadia/Kernos)** — a personal-agent kernel; the source of the cohort architecture the Construct's turn loop borrows.
+Three projects, one line of research — each a résumé of the last:
+
+- **[pattern-buffer](https://github.com/5000Stadia/pattern-buffer)** — the append-only world-state engine: current state, knowledge frames, and history as derived projections over one assertion log. The Construct is its first full-depth adopter.
+- **[Kernos](https://github.com/5000Stadia/Kernos)** — a personal-agent kernel (v1.0, research complete). The Construct inherits its cohort architecture — bounded specialist workers around one principal voice — and its house methodology: design-first, spec-reviewed, receipts-first.
+- **The Construct** (this repo) — the drama engine: what a *story* is, mechanically, when the world underneath it is guaranteed to hold.
+
+## Project status
+
+**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (720+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE). Built by [@5000Stadia](https://github.com/5000Stadia).
+
+---
+
+*The model narrates. The world remembers, refuses, and keeps its own truth.*

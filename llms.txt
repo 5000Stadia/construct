@@ -1,32 +1,46 @@
 # construct
 
-> The Construct — an interactive-fiction engine that loads a stored world
-> into a played, remembered holonovel. A host over pattern-buffer: it
-> narrates scenes, voices characters, and drives a hidden story arc while
-> the engine beneath it keeps the world coherent — object permanence,
-> per-character knowledge frames, as-of queries. Put a thing down, walk
-> away, come back: it's still there. Pre-1.0, first-playable.
+> The Construct — an interactive-fiction engine where the world's truth is
+> a database and the model is only a voice. A host over pattern-buffer:
+> it classifies the player's move, adjudicates it against the map,
+> advances a hidden story arc, and only then lets a model narrate. Object
+> permanence, per-character knowledge frames, as-of queries — put a thing
+> down, walk away, come back: it's still there. Pre-1.0, research active;
+> 720+ tests green; evaluated over a 5-scenario live corpus plus an
+> adversarial critic campaign.
 
 Vocabulary: pattern-buffer holds a world's pattern -> the Construct loads
 it into a played -> holonovel (one played world, ingested from a book or
-built live).
+built live). Design bet: structural absence over instruction — secrets
+never enter a character's window; the plot frame never enters the
+narrator's briefing; free-text writes pass one Entity Authority seam.
 
 ## Docs
 
-- [README.md](README.md): what it is, the live-play acceptance results,
-  architecture, how to play. Start here.
+- [README.md](README.md): research question, architectural contributions,
+  evaluation methodology, honest capability status. Start here.
+- [docs/design/00-INDEX.md](docs/design/00-INDEX.md): the curated map of
+  all 58 design docs, by layer.
 - [docs/CONCEPT.md](docs/CONCEPT.md): founding brief — vision, session-zero,
-  host architecture, the arc layer, model-provider interface.
-- [docs/design/ARC-LAYER.md](docs/design/ARC-LAYER.md): pacing as
-  navigation toward a hidden authored destination; anti-railroading by
-  construction. The project's design contribution.
+  host architecture, the arc layer.
+- [docs/design/OPTIMAL-IF-EXPERIENCE.md](docs/design/OPTIMAL-IF-EXPERIENCE.md):
+  the research synthesis — five pillars of the optimal interactive-fiction
+  experience, grounded in the evaluation corpus.
+- [docs/design/eval/00-CONSOLIDATED-REPORT.md](docs/design/eval/00-CONSOLIDATED-REPORT.md):
+  the evaluation suite's consolidated engineering report; eval/09 is the
+  adversarial critic campaign.
+- [docs/design/ARC-LAYER.md](docs/design/ARC-LAYER.md): the hidden arc —
+  pacing as navigation, anti-railroading by construction.
+- [docs/design/CONCLUSION-AND-OUTCOME.md](docs/design/CONCLUSION-AND-OUTCOME.md):
+  conclusion-as-effect — turns never force a close.
+- [docs/design/ENTITY-AUTHORITY.md](docs/design/ENTITY-AUTHORITY.md): the
+  one disciplined write seam (bind-before-mint, channel-scoped minting,
+  first-mention permanence).
+- [docs/design/REMEMBRANCER.md](docs/design/REMEMBRANCER.md): the player's
+  own memory as a turn participant + player-authored retcon with
+  contradiction quarantine.
 - [docs/design/TURN-LOOP.md](docs/design/TURN-LOOP.md): the per-turn DAG
   (serial mutation spine + parallel assembly fan-out) and model tiers.
-- [docs/design/SESSION-ZERO.md](docs/design/SESSION-ZERO.md): the unified
-  creation interview (ingest a book OR build live) and the
-  scenario/playthrough model.
-- [docs/design/PROVIDER-INTERFACE.md](docs/design/PROVIDER-INTERFACE.md):
-  bring-any-LLM provider boundary; zero-credit subscription default.
 - [docs/LEXICON.md](docs/LEXICON.md): naming discipline.
 
 ## Built on
@@ -35,4 +49,5 @@ built live).
   append-only world-state engine. The Construct is a host over it; it
   never reimplements engine concepts.
 - Kernos (https://github.com/5000Stadia/Kernos): the cohort architecture
-  the turn loop borrows.
+  the turn loop borrows, and the house methodology (design-first,
+  adversarially reviewed, receipts-first).
