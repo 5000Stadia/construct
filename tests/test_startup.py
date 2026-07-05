@@ -165,10 +165,11 @@ class TestGenerateOrchestration:
     def _patch(self, monkeypatch, viability):
         monkeypatch.setattr(cohorts, "author_story",
                             lambda provider, seed="", win_direction="", play_as="",
-                            signature_directive="": dict(_STORY))
+                            signature_directive="", laws_directive="": dict(_STORY))
 
         def _fake_build(name, prose_path, provider, endless=False, on_stage=None,
-                        win_direction="", play_as="", game_types=None):
+                        win_direction="", play_as="", game_types=None,
+                        laws=None, reality_register=""):
             if on_stage:
                 on_stage("Stage 1 · (stub ingest)")
             # mimic a real publish so the unpublish path has files to remove

@@ -160,6 +160,10 @@ class Session:
         # scoreboard entity (letters 131/132). `result_events` = {win:(kinds,), loss:(kinds,),
         # participants:(ids,)} authored per-arc; None for shapes with no literal-result axis.
         self._result_events = meta.get("result_events")
+        # WORLD LAWS (#105): the sealed law objects off meta — one read; run_turn
+        # renders the same block for the briefing lane + every adjudication feed.
+        from construct.laws import laws_from_meta
+        self._laws = laws_from_meta(meta)
         # The populated cast (STORY-SHAPES §8), rebuilt once from the seal for interview
         # delivery (node_id → CastNode). Absent → a pillar-less world (legacy path).
         self._cast: dict = {}
@@ -1014,6 +1018,7 @@ class Session:
                               side_arcs=self._side_arcs,
                               horizon=horizon,
                               death_policy=self._meta.get("death_policy", "shielded"),
+                              laws=self._laws,
                               on_scene=self._note_scene_image)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)

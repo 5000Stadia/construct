@@ -389,7 +389,7 @@ class TestRouting:
         builds, pings = [], []
 
         def fake_builder(*, name, provider, seed, endless, win_direction,
-                         play_as, on_stage, game_types=None):
+                         play_as, on_stage, game_types=None, reality_register=""):
             builds.append({"name": name, "seed": seed, "endless": endless,
                            "win_direction": win_direction, "play_as": play_as})
             on_stage("Stage 1 · Ingesting prose → pattern-buffer · extraction")

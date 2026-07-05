@@ -687,3 +687,78 @@ def test_continue_episode_refuses_after_player_death(tmp_path, monkeypatch):
         continue_episode("deadcase", prov, player_id="u1")
     assert not any(task_of(p) == "gen" for (p, _s, _t) in prov.calls), \
         "the refusal must come before any generator work"
+
+
+def test_finalize_commits_laws_as_canon_and_meta(tmp_path):
+    # WORLD LAWS (#105): sealed laws land as explicit canon rows (law:<slug>,
+    # kind=world_law — Cx 470 ruling 5), ride meta for the turn loop, and the
+    # arc author receives THE LAWS block (the destination may turn on one).
+    from construct import game
+    from construct.provider import StubProvider, task_of
+
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        return rule(prompt, schema) if prompt.startswith("Classify the lifetime") else {"items": []}
+
+    path = tmp_path / "lawful.world"
+    w = World(path, world_id="w:lawful", model=StubModel(fallback=fallback),
+              stance="fiction", title="Lawful World")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:hall", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:keeper", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:keeper", "attribute": "in", "value": "place:hall"},
+        {"entity": "fact:debt", "attribute": "kind", "value": "proposition", "timeless": True},
+        {"entity": "fact:debt", "attribute": "holder", "value": "person:keeper"},
+    ])
+
+    laws = [{"name": "The Ledger of Hours", "register": "systemic",
+             "rule": "every favor owed is recorded and must be repaid",
+             "cost_limit": "a debt unpaid compounds",
+             "embodiment": "the Clerks of the Ledger",
+             "texture": "ledger-slips", "nearest_borrowed_shape": "",
+             "changed_consequence": "rank is a running balance",
+             "disclosure": "understood"}]
+
+    proposal = {
+        "protagonist": "person:keeper", "delta_type": "drive_inverted",
+        "tension": ["person:keeper", "drive:doubt", "drive:proof"],
+        "goal_statement": "settle the ledger", "theme": "what is owed",
+        "beats": [{"id": "beat:learn", "phase": "climax", "weight": "required",
+                   "kind": "player_learns", "entity": "fact:debt",
+                   "attribute": "holder", "value": "person:keeper"}],
+    }
+
+    class _ArcProvider(StubProvider):
+        def __init__(self):
+            super().__init__([])
+            self.arc_prompts: list[str] = []
+
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if task_of(prompt) == "arc":
+                self.arc_prompts.append(prompt)
+                return dict(proposal)
+            return {"items": []}
+
+    provider = _ArcProvider()
+    spath = tmp_path / "lawful_scenario.world"
+    meta = game._finalize_scenario(w, "lawful", "Lawful World", provider, spath,
+                                   endless=False, laws=laws,
+                                   reality_register="secondary")
+    # canon rows — explicit and boring
+    _kind = w.porcelain.state("law:the_ledger_of_hours", "kind")
+    assert _kind["status"] == "known" and _kind["fact"]["value"] == "world_law"
+    _reg = w.porcelain.state("law:the_ledger_of_hours", "register")
+    assert _reg["fact"]["value"] == "systemic"
+    # meta mirror for the turn loop
+    assert meta["laws"] == laws
+    assert meta["reality_register"] == "secondary"
+    # the arc author saw the SAME rendered block (Cx 470 test bar)
+    from construct.laws import laws_block
+    assert any(laws_block(laws) in p for p in provider.arc_prompts)
+    assert any("TURN ON A LAW" in p for p in provider.arc_prompts)
+    w.close()

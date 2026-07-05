@@ -220,6 +220,18 @@ class StubProvider(Provider):
                 self._queue and isinstance(self._queue[0], dict)
                 and "claims" in self._queue[0]):
             return {"claims": [], "people": []}
+        # #105 (same precedent): the WORLD-LAWS author/critic are NEW calls inside
+        # long-stubbed build paths. Unless a test EXPLICITLY stubs them (queue head
+        # carries the signature key), answer "no laws" without consuming the queue —
+        # a law-less build flows exactly as before.
+        if task_of(prompt) == "law" and not (
+                self._queue and isinstance(self._queue[0], dict)
+                and "laws" in self._queue[0]):
+            return {"reality_register": "secondary", "laws": []}
+        if task_of(prompt) == "lwc" and not (
+                self._queue and isinstance(self._queue[0], dict)
+                and "verdicts" in self._queue[0]):
+            return {"verdicts": []}
         if not self._queue:
             raise ProviderTransportError("StubProvider queue exhausted")
         response = self._queue.pop(0)

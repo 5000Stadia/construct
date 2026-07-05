@@ -1,6 +1,9 @@
 # World Laws — universal dynamics as first-class canon
 
-**Status:** design draft for the Cx round (founder-directed, 2026-07-05).
+**Status:** BUILT (task #105; Cx 470 YELLOW → rulings accepted 471 → foundation
+GREEN 472/473; suite 804). See **As built** at the end for the shipped shape,
+including the founder's two post-spec refinements (the interview's
+universe-details beat and the per-law DISCLOSURE axis).
 **Provenance:** the founder's Star Wars question — "what are the odds a similarly
 intended sci-fi fantasy world establishes unique world elements as universe-affecting
 as the Force, Tatooine's politics, Jedi/Sith, the Empire?" — plus his two refinements:
@@ -173,3 +176,50 @@ gates the register palette above.
 - Laws land as canon rows + pins; the cast prompt carries THE LAWS; the arc's
   destination references one.
 - A REAL-register build refuses a player's metaphysical improv honestly.
+
+## As built (task #105 — Cx 470 rulings folded)
+
+- **`construct/laws.py`** — the canonical data + pure logic: `FAMILY_PALETTE`
+  (all 19 card families → registers + metaphysical policy; a data-drift test
+  pins it to the taxonomy), `allowed_registers(families, reality)` (the
+  reality-register overlay: REAL strips metaphysical+delta; ALTERNATE adds
+  delta over real-Earth discipline; SECONDARY lets the palette decide),
+  `lint_laws` (the SHALLOW deterministic checks only — five parts,
+  register-in-gate, `is_proper_named`, calibration-copy, texture-only
+  consequence, disclosure), and the single-source renders `laws_block`
+  (the compact THE LAWS block every consumer shares) / `law_lines` (the
+  briefing lane) / `law_rows` / `embodiment_rows`.
+- **Authoring** (`cohorts.author_laws`, task ⟦law⟧) runs FIRST on the
+  generated/interview paths — the source fiction is written ON the laws
+  (the Jedi property), never retrofitted; a real ingested book keeps its own
+  implicit constitution (laws skipped). The loop is author → lint →
+  `law_critic` (⟦lwc⟧, the semantic anti-pastiche judgment — Cx 470 ruling 2)
+  → feedback retry ×2, fail-open to law-less. The author settles an
+  undeclared reality register from the brief; the gate re-derives against it.
+- **DISCLOSURE (founder refinement):** each law is marked `understood` (the
+  player's character inherently knows it — the intro/opening grounding
+  introduces it as lived context) or `discovered` ("magic is real and you're
+  a wizard" — never stated; the briefing carries it under a STILL
+  UNDISCOVERED weave directive, and it still binds adjudication silently).
+- **Canon:** `law:<slug>` rows (kind=world_law + name/register/rule/
+  cost_limit/texture/disclosure) committed before arc authoring;
+  `embodied_by` links written from `author_cast`'s `law_embodiment`
+  declarations (ruling 5 — the causal stack is queryable). Meta mirrors
+  `laws` + `reality_register` for the turn loop's cheap read.
+- **Consumers, one render:** the arc author (destination turns on a law),
+  `author_story`/`interview_world` (institutions exist BECAUSE of laws),
+  `author_cast` (+ embodiment), `author_intro` (understood laws only), and at
+  play time `classify` (assured-for-the-attuned / refused-for-others),
+  `equipment_check` (carry + take), and `propose_reshape` (miracles bound by
+  law; ALTERNATE seam policed) — all receive the same `laws_block` (ruling 3).
+- **The reserved lane (ruling 4):** the narrator briefing renders WORLD LAWS
+  ahead of the capped PINS block — proven by an overcrowded-pin test
+  (_PIN_CAP+2 active pins, every law still briefed). `TurnTrace.laws` is the
+  debug surface.
+- **Interview:** `set_reality` tool + a REALITY beat (asked with WHERE/WHEN),
+  and THE LAW beat (founder) — when reality+shape invite invention, the guest
+  is asked once whether the universe has rules THEY want folded in;
+  what they bring rides the brief into `author_laws`.
+- Tests: `tests/test_laws.py` (palette/gate/lint/renders/rows/authoring loop)
+  + `TestWorldLaws` in `tests/test_integration.py` (lane, disclosure split,
+  shared block) + a `_finalize_scenario` seal test + architect reality tests.

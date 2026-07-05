@@ -37,6 +37,7 @@ class ArchitectState:
     play_as: str = ""
     mode: str = ""            # "win_loss" | "endless" | "" (not yet chosen)
     win_direction: str = ""   # the hidden destination direction (win_loss only)
+    reality: str = ""         # "real" | "alternate" | "secondary" | "" (WORLD-LAWS #105)
     game_types: list[str] = field(default_factory=list)  # taxonomy keys (primary + secondaries)
     surprise_offer: list[str] = field(default_factory=list)   # host-rolled shape awaiting the guest's yes
     surprise_declined: list[str] = field(default_factory=list)  # families the guest waved off this session
@@ -57,6 +58,11 @@ class ArchitectState:
             lines.append("World so far: " + "; ".join(self.elements))
         if self.play_as:
             lines.append(f"Playing as: {self.play_as}")
+        if self.reality:
+            _r = {"real": "the real world as it is",
+                  "alternate": "our world, with a strange difference",
+                  "secondary": "a world of its own"}.get(self.reality, self.reality)
+            lines.append(f"Reality: {_r}")
         if self.mode == "win_loss":
             lines.append("Ending: a story that builds to a win/loss"
                          + (f" (direction: {self.win_direction})"
@@ -69,6 +75,7 @@ class ArchitectState:
         """Serialize for per-player persistence (registry `creation` blob)."""
         return {"elements": list(self.elements), "play_as": self.play_as,
                 "mode": self.mode, "win_direction": self.win_direction,
+                "reality": self.reality,
                 "game_types": list(self.game_types),
                 "surprise_offer": list(self.surprise_offer),
                 "surprise_declined": list(self.surprise_declined)}
@@ -80,6 +87,7 @@ class ArchitectState:
                    play_as=data.get("play_as") or "",
                    mode=data.get("mode") or "",
                    win_direction=data.get("win_direction") or "",
+                   reality=data.get("reality") or "",
                    game_types=list(data.get("game_types") or []),
                    surprise_offer=list(data.get("surprise_offer") or []),
                    surprise_declined=list(data.get("surprise_declined") or []))
@@ -93,6 +101,7 @@ class ArchitectState:
             "play_as": self.play_as,
             "mode": self.mode or "endless",
             "win_direction": self.win_direction if self.mode == "win_loss" else "",
+            "reality": self.reality,
             "game_types": list(self.game_types),
         }
 
@@ -205,6 +214,11 @@ def architect_step(provider: Provider, state: ArchitectState, history: str,
         elif tool == "set_role":
             if detail:
                 state.play_as = detail
+        elif tool == "set_reality":
+            # WORLD-LAWS (#105): the reality register — an explicit interview
+            # dimension (founder), alongside location and time period.
+            if detail in ("real", "alternate", "secondary"):
+                state.reality = detail
         elif tool == "set_game_type":
             # Resolve the free label to a taxonomy key; keep a primary + up to two
             # secondaries (a compound). Unknown labels are dropped (free improvised).

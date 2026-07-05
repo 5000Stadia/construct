@@ -1273,6 +1273,7 @@ class TransportCore:
                         win_direction=brief.get("win_direction", ""),
                         play_as=brief.get("play_as", ""),
                         game_types=brief.get("game_types") or [],
+                        reality_register=brief.get("reality", ""),
                         on_stage=on_stage)
         except Exception as exc:
             logger.exception("build failed for %s", pid)

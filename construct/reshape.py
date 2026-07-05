@@ -238,7 +238,7 @@ def reshape_canon(world: Any, plan: ReshapePlan, *, turn: int) -> ReshapeResult:
 
 def apply_reshape(world: Any, provider: Any, *, action: str, scene: str, canon: str,
                   tier: str, turn: int, narration: str = "",
-                  enabled: bool | None = None) -> ReshapeResult | None:
+                  enabled: bool | None = None, laws: str = "") -> ReshapeResult | None:
     """Flag-gated turn-time orchestration (the seam the turn loop calls). If
     world-reshaping is enabled and the reshape cohort judges this an earned,
     miraculous, story-improving attempt, it proposes → types → COMMITS the change
@@ -255,7 +255,8 @@ def apply_reshape(world: Any, provider: Any, *, action: str, scene: str, canon: 
     try:
         from construct import cohorts
         proposal = cohorts.propose_reshape(provider, action=action, scene=scene,
-                                           canon=canon, outcome=tier, narration=narration)
+                                           canon=canon, outcome=tier, narration=narration,
+                                           laws=laws)
         if not isinstance(proposal, dict) or not proposal.get("is_reshape"):
             return None
         plan = plan_from_proposal(proposal, tier=tier, turn=turn)

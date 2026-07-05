@@ -348,3 +348,30 @@ def test_show_styles_flag_and_prompt_offer():
     prompt = prov.calls[0][0]
     assert "show_styles: display the FULL WALL" in prompt
     assert "SEE EVERYTHING" in prompt                   # the opening beat's offer
+
+
+def test_set_reality_lands_in_state_and_brief():
+    # WORLD LAWS (#105): the reality register is an explicit interview
+    # dimension (founder) — captured by tool, carried on the brief, ignored
+    # when the value is not one of the three registers.
+    p = StubProvider([
+        _turn("Our own world then — 1920s Chicago as it truly was.",
+              _act("set_reality", "real"),
+              _act("add_element", "1920s Chicago, as real as rain")),
+        _turn("Noted.", _act("set_reality", "dreamlike")),   # invalid → ignored
+        _turn("Cooking now.", _act("begin_build")),
+    ])
+    s = ArchitectState()
+    _step(p, s, "the real 1920s Chicago please")
+    assert s.reality == "real"
+    assert "Reality: the real world as it is" in s.summary()
+    _step(p, s, "make it dreamlike too")
+    assert s.reality == "real"                               # invalid value ignored
+    r = _step(p, s, "go")
+    assert r.outcome == BUILD
+    assert r.brief["reality"] == "real"
+
+
+def test_reality_round_trips_serialization():
+    s = ArchitectState(reality="alternate")
+    assert ArchitectState.from_dict(s.to_dict()).reality == "alternate"

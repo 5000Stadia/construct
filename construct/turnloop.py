@@ -670,6 +670,7 @@ class TurnTrace:
     resolver: list = field(default_factory=list)  # ENTITY-AUTHORITY resolver receipts (id, attr, reason) — debug
     contradictions: list = field(default_factory=list)  # narrator rows quarantined (changed established canon)
     quarantined: list = field(default_factory=list)  # narrator rows quarantined (unlicensed assertion of an arc key)
+    laws: list = field(default_factory=list)  # WORLD LAWS (#105): law names briefed this turn (reserved lane)
     reshape: str = ""  # WORLD-CHANGING AGENCY: the narrator directive for a canon reshape committed this turn (flag-gated)
     replanned: str = ""  # the new main arc id if a reshape re-aimed the arc mid-story (flag-gated)
     reshape_entities: list = field(default_factory=list)  # visible committed reshape entity ids (carried into next-turn scope)
@@ -933,7 +934,7 @@ def _mint_held_object(world: Any, protagonist: str, description: str,
 
 
 def _grant_equipment(world: Any, p: Any, protagonist: str, description: str,
-                     scene: str | None, provider: Any) -> bool:
+                     scene: str | None, provider: Any, laws: str = "") -> bool:
     """IMPROV-AND-AUTHORITY: an unresolved required item that is ORDINARY role/personal
     equipment (a physician's bag, a detective's notebook) is GRANTED — minted as the
     protagonist's possession and committed (the world adapts), so the action stands
@@ -944,7 +945,7 @@ def _grant_equipment(world: Any, p: Any, protagonist: str, description: str,
     try:
         from construct import cohorts
         v = cohorts.equipment_check(provider, actor=protagonist, item=description,
-                                    scene=scene or "", manner="carry")
+                                    scene=scene or "", manner="carry", laws=laws)
         if not isinstance(v, dict) or not v.get("ordinary_equipment"):
             return False
         item_id = _mint_held_object(world, protagonist, description, v.get("item_id") or "")
@@ -959,7 +960,8 @@ def _grant_equipment(world: Any, p: Any, protagonist: str, description: str,
 
 
 def _grant_taken_object(world: Any, protagonist: str, description: str,
-                        scene: str | None, provider: Any, at: float) -> str | None:
+                        scene: str | None, provider: Any, at: float,
+                        laws: str = "") -> str | None:
     """IMPROV-OBJECT PERMANENCE (founder: "a mug from the bar doesn't not exist"): when the
     player TAKES an object that isn't an established canon entity, grant it world permanence
     by minting a fresh `obj:` held by the player — IF it's an ordinary thing plainly present
@@ -970,7 +972,7 @@ def _grant_taken_object(world: Any, protagonist: str, description: str,
     try:
         from construct import cohorts
         v = cohorts.equipment_check(provider, actor=protagonist, item=description,
-                                    scene=scene or "", manner="take")
+                                    scene=scene or "", manner="take", laws=laws)
         if not isinstance(v, dict) or not v.get("ordinary_equipment"):
             return None
         item_id = _mint_held_object(world, protagonist, description,
@@ -1533,7 +1535,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
 
 def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
                requires: list[str], provider: Any = None,
-               *, as_of: float | None = None) -> str | None:
+               *, as_of: float | None = None, laws: str = "") -> str | None:
     """The Adjudicate faculty (letter 028, finding E): locate() is the
     rules lawyer. Each claimed item must resolve AND be at hand (its
     containment chain reaching the player or the current scene). Returns
@@ -1548,7 +1550,8 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
         res = world.refer(description, scope=[e for e in (protagonist, scene) if e],
                           frame="canon", as_of=as_of)  # at-hand only at the horizon (Cx 257)
         if getattr(res, "status", None) != "resolved" or not getattr(res, "entity_id", None):
-            if _grant_equipment(world, p, protagonist, description, scene, provider):
+            if _grant_equipment(world, p, protagonist, description, scene, provider,
+                                laws=laws):
                 continue  # ordinary role equipment — granted, action stands
             return (f"{description!r} is not a thing you are known to have — "
                     f"it has never been established in this world's canon")
@@ -1802,6 +1805,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              generate: bool = True,
              horizon: float | None = None,
              death_policy: str = "shielded",
+             laws: list | None = None,
              on_scene: Callable[[], None] | None = None) -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
@@ -1813,8 +1817,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     the MAIN arc — it alone bears the win/loss terminal and anchors the player
     frame, scope, pins and briefing voice. Side arcs tick (clocks/beats), are
     classified per-arc, and on a non-won terminal emit FALLOUT + a diegetic
-    acknowledgment; they NEVER end the scenario."""
+    acknowledgment; they NEVER end the scenario.
+    laws: the world's sealed law objects (#105 WORLD LAWS) — rendered once
+    into the SAME compact block for every consumer this turn (classify's
+    assured/refused judgment, equipment/take grants, the reshape judge) and
+    into the reserved briefing lane ahead of the capped pins (Cx 470)."""
     side_arcs = side_arcs or []
+    from construct import laws as _laws_mod
+    _world_laws = [law for law in (laws or []) if isinstance(law, dict)]
+    _laws_full = _laws_mod.laws_block(_world_laws)
     # Fold any terminal gauge floors into failure_when (GAUGE §5): the gauge
     # declaration is the source of truth; the loss terminal is derived each load.
     arc = apply_gauge_terminals(arc)
@@ -1931,7 +1942,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         with _phase(trace, "classify"):
             verdict = cohorts.classify(provider, player_input, actor=actor,
                                        ask_candidates=ask_candidates,
-                                       npc_candidates=npc_candidates)
+                                       npc_candidates=npc_candidates,
+                                       laws=_laws_full)
         kind = verdict["kind"]
         moves_to = verdict.get("moves_to", "") or ""
         requires = [r for r in verdict.get("requires", []) if r]
@@ -2043,7 +2055,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     pre_chain = p.locate(arc.protagonist, as_of=_h)
     pre_scene = pre_chain[0] if pre_chain else None
     if requires and mode == "pure":
-        denial = adjudicate(world, p, arc.protagonist, pre_scene, requires, provider, as_of=_h)
+        denial = adjudicate(world, p, arc.protagonist, pre_scene, requires, provider,
+                            as_of=_h, laws=_laws_full)
         if denial:
             trace.adjudication = f"denied: {denial}"
             prose = cohorts.narrate(
@@ -2728,7 +2741,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # genuine `mint` signal reaches here — an AMBIGUOUS take must NOT spawn a sibling (Cx
                 # 306): it falls through to no canon write + a receipt, below.
                 granted = _grant_taken_object(world, arc.protagonist, takes, pre_scene,
-                                              provider, at=turn_time(turn))
+                                              provider, at=turn_time(turn),
+                                              laws=_laws_full)
                 if granted:
                     trace.took = granted
             else:
@@ -3418,7 +3432,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         _rr = apply_reshape(world, provider, action=player_input,
                             scene=(scene or arc.protagonist),
                             canon=f"{uncertain_of}. {_scene_facts}".strip(),
-                            tier=_resolved_tier, turn=turn)
+                            tier=_resolved_tier, turn=turn, laws=_laws_full)
         if _rr is not None:
             trace.reshape = _rr.summary
             for _row in _rr.canon_rows:
@@ -4077,6 +4091,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # distinct from the things merely in the room.
         briefing_parts.append("\nFEATURES OF THIS PLACE (its sub-features/"
                               "structures): " + ", ".join(scene_features))
+    if _world_laws:
+        # WORLD LAWS (#105, Cx 470 ruling 4): the constitution rides a RESERVED
+        # lane AHEAD of the capped pins — a busy turn's clue/social/temporal
+        # pins can never push a law out of the narrator's standing awareness.
+        # Disclosure-split (founder): understood laws are open lived context;
+        # discovered laws bind silently, their edges woven, never named.
+        briefing_parts.append("\n" + _laws_mod.law_lines(_world_laws))
+        trace.laws = [str(law.get("name") or "") for law in _world_laws]
     if active_pins:
         pin_lines = [f"[{ap.pin.scope_kind}] {ap.pin.directive}"
                      for ap in active_pins[:_PIN_CAP]]

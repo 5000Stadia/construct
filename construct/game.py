@@ -302,11 +302,72 @@ def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
                     "(adjudicable)", rejected, deferred)
 
 
+def _author_world_laws(provider: Provider, brief: str, reality: str,
+                       game_types: list | None) -> tuple[list[dict], str]:
+    """WORLD LAWS (#105, Cx 470): author the universe's 1-4 governing dynamics
+    from the brief, gated by the canonical family palette × reality register,
+    linted deterministically (shallow checks) and judged by the anti-pastiche
+    critic, with one feedback retry each. Returns (laws, reality_register) —
+    fail-open to ([], reality): laws are enrichment; their absence never
+    sinks a build."""
+    from construct import cohorts, laws as laws_mod, play_styles
+
+    families = laws_mod.families_of(play_styles.resolve(game_types))
+    feedback = ""
+    for attempt in range(3):
+        try:
+            out = cohorts.author_laws(
+                provider, brief, reality, families,
+                laws_mod.allowed_registers(families, reality),
+                feedback=feedback)
+        except Exception as exc:  # noqa: BLE001 — enrichment, never a gate
+            logger.warning("law authoring skipped: %s", exc)
+            return [], reality
+        settled = (out.get("reality_register") or reality or "").strip()
+        proposed = [law for law in (out.get("laws") or [])
+                    if isinstance(law, dict)]
+        if not proposed:
+            return [], settled  # a world may honestly have no named laws
+        # The gate is re-derived against the SETTLED register (the author may
+        # have settled an undeclared one from the brief).
+        problems = laws_mod.lint_laws(
+            proposed, laws_mod.allowed_registers(families, settled))
+        if not problems:
+            try:
+                verdicts = {v.get("name", ""): v for v in
+                            (cohorts.law_critic(provider, proposed)
+                             .get("verdicts") or [])}
+                problems = [f"{n}: {v.get('problem') or 'pastiche'}"
+                            for n, v in verdicts.items()
+                            if not v.get("passes", True)]
+            except Exception as exc:  # noqa: BLE001 — critic is best-effort
+                logger.warning("law critic skipped: %s", exc)
+                problems = []
+        if not problems:
+            logger.info("authored %d world law(s) [%s] (attempt %d): %s",
+                        len(proposed), settled, attempt + 1,
+                        [law.get("name") for law in proposed])
+            return proposed, settled
+        feedback = "; ".join(problems)
+        logger.warning("world laws failed lint/critic (attempt %d): %s",
+                       attempt + 1, problems)
+    # retries exhausted — keep only the laws that pass the shallow lint alone
+    survivors = [law for law in proposed
+                 if not laws_mod.lint_laws(
+                     [law], laws_mod.allowed_registers(families, settled))]
+    if survivors:
+        logger.warning("shipping %d/%d law(s) that pass lint after retries",
+                       len(survivors), len(proposed))
+    return survivors, settled
+
+
 def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                        spath: Path, endless: bool, on_stage=None,
                        win_direction: str = "", play_as: str = "",
                        game_types: list | None = None,
-                       source_step: float | None = None) -> dict:
+                       source_step: float | None = None,
+                       laws: list | None = None,
+                       reality_register: str = "") -> dict:
     """Shared session-zero tail (both creation paths): once canon is
     established, author the hidden arc over it (lint-gated), seed
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION.
@@ -372,6 +433,22 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
         if entry_epoch > 1000.0:
             logger.info("scenario entry epoch raised to %.1f (above pre-play valid_from)",
                         entry_epoch)
+
+    # WORLD LAWS (#105): the universe's governing dynamics land as ordinary
+    # canon BEFORE the arc, so the destination can turn on a law and the cast
+    # can embody one. Written through the same doorway as everything else;
+    # the single-source renders below feed every downstream author (Cx 470
+    # test bar: cast, arc, adjudication share the SAME law objects).
+    laws = [law for law in (laws or []) if isinstance(law, dict)]
+    from construct import laws as laws_mod
+    _laws_block = laws_mod.laws_block(laws)
+    if laws:
+        _emit(on_stage, "Stage 3.5 · Committing the world's deep laws · "
+                        f"{len(laws)} governing dynamic(s) as canon")
+        try:
+            world.porcelain.ingest_structured(laws_mod.law_rows(laws))
+        except Exception as exc:  # noqa: BLE001 — enrichment, never a gate
+            logger.warning("law canon rows skipped: %s", exc)
 
     _emit(on_stage, "Stage 4 · Authoring the hidden arc over canon")
     reads = PorcelainWorldReads(world)
@@ -479,7 +556,12 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             "investigating (you can't interview yourself). A self-realization or a deed the "
             "protagonist does is an ACT: use `event_occurs` (or a conclusory commitment) for "
             "it, never `player_learns` on the protagonist's own id.\n\n"
-            f"AVAILABLE IDS (use these exact strings):\n{known_ids}\n\n"
+            + (f"{_laws_block}\nTHE DESTINATION SHOULD TURN ON A LAW where it "
+               f"serves the story: the climax of a lawful world is a "
+               f"law-moment — the code confronted, the delta exposed, the "
+               f"metaphysic's cost paid. Never contradict a law.\n\n"
+               if _laws_block else "")
+            + f"AVAILABLE IDS (use these exact strings):\n{known_ids}\n\n"
             f"WORLD DIGEST:\n{digest}\n\n"
             + (f"THE PLAYER HAS CHOSEN THEIR WIN/LOSS — honour it. Author the "
                f"conclusion shape's `world_condition` toward this victory and, if "
@@ -616,7 +698,8 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 _cprop = _co.author_cast(provider, digest, proposal.get("theme", ""),
                                          _shape, arc.protagonist, people, feedback=_feedback,
                                          signature_directive=_sig_dir,
-                                         beat_targets=_beat_targets)
+                                         beat_targets=_beat_targets,
+                                         laws_directive=_laws_block)
                 # IDENTITY COHERENCE GATE (#92, Cx 404 A): a reused canon person id whose
                 # established role contradicts the proposed conception is DISAMBIGUATED on
                 # the RAW proposal (the persisted meta["cast"] must carry the fresh id too —
@@ -787,6 +870,20 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
         except Exception as exc:  # staging must never sink the seal
             logger.warning("cast location staging skipped: %s", exc)
 
+        # LAW EMBODIMENT LINKS (#105, Cx 470 ruling 5): the cast author declared
+        # which members/institutions exist BECAUSE of which law — written as
+        # queryable canon (law:<slug> embodied_by <entity>), never prose-only.
+        if laws and cast_proposal is not None:
+            try:
+                _emb = laws_mod.embodiment_rows(
+                    laws, cast_proposal.get("law_embodiment") or [],
+                    _canon_entity_ids(world))
+                if _emb:
+                    world.porcelain.ingest_structured(_emb)
+                    logger.info("linked %d law embodiment(s) to canon", len(_emb))
+            except Exception as exc:  # noqa: BLE001 — links must never sink a seal
+                logger.warning("law embodiment links skipped: %s", exc)
+
         # OPENING-GROUNDING (founder 2026-06-30): author the player's STANDING relationship to
         # each present/known cast member into knows:<protagonist>, so the grounded cold open
         # (Session._player_grounding) introduces each as who-they-are-TO-the-player, not a
@@ -828,6 +925,12 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
             # (Session). Absent / == TURN_EPOCH for one-timeframe worlds (a no-op).
             "entry_epoch": entry_epoch,
             "seeded_frames": seeded, "endless": bool(endless)}
+    # WORLD LAWS (#105): the sealed law objects + the reality register ride
+    # meta for the turn loop's cheap read (canon law:* rows stay the truth).
+    if laws:
+        meta["laws"] = laws
+    if reality_register:
+        meta["reality_register"] = reality_register
     # AS-OF PLAY HORIZON (B' S2): a HORIZON world records its opening coordinate + the
     # fail-closed ceiling so Session binds every read to `opening_as_of + turns` (S3). Absent
     # on legacy/interview worlds → Session reads the timeline head (the epoch-raise path).
@@ -854,8 +957,13 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     from construct import cohorts
     aim = meta.get("goal_statement") or "find your way through the story to its end"
     try:
+        # DISCLOSURE (founder, #105): laws the character inherently understands
+        # are introduced as lived context; discovered laws never surface here.
+        _known_laws = laws_mod.laws_block(laws_mod.understood_laws(laws))
         meta["intro"] = (cohorts.author_intro(provider, digest, proposal["theme"],
-                                              style, aim).get("intro") or "").strip()
+                                              style, aim,
+                                              laws_directive=_known_laws)
+                         .get("intro") or "").strip()
     except Exception as exc:
         logger.warning("thematic intro skipped: %s", exc)
         meta["intro"] = ""
@@ -929,11 +1037,15 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
 def create_scenario_from_ingest(name: str, prose_path: Path,
                                 provider: Provider, endless: bool = False,
                                 on_stage=None, win_direction: str = "",
-                                play_as: str = "", game_types: list | None = None) -> dict:
+                                play_as: str = "", game_types: list | None = None,
+                                laws: list | None = None,
+                                reality_register: str = "") -> dict:
     """Session-zero Path A: fresh ingest of a work through OUR pipeline
     → pristine scenario. Emits per-stage status via `on_stage`. `win_direction`
     (optional) is the player's own chosen win/loss framing, threaded to the arc
-    author + the player-facing goal."""
+    author + the player-facing goal. `laws`/`reality_register` (#105) arrive
+    only from the GENERATED path (the fiction was written on them); a real
+    ingested book keeps its own implicit constitution — never retrofitted."""
     WORLDS_DIR.mkdir(exist_ok=True)
     spath = scenario_path(name)
     if spath.exists():
@@ -1020,7 +1132,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         return _finalize_scenario(world, name, title, provider, spath, endless,
                                   on_stage, win_direction=win_direction,
                                   play_as=play_as, game_types=game_types,
-                                  source_step=SOURCE_STEP)
+                                  source_step=SOURCE_STEP,
+                                  laws=laws, reality_register=reality_register)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
@@ -1033,7 +1146,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
 def create_scenario_from_interview(name: str, brief: str, provider: Provider,
                                    endless: bool = False, on_stage=None,
                                    win_direction: str = "", play_as: str = "",
-                                   game_types: list | None = None) -> dict:
+                                   game_types: list | None = None,
+                                   reality_register: str = "") -> dict:
     """Session-zero Path B: build a world LIVE from a brief (no source
     text). An interviewer cohort expands the brief into the constitutive
     spine — charter, places + lateral graph, key NPCs with dispositional
@@ -1047,9 +1161,17 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
     if spath.exists():
         raise FileExistsError(f"scenario {name!r} already exists at {spath}")
 
+    # WORLD LAWS (#105): constitution first, so the spine is authored ON the
+    # laws (institutions exist because of them). Fail-open to law-less.
+    _emit(on_stage, "Stage 0 · Authoring the world's deep laws · the universe's "
+                    "governing dynamics (register-gated)")
+    laws, reality = _author_world_laws(provider, brief, reality_register,
+                                       game_types)
+    from construct import laws as _laws_mod
     _emit(on_stage, "Stage 1 · Interviewing → pattern-buffer · expanding the brief "
                     "into a constitutive spine (stated canon)")
-    spine = cohorts.interview_world(provider, brief, play_as=play_as)
+    spine = cohorts.interview_world(provider, brief, play_as=play_as,
+                                    laws_directive=_laws_mod.laws_block(laws))
     title = (spine.get("title") or name).strip()
     world = _world(spath, name, model=engine_tier_dispatch(provider),
                    stance="fiction", title=title,
@@ -1068,7 +1190,8 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
         # single-spine, so no source-axis spacing → no source_step (legacy/head reads).
         return _finalize_scenario(world, name, title, provider, spath, endless,
                                   on_stage, win_direction=win_direction,
-                                  play_as=play_as, game_types=game_types)
+                                  play_as=play_as, game_types=game_types,
+                                  laws=laws, reality_register=reality)
     except BaseException:
         world.close()
         spath.unlink(missing_ok=True)
@@ -1186,7 +1309,8 @@ def _assess_viability(name: str, meta: dict) -> list[str]:
 def create_scenario_from_generated(name: str, provider: Provider, *, seed: str = "",
                                    endless: bool = False, on_stage=None,
                                    win_direction: str = "", play_as: str = "",
-                                   game_types: list | None = None) -> dict:
+                                   game_types: list | None = None,
+                                   reality_register: str = "") -> dict:
     """Session-zero Path 2 (STARTUP-ENTRY §3): author a complete HIDDEN story
     from an optional seed, save it on the authoring side of the firewall,
     ingest it through the UNCHANGED six-stage pipeline, then GATE on
@@ -1209,8 +1333,19 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
     # (surprise-me), where the cast-shaped signature still rides author_cast after shape derivation.
     from construct.story_shapes import author_signature_directive as _asd
     _story_sig = _asd(game_types) if game_types else ""
+    # WORLD LAWS (#105): the constitution is authored FIRST, so the source
+    # fiction is generated ON the laws — institutions exist because of them
+    # (the Jedi property), not as retrofitted texture. Fail-open: a law-less
+    # world builds exactly as before.
+    _emit(on_stage, "Stage 0 · Authoring the world's deep laws · the universe's "
+                    "governing dynamics (register-gated)")
+    laws, reality = _author_world_laws(provider, seed, reality_register,
+                                       game_types)
+    from construct import laws as _laws_mod
+    _laws_dir = _laws_mod.laws_block(laws)
     work = cohorts.author_story(provider, seed=seed, win_direction=win_direction,
-                                play_as=play_as, signature_directive=_story_sig)
+                                play_as=play_as, signature_directive=_story_sig,
+                                laws_directive=_laws_dir)
     prose_path = _save_generated_prose(name, work)
     _emit(on_stage, f"   …hidden bible saved (authoring side of the firewall) "
                     f"→ {prose_path}")
@@ -1218,7 +1353,8 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
     meta = create_scenario_from_ingest(name, prose_path, provider,
                                        endless=endless, on_stage=on_stage,
                                        win_direction=win_direction, play_as=play_as,
-                                       game_types=game_types)
+                                       game_types=game_types,
+                                       laws=laws, reality_register=reality)
 
     _emit(on_stage, "Stage 7 · Viability gate · entry material + cold-open smoke "
                     "over shipped reads")

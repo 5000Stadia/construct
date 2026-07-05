@@ -6484,3 +6484,116 @@ def test_journey_accept_key_is_a_fixed_digest():
     assert a == k(long_origin, long_dest, 100.0)              # deterministic
     assert len(a) == len(b) == len("jacc_") + 20              # fixed size, no truncation
     assert a.startswith("jacc_")
+
+
+# ---------------------------------------------------------------------------
+# WORLD LAWS (#105, WORLD-LAWS.md, Cx 470) — the reserved briefing lane + the
+# shared adjudication block at play time.
+# ---------------------------------------------------------------------------
+
+_LAWS = [
+    {"name": "The Ledger of Hours", "register": "systemic",
+     "rule": "every favor owed is recorded and must be repaid in kind",
+     "cost_limit": "a debt unpaid compounds", "embodiment": "the Clerks",
+     "texture": "ledger-slips", "nearest_borrowed_shape": "",
+     "changed_consequence": "rank is a running balance", "disclosure": "understood"},
+    {"name": "The Salt Concord", "register": "social",
+     "rule": "no violence may pass between those who have shared salt",
+     "cost_limit": "an oathbreaker is barred from every table",
+     "embodiment": "the table-keepers", "texture": "the salt bowl at every door",
+     "nearest_borrowed_shape": "guest-right",
+     "changed_consequence": "hospitality is a weaponizable jurisdiction",
+     "disclosure": "understood"},
+    {"name": "The Undertow", "register": "environmental",
+     "rule": "the fog carries sound backward — words arrive before they are spoken",
+     "cost_limit": "listeners sicken with borrowed time",
+     "embodiment": "the wardens of the shore", "texture": "wax-plugged ears",
+     "nearest_borrowed_shape": "prophecy",
+     "changed_consequence": "foreknowledge is a public hazard, not a gift",
+     "disclosure": "discovered"},
+]
+
+
+class TestWorldLaws:
+    def test_law_lane_survives_overcrowded_pins(self, world):
+        # Cx 470 ruling 4 + test bar: 3 laws plus MORE than _PIN_CAP active pins
+        # still brief every law — the constitution rides a reserved lane AHEAD
+        # of the capped PINS block, never competing under the cap.
+        from construct.arc.grammar import Pin
+        from construct.turnloop import _PIN_CAP
+        crowd = tuple(
+            Pin(f"pin:crowd{i}", "region", "place:study", f"crowding directive {i}",
+                subject_attribute=f"detail{i}", anchor="place:study", severity=0.9)
+            for i in range(_PIN_CAP + 2))
+        arc = replace(make_arc(), pins=crowd)
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "The study holds its breath."},
+        ])
+        result = run_turn(world, arc, provider, "I look around.", turn=1,
+                          laws=_LAWS)
+        brief = _narrate_prompt(provider)
+        assert len(result.trace.pins) == _PIN_CAP + 2   # all active…
+        assert "PINNED AWARENESS" in brief              # …capped block present
+        for law in _LAWS:
+            assert law["name"] in brief                 # every law briefed
+        # the reserved lane renders BEFORE the ordinary pins
+        assert brief.index("WORLD LAWS") < brief.index("PINNED AWARENESS")
+        assert result.trace.laws == [law["name"] for law in _LAWS]
+
+    def test_discovered_law_briefs_as_hidden(self, world):
+        # Founder disclosure ruling: an 'understood' law is open lived context;
+        # a 'discovered' law binds silently — woven, never stated.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "Fog against the glass."},
+        ])
+        run_turn(world, arc, provider, "I listen.", turn=1, laws=_LAWS)
+        brief = _narrate_prompt(provider)
+        assert "STILL UNDISCOVERED" in brief
+        # the hidden law sits under the weave directive, after the open laws
+        assert brief.index("The Undertow") > brief.index("STILL UNDISCOVERED")
+        assert brief.index("The Ledger of Hours") < brief.index("STILL UNDISCOVERED")
+
+    def test_classify_receives_the_same_laws_block(self, world):
+        # Cx 470 test bar: consumers get the SAME rendered law objects — the
+        # classify (assured/refused) feed carries laws_block(laws) verbatim,
+        # the identical render the build-side authors received.
+        from construct.laws import laws_block
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "You weigh the debt."},
+        ])
+        run_turn(world, arc, provider, "I call in the favor.", turn=1, laws=_LAWS)
+        classify_prompt = provider.calls[0][0]
+        assert laws_block(_LAWS) in classify_prompt
+        assert "JUDGE AGAINST THE LAWS" in classify_prompt
+
+    def test_no_laws_no_lane(self, world):
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "Quiet."},
+        ])
+        result = run_turn(world, arc, provider, "I wait.", turn=1)
+        assert "WORLD LAWS" not in _narrate_prompt(provider)
+        assert "JUDGE AGAINST THE LAWS" not in provider.calls[0][0]
+        assert result.trace.laws == []
