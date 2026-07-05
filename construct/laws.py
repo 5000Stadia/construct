@@ -290,6 +290,27 @@ def embodiment_rows(laws: list[dict], links: list[dict],
     return rows
 
 
+#: The reality register's standing adjudication contract, one line per
+#: register (WORLD-LAWS.md §reality register) — threaded beside the laws
+#: block so "in a real-world register…" clauses have an explicit referent,
+#: INCLUDING the no-law case (Cx 475 note).
+_REALITY_LINES = {
+    "real": ("THE REALITY REGISTER: REAL — actual Earth, actual era. Invention "
+             "stays plausible-real; real institutions and physics hold; nothing "
+             "metaphysical or physics-breaking is possible here."),
+    "alternate": ("THE REALITY REGISTER: ALTERNATE EARTH — our world PLUS its "
+                  "authored delta laws. Everything NOT covered by a delta "
+                  "defaults to real-Earth truth; police that seam."),
+    "secondary": ("THE REALITY REGISTER: SECONDARY WORLD — an invented whole. "
+                  "Its laws are the only Earth it has; hold them absolutely."),
+}
+
+
+def reality_line(reality: str) -> str:
+    """The one-line reality contract for runtime consumers; '' when unset."""
+    return _REALITY_LINES.get((reality or "").strip().lower(), "")
+
+
 def laws_from_meta(meta: dict | None) -> list[dict]:
     """The sealed law objects off scenario meta (the turn loop's cheap read;
     the canon law:* rows remain the queryable truth)."""

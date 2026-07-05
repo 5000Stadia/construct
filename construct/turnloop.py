@@ -1806,6 +1806,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              horizon: float | None = None,
              death_policy: str = "shielded",
              laws: list | None = None,
+             reality: str = "",
              on_scene: Callable[[], None] | None = None) -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
@@ -1821,11 +1822,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     laws: the world's sealed law objects (#105 WORLD LAWS) — rendered once
     into the SAME compact block for every consumer this turn (classify's
     assured/refused judgment, equipment/take grants, the reshape judge) and
-    into the reserved briefing lane ahead of the capped pins (Cx 470)."""
+    into the reserved briefing lane ahead of the capped pins (Cx 470).
+    reality: the world's reality register — its one-line contract rides
+    BESIDE the laws block for every consumer, including the no-law case
+    (Cx 475: 'in a real-world register…' needs an explicit referent)."""
     side_arcs = side_arcs or []
     from construct import laws as _laws_mod
     _world_laws = [law for law in (laws or []) if isinstance(law, dict)]
-    _laws_full = _laws_mod.laws_block(_world_laws)
+    _reality_line = _laws_mod.reality_line(reality)
+    _laws_full = "\n".join(
+        p for p in (_reality_line, _laws_mod.laws_block(_world_laws)) if p)
     # Fold any terminal gauge floors into failure_when (GAUGE §5): the gauge
     # declaration is the source of truth; the loss terminal is derived each load.
     arc = apply_gauge_terminals(arc)
@@ -4091,13 +4097,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # distinct from the things merely in the room.
         briefing_parts.append("\nFEATURES OF THIS PLACE (its sub-features/"
                               "structures): " + ", ".join(scene_features))
-    if _world_laws:
+    if _world_laws or _reality_line:
         # WORLD LAWS (#105, Cx 470 ruling 4): the constitution rides a RESERVED
         # lane AHEAD of the capped pins — a busy turn's clue/social/temporal
         # pins can never push a law out of the narrator's standing awareness.
         # Disclosure-split (founder): understood laws are open lived context;
-        # discovered laws bind silently, their edges woven, never named.
-        briefing_parts.append("\n" + _laws_mod.law_lines(_world_laws))
+        # discovered laws bind silently, their edges woven, never named. The
+        # reality register's contract rides the same lane (no-law case incl.).
+        _lane = "\n".join(p for p in (_reality_line,
+                                      _laws_mod.law_lines(_world_laws)) if p)
+        briefing_parts.append("\n" + _lane)
         trace.laws = [str(law.get("name") or "") for law in _world_laws]
     if active_pins:
         pin_lines = [f"[{ap.pin.scope_kind}] {ap.pin.directive}"

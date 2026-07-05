@@ -314,6 +314,7 @@ def _author_world_laws(provider: Provider, brief: str, reality: str,
 
     families = laws_mod.families_of(play_styles.resolve(game_types))
     feedback = ""
+    last_critic_pass: set[str] | None = None  # names the critic passed, FINAL attempt
     for attempt in range(3):
         try:
             out = cohorts.author_laws(
@@ -330,6 +331,7 @@ def _author_world_laws(provider: Provider, brief: str, reality: str,
             return [], settled  # a world may honestly have no named laws
         # The gate is re-derived against the SETTLED register (the author may
         # have settled an undeclared one from the brief).
+        last_critic_pass = None
         problems = laws_mod.lint_laws(
             proposed, laws_mod.allowed_registers(families, settled))
         if not problems:
@@ -340,9 +342,15 @@ def _author_world_laws(provider: Provider, brief: str, reality: str,
                 problems = [f"{n}: {v.get('problem') or 'pastiche'}"
                             for n, v in verdicts.items()
                             if not v.get("passes", True)]
+                last_critic_pass = {
+                    str(law.get("name") or "") for law in proposed
+                    if verdicts.get(str(law.get("name") or ""), {})
+                    .get("passes", True)}
             except Exception as exc:  # noqa: BLE001 — critic is best-effort
                 logger.warning("law critic skipped: %s", exc)
                 problems = []
+                last_critic_pass = {str(law.get("name") or "")
+                                    for law in proposed}
         if not problems:
             logger.info("authored %d world law(s) [%s] (attempt %d): %s",
                         len(proposed), settled, attempt + 1,
@@ -351,13 +359,21 @@ def _author_world_laws(provider: Provider, brief: str, reality: str,
         feedback = "; ".join(problems)
         logger.warning("world laws failed lint/critic (attempt %d): %s",
                        attempt + 1, problems)
-    # retries exhausted — keep only the laws that pass the shallow lint alone
+    # Retries exhausted (Cx 475 blocker): a survivor must pass the shallow lint
+    # AND hold a PASSING critic verdict from the final round — the critic's
+    # semantic anti-pastiche judgment is the central bar (Cx 470 ruling 2) and
+    # is never bypassed by exhaustion. Lint-failed final round → the critic
+    # never judged it → nothing ships (law-less is the honest failure mode).
     survivors = [law for law in proposed
                  if not laws_mod.lint_laws(
-                     [law], laws_mod.allowed_registers(families, settled))]
+                     [law], laws_mod.allowed_registers(families, settled))
+                 and str(law.get("name") or "") in (last_critic_pass or set())]
     if survivors:
-        logger.warning("shipping %d/%d law(s) that pass lint after retries",
-                       len(survivors), len(proposed))
+        logger.warning("shipping %d/%d law(s) that pass lint AND the critic "
+                       "after retries", len(survivors), len(proposed))
+    else:
+        logger.warning("no law survived lint+critic after retries — shipping "
+                       "law-less")
     return survivors, settled
 
 

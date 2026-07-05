@@ -1019,6 +1019,7 @@ class Session:
                               horizon=horizon,
                               death_policy=self._meta.get("death_policy", "shielded"),
                               laws=self._laws,
+                              reality=self._meta.get("reality_register", ""),
                               on_scene=self._note_scene_image)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)

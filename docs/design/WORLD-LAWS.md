@@ -196,6 +196,14 @@ gates the register palette above.
   `law_critic` (⟦lwc⟧, the semantic anti-pastiche judgment — Cx 470 ruling 2)
   → feedback retry ×2, fail-open to law-less. The author settles an
   undeclared reality register from the brief; the gate re-derives against it.
+  **The critic is never bypassed (Cx 475 blocker):** after retry exhaustion a
+  survivor must pass lint AND hold a passing critic verdict from the final
+  round — critic-rejected pastiche ships as law-LESS, never as canon.
+- **Reality at runtime (Cx 475 note):** `reality_line(register)` — the
+  register's one-line contract (REAL: nothing physics-breaking; ALTERNATE:
+  un-deltaed defaults to real-Earth truth, police the seam; SECONDARY: the
+  laws are the only Earth it has) — rides beside the laws block into the
+  briefing lane and every adjudication feed, including the no-law case.
 - **DISCLOSURE (founder refinement):** each law is marked `understood` (the
   player's character inherently knows it — the intro/opening grounding
   introduces it as lived context) or `discovered` ("magic is real and you're

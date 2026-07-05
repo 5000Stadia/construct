@@ -201,3 +201,51 @@ class TestAuthoringLoop:
         laws, reality = _author_world_laws(
             StubProvider([{"unexpected": True}]), "x", "secondary", [])
         assert laws == [] and reality == "secondary"
+
+
+class TestCriticExhaustion:
+    # Cx 475 blocker: the critic's semantic judgment is never bypassed by
+    # retry exhaustion — a survivor needs lint AND a passing critic verdict.
+
+    def _author(self, name="The Ledger of Hours"):
+        return {"reality_register": "real", "laws": [_law(name=name)]}
+
+    def test_critic_rejects_all_retries_ships_no_laws(self):
+        from construct.game import _author_world_laws
+        from construct.provider import StubProvider
+        reject = {"verdicts": [{"name": "The Ledger of Hours", "passes": False,
+                                "problem": "a guild economy wearing new words"}]}
+        provider = StubProvider([self._author(), dict(reject),
+                                 self._author(), dict(reject),
+                                 self._author(), dict(reject)])
+        laws, reality = _author_world_laws(provider, "a trade city", "real", [])
+        assert laws == []                       # lint-clean but critic-rejected
+        assert reality == "real"
+
+    def test_partial_critic_pass_ships_only_the_pass(self):
+        from construct.game import _author_world_laws
+        from construct.provider import StubProvider
+        two = {"reality_register": "real",
+               "laws": [_law(), _law(name="The Salt Concord",
+                                     rule="no violence between salt-sharers",
+                                     changed_consequence="hospitality is a "
+                                                         "weaponizable jurisdiction")]}
+        verdict = {"verdicts": [
+            {"name": "The Ledger of Hours", "passes": True, "problem": ""},
+            {"name": "The Salt Concord", "passes": False,
+             "problem": "guest-right re-textured"}]}
+        provider = StubProvider([dict(two), dict(verdict),
+                                 dict(two), dict(verdict),
+                                 dict(two), dict(verdict)])
+        laws, _ = _author_world_laws(provider, "a trade city", "real", [])
+        assert [law["name"] for law in laws] == ["The Ledger of Hours"]
+
+
+class TestRealityLine:
+    def test_reality_line_per_register(self):
+        from construct.laws import reality_line
+        assert "REAL" in reality_line("real")
+        assert "ALTERNATE" in reality_line("alternate")
+        assert "police that seam" in reality_line("alternate")
+        assert "SECONDARY" in reality_line("secondary")
+        assert reality_line("") == "" and reality_line("dreamlike") == ""

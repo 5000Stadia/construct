@@ -6597,3 +6597,22 @@ class TestWorldLaws:
         assert "WORLD LAWS" not in _narrate_prompt(provider)
         assert "JUDGE AGAINST THE LAWS" not in provider.calls[0][0]
         assert result.trace.laws == []
+
+    def test_reality_contract_rides_the_no_law_case(self, world):
+        # Cx 475 note: the reality register's one-line contract reaches the
+        # briefing lane AND the adjudication feeds even when no laws exist —
+        # "in a real-world register…" always has an explicit referent.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "The world stays stubbornly real."},
+        ])
+        result = run_turn(world, arc, provider, "I try to fly.", turn=1,
+                          reality="real")
+        assert "THE REALITY REGISTER: REAL" in _narrate_prompt(provider)
+        assert "THE REALITY REGISTER: REAL" in provider.calls[0][0]  # classify
+        assert result.trace.laws == []
