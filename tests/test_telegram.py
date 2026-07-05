@@ -258,6 +258,35 @@ class TestRouting:
         assert cat["live_telegram_42"].startswith("The Drowned Harbor")
         assert "anchor" in cat
         assert "live_telegram_99" not in cat             # untitled artifact still excluded
+        # PROVENANCE (founder 2026-07-05, "did I make one?"): the spoken catalog
+        # tags who made what, so the agent answers provenance truthfully.
+        assert cat["live_telegram_42"].endswith("player-built")
+        assert cat["anchor"].endswith("preloaded")
+
+    def test_world_menu_splits_house_and_player_shelves(self, conn, monkeypatch):
+        # PROVENANCE INDICATOR (founder 2026-07-05): the host menu splits the
+        # preloaded HOUSE SHELF from BUILT BY PLAYERS, and marks the viewing
+        # guest's own creations "yours".
+        import construct.game as _game
+        monkeypatch.setattr(_game, "list_scenarios", lambda: [
+            {"name": "bodycase", "title": "The Rain in Bluegate Yard",
+             "genre": "Victorian detective mystery"},
+            {"name": "live_telegram_42_1", "title": "The Drowned Harbor",
+             "genre": "mystery"},
+            {"name": "live_telegram_7_1", "title": "The Glass Orchard",
+             "genre": "pastoral fable"},
+        ])
+        core = _core(conn, _Factory())
+        menu = core._world_menu(viewer="live_telegram_42_")
+        assert "HOUSE SHELF" in menu and "(preloaded)" in menu
+        assert "BUILT BY PLAYERS" in menu
+        assert menu.index("Bluegate Yard") < menu.index("BUILT BY PLAYERS")
+        assert menu.index("Drowned Harbor") > menu.index("BUILT BY PLAYERS")
+        # the viewer's own build is marked; another player's is not
+        harbor_line = next(ln for ln in menu.splitlines() if "Drowned Harbor" in ln)
+        orchard_line = next(ln for ln in menu.splitlines() if "Glass Orchard" in ln)
+        assert harbor_line.endswith("· yours")
+        assert "yours" not in orchard_line
 
     def test_atrium_show_library_renders_host_menu(self, conn):
         # The Construct emits show_library; the HOST renders a clean menu block
@@ -269,7 +298,7 @@ class TestRouting:
         out = core.handle(_ev("telegram", "lib", "what can I play?"), now=NOW)
         body = out.chunks[0]
         assert body.startswith("Here's what's ready")          # short agent intro
-        assert "ready-made worlds" in body.lower()             # host menu header
+        assert "house shelf" in body.lower()                   # host menu header
         assert "The Rain in Bluegate Yard" in body             # a real title, listed
         assert "new world" in body                             # the build option line
         assert f.calls == []                                   # still in dialogue

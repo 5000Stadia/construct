@@ -712,26 +712,47 @@ class TransportCore:
     def _catalog(self) -> dict[str, str]:
         """{name: 'Title — genre/hook'} for the Construct to speak (so the guest
         sees the STYLE of each title — founder); pick_world resolves to the name.
-        Prefers the authored genre tag, falling back to the logline hook."""
+        Prefers the authored genre tag, falling back to the logline hook.
+        Player-built worlds are tagged so the agent can answer provenance
+        questions ('did I make one?') truthfully."""
         return {w["name"]: (f"{w['title']} — {w['genre']}" if w["genre"]
                             else (f"{w['title']} — {w['logline']}" if w["logline"]
                                   else w["title"]))
+                          + (" · player-built" if w["name"].startswith("live_")
+                             else " · preloaded")
                 for w in self._library()}
 
-    def _world_menu(self, resumable: str = "") -> str:
+    def _world_menu(self, resumable: str = "", viewer: str = "") -> str:
         """A clean, scannable menu of the ready-made worlds (founder: 'more menu
         clean' — emoji to separate sections). Host-rendered for consistency, one
-        world per line with a genre emoji; the Construct's prose introduces it."""
+        world per line with a genre emoji; the Construct's prose introduces it.
+        PROVENANCE (founder 2026-07-05, 'did I make one?'): the shelf splits into
+        the preloaded house worlds and the player-built ones (`live_*` — the
+        transport's own naming carries provenance); `viewer` (a `live_<platform>_
+        <id>_` prefix) marks this guest's own creations."""
         lib = self._library()
         if not lib:
             return ""
-        # Plain text + emoji only — the Telegram sender uses no parse_mode, so
-        # markdown would show literal asterisks. Emoji + line breaks do the work.
-        lines = ["📂 READY-MADE WORLDS"]
-        for w in lib:
+        house = [w for w in lib if not w["name"].startswith("live_")]
+        built = [w for w in lib if w["name"].startswith("live_")]
+
+        def _line(w: dict) -> str:
             tag = f" — {w['genre']}" if w["genre"] else (
                 f" — {w['logline']}" if w["logline"] else "")
-            lines.append(f"{_genre_emoji(w['genre'], w['title'])} {w['title']}{tag}")
+            yours = " · yours" if viewer and w["name"].startswith(viewer) else ""
+            return f"{_genre_emoji(w['genre'], w['title'])} {w['title']}{tag}{yours}"
+
+        # Plain text + emoji only — the Telegram sender uses no parse_mode, so
+        # markdown would show literal asterisks. Emoji + line breaks do the work.
+        lines = []
+        if house:
+            lines.append("📂 THE HOUSE SHELF (preloaded)")
+            lines += [_line(w) for w in house]
+        if built:
+            if lines:
+                lines.append("")
+            lines.append("🛠️ BUILT BY PLAYERS")
+            lines += [_line(w) for w in built]
         if resumable:
             lines.append("")
             lines.append(f"▶️ Resume — {self._title_of(resumable)}")
@@ -1077,7 +1098,8 @@ class TransportCore:
                                   {"history": history_list, "state": state.to_dict()})
             reply = result.reply
             if result.show_library:
-                menu = self._world_menu(resumable)
+                menu = self._world_menu(
+                    resumable, viewer=f"live_{ev.platform}_{ev.external_id}_")
                 if menu:
                     reply = f"{reply}\n\n{menu}" if reply else menu
             if getattr(result, "show_styles", False):
@@ -1550,7 +1572,7 @@ def _resolve_removal(arg: str, catalog: dict[str, str]) -> str | None:
     if low in {k.lower() for k in catalog}:
         return next(k for k in catalog if k.lower() == low)
     hits = [k for k, t in catalog.items()
-            if low == str(t).split(" — ")[0].strip().lower()]
+            if low == str(t).split(" — ")[0].split(" · ")[0].strip().lower()]
     if not hits:
         hits = [k for k, t in catalog.items() if low in str(t).lower()]
     return hits[0] if len(hits) == 1 else None
