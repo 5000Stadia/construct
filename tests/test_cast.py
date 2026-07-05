@@ -762,3 +762,44 @@ def test_disambiguate_cast_identities_no_ops_when_safe():
     ]}
     out, remaps = disambiguate_cast_identities(proposal, lambda pid: None, set())
     assert remaps == {} and out is proposal          # unknown canon person — reuse safe
+
+
+def test_bodycase_ships_a_real_suspect_field():
+    # FOUNDER (2026-07-05): the flagship whodunit must never be a two-horse race.
+    # Invariants over the SHIPPED world: >=4 suspect-grade cast, misdirection in
+    # >=3 mouths, every clue on a real pillar, every volunteered herring debunkable,
+    # and the case still solvable.
+    import json
+    from pathlib import Path
+
+    from construct.cast import cast_from_proposal, check_solvability
+    meta = json.loads(Path("worlds/bodycase.meta.json").read_text())
+    nodes, _specs = cast_from_proposal(meta["cast"])
+    suspects = [n for n in nodes if n.shape_role == "suspect" or n.is_culprit]
+    assert len(suspects) >= 4, [n.node_id for n in suspects]
+    herring_mouths = {n.node_id for n in nodes
+                      if any(c.is_red_herring or c.coverage_effect == "false"
+                             for c in n.holds_clues)}
+    assert len(herring_mouths) >= 3
+    pillar_ids = {p["id"] for p in meta["cast"]["pillars"]}
+    all_ids = {c.clue_id for n in nodes for c in n.holds_clues}
+    for n in nodes:
+        for c in n.holds_clues:
+            assert c.pillar_id in pillar_ids, c.clue_id
+            if c.is_red_herring and c.reveal_condition == "none":
+                assert c.debunked_by in all_ids, f"{c.clue_id} lacks a live debunker"
+    required = [p["id"] for p in meta["cast"]["pillars"] if p.get("required")]
+    assert check_solvability(required, nodes) == []
+
+
+def test_deduction_shape_demands_a_suspect_web():
+    # the doctrine pin: author_cast for a deduction shape carries the field
+    # requirement; a non-deduction shape does not.
+    from construct.cohorts import author_cast
+    from construct.provider import StubProvider
+    prov = StubProvider([{"pillars": [], "cast": []}, {"pillars": [], "cast": []}])
+    author_cast(prov, "digest", "theme", "deduction (whodunit)", "person:p", [])
+    assert "THE SUSPECT WEB" in prov.calls[0][0]
+    assert "never a two-horse race" in prov.calls[0][0]
+    author_cast(prov, "digest", "theme", "endurance", "person:p", [])
+    assert "THE SUSPECT WEB" not in prov.calls[1][0]

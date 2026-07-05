@@ -29,7 +29,7 @@ from construct import cohorts
 from construct import resolution
 from construct.resolve import (
     resolve_rows, bind_or_mint, _PLAYER_INPUT_MINT_KINDS,
-    _NARRATION_MINT_KINDS, _NARRATION_STUB_KINDS,
+    _NARRATION_MINT_KINDS, _NARRATION_STUB_KINDS, _PLACE_LIKE_KINDS,
 )
 from construct.adapter import PorcelainWorldReads
 from construct.gauge import (
@@ -641,6 +641,10 @@ class TurnTrace:
     peril: str = ""             # #95 debug: "staged"|"standing"|"cleared"|"" this turn
     vocative: str = ""          # #93 debug: "token->person:id (present|ABSENT)" when a title address resolved
     memory: str = ""            # #97 debug: the Remembrancer's stirred memory this turn (empty = silent)
+    distance_unknown: str = ""  # #101 inversion: "place:a->place:b" when the map can't prove a local move
+    deliberating: str = ""      # #102: the journey held for the player's own weighing (founder-shaped)
+    journey_est: int = -1       # #102: a pre-commit elapsed estimate to reuse (never re-priced)
+    same_place: bool = False    # a synonym for the current room bound already-here — no move, no time charge
     commitment: str = ""        # the player's conclusory commitment this turn (if any)
     commitment_grade: str = ""  # vindicated|partial|wrong|pyrrhic — graded outcome (epilogue flavor)
     commitment_bounced: bool = False  # commit attempted but required coverage incomplete → non-terminal bounce (COMMITMENT-AS-EFFECT)
@@ -768,6 +772,60 @@ def _route_obstruction(p: Any, origin: str | None, target: str | None,
     for seg in r.get("segments", []):
         if seg.get("status") in ("blocked", "obscured"):
             return seg
+    return None
+
+
+def _route_connects(p: Any, origin: str | None, target: str | None,
+                    *, as_of: float | None = None) -> bool:
+    """The nearness inversion's ROUTE arm (Cx 458): does a DIRECT, passable way
+    connect origin and target? `_route_obstruction()` reports only problems and
+    returns None for a clear route, so it can never prove nearness — this is the
+    dedicated existence read. Direct = the termini are immediately connected
+    (route length 2: a door, corridor, lane, lift); a multi-hop path proves a
+    network, not nearness, and stays with the model's pricing. Fail-closed: any
+    route error proves nothing."""
+    if not origin or not target or origin == target:
+        return False
+    try:
+        r = p.route(origin, target, as_of=as_of)
+    except Exception:  # noqa: BLE001 — missing capture proves nothing
+        return False
+    _route = r.get("route") or []
+    # DIRECT includes PB's portal shape (Cx 465 #1): place -> obj:door -> place is a
+    # door, not a trek — near iff NO intermediate node is itself a place (an
+    # intermediate place = genuine multi-hop travel, which stays with the model).
+    return (r.get("status") in ("clear", "obscured") and len(_route) >= 2
+            and not any(str(n).startswith("place:") for n in _route[1:-1]))
+
+
+def _journey_accept_key(origin: str | None, dest_key: str, threshold: float) -> str:
+    """#102 marker key (Cx 465 #3): a FIXED-SIZE digest over all four components
+    (origin | destination | hazard identity | deadline coordinate) — truncation can
+    never substring away the coordinate, so a moved deadline always re-warns."""
+    import hashlib
+    raw = f"{origin or ''}|{dest_key}|time_deadline|{int(threshold)}"
+    return "jacc_" + hashlib.sha1(raw.encode()).hexdigest()[:20]
+
+
+def _deadline_remaining(arc: Any, world: Any) -> tuple[float, float] | None:
+    """#102 (Cx 457): the live diegetic time-deadline's remaining budget —
+    (remaining_minutes, threshold) from the arc's `failure_when` Quantity over the
+    elapsed clock, or None when the story authored no deadline. Deterministic reads
+    only; the hazard must be ESTABLISHED, never inferred."""
+    fw = getattr(arc, "failure_when", None)
+    if fw is None:
+        return None
+    from construct.arc.conditions import Quantity, atoms_of
+    from construct.clock import ELAPSED_ATTR, ELAPSED_ENTITY, read_clock
+    for a in atoms_of(fw):
+        if (isinstance(a, Quantity) and a.entity == ELAPSED_ENTITY
+                and a.attribute == ELAPSED_ATTR and getattr(a, "cmp", "") in (">=", ">")):
+            try:
+                thr = float(a.value)
+                cur = float(read_clock(world).minutes)
+            except Exception:  # noqa: BLE001 — an unreadable clock is no hazard
+                continue
+            return max(0.0, thr - cur), thr
     return None
 
 
@@ -1055,9 +1113,21 @@ def _embedded_container(moves_to: str, roster: list) -> tuple[str, str] | None:
     for pid, _label in roster or []:
         stoks = {t for t in str(pid).split(":", 1)[-1].split("_")
                  if len(t) > 3 and t not in _EMBED_STOP}
-        hit = stoks & ptoks
+        # Cx 449: name/kind evidence widens the HIT surface (place:north named "North
+        # Village" is findable by "village"). Match strength must still be EARNED:
+        # either the original slug ratio holds, or the hit covers at least half the
+        # place's NAME tokens — a lone kind-word brush ("...a rain-wet yard") never
+        # qualifies a container on its own.
+        _lcore = str(_label).split(" (the room", 1)[0]
+        ltoks = {t for t in re.split(r"[^a-z0-9]+", _lcore.lower())
+                 if len(t) > 3 and t not in _EMBED_STOP}
+        ntoks = {t for t in re.split(r"[^a-z0-9]+", _lcore.split(" — ", 1)[0].lower())
+                 if len(t) > 3 and t not in _EMBED_STOP}
+        hit = (stoks | ltoks) & ptoks
         score = len(hit)
-        if score < 1 or score * 2 < len(stoks):
+        _strong = ((stoks and score * 2 >= len(stoks))
+                   or (ntoks and len(hit & ntoks) * 2 >= len(ntoks)))
+        if score < 1 or not _strong:
             continue  # too weak a brush to be a reference
         if best is not None and score == best[0]:
             tied = True
@@ -1066,7 +1136,7 @@ def _embedded_container(moves_to: str, roster: list) -> tuple[str, str] | None:
     if best is None or tied:
         return None
     _score, container, hit = best
-    segments = [s.strip() for s in re.split(r",|;|\bat\b|\bwithin\b|\binside\b|\bto\b",
+    segments = [s.strip() for s in re.split(r",|;|\bat\b|\bin\b|\bwithin\b|\binside\b|\bto\b",
                                             phrase) if s.strip()]
     # a tail must carry a DISTINCTIVE token of its own — "back to the study" leaves only
     # the stop-word "back", which is the reuse path's business ("go back"), not a nest.
@@ -1116,7 +1186,8 @@ def _persons_under(p: Any, scene: str | None, as_of: float | None,
 def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float,
                        p: Any = None, origin: str | None = None,
                        as_of: float | None = None,
-                       roster: list | None = None) -> tuple[str | None, dict | None]:
+                       roster: list | None = None,
+                       hold_check: Any = None) -> tuple[str | None, dict | None]:
     """MOVEMENT PERMANENCE (founder live: "I said I went to Harrow's office" but canon kept me at
     the post office). A move to a NAMED place that didn't resolve to an established canon place (an
     improvised/narrated location) MINTS a fresh `place:<slug>` and commits the protagonist INTO it,
@@ -1128,9 +1199,46 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
     / an existing reused place is checked; blocked → no commit). Returns (place_id, obstruction);
     (None, seg) = blocked; (None, None) = no grant. Reuses an existing `place:<slug>` on match."""
     container: str | None = None
+    _mint_container: tuple[str, str] | None = None  # (tail phrase, kind) — a NOVEL container to mint
     _embed = _embedded_container(moves_to, roster or [])
     if _embed is not None:
         container, moves_to = _embed
+    else:
+        # #101 MINT-ID HYGIENE (Cx 445): a locative TAIL must never be baked into the
+        # child's identity — "Dr. Ames's consulting room in the village" is a
+        # consulting room CONTAINED in a village, not one long room name. A tail that
+        # names a KNOWN place was already caught by _embedded_container above; here the
+        # tail is NOVEL or generic: split it off, and either bind it (unique roster
+        # token match), flag ambiguity (two known villages → the ask path), or mint a
+        # thin container shell (kind/name only).
+        _loc = re.match(r"^(.*?)\s+(?:in|at|inside|within)\s+(?:the\s+)?(.{3,60})$",
+                        (moves_to or "").strip(), re.IGNORECASE)
+        if _loc and _loc.group(1).strip():
+            _child, _tail = _loc.group(1).strip(), _loc.group(2).strip().rstrip(".,;")
+            _ttoks = {t for t in re.split(r"[^a-z0-9]+", _tail.lower()) if len(t) > 3}
+
+            def _place_evidence(pid: str, lb: str) -> set:
+                # Cx 449 blocker: the container must match on WORLD FACTS (name/kind
+                # in the roster label), never only on how the id happens to be worded
+                # — place:north with name "North Village" IS a village.
+                _core = str(lb).split(" (the room", 1)[0]  # drop the current-room marker
+                return ({t for t in str(pid).split(":", 1)[-1].split("_") if len(t) > 3}
+                        | {t for t in re.split(r"[^a-z0-9]+", _core.lower())
+                           if len(t) > 3})
+
+            _thits = [pid for pid, _lb in (roster or [])
+                      if _ttoks & _place_evidence(pid, _lb)]
+            if len(_thits) > 1:
+                # "in the village" with two known villages: ASK, never guess (founder)
+                return None, {"status": "ambiguous", "evidence": f"container {_tail!r} "
+                              f"matches {len(_thits)} known places"}
+            if len(_thits) == 1:
+                container, moves_to = _thits[0], _child
+            else:
+                _tkind = _tail.lower().split()[-1]
+                _mint_container = (_tail, _tkind if _tkind in _PLACE_LIKE_KINDS
+                                   else "place")
+                moves_to = _child
     words = (moves_to or "").lower().split()
     while words and words[0].strip(".,;:!?'\"") in _MOVE_LEAD_STOP:
         words.pop(0)
@@ -1156,12 +1264,29 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
         if seg and seg.get("status") == "blocked":
             logger.info("move grant to %r blocked en route to %s", moves_to, _gate_target)
             return None, seg
+    if hold_check is not None and hold_check():
+        # #102 (Cx 465 #2): the route would commit — NOW the mind may weigh it,
+        # before anything mints.
+        return None, {"status": "deliberating"}
     # REUSE an existing `place:<slug>` regardless of its `kind` string (Cx 325): a `place:`-prefixed
     # id is already place-typed for movement, but authored places carry DESCRIPTIVE kinds ("yard",
     # "murder scene in a narrow rain-wet yard…"), so the old kind∈{place,room,site} check spuriously
     # bumped `place:bluegate_yard` → `place:bluegate_yard_1` (a duplicate of the authored yard). The
     # id namespace IS the type; reuse it. (Coreference-reuse is the right default — Cx agrees.)
     rows: list[dict] = []
+    if _mint_container is not None and container is None:
+        # #101: the novel container mints as a THIN SHELL (Cx 445: place/kind/name only)
+        # so the child nests honestly — place:consulting_room IN place:village, never
+        # place:consulting_room_in_the_village.
+        _tail_phrase, _tail_kind = _mint_container
+        _tslug = re.sub(r"[^a-z0-9]+", "_", _tail_phrase.lower()).strip("_")
+        if _tslug and _tslug not in _DEICTIC_DEST:
+            container = f"place:{_tslug}"
+            if not reads.has_entity(container):
+                rows += [{"entity": container, "attribute": "kind",
+                          "value": _tail_kind, "timeless": True},
+                         {"entity": container, "attribute": "name",
+                          "value": _tail_phrase[:60]}]
     if not reads.has_entity(place_id):
         rows += [{"entity": place_id, "attribute": "kind", "value": "place", "timeless": True},
                  {"entity": place_id, "attribute": "name", "value": " ".join(words)[:60].strip()}]
@@ -1417,7 +1542,11 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
     than denied (IMPROV-AND-AUTHORITY); load-bearing/specific objects still
     deny. Deterministic after refer() (+ one cheap grant check on a miss)."""
     for description in requires:
-        res = world.refer(description, frame="canon", as_of=as_of)  # at-hand only at the horizon (Cx 257)
+        # SCOPED (founder synonym mandate / Cx 445 note): scope unlocks refer's
+        # tier-2 zero-candidate escalation + alias accrual — "the blade" finds the
+        # established knife you hold, one cheap call once, deterministic thereafter.
+        res = world.refer(description, scope=[e for e in (protagonist, scene) if e],
+                          frame="canon", as_of=as_of)  # at-hand only at the horizon (Cx 257)
         if getattr(res, "status", None) != "resolved" or not getattr(res, "entity_id", None):
             if _grant_equipment(world, p, protagonist, description, scene, provider):
                 continue  # ordinary role equipment — granted, action stands
@@ -1620,20 +1749,34 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                            provider: Provider, *, narration: str) -> None:
     """Estimate how much in-world time this turn consumed and APPEND it to the accrue counter
     (DIEGETIC-TIME.md). Deterministic for ordinary turns (skips the model call); the model
-    `estimate_elapsed` only for explicit temporal language (a wait/jump/rest/montage). Best-effort:
-    time never sinks a turn. Called EARLY for time-deadline arcs (narration unavailable → "") so the
-    deadline crosses same-turn; otherwise POST-RENDER with the narration for a richer estimate."""
+    `estimate_elapsed` only for explicit temporal language (a wait/jump/rest/montage) or a
+    cross-site JOURNEY (#101, Cx 445: the six-minute village trip — the local-move bucket
+    must never price real travel). Best-effort: time never sinks a turn. Called EARLY for
+    time-deadline arcs (narration unavailable → "") so the deadline crosses same-turn;
+    otherwise POST-RENDER with the narration for a richer estimate."""
     try:
         from construct.clock import commit_elapsed, delta_from_estimate, deterministic_elapsed
         with _phase(trace, "time_estimate"):
+            # an already-here no-op (a synonym for the current room, Cx 445 wrinkle) is
+            # NOT a move for time purposes — and the input's own move VERBS would still
+            # hit the 6-minute bucket, so the no-op bucket is FORCED, not inferred.
             _moved = trace.movement_status in ("clear", "obscured")
-            est = deterministic_elapsed(player_input, moved=_moved)
+            if trace.same_place:
+                est = {"advance_minutes": 1}
+            elif trace.distance_unknown:
+                # a pre-commit estimate (deliberation gate, #102) is REUSED — the same
+                # movement is never priced twice in one story beat.
+                est = ({"advance_minutes": trace.journey_est}
+                       if trace.journey_est >= 0 else None)
+            else:
+                est = deterministic_elapsed(player_input, moved=_moved)
             if est is None:
                 est = cohorts.estimate_elapsed(
                     provider, now=clock.render(),
                     hours_per_day=clock.calendar.hours_per_day,
                     phases=clock.calendar.phase_names,
-                    action=player_input, narration=narration)
+                    action=player_input, narration=narration,
+                    distance_unknown=trace.distance_unknown)
                 trace.cohort_calls.append("estimate_elapsed")
             else:
                 trace.cohort_calls.append("time_estimate:deterministic")
@@ -2016,6 +2159,66 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     item, and single-parent semantics supersede the old location.
     #     Unresolved destinations fall back to whatever extraction did,
     #     loudly logged.
+    _move_clarify = ""  # ambiguous destination → the world ASKS (founder: never hallucinate)
+    # ---- #102 JOURNEY DELIBERATION (Cx 457; founder-shaped 2026-07-04) -----------------
+    # When a live deadline stands and a move the map can't prove local would eat the
+    # remaining budget, the character's OWN MIND weighs it before a single step is
+    # taken — "you consider X, but realize you may (consequence); X or Y?" — one
+    # warning, once; re-stating the move proceeds on the CACHED estimate. Deterministic
+    # over established facts (Cx: no sheet call needed); the same cheap estimator is
+    # the crossing authority, never a fixed floor.
+    _delib_deadline = _deadline_remaining(arc, world) if kind == "action" else None
+
+    def _hold_for_deliberation(dest_id: str | None, label: str) -> bool:
+        """True = HOLD the move (deliberation briefed). Also caches the pre-commit
+        estimate on the trace for the accept/under-budget cases so the turn's time
+        advance never re-prices the same movement."""
+        if _delib_deadline is None:
+            return False
+        _dest_key = dest_id or re.sub(r"[^a-z0-9]+", "_", str(label).lower()).strip("_")
+        if dest_id:
+            if dest_id == pre_scene:
+                return False
+            _dchain = [dest_id] + (p.locate(dest_id, as_of=_h) or [])
+            if ((len(pre_chain) > 1 and len(_dchain) > 1 and pre_chain[1] == _dchain[1])
+                    or dest_id in pre_chain or (pre_scene and pre_scene in _dchain)
+                    or _route_connects(p, pre_scene, dest_id, as_of=_h)):
+                return False  # provably near — no deliberation on a step
+        _key = _journey_accept_key(pre_scene, _dest_key, _delib_deadline[1])
+        try:  # accepted before (origin+dest+hazard+coordinate, Cx 457)? proceed, reuse est
+            for _r in world.buffer.visible(entity="session:journey_accept",
+                                           attribute=_key, frame=SESSION):
+                trace.journey_est = int(json.loads(str(_r.value)).get("est", -1))
+                return False
+        except Exception:  # noqa: BLE001
+            pass
+        try:  # the SAME cheap estimator, pre-commit — the crossing authority
+            from construct.clock import read_clock as _rc
+            _clk = _rc(world)
+            _est = cohorts.estimate_elapsed(
+                provider, now=_clk.render(),
+                hours_per_day=_clk.calendar.hours_per_day,
+                phases=_clk.calendar.phase_names,
+                action=player_input, narration="",
+                distance_unknown=f"{pre_scene}->{_dest_key}")
+            _est_min = max(0, int(_est.get("advance_minutes") or 0))
+            trace.cohort_calls.append("estimate_elapsed:precommit")
+        except Exception:  # noqa: BLE001 — estimation failure never blocks movement
+            return False
+        if _est_min < _delib_deadline[0]:
+            trace.journey_est = _est_min  # fits the budget — commit, reuse the price
+            return False
+        p.ingest_structured([{  # the one-warning marker carries the cached estimate
+            "entity": "session:journey_accept", "attribute": _key,
+            "value": json.dumps({"est": _est_min, "turn": turn}),
+            "value_type": "literal", "valid_from": turn_time(turn),
+        }], frame=SESSION, classify="batch")
+        trace.movement_status = "deliberating"
+        trace.deliberating = (f"{label} — roughly {_est_min} minutes of travel against "
+                              f"about {int(_delib_deadline[0])} minutes left")
+        logger.info("journey held for deliberation: %s", trace.deliberating)
+        return True
+
     if moves_to:
         # SEEK-A-PERSON unwrap (founder live 2026-07-01, "I go back to where Reed is"): the
         # "where X is" wrapper defeats refer's token match, so the move resolved NOTHING and the
@@ -2112,6 +2315,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             else:
                 logger.info("resolved non-place target %r is not a location; narration handles", target)
             target = None  # never relocate into a non-place
+        if status == "resolved" and target and target == pre_scene:
+            # EXACT current-room naming (Cx 447 blocker): "I go to the study" while
+            # standing in the study is a no-op — no relocation row, no route check,
+            # and NO move-bucket time charge (the 445 wrinkle, now on ALL paths).
+            trace.movement_status = "clear"
+            trace.same_place = True
+            target = None
+            logger.info("move %r resolved to the CURRENT scene — already here", moves_to)
         if status == "resolved" and target:
             # Passability (PB route(), RFC-003): a `blocked` way (a portal with a
             # blocking state/relation under the declared traversal policy) is not
@@ -2125,6 +2336,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 trace.movement_obstruction = seg
                 logger.info("movement blocked: %s -> %s (%s)", arc.protagonist,
                             target, seg.get("evidence"))
+            elif _hold_for_deliberation(target, moves_to):
+                pass  # #102 (Cx 465 #2): only a move that WOULD commit deliberates
             else:
                 p.ingest_structured([{
                     "entity": arc.protagonist, "attribute": "in", "value": target,
@@ -2202,7 +2415,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                             pass  # enumeration is best-effort; scope∪chain still serve
                         _cand_places -= _excl | {""}
                         for _pid in sorted(_cand_places):
-                            if not str(_pid).startswith("place:") or _pid == pre_scene:
+                            if not str(_pid).startswith("place:"):
                                 continue
                             _bits = []
                             for _a in ("name", "kind"):
@@ -2213,20 +2426,39 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                     _bits.append(str(_v))
                             if not _bits and _pid not in set(scope or []):
                                 continue  # not horizon-present/readable — not a bind target
-                            _roster.append((_pid, " — ".join(_bits) or _pid.split(":", 1)[-1]
-                                            .replace("_", " ")))
+                            _label = " — ".join(_bits) or _pid.split(":", 1)[-1] \
+                                .replace("_", " ")
+                            # THE CURRENT SCENE IS A BIND TARGET (founder live, the
+                            # drawing-room twin): a synonym for the room the player is
+                            # STANDING IN ("the drawing room" in an established parlor)
+                            # must bind to it, not mint a twin — its exclusion here was
+                            # the hole. Marked so the judge knows it's where they are.
+                            if _pid == pre_scene:
+                                _label += " (the room the player is in RIGHT NOW)"
+                            _roster.append((_pid, _label))
                     except Exception:  # roster is best-effort; reuse/bind/mint degrade
                         logger.warning("place roster build failed", exc_info=True)
                         _roster = []
 
                 def _do_grant() -> None:
                     """The improv mint (shared by the compound-container path and the
-                    zero-candidate fallback) — route/passability gated inside."""
+                    zero-candidate fallback) — route/passability gated inside; the
+                    deliberation hold runs AFTER the grant's own passability gate
+                    (Cx 465 #2), via the callable it invokes just before minting."""
+                    nonlocal _move_clarify
                     granted, _gseg = _grant_moved_place(
                         world, arc.protagonist, moves_to, at=turn_time(turn),
                         p=p, origin=pre_chain[0] if pre_chain else None,
-                        as_of=_h, roster=_roster)
-                    if _gseg and _gseg.get("status") == "blocked":
+                        as_of=_h, roster=_roster,
+                        hold_check=lambda: _hold_for_deliberation(None, moves_to))
+                    if _gseg and _gseg.get("status") == "ambiguous":
+                        # #101 (Cx 445): an ambiguous locative tail ("in the village",
+                        # two known villages) → the ask path, never a guessed mint.
+                        trace.movement_status = "ambiguous"
+                        _move_clarify = str(moves_to)
+                        logger.info("move %r container ambiguous — clarify beat (%s)",
+                                    moves_to, _gseg.get("evidence"))
+                    elif _gseg and _gseg.get("status") == "blocked":
                         trace.movement_status = "blocked"
                         trace.movement_obstruction = _gseg
                     elif granted:
@@ -2249,7 +2481,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         moves_to,
                         set(scope or []) | ({pre_scene} if pre_scene else set())
                         | set(pre_chain or []),
-                        live_reads, _name_of)) and _known != pre_scene:
+                        live_reads, _name_of)) and _known != pre_scene \
+                        and not _hold_for_deliberation(_known, moves_to):
                     # reuse an already-KNOWN place by token ("my own office" → the existing
                     # office) so a return home doesn't mint a duplicate (founder cohesion test).
                     p.ingest_structured([{
@@ -2260,6 +2493,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     logger.info("move resolved to KNOWN place %s (reused, not minted)", _known)
                 elif _known == pre_scene:
                     trace.movement_status = "clear"  # naming the current place → already here
+                    trace.same_place = True          # Cx 445: no time charge for a no-op
                 else:
                     # SEMANTIC BIND BEFORE MINT (Cx 354 A, founder phantom-scene incident): the
                     # destination may be a DEFINITE DESCRIPTION of an established place by ROLE
@@ -2287,35 +2521,103 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         (logger.info if _deictic else logger.warning)(
                             "destination bind skipped (%s)", exc)
                     if _bound:
-                        # SAME MOVEMENT GATES AS RESOLVED TRAVEL (Cx 358 blocker): a bound
-                        # destination must not teleport through a blocked route — run the
-                        # passability check exactly as the resolved branch does; blocked → no
-                        # commit + obstruction on the trace; obscured → commit but hedge.
-                        _seg = _route_obstruction(p, pre_chain[0] if pre_chain else None,
-                                                  _bound, as_of=_h)
-                        if _seg and _seg.get("status") == "blocked":
-                            trace.movement_status = "blocked"
-                            trace.movement_obstruction = _seg
-                            logger.info("bound move blocked: %s -> %s (%s)", arc.protagonist,
-                                        _bound, _seg.get("evidence"))
+                        # ALIAS ACCRUAL (founder: "the bar's basement" must find the tavern
+                        # cellar): a successful semantic bind teaches the world the player's
+                        # word — one cheap call per synonym ONCE, then refer() tier-1a binds
+                        # it deterministically forever (PB's by_alias index reads this row).
+                        try:
+                            _alias = re.sub(
+                                r"^\s*(?:the|a|an|my|your|his|her|its|their|our)\s+", "",
+                                str(moves_to).strip(), flags=re.IGNORECASE).strip()
+                            if _alias and _alias.lower() not in (
+                                    str(live_reads.state(_bound, "name") or "").lower(),):
+                                p.ingest_structured([{
+                                    "entity": _bound, "attribute": "alias", "value": _alias,
+                                    "valid_from": turn_time(turn),
+                                }], classify="batch")
+                                logger.info("alias learned: %s known_as %r", _bound, _alias)
+                        except Exception:  # noqa: BLE001 — alias learning is enrichment
+                            pass
+                        if _bound == pre_scene:
+                            # a synonym for the room they're STANDING IN — already here;
+                            # no relocation row, no twin (the drawing-room incident).
+                            trace.movement_status = "clear"
+                            trace.same_place = True  # Cx 445: no time charge for a no-op
+                            logger.info("move %r bound to the CURRENT scene %s — already here",
+                                        moves_to, _bound)
                         else:
-                            p.ingest_structured([{
-                                "entity": arc.protagonist, "attribute": "in", "value": _bound,
-                                "value_type": "entity", "valid_from": turn_time(turn),
-                            }], classify="batch")
-                            trace.movement_status = _seg.get("status") if _seg else "clear"
-                            if _seg:
+                            # SAME MOVEMENT GATES AS RESOLVED TRAVEL (Cx 358 blocker): a bound
+                            # destination must not teleport through a blocked route — run the
+                            # passability check exactly as the resolved branch does; blocked →
+                            # no commit + obstruction on the trace; obscured → commit but hedge.
+                            # Deliberation runs AFTER passability (Cx 465 #2): only a move
+                            # that WOULD commit may render as a deadline choice.
+                            _seg = _route_obstruction(p, pre_chain[0] if pre_chain else None,
+                                                      _bound, as_of=_h)
+                            if _seg and _seg.get("status") == "blocked":
+                                trace.movement_status = "blocked"
                                 trace.movement_obstruction = _seg
-                            logger.info("move %r semantically BOUND to %s (%s)", moves_to,
-                                        _bound, trace.movement_status)
+                                logger.info("bound move blocked: %s -> %s (%s)", arc.protagonist,
+                                            _bound, _seg.get("evidence"))
+                            elif _hold_for_deliberation(_bound, moves_to):
+                                pass  # #102: held for the player's own weighing
+                            else:
+                                p.ingest_structured([{
+                                    "entity": arc.protagonist, "attribute": "in", "value": _bound,
+                                    "value_type": "entity", "valid_from": turn_time(turn),
+                                }], classify="batch")
+                                trace.movement_status = _seg.get("status") if _seg else "clear"
+                                if _seg:
+                                    trace.movement_obstruction = _seg
+                                logger.info("move %r semantically BOUND to %s (%s)", moves_to,
+                                            _bound, trace.movement_status)
                     elif _amb:
-                        logger.info("move %r ambiguous against roster — no mint, no relocation",
-                                    moves_to)
+                        # ASK, NEVER HALLUCINATE (founder 2026-07-04): an ambiguous
+                        # destination gets a CLARIFY beat — the world asks which the player
+                        # means, in-fiction; no mint, no relocation, no invented arrival.
+                        trace.movement_status = "ambiguous"
+                        _move_clarify = str(moves_to)
+                        logger.info("move %r ambiguous against roster — clarify beat, "
+                                    "no mint, no relocation", moves_to)
                     else:
                         _do_grant()
-        elif trace.movement_status != "in_scene":  # an absorbed in-scene fixture is handled, not a miss
+        elif trace.movement_status != "in_scene" and not trace.same_place:
+            # an absorbed in-scene fixture / already-here no-op is handled, not a miss
             logger.warning("movement destination %r did not resolve (%s); "
                            "relying on extraction", moves_to, status)
+
+    # ---- #101 DISTANCE: THE NEARNESS INVERSION (Cx 454; founder's shape challenge) -----
+    # The map is authoritative about NEARNESS, never farness. A committed move is
+    # provably near when: destination shares the origin's immediate parent (siblings in
+    # one site); either terminus sits on the other's containment chain (stepping in/out);
+    # or a route segment directly connects them. Everything else is DISTANCE UNKNOWN —
+    # not "long", not "a journey", just unpriceable by the map — and the time estimator
+    # (which already knows what a city or a kingdom is) prices it from the fiction.
+    # The old disjoint-chain farness proxy, the settlement vocabulary, and the durable
+    # journey event all retire: derived farness is never stored (Cx 454 hard rule).
+    if (trace.movement_status in ("clear", "obscured") and not trace.same_place
+            and pre_chain):
+        try:
+            _post_chain = p.locate(arc.protagonist, as_of=_h) or []
+            if _post_chain and _post_chain[0] != pre_chain[0]:
+                _near = (
+                    (len(pre_chain) > 1 and len(_post_chain) > 1
+                     and pre_chain[1] == _post_chain[1])       # siblings in one site
+                    or _post_chain[0] in pre_chain             # stepped INTO containment
+                    or pre_chain[0] in _post_chain             # stepped OUT of it
+                )
+                if not _near:
+                    # route evidence (Cx 458): a known DIRECT passable way connecting
+                    # the termini — read via the dedicated existence check, because
+                    # _route_obstruction() returns None for exactly the clear routes
+                    # that prove nearness.
+                    _near = _route_connects(p, pre_chain[0], _post_chain[0], as_of=_h)
+                if not _near:
+                    trace.distance_unknown = f"{pre_chain[0]}->{_post_chain[0]}"
+                    logger.info("move distance UNKNOWN (map can't prove local): %s",
+                                trace.distance_unknown)
+        except Exception as exc:  # noqa: BLE001 — detection is enrichment, never a gate
+            trace.dropped_cohorts.append(f"nearness_check ({exc})")
 
     # 2b-ii. COMPANION MOVEMENT (Cx 363/365: "Sir? Shall we…"): commit `in` rows for the
     # companions the player's move PLAINLY included — ONCE, after the movement chain, keyed on
@@ -2376,7 +2678,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     it back" was wrongly denied. Host-side + coreference-proof: "I take X" → X is
     #     with you, never the pronoun-phantom the extraction sometimes invents.)
     if takes:
-        ores = world.refer(takes, frame="canon", as_of=_h)  # take only a horizon-present object (Cx 257)
+        # SCOPED (founder synonym mandate): scene + held — "the blade" binds the
+        # scene's knife at tier 2 instead of minting a sibling obj:blade.
+        ores = world.refer(takes, scope=[e for e in (pre_scene, arc.protagonist) if e],
+                           frame="canon", as_of=_h)  # take only a horizon-present object (Cx 257)
         otarget = getattr(ores, "entity_id", None)
         # Horizon-presence guard (Cx 257): don't grant possession of a future-only object that
         # `refer` matched purely by its registered name; it doesn't exist yet at the opening.
@@ -2438,7 +2743,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     canon kept it held). Only a thing currently in the protagonist's possession can be set
     #     down here; otherwise the narrator handles it. Deterministic, parallel to the take commit.
     if drops and pre_scene:
-        dres = world.refer(drops, frame="canon", as_of=_h)
+        dres = world.refer(drops, scope=[e for e in (arc.protagonist, pre_scene) if e],
+                           frame="canon", as_of=_h)  # held first: you drop what you hold
         # Resolve to an object the player ACTUALLY HOLDS first (you can only set down what you hold);
         # fall back to global refer. This sidesteps a FRAGMENTED same-named twin where refer picks the
         # un-held `obj:pencil` while the held one is the take-mint's `obj:pencil_1` (Cx 297 follow-on,
@@ -3841,6 +4147,43 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "\nTHE MEMORY SITS ODDLY (render as felt tension, one beat, never a "
             "lecture; what is already established REMAINS the truth): "
             + "; ".join(_memory_tensions))
+    if trace.distance_unknown:
+        # #101 inversion (Cx 454): the map couldn't prove this was a local step — the
+        # render is SCALE-NEUTRAL: true scale when the fiction establishes it, modest
+        # when it doesn't; a flat map must never overdramatize "across the yard".
+        briefing_parts.append(
+            "\nMOVEMENT AT ITS TRUE SCALE (render the travel honestly): the player "
+            "moved between places whose distance the map does not establish. Render "
+            "the movement at the scale the FICTION has established — a walk down a "
+            "lane is a beat; a ride to another town is departing, the way, and "
+            "arriving, with weather and effort as the scene holds them. Where the "
+            "distance is NOT established, keep the transit brief and modest — never "
+            "invent roads, distances, or landmarks the world hasn't given you.")
+    if trace.deliberating:
+        # #102 (founder-shaped): the weighing is the character's OWN MIND — second-person
+        # deliberation ending on the open question; never a menu, never decided for them.
+        briefing_parts.append(
+            f"\nYOUR OWN MIND WEIGHS IT (render as ONE beat of second-person "
+            f"deliberation, then stop — the player has NOT moved): they mean to set "
+            f"out for {trace.deliberating.split(' — ')[0]}, but the story's deadline "
+            f"stands against the time the way would take "
+            f"({trace.deliberating.split(' — ', 1)[-1]} — translate to FELT time, "
+            f"never numbers). Voice it as their own thought — 'you consider it; but "
+            f"if you go now, you may…' — and end on the open question: press on, or "
+            f"see to what the deadline demands first? Their next word decides; if "
+            f"they choose the road, it will not be questioned again.")
+    if _move_clarify:
+        # ASK, NEVER HALLUCINATE (founder 2026-07-04): the destination was ambiguous —
+        # render ONE in-world clarify beat (a companion asking "which do you mean?",
+        # the narrator putting the fork plainly); the player has NOT moved; do not
+        # invent an arrival or pick for them.
+        briefing_parts.append(
+            f"\nTHE DESTINATION IS UNCLEAR (render as ONE brief in-world beat, then "
+            f"stop — the player has NOT moved): they said they were going to "
+            f"\"{_move_clarify}\", and more than one known place could be meant. Have "
+            f"the world ask which they mean — a present character's natural question, "
+            f"or the narrator laying out the fork plainly. Never guess, never invent "
+            f"an arrival.")
     if _voc_holder:
         # #93 (Cx 404 C): the player addressed a unique canon title-holder who IS here —
         # the address binds to them, outranking the last-speaker convention.

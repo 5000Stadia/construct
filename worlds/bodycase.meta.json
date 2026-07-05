@@ -1,401 +1,511 @@
 {
-  "title": "The Rain in Bluegate Yard",
-  "protagonist": "person:clara_vale",
-  "theme": "Patient truth matters more than a clean-looking case when the poor are easiest to hang.",
-  "stance": "fiction",
-  "mode": "pure",
-  "style": "Write as a soot-dark Victorian London procedural: gaslit 1888 docklands, river fog, wet cobbles, public-house murmurs, and plain-clothes inquiry work, in crisp, observant, morally alert prose with period diction and a grim but fair-minded detective register.",
-  "scenario_mode": "win_loss",
-  "arc_scope": [
-    "person:arthur_liddell",
-    "person:clara_vale",
-    "person:edmund_reed",
-    "person:jonas_bell",
-    "person:maud_greaves",
-    "person:nell_carter",
-    "place:liddell_warehouse"
+ "title": "The Rain in Bluegate Yard",
+ "protagonist": "person:clara_vale",
+ "theme": "Patient truth matters more than a clean-looking case when the poor are easiest to hang.",
+ "stance": "fiction",
+ "mode": "pure",
+ "style": "Write as a soot-dark Victorian London procedural: gaslit 1888 docklands, river fog, wet cobbles, public-house murmurs, and plain-clothes inquiry work, in crisp, observant, morally alert prose with period diction and a grim but fair-minded detective register.",
+ "scenario_mode": "win_loss",
+ "arc_scope": [
+  "person:arthur_liddell",
+  "person:clara_vale",
+  "person:edmund_reed",
+  "person:jonas_bell",
+  "person:maud_greaves",
+  "person:nell_carter",
+  "place:liddell_warehouse",
+  "person:silas_crane",
+  "person:tobias_flint"
+ ],
+ "main_arc": "arc:main",
+ "arc_ids": [
+  "arc:main"
+ ],
+ "entry_epoch": 1000.0,
+ "seeded_frames": [
+  "person:clara_vale",
+  "person:arthur_liddell",
+  "person:edmund_reed",
+  "person:jonas_bell",
+  "person:maud_greaves"
+ ],
+ "endless": false,
+ "cast": {
+  "pillars": [
+   {
+    "id": "pillar:motive_sample_token",
+    "label": "Motive: the dead messenger carried a stolen sample token that could expose a warehouse theft ring",
+    "required": true
+   },
+   {
+    "id": "pillar:opportunity_warehouse_route",
+    "label": "Opportunity: the killer could move between Bluegate Yard, the river stair, and Liddell's warehouse under cover of rain",
+    "required": true
+   },
+   {
+    "id": "pillar:victim_last_errand",
+    "label": "Connection: the victim's last errand tied him to the warehouse scales, not to a street quarrel",
+    "required": true
+   },
+   {
+    "id": "pillar:alibis_contradictions",
+    "label": "Alibis and contradictions: the poor visible suspect looks guilty, but the timings and corroboration clear him",
+    "required": true
+   }
   ],
-  "main_arc": "arc:main",
-  "arc_ids": [
-    "arc:main"
-  ],
-  "entry_epoch": 1000.0,
-  "seeded_frames": [
-    "person:clara_vale",
-    "person:arthur_liddell",
-    "person:edmund_reed",
-    "person:jonas_bell",
-    "person:maud_greaves"
-  ],
-  "endless": false,
-  "cast": {
-    "pillars": [
-      {
-        "id": "pillar:motive_sample_token",
-        "label": "Motive: the dead messenger carried a stolen sample token that could expose a warehouse theft ring",
-        "required": true
+  "cast": [
+   {
+    "id": "person:maud_greaves",
+    "shape_role": "witness",
+    "surface_role": "costermonger who found the body and fears the police will blame the nearest poor man",
+    "presence": "at_scene",
+    "first_witness": true,
+    "is_culprit": false,
+    "clues": [
+     {
+      "clue_id": "clue:maud_names_jonas_visible_suspect",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:jonas_bell",
+       "attribute": "role",
+       "value": "knife-grinder and lodging-house tenant; visible suspect who drank with the victim"
       },
-      {
-        "id": "pillar:opportunity_warehouse_route",
-        "label": "Opportunity: the killer could move between Bluegate Yard, the river stair, and Liddell's warehouse under cover of rain",
-        "required": true
+      "hook_text": "Maud's shawl is still wet from kneeling by the corpse; she keeps glancing toward the lodging-house steps, angry that the constable's first question was whether the drunk knife-grinder had done it.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none"
+     },
+     {
+      "clue_id": "clue:maud_heard_dead_man_say_scales",
+      "pillar_id": "pillar:victim_last_errand",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "was_named_at_scene",
+       "value": "person:arthur_liddell"
       },
-      {
-        "id": "pillar:victim_last_errand",
-        "label": "Connection: the victim's last errand tied him to the warehouse scales, not to a street quarrel",
-        "required": true
+      "hook_text": "Maud heard the dying man mutter one clipped warehouse name before the rain swallowed it; she is frightened of repeating it because foremen can ruin a street trader with one complaint.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:maud_false_jonas_bloody_knife",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:jonas_bell",
+       "attribute": "appeared_to_carry_murder_knife",
+       "value": "Maud saw Jonas Bell stagger from the public-house yard with a dark-stained knife in his hand after drinking with the victim"
       },
-      {
-        "id": "pillar:alibis_contradictions",
-        "label": "Alibis and contradictions: the poor visible suspect looks guilty, but the timings and corroboration clear him",
-        "required": true
-      }
-    ],
-    "cast": [
-      {
-        "id": "person:maud_greaves",
-        "shape_role": "witness",
-        "surface_role": "costermonger who found the body and fears the police will blame the nearest poor man",
-        "presence": "at_scene",
-        "first_witness": true,
-        "is_culprit": false,
-        "clues": [
-          {
-            "clue_id": "clue:maud_names_jonas_visible_suspect",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:jonas_bell",
-              "attribute": "role",
-              "value": "knife-grinder and lodging-house tenant; visible suspect who drank with the victim"
-            },
-            "hook_text": "Maud's shawl is still wet from kneeling by the corpse; she keeps glancing toward the lodging-house steps, angry that the constable's first question was whether the drunk knife-grinder had done it.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "volunteered",
-            "reveal_condition": "none"
-          },
-          {
-            "clue_id": "clue:maud_heard_dead_man_say_scales",
-            "pillar_id": "pillar:victim_last_errand",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "was_named_at_scene",
-              "value": "person:arthur_liddell"
-            },
-            "hook_text": "Maud heard the dying man mutter one clipped warehouse name before the rain swallowed it; she is frightened of repeating it because foremen can ruin a street trader with one complaint.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:maud_false_jonas_bloody_knife",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:jonas_bell",
-              "attribute": "appeared_to_carry_murder_knife",
-              "value": "Maud saw Jonas Bell stagger from the public-house yard with a dark-stained knife in his hand after drinking with the victim"
-            },
-            "hook_text": "Maud saw a blade in the gaslight and has been clinging to that simple answer, though her voice hardens whenever anyone says hanging a poor drunk is tidy work.",
-            "coverage_effect": "false",
-            "is_red_herring": true,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure",
-            "debunked_by": "clue:jonas_lodging_chain_alibi"
-          },
-          {
-            "clue_id": "clue:maud_nell_steady_at_body",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:nell_carter",
-              "attribute": "innocence_thread",
-              "value": "Nell Carter was beside Maud at the barrow when the cry over the body went up, shaking so hard she spilled her match tray"
-            },
-            "hook_text": "Maud snaps at anyone who bullies Nell; the girl may have seen something, but Maud insists she was not alone long enough to kill a dock messenger.",
-            "coverage_effect": "context",
-            "is_red_herring": false,
-            "reveal_mode": "volunteered",
-            "reveal_condition": "none"
-          }
-        ]
+      "hook_text": "Maud saw a blade in the gaslight and has been clinging to that simple answer, though her voice hardens whenever anyone says hanging a poor drunk is tidy work.",
+      "coverage_effect": "false",
+      "is_red_herring": true,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure",
+      "debunked_by": "clue:jonas_lodging_chain_alibi"
+     },
+     {
+      "clue_id": "clue:maud_nell_steady_at_body",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:nell_carter",
+       "attribute": "innocence_thread",
+       "value": "Nell Carter was beside Maud at the barrow when the cry over the body went up, shaking so hard she spilled her match tray"
       },
-      {
-        "id": "person:nell_carter",
-        "shape_role": "witness",
-        "surface_role": "match-seller who sleeps near the yard and notices movements respectable men ignore",
-        "presence": "at_scene",
-        "first_witness": false,
-        "is_culprit": false,
-        "clues": [
-          {
-            "clue_id": "clue:nell_overheard_liddell_fear_scales",
-            "pillar_id": "pillar:victim_last_errand",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "fear",
-              "value": "the dead man's last errand will lead investigators from the yard to the warehouse scales"
-            },
-            "hook_text": "Nell keeps rubbing blue chalk-dust from under her thumbnail; she heard a gentleman's threat by the warehouse wall but fears a magistrate will believe his collar before her hunger.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:nell_saw_liddell_river_gate",
-            "pillar_id": "pillar:opportunity_warehouse_route",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "route",
-              "value": "used the side river gate from place:liddell_warehouse toward place:bluegate_yard shortly before the body was found"
-            },
-            "hook_text": "Nell can tell carts by sound; when pressed past her terror, she describes one quiet tread that should not have been in the yard after the warehouse bell.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:nell_names_liddell_warehouse",
-            "pillar_id": "pillar:opportunity_warehouse_route",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "in",
-              "value": "place:liddell_warehouse"
-            },
-            "hook_text": "Nell points not toward the gin-shop but toward the warehouse lamps, where one upper window kept burning after all honest loading had ceased.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "volunteered",
-            "reveal_condition": "none"
-          },
-          {
-            "clue_id": "clue:nell_maud_never_left_barrow",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:maud_greaves",
-              "attribute": "innocence_thread",
-              "value": "Maud Greaves stayed at her barrow arguing with a constable until the alarm, with three customers sheltering under her awning"
-            },
-            "hook_text": "Nell resents Maud's fussing but defends her fiercely; the old costermonger was too loud and too public to slip away into murder.",
-            "coverage_effect": "context",
-            "is_red_herring": false,
-            "reveal_mode": "volunteered",
-            "reveal_condition": "none"
-          }
-        ]
-      },
-      {
-        "id": "person:edmund_reed",
-        "shape_role": "mentor_investigator",
-        "surface_role": "senior St. Bride Inquiry Bureau partner, impatient for proof but not for a convenient hanging",
-        "presence": "at_scene",
-        "first_witness": false,
-        "is_culprit": false,
-        "clues": [
-          {
-            "clue_id": "clue:reed_marks_body_not_street_brawl",
-            "pillar_id": "pillar:victim_last_errand",
-            "fact": {
-              "entity": "victim:dock_messenger",
-              "attribute": "death_context",
-              "value": "the killing was done after a deliberate meeting about warehouse business, not during a drunken street fight"
-            },
-            "hook_text": "Reed crouches in the rain until his knees crack, tracing where the dead man's boots skidded; he distrusts the neat constable's story because the body lies too carefully for a tavern quarrel.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:reed_orients_scales_errand",
-            "pillar_id": "pillar:victim_last_errand",
-            "fact": {
-              "entity": "place:liddell_warehouse",
-              "attribute": "has_relevant_scales",
-              "value": "the warehouse scales record sample-token weights and would show whether a messenger's token was false"
-            },
-            "hook_text": "Reed keeps tapping his notebook beside the word 'scales,' a professional habit from older dock cases where brass tokens mattered more than blood on cobbles.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "volunteered",
-            "reveal_condition": "none"
-          },
-          {
-            "clue_id": "clue:reed_arrived_after_call",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:edmund_reed",
-              "attribute": "innocence_thread",
-              "value": "Edmund Reed reached Bluegate Yard only after the runner summoned St. Bride from the briefing room"
-            },
-            "hook_text": "Reed's coat is dry under the cape where the killer's would be soaked through; he is old enough to be offended by being counted out, but precise enough to log his own arrival.",
-            "coverage_effect": "context",
-            "is_red_herring": false,
-            "reveal_mode": "volunteered",
-            "reveal_condition": "none"
-          },
-          {
-            "clue_id": "clue:reed_concludes_liddell_culprit",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "role",
-              "value": "dock warehouse foreman and true culprit behind the murder"
-            },
-            "hook_text": "When the token, the gate, and Bell's broken alibi are laid in order, Reed stops trying to protect the Bureau's pride and says the ugly conclusion aloud.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "contradicted",
-            "reveal_condition": "pressure"
-          }
-        ]
-      },
-      {
-        "id": "person:jonas_bell",
-        "shape_role": "suspect",
-        "surface_role": "drunken knife-grinder and lodging-house tenant, frightened because the case fits him too easily",
-        "presence": "nearby",
-        "location": "place:bell_lodgings",
-        "first_witness": false,
-        "is_culprit": false,
-        "clues": [
-          {
-            "clue_id": "clue:jonas_token_threat",
-            "pillar_id": "pillar:motive_sample_token",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "drive",
-              "value": "recover an incriminating stolen sample token before it exposes his profitable theft ring"
-            },
-            "hook_text": "Jonas reeks of gin and shame, but his terror sharpens when Clara mentions a brass token the dead man flashed in the public house and would not let Jonas touch.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:jonas_lodging_chain_alibi",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:jonas_bell",
-              "attribute": "innocence_thread",
-              "value": "Jonas Bell was locked inside the lodging-house entry by the landlord's chain before the fatal window, with his sister pounding on the door for him to answer"
-            },
-            "hook_text": "Jonas keeps swearing he cannot remember the walk home, then grows furious at the one humiliating detail that could save him: he was too drunk and too locked-in to reach the yard.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:jonas_names_dead_mans_errand",
-            "pillar_id": "pillar:victim_last_errand",
-            "fact": {
-              "entity": "victim:dock_messenger",
-              "attribute": "last_errand",
-              "value": "intended to take a brass sample token to the warehouse scales before meeting anyone at Bluegate Yard"
-            },
-            "hook_text": "Under bluster, Jonas remembers the victim sobering suddenly over a scrap of paper, as if a poor messenger had found a way to frighten a rich man's warehouse.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:jonas_false_nell_picked_pocket",
-            "pillar_id": "pillar:motive_sample_token",
-            "fact": {
-              "entity": "person:nell_carter",
-              "attribute": "appeared_to_steal_token",
-              "value": "Jonas thought Nell Carter brushed the victim's coat for coin and may have taken the brass token"
-            },
-            "hook_text": "Jonas points at Nell too quickly, not with cruelty but panic; he saw small fingers near the victim's pocket and wants any story that is not the noose around his own neck.",
-            "coverage_effect": "false",
-            "is_red_herring": true,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure",
-            "debunked_by": "clue:nell_overheard_liddell_fear_scales"
-          }
-        ]
-      },
-      {
-        "id": "person:arthur_liddell",
-        "shape_role": "suspect",
-        "surface_role": "dock warehouse foreman with polished cuffs, wet boots, and too much interest in the dead man's pockets",
-        "presence": "nearby",
-        "location": "place:liddell_warehouse",
-        "first_witness": false,
-        "is_culprit": true,
-        "clues": [
-          {
-            "clue_id": "clue:liddell_master_key_route",
-            "pillar_id": "pillar:opportunity_warehouse_route",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "means_of_access",
-              "value": "kept the master key to the side river gate connecting place:liddell_warehouse with the passage toward place:bluegate_yard"
-            },
-            "hook_text": "Liddell offers his keys one by one like a man performing honesty, but his thumb never leaves the smallest iron key on the ring.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:liddell_false_orderly_ledger_alibi",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "claimed_alibi",
-              "value": "Arthur Liddell claims he was alone at the warehouse ledger desk during the murder window, balancing the scales accounts"
-            },
-            "hook_text": "His ledger is beautifully ruled, every figure clean as church silver; the neatness itself feels like a freshly scrubbed doorstep after blood.",
-            "coverage_effect": "false",
-            "is_red_herring": true,
-            "reveal_mode": "pressed",
-            "reveal_condition": "pressure",
-            "debunked_by": "clue:nell_saw_liddell_river_gate"
-          },
-          {
-            "clue_id": "clue:liddell_token_denial_cracks",
-            "pillar_id": "pillar:motive_sample_token",
-            "fact": {
-              "entity": "person:arthur_liddell",
-              "attribute": "knowledge_of_token",
-              "value": "recognized the missing sample token before Clara described it, then tried to pretend all such tokens were ordinary"
-            },
-            "hook_text": "The first time Clara says 'brass,' Liddell's hand goes to his waistcoat pocket; only afterward does he remember to smile.",
-            "coverage_effect": "genuine",
-            "is_red_herring": false,
-            "reveal_mode": "contradicted",
-            "reveal_condition": "pressure"
-          },
-          {
-            "clue_id": "clue:liddell_accuses_jonas",
-            "pillar_id": "pillar:alibis_contradictions",
-            "fact": {
-              "entity": "person:jonas_bell",
-              "attribute": "accused_by_liddell",
-              "value": "Arthur Liddell insists Jonas Bell's trade knife and drunken quarrel make him the only sensible suspect"
-            },
-            "hook_text": "Liddell speaks Jonas's name with practised contempt, as if poverty itself were a signed confession.",
-            "coverage_effect": "context",
-            "is_red_herring": true,
-            "reveal_mode": "volunteered",
-            "reveal_condition": "none",
-            "debunked_by": "clue:jonas_lodging_chain_alibi"
-          }
-        ]
-      }
+      "hook_text": "Maud snaps at anyone who bullies Nell; the girl may have seen something, but Maud insists she was not alone long enough to kill a dock messenger.",
+      "coverage_effect": "context",
+      "is_red_herring": false,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none"
+     }
     ]
-  },
-  "goal_statement": "Solve the murder of the dock messenger in Bluegate Yard and prove the killer before an innocent man is fitted for the noose.",
-  "intro": "London, 1888: in the docklands off Ratcliff Highway, Bluegate Yard lies under river fog, gaslight, and rain, and a dock messenger has been found dead on the wet cobbles. You are a newly trusted detective-operative of the small St. Bride Inquiry Bureau, called in plain clothes before the Metropolitan Police can make a tidy case of the nearest poor man with a bad night behind him. In these streets, public-house talk, cab-wheel marks, river mud, and the set of a wound may weigh more than a sworn accusation, because a clean-looking answer can still put an innocent neck in the rope.",
-  "genre": "Victorian detective mystery",
-  "premise": "In London in 1888, amid the soot, gaslight, river fog, and dock traffic off Ratcliff Highway, a murdered dock messenger is found in Bluegate Yard and the small plain-clothes St. Bride Inquiry Bureau is brought in before the Metropolitan Police can take over. As newly assigned detective-operative Clara Vale, you work the case through body marks, wet cobbles, public houses, river stairs, cabmen, costermongers, and suspect lodgings, in a system where hurried officials and frightened witnesses can turn a poor visible suspect into the easiest man to hang.",
-  "game_type": [
-    "detective_procedural",
-    "mystery_whodunnit"
+   },
+   {
+    "id": "person:nell_carter",
+    "shape_role": "witness",
+    "surface_role": "match-seller who sleeps near the yard and notices movements respectable men ignore",
+    "presence": "at_scene",
+    "first_witness": false,
+    "is_culprit": false,
+    "clues": [
+     {
+      "clue_id": "clue:nell_overheard_liddell_fear_scales",
+      "pillar_id": "pillar:victim_last_errand",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "fear",
+       "value": "the dead man's last errand will lead investigators from the yard to the warehouse scales"
+      },
+      "hook_text": "Nell keeps rubbing blue chalk-dust from under her thumbnail; she heard a gentleman's threat by the warehouse wall but fears a magistrate will believe his collar before her hunger.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:nell_saw_liddell_river_gate",
+      "pillar_id": "pillar:opportunity_warehouse_route",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "route",
+       "value": "used the side river gate from place:liddell_warehouse toward place:bluegate_yard shortly before the body was found"
+      },
+      "hook_text": "Nell can tell carts by sound; when pressed past her terror, she describes one quiet tread that should not have been in the yard after the warehouse bell.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:nell_names_liddell_warehouse",
+      "pillar_id": "pillar:opportunity_warehouse_route",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "in",
+       "value": "place:liddell_warehouse"
+      },
+      "hook_text": "Nell points not toward the gin-shop but toward the warehouse lamps, where one upper window kept burning after all honest loading had ceased.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none"
+     },
+     {
+      "clue_id": "clue:nell_maud_never_left_barrow",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:maud_greaves",
+       "attribute": "innocence_thread",
+       "value": "Maud Greaves stayed at her barrow arguing with a constable until the alarm, with three customers sheltering under her awning"
+      },
+      "hook_text": "Nell resents Maud's fussing but defends her fiercely; the old costermonger was too loud and too public to slip away into murder.",
+      "coverage_effect": "context",
+      "is_red_herring": false,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none"
+     }
+    ]
+   },
+   {
+    "id": "person:edmund_reed",
+    "shape_role": "mentor_investigator",
+    "surface_role": "senior St. Bride Inquiry Bureau partner, impatient for proof but not for a convenient hanging",
+    "presence": "at_scene",
+    "first_witness": false,
+    "is_culprit": false,
+    "clues": [
+     {
+      "clue_id": "clue:reed_marks_body_not_street_brawl",
+      "pillar_id": "pillar:victim_last_errand",
+      "fact": {
+       "entity": "victim:dock_messenger",
+       "attribute": "death_context",
+       "value": "the killing was done after a deliberate meeting about warehouse business, not during a drunken street fight"
+      },
+      "hook_text": "Reed crouches in the rain until his knees crack, tracing where the dead man's boots skidded; he distrusts the neat constable's story because the body lies too carefully for a tavern quarrel.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:reed_orients_scales_errand",
+      "pillar_id": "pillar:victim_last_errand",
+      "fact": {
+       "entity": "place:liddell_warehouse",
+       "attribute": "has_relevant_scales",
+       "value": "the warehouse scales record sample-token weights and would show whether a messenger's token was false"
+      },
+      "hook_text": "Reed keeps tapping his notebook beside the word 'scales,' a professional habit from older dock cases where brass tokens mattered more than blood on cobbles.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none"
+     },
+     {
+      "clue_id": "clue:reed_arrived_after_call",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:edmund_reed",
+       "attribute": "innocence_thread",
+       "value": "Edmund Reed reached Bluegate Yard only after the runner summoned St. Bride from the briefing room"
+      },
+      "hook_text": "Reed's coat is dry under the cape where the killer's would be soaked through; he is old enough to be offended by being counted out, but precise enough to log his own arrival.",
+      "coverage_effect": "context",
+      "is_red_herring": false,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none"
+     },
+     {
+      "clue_id": "clue:reed_concludes_liddell_culprit",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "role",
+       "value": "dock warehouse foreman and true culprit behind the murder"
+      },
+      "hook_text": "When the token, the gate, and Bell's broken alibi are laid in order, Reed stops trying to protect the Bureau's pride and says the ugly conclusion aloud.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "contradicted",
+      "reveal_condition": "pressure"
+     }
+    ]
+   },
+   {
+    "id": "person:jonas_bell",
+    "shape_role": "suspect",
+    "surface_role": "drunken knife-grinder and lodging-house tenant, frightened because the case fits him too easily",
+    "presence": "nearby",
+    "location": "place:bell_lodgings",
+    "first_witness": false,
+    "is_culprit": false,
+    "clues": [
+     {
+      "clue_id": "clue:jonas_token_threat",
+      "pillar_id": "pillar:motive_sample_token",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "drive",
+       "value": "recover an incriminating stolen sample token before it exposes his profitable theft ring"
+      },
+      "hook_text": "Jonas reeks of gin and shame, but his terror sharpens when Clara mentions a brass token the dead man flashed in the public house and would not let Jonas touch.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:jonas_lodging_chain_alibi",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:jonas_bell",
+       "attribute": "innocence_thread",
+       "value": "Jonas Bell was locked inside the lodging-house entry by the landlord's chain before the fatal window, with his sister pounding on the door for him to answer"
+      },
+      "hook_text": "Jonas keeps swearing he cannot remember the walk home, then grows furious at the one humiliating detail that could save him: he was too drunk and too locked-in to reach the yard.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:jonas_names_dead_mans_errand",
+      "pillar_id": "pillar:victim_last_errand",
+      "fact": {
+       "entity": "victim:dock_messenger",
+       "attribute": "last_errand",
+       "value": "intended to take a brass sample token to the warehouse scales before meeting anyone at Bluegate Yard"
+      },
+      "hook_text": "Under bluster, Jonas remembers the victim sobering suddenly over a scrap of paper, as if a poor messenger had found a way to frighten a rich man's warehouse.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:jonas_false_nell_picked_pocket",
+      "pillar_id": "pillar:motive_sample_token",
+      "fact": {
+       "entity": "person:nell_carter",
+       "attribute": "appeared_to_steal_token",
+       "value": "Jonas thought Nell Carter brushed the victim's coat for coin and may have taken the brass token"
+      },
+      "hook_text": "Jonas points at Nell too quickly, not with cruelty but panic; he saw small fingers near the victim's pocket and wants any story that is not the noose around his own neck.",
+      "coverage_effect": "false",
+      "is_red_herring": true,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure",
+      "debunked_by": "clue:nell_overheard_liddell_fear_scales"
+     }
+    ]
+   },
+   {
+    "id": "person:arthur_liddell",
+    "shape_role": "suspect",
+    "surface_role": "dock warehouse foreman with polished cuffs, wet boots, and too much interest in the dead man's pockets",
+    "presence": "nearby",
+    "location": "place:liddell_warehouse",
+    "first_witness": false,
+    "is_culprit": true,
+    "clues": [
+     {
+      "clue_id": "clue:liddell_master_key_route",
+      "pillar_id": "pillar:opportunity_warehouse_route",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "means_of_access",
+       "value": "kept the master key to the side river gate connecting place:liddell_warehouse with the passage toward place:bluegate_yard"
+      },
+      "hook_text": "Liddell offers his keys one by one like a man performing honesty, but his thumb never leaves the smallest iron key on the ring.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:liddell_false_orderly_ledger_alibi",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "claimed_alibi",
+       "value": "Arthur Liddell claims he was alone at the warehouse ledger desk during the murder window, balancing the scales accounts"
+      },
+      "hook_text": "His ledger is beautifully ruled, every figure clean as church silver; the neatness itself feels like a freshly scrubbed doorstep after blood.",
+      "coverage_effect": "false",
+      "is_red_herring": true,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure",
+      "debunked_by": "clue:nell_saw_liddell_river_gate"
+     },
+     {
+      "clue_id": "clue:liddell_token_denial_cracks",
+      "pillar_id": "pillar:motive_sample_token",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "knowledge_of_token",
+       "value": "recognized the missing sample token before Clara described it, then tried to pretend all such tokens were ordinary"
+      },
+      "hook_text": "The first time Clara says 'brass,' Liddell's hand goes to his waistcoat pocket; only afterward does he remember to smile.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "contradicted",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:liddell_accuses_jonas",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:jonas_bell",
+       "attribute": "accused_by_liddell",
+       "value": "Arthur Liddell insists Jonas Bell's trade knife and drunken quarrel make him the only sensible suspect"
+      },
+      "hook_text": "Liddell speaks Jonas's name with practised contempt, as if poverty itself were a signed confession.",
+      "coverage_effect": "context",
+      "is_red_herring": true,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none",
+      "debunked_by": "clue:jonas_lodging_chain_alibi"
+     }
+    ]
+   },
+   {
+    "id": "person:silas_crane",
+    "shape_role": "suspect",
+    "surface_role": "publican of the Crown and Anchor, genial to a fault and listening to everything \u2014 a receiver of quietly pilfered warehouse goods who would rather hang a stranger than open his cellar books",
+    "presence": "nearby",
+    "location": "place:crown_and_anchor",
+    "first_witness": false,
+    "is_culprit": false,
+    "clues": [
+     {
+      "clue_id": "clue:crane_bell_alibi",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:jonas_bell",
+       "attribute": "alibi_witnessed",
+       "value": "dead drunk in the Crown and Anchor taproom until well past one, watched the whole time by the publican who never said so"
+      },
+      "hook_text": "Crane polishes a glass that is already clean. Pressed on Jonas Bell, his geniality thins: admitting Bell never left the taproom means admitting what hours the Crown truly keeps, and for whom.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:crane_rival_quarrel",
+      "pillar_id": "pillar:victim_last_errand",
+      "fact": {
+       "entity": "fact:rival_quarrel",
+       "attribute": "claimed",
+       "value": "a rival messenger quarreled with the dead man over money in the taproom that evening \u2014 so Crane tells it, freely and twice"
+      },
+      "hook_text": "Unprompted, Crane leans in with the story of a quarrel \u2014 a rival messenger, raised voices, money on the table. He offers it a little too readily, the way a man hands you a lantern pointed away from his own door.",
+      "coverage_effect": "false",
+      "is_red_herring": true,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none",
+      "debunked_by": "clue:crane_token_worth"
+     },
+     {
+      "clue_id": "clue:crane_token_worth",
+      "pillar_id": "pillar:motive_sample_token",
+      "fact": {
+       "entity": "fact:token_inquiry",
+       "attribute": "asked_at_taproom",
+       "value": "the victim, sober and careful, asked the publican what a warehouse sample token would fetch from the right buyer"
+      },
+      "hook_text": "Cornered on the token, Crane's hands stop moving. Yes \u2014 the boy asked what such a thing might FETCH. And Crane, who knows exactly what such things fetch and from whom, told him to take it back where it came from.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     }
+    ]
+   },
+   {
+    "id": "person:tobias_flint",
+    "shape_role": "suspect",
+    "surface_role": "Liddell's night-watchman at the warehouse, a careful man with lamp-scalded eyes \u2014 paid twice: once by wages, once by not seeing which crates walk on late nights; the dead messenger had caught him at it",
+    "presence": "nearby",
+    "location": "place:liddell_warehouse",
+    "first_witness": false,
+    "is_culprit": false,
+    "clues": [
+     {
+      "clue_id": "clue:flint_unbolted_door",
+      "pillar_id": "pillar:opportunity_warehouse_route",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "standing_order",
+       "value": "the river-stair door left unbolted on late working nights, by his own quiet instruction \u2014 anyone who knew could pass from the yard to the scales unseen"
+      },
+      "hook_text": "Flint's lamp shakes, just once. The bolt on the river door \u2014 he oils it, he does not throw it. Not on the late nights. Whose instruction that is, he will only say with the yard empty and Clara between him and the water.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     },
+     {
+      "clue_id": "clue:flint_boat_cloak",
+      "pillar_id": "pillar:opportunity_warehouse_route",
+      "fact": {
+       "entity": "fact:boat_cloak_stranger",
+       "attribute": "claimed",
+       "value": "a stranger in a boat-cloak stood at the Wapping stairs near midnight \u2014 so Flint swears, though the fog that night would have hidden a mast at ten paces"
+      },
+      "hook_text": "Asked who used the stairs, Flint produces a stranger \u2014 boat-cloak, broad hat, no face. The figure arrives in his telling exactly where his own rounds should have been.",
+      "coverage_effect": "false",
+      "is_red_herring": true,
+      "reveal_mode": "volunteered",
+      "reveal_condition": "none",
+      "debunked_by": "clue:flint_liddell_return"
+     },
+     {
+      "clue_id": "clue:flint_liddell_return",
+      "pillar_id": "pillar:alibis_contradictions",
+      "fact": {
+       "entity": "person:arthur_liddell",
+       "attribute": "seen_returning",
+       "value": "back at the warehouse gate near half past twelve, keys in hand, though he swore to the bureau he left at eleven and never returned"
+      },
+      "hook_text": "What breaks Flint at last is not the door but the gate: he logged Mr. Liddell IN, half past twelve, because logging is the one honesty he has left \u2014 and the page with that line has since been torn out.",
+      "coverage_effect": "genuine",
+      "is_red_herring": false,
+      "reveal_mode": "pressed",
+      "reveal_condition": "pressure"
+     }
+    ]
+   }
   ]
+ },
+ "goal_statement": "Solve the murder of the dock messenger in Bluegate Yard and prove the killer before an innocent man is fitted for the noose.",
+ "intro": "London, 1888: in the docklands off Ratcliff Highway, Bluegate Yard lies under river fog, gaslight, and rain, and a dock messenger has been found dead on the wet cobbles. You are a newly trusted detective-operative of the small St. Bride Inquiry Bureau, called in plain clothes before the Metropolitan Police can make a tidy case of the nearest poor man with a bad night behind him. In these streets, public-house talk, cab-wheel marks, river mud, and the set of a wound may weigh more than a sworn accusation, because a clean-looking answer can still put an innocent neck in the rope.",
+ "genre": "Victorian detective mystery",
+ "premise": "In London in 1888, amid the soot, gaslight, river fog, and dock traffic off Ratcliff Highway, a murdered dock messenger is found in Bluegate Yard and the small plain-clothes St. Bride Inquiry Bureau is brought in before the Metropolitan Police can take over. As newly assigned detective-operative Clara Vale, you work the case through body marks, wet cobbles, public houses, river stairs, cabmen, costermongers, and suspect lodgings, in a system where hurried officials and frightened witnesses can turn a poor visible suspect into the easiest man to hang.",
+ "game_type": [
+  "detective_procedural",
+  "mystery_whodunnit"
+ ]
 }

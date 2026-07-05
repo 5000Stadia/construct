@@ -5865,3 +5865,622 @@ def test_settle_reconstructs_name_evidence_when_extractor_omits_names(world):
     assert p.state("place:the_hart_and_bell", "name")["fact"]["value"] \
         == "The Hart and Bell"                                  # reconstructed, cased
     assert not (p.state("place:coach_yard", "kind").get("fact") or {})  # denied
+
+
+# ---------------------------------------------------------------------------
+# Room-coherence fixes (founder live test pass, 2026-07-04: the drawing-room twin)
+# ---------------------------------------------------------------------------
+
+def test_move_synonym_for_current_room_binds_no_twin(world):
+    # THE DRAWING-ROOM INCIDENT: the player, standing in the established parlor, says
+    # "I step back into the drawing room" — a natural synonym. The old roster EXCLUDED
+    # the current scene, so the bind could never see it and minted place:drawing_room,
+    # splitting the cast across twin rooms. Now: binds to the room they're in,
+    # already-here no-op, and the synonym is LEARNED as an alias.
+    arc = make_arc()
+    seed_arc(world, arc)
+    from construct.arc.executor import turn_time as _tt
+    world.porcelain.ingest_structured([
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "name", "value": "the parlor"},
+        {"entity": PLAYER, "attribute": "in", "value": "place:parlor",
+         "value_type": "entity", "valid_from": _tt(1)},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the drawing room", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"verdict": "existing", "match": "place:parlor"},      # the dst bind sees HOME
+        {"prose": "You are already in the parlor; the fire has not moved."},
+    ])
+    result = run_turn(world, arc, provider, "I step back into the drawing room.", turn=2,
+                      scope=[PLAYER, "place:parlor"])
+    assert result.trace.movement_status == "clear"
+    assert result.trace.same_place is True                          # a no-op, not travel
+    assert world.porcelain.locate(PLAYER)[0] == "place:parlor"      # never left
+    assert not PorcelainWorldReads(world).has_entity("place:drawing_room")  # NO twin
+    # the world learned the player's word — next time refer() binds it at tier 1
+    _alias = world.porcelain.state("place:parlor", "alias")
+    assert (_alias.get("fact") or {}).get("value") == "drawing room"
+
+
+def test_move_ambiguous_destination_asks_never_mints(world):
+    # ASK, NEVER HALLUCINATE (founder 2026-07-04): an ambiguous destination renders a
+    # clarify beat — the world asks which the player means; no mint, no relocation,
+    # no invented arrival.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:north_cellar", "attribute": "kind", "value": "cellar",
+         "timeless": True},
+        {"entity": "place:north_cellar", "attribute": "name", "value": "the north cellar"},
+        {"entity": "place:south_cellar", "attribute": "kind", "value": "cellar",
+         "timeless": True},
+        {"entity": "place:south_cellar", "attribute": "name", "value": "the south cellar"},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the basement", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"verdict": "ambiguous", "match": ""},
+        {"prose": "“Which cellar do you mean, sir — north or south?”"},
+    ])
+    result = run_turn(world, arc, provider, "I head down to the basement.", turn=2,
+                      scope=[PLAYER, "place:study", "place:north_cellar",
+                             "place:south_cellar"])
+    assert result.trace.movement_status == "ambiguous"
+    assert world.porcelain.locate(PLAYER)[0] == "place:study"       # unmoved
+    assert not PorcelainWorldReads(world).has_entity("place:basement")
+    _np = _narrate_prompt(provider)
+    assert "THE DESTINATION IS UNCLEAR" in _np and "Never guess" in _np
+
+
+def test_narrator_briefed_places_keep_their_names(world):
+    # The drift's SOURCE was the narrator renaming the parlor "the drawing room" —
+    # the render contract now pins canonical place names on every turn.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "The study sits quiet around you."},
+    ])
+    run_turn(world, arc, provider, "I take in the room.", turn=2,
+             scope=[PLAYER, "place:study"])
+    _np = _narrate_prompt(provider)
+    assert "PLACES KEEP THEIR NAMES" in _np
+    assert "never 'the drawing room'" in _np
+
+
+# ---------------------------------------------------------------------------
+# #101 DISTANCE FIDELITY (Cx 445 constraints; founder probe 8: the village teleport)
+# ---------------------------------------------------------------------------
+
+def _hall_world(world):
+    """Origin with real topology: the parlor sits IN Brackenmere Hall (chain depth 2)."""
+    from construct.arc.executor import turn_time
+    world.porcelain.ingest_structured([
+        {"entity": "place:hall", "attribute": "kind", "value": "manor", "timeless": True},
+        {"entity": "place:hall", "attribute": "name", "value": "Brackenmere Hall"},
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "name", "value": "the parlor"},
+        {"entity": "place:parlor", "attribute": "in", "value": "place:hall",
+         "value_type": "entity"},
+        # valid_from supersedes the fixture's study placement (single-parent semantics)
+        {"entity": PLAYER, "attribute": "in", "value": "place:parlor",
+         "value_type": "entity", "valid_from": turn_time(1)},
+    ])
+
+
+def test_unknown_distance_move_prices_by_model_with_hygienic_ids(world):
+    # The village teleport, closed by the INVERSION (Cx 454): the map can't prove
+    # parlor→consulting-room is local, so the move is DISTANCE UNKNOWN — the model
+    # prices it, the render is scale-neutral, ids stay hygienic, and NO farness is
+    # ever stored (no journey event, no "long" anywhere durable).
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    _hall_world(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the consulting room in the village",
+         "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+         "commitment": ""},
+        {"verdict": "new", "match": ""},                     # the dst bind: genuinely new
+        {"prose": "The storm walks you down the long dark lane to the village."},
+        {"advance_minutes": 75, "jump_to_phase": "", "jump_days": 0,
+         "reason": "a night walk to the village"},           # the journey estimate
+    ])
+    result = run_turn(world, arc, provider, "I go to the consulting room in the village.",
+                      turn=2, scope=[PLAYER, "place:parlor"])
+    p = world.porcelain
+    # hygienic ids: child nested in a thin container shell
+    assert p.locate(PLAYER)[0] == "place:consulting_room"
+    assert p.state("place:consulting_room", "in")["fact"]["value"] == "place:village"
+    assert p.state("place:village", "kind")["fact"]["value"] == "village"
+    assert not _PWR(world).has_entity("place:consulting_room_in_the_village")
+    # distance unknown: model-priced, scale-neutral render, NOTHING durable stored
+    assert result.trace.distance_unknown == "place:parlor->place:consulting_room"
+    assert not _PWR(world).events(kind="journey")            # derived farness never stored
+    assert "MOVEMENT AT ITS TRUE SCALE" in _narrate_prompt(provider)
+    _elp = next((pr for (pr, _s, _t) in provider.calls
+                 if "CANNOT PROVE" in pr), None)
+    assert _elp is not None
+    assert result.trace.time_advanced == 75                  # the real cost, not 6 min
+
+
+def test_sibling_rooms_are_provably_near_bucket_kept(world):
+    # parlor → study, siblings under the hall: NEARNESS proven deterministically —
+    # the 6-minute bucket stays, no model pricing, no scale-neutral directive.
+    arc = make_arc()
+    seed_arc(world, arc)
+    _hall_world(world)
+    world.porcelain.ingest_structured([
+        {"entity": "place:study", "attribute": "in", "value": "place:hall",
+         "value_type": "entity"}])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the study", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You cross the passage into the study."},
+    ])
+    result = run_turn(world, arc, provider, "I go to the study.", turn=2,
+                      scope=[PLAYER, "place:parlor", "place:study"])
+    assert world.porcelain.locate(PLAYER)[0] == "place:study"
+    assert result.trace.distance_unknown == ""
+    assert "MOVEMENT AT ITS TRUE SCALE" not in _narrate_prompt(provider)
+    assert result.trace.time_advanced == 6                   # the local bucket held
+
+
+def test_ambiguous_locative_container_asks_never_mints(world):
+    # "in the village" with TWO known villages: the ask path, no mint, no guess.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:north_village", "attribute": "kind", "value": "village",
+         "timeless": True},
+        {"entity": "place:north_village", "attribute": "name", "value": "North Village"},
+        {"entity": "place:south_village", "attribute": "kind", "value": "village",
+         "timeless": True},
+        {"entity": "place:south_village", "attribute": "name", "value": "South Village"},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the smithy in the village", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"verdict": "new", "match": ""},
+        {"prose": "“Which village, sir — north or south?”"},
+    ])
+    result = run_turn(world, arc, provider, "I ride to the smithy in the village.",
+                      turn=2, scope=[PLAYER, "place:study", "place:north_village",
+                                     "place:south_village"])
+    assert result.trace.movement_status == "ambiguous"
+    assert world.porcelain.locate(PLAYER)[0] == "place:study"
+    assert not _PWR(world).has_entity("place:smithy")
+    assert "THE DESTINATION IS UNCLEAR" in _narrate_prompt(provider)
+
+
+def test_same_place_synonym_charges_no_move_time(world):
+    # Cx 445 wrinkle: the already-here bind must not pay the 6-minute move bucket —
+    # the input's own move verbs would otherwise still hit it.
+    arc = make_arc()
+    seed_arc(world, arc)
+    from construct.arc.executor import turn_time as _tt
+    world.porcelain.ingest_structured([
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "name", "value": "the parlor"},
+        {"entity": PLAYER, "attribute": "in", "value": "place:parlor",
+         "value_type": "entity", "valid_from": _tt(1)},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the drawing room", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"verdict": "existing", "match": "place:parlor"},
+        {"prose": "You are already in the parlor."},
+    ])
+    result = run_turn(world, arc, provider, "I walk back into the drawing room.", turn=2,
+                      scope=[PLAYER, "place:parlor"])
+    assert result.trace.same_place is True
+    assert result.trace.time_advanced == 1                   # a beat, not a move
+
+
+def test_move_exact_current_room_name_is_a_time_noop(world):
+    # Cx 447 blocker: "I go to the study" while STANDING in the study resolved through
+    # the primary refer path and charged the 6-minute move bucket. All already-here
+    # paths are now a no-op: same_place, 1-minute beat, no relocation churn.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:study", "attribute": "name", "value": "the study"}])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the study", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You are already in the study."},
+    ])
+    result = run_turn(world, arc, provider, "I go to the study.", turn=2,
+                      scope=[PLAYER, "place:study"])
+    assert result.trace.movement_status == "clear"
+    assert result.trace.same_place is True
+    assert result.trace.time_advanced == 1                    # a beat, never a move
+    assert world.porcelain.locate(PLAYER)[0] == "place:study"
+
+
+def test_take_synonym_binds_scoped_scene_object(world):
+    # Cx 447 note pinned: the SCOPED refer at the take seam lets "the blade" bind the
+    # scene's established knife at tier 2 — no obj:blade sibling ever mints (the
+    # founder's object-synonym mandate).
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "obj:knife", "attribute": "kind", "value": "knife", "timeless": True},
+        {"entity": "obj:knife", "attribute": "name", "value": "a boning knife"},
+        {"entity": "obj:knife", "attribute": "in", "value": "place:study",
+         "value_type": "entity"},
+    ])
+    world._extractions.append({"items": []})                   # player-input extract
+    world._extractions.append({"entity_id": "obj:knife",       # refer tier-2 judgment
+                               "confidence": 0.9, "signals": ["synonym"]})
+    world._extractions.append({"items": []})                   # post-render extract
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": "",
+         "takes": "the blade"},
+        {"prose": "You take up the boning knife."},
+    ])
+    result = run_turn(world, arc, provider, "I take the blade.", turn=2,
+                      scope=[PLAYER, "place:study", "obj:knife"])
+    assert result.trace.took == "obj:knife"
+    assert world.porcelain.locate("obj:knife")[0] == PLAYER    # held, the real knife
+    assert not _PWR(world).has_entity("obj:blade")             # no sibling minted
+
+
+def test_wrapper_world_cross_site_move_is_distance_unknown(world):
+    # THE INVERSION'S WIN (Cx 454, founder's shape challenge): under a shared WORLD
+    # wrapper (room→hall→world vs room→village→world) the old disjoint-chain proxy
+    # went blind. Nearness can't be proven (different immediate parents, no route),
+    # so the move is distance-unknown and the MODEL prices it — wrapped worlds keep
+    # honest travel costs with no declared-scale metadata.
+    arc = make_arc()
+    seed_arc(world, arc)
+    from construct.arc.executor import turn_time as _tt
+    world.porcelain.ingest_structured([
+        {"entity": "place:world", "attribute": "kind", "value": "region", "timeless": True},
+        {"entity": "place:hall", "attribute": "kind", "value": "manor", "timeless": True},
+        {"entity": "place:hall", "attribute": "in", "value": "place:world",
+         "value_type": "entity"},
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "name", "value": "the parlor"},
+        {"entity": "place:parlor", "attribute": "in", "value": "place:hall",
+         "value_type": "entity"},
+        {"entity": "place:village", "attribute": "kind", "value": "village", "timeless": True},
+        {"entity": "place:village", "attribute": "in", "value": "place:world",
+         "value_type": "entity"},
+        {"entity": "place:forge", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:forge", "attribute": "name", "value": "the forge"},
+        {"entity": "place:forge", "attribute": "in", "value": "place:village",
+         "value_type": "entity"},
+        {"entity": PLAYER, "attribute": "in", "value": "place:parlor",
+         "value_type": "entity", "valid_from": _tt(1)},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the forge", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You walk down to the forge in the village."},
+        {"advance_minutes": 40, "jump_to_phase": "", "jump_days": 0,
+         "reason": "the walk down to the village"},
+    ])
+    result = run_turn(world, arc, provider, "I go to the forge.", turn=2,
+                      scope=[PLAYER, "place:parlor", "place:forge"])
+    assert world.porcelain.locate(PLAYER)[0] == "place:forge"
+    assert result.trace.distance_unknown == "place:parlor->place:forge"
+    assert result.trace.time_advanced == 40   # the model priced it — the wrapper is moot
+
+
+def test_ambiguous_container_by_name_kind_evidence_asks(world):
+    # Cx 449 blocker: the container match must read WORLD FACTS (name/kind), never
+    # the id wording — place:north / place:south with kind=village and names
+    # "North Village"/"South Village" ARE two villages; "in the village" must ASK,
+    # and neither child nor container may mint.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:north", "attribute": "kind", "value": "village", "timeless": True},
+        {"entity": "place:north", "attribute": "name", "value": "North Village"},
+        {"entity": "place:south", "attribute": "kind", "value": "village", "timeless": True},
+        {"entity": "place:south", "attribute": "name", "value": "South Village"},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the smithy in the village", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"verdict": "new", "match": ""},
+        {"prose": "“Which village, sir — north or south?”"},
+    ])
+    result = run_turn(world, arc, provider, "I ride to the smithy in the village.",
+                      turn=2, scope=[PLAYER, "place:study", "place:north", "place:south"])
+    assert result.trace.movement_status == "ambiguous"
+    assert world.porcelain.locate(PLAYER)[0] == "place:study"
+    assert not _PWR(world).has_entity("place:smithy")
+    assert not _PWR(world).has_entity("place:village")
+    assert "THE DESTINATION IS UNCLEAR" in _narrate_prompt(provider)
+
+
+def test_unique_container_binds_by_name_kind_evidence(world):
+    # The unique half of the same rule: ONE known village (id place:north, name
+    # "North Village") — "the smithy in the village" nests in the REAL village,
+    # never a fresh generic place:village twin.
+    from construct.adapter import PorcelainWorldReads as _PWR
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:north", "attribute": "kind", "value": "village", "timeless": True},
+        {"entity": "place:north", "attribute": "name", "value": "North Village"},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the smithy in the village", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        # no dst-bind stub: the unique container match takes the COMPOUND path
+        # (straight to the nesting grant), never the semantic-bind cohort
+        {"prose": "You ride down into North Village and find the smithy."},
+    ])
+    run_turn(world, arc, provider, "I ride to the smithy in the village.", turn=2,
+             scope=[PLAYER, "place:study", "place:north"])
+    p = world.porcelain
+    assert p.locate(PLAYER)[0] == "place:smithy"
+    assert p.state("place:smithy", "in")["fact"]["value"] == "place:north"  # the REAL one
+    assert not _PWR(world).has_entity("place:village")                      # no twin
+
+
+def test_direct_clear_route_proves_nearness(world):
+    # Cx 458 blocker regression: two places with DIFFERENT parents but a direct
+    # clear `connects_to` way between them (a lane, a corridor, a lift) are provably
+    # near — no distance_unknown, no scale-neutral directive, deterministic bucket.
+    from construct.arc.executor import turn_time as _tt
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:hall", "attribute": "kind", "value": "manor", "timeless": True},
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "name", "value": "the parlor"},
+        {"entity": "place:parlor", "attribute": "in", "value": "place:hall",
+         "value_type": "entity"},
+        {"entity": "place:gatehouse", "attribute": "kind", "value": "gatehouse",
+         "timeless": True},
+        {"entity": "place:gatehouse", "attribute": "name", "value": "the gatehouse"},
+        # different roots — but a DIRECT connecting way exists
+        {"entity": "place:parlor", "attribute": "connects_to", "value": "place:gatehouse",
+         "value_type": "entity"},
+        {"entity": PLAYER, "attribute": "in", "value": "place:parlor",
+         "value_type": "entity", "valid_from": _tt(1)},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the gatehouse", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You cross to the gatehouse."},
+    ])
+    result = run_turn(world, arc, provider, "I go to the gatehouse.", turn=2,
+                      scope=[PLAYER, "place:parlor", "place:gatehouse"])
+    assert world.porcelain.locate(PLAYER)[0] == "place:gatehouse"
+    assert result.trace.distance_unknown == ""               # the route PROVED nearness
+    assert "MOVEMENT AT ITS TRUE SCALE" not in _narrate_prompt(provider)
+    assert result.trace.time_advanced == 6                   # deterministic bucket held
+
+
+# ---------------------------------------------------------------------------
+# #102 JOURNEY DELIBERATION (Cx 457; founder-shaped: the mind weighs it first)
+# ---------------------------------------------------------------------------
+
+def _deadline_arc(threshold: float = 100.0):
+    from construct.arc.conditions import Quantity
+    from construct.clock import ELAPSED_ATTR, ELAPSED_ENTITY
+    return replace(make_arc(), failure_when=Quantity(
+        ELAPSED_ENTITY, ELAPSED_ATTR, ">=", threshold))
+
+
+def test_journey_deliberation_holds_move_once_then_proceeds_on_cache(world):
+    # Founder's shape end-to-end: deadline at 100 min, clock near zero — a ride the
+    # estimator prices at 90 min against ~100 left... make it CROSS: estimate 120.
+    # Turn A: the move HOLDS, the mind weighs it (second-person, open question),
+    # the accept marker carries the cached estimate. Turn B (the player insists):
+    # the move COMMITS with no second warning, priced by the CACHED estimate.
+    arc = _deadline_arc(threshold=100.0)
+    seed_arc(world, arc)
+    _hall_world(world)
+    world._extractions.extend([{"items": []}, {"items": []},
+                               {"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the consulting room in the village",
+         "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+         "commitment": ""},
+        {"verdict": "new", "match": ""},                      # dst bind: genuinely new
+        {"advance_minutes": 120, "jump_to_phase": "", "jump_days": 0,
+         "reason": "a long night ride"},                      # the PRE-COMMIT estimate
+        {"prose": "You pause at the door, weighing the road against the hour."},
+        # ---- turn B: the player insists ----
+        {"kind": "action", "moves_to": "the consulting room in the village",
+         "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+         "commitment": ""},
+        {"verdict": "new", "match": ""},
+        {"prose": "You take the road anyway; the night takes its due."},
+    ])
+    r1 = run_turn(world, arc, provider, "I ride to the consulting room in the village.",
+                  turn=2, scope=[PLAYER, "place:parlor"])
+    assert r1.trace.movement_status == "deliberating"
+    assert world.porcelain.locate(PLAYER)[0] == "place:parlor"      # NOT moved
+    assert not PorcelainWorldReads(world).has_entity("place:consulting_room")
+    _np = _narrate_prompt(provider)
+    assert "YOUR OWN MIND WEIGHS IT" in _np
+    assert "has NOT moved" in _np and "open question" in _np
+    r2 = run_turn(world, arc, provider, "I ride to the consulting room in the village.",
+                  turn=3, scope=[PLAYER, "place:parlor"])
+    assert r2.trace.movement_status in ("clear", "obscured")        # committed now
+    assert world.porcelain.locate(PLAYER)[0] == "place:consulting_room"
+    assert r2.trace.deliberating == ""                              # one warning, once
+    assert r2.trace.journey_est == 120                              # the CACHED price
+    assert r2.trace.time_advanced == 120                            # reused, not re-asked
+
+
+def test_journey_within_budget_commits_without_deliberation(world):
+    # est < remaining: no warning, the move commits, and the pre-commit estimate is
+    # REUSED as the turn's time (never priced twice).
+    arc = _deadline_arc(threshold=500.0)
+    seed_arc(world, arc)
+    _hall_world(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the consulting room in the village",
+         "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+         "commitment": ""},
+        {"verdict": "new", "match": ""},
+        {"advance_minutes": 75, "jump_to_phase": "", "jump_days": 0,
+         "reason": "a night walk"},                           # pre-commit estimate
+        {"prose": "You go down to the village through the rain."},
+    ])
+    result = run_turn(world, arc, provider,
+                      "I go to the consulting room in the village.", turn=2,
+                      scope=[PLAYER, "place:parlor"])
+    assert result.trace.movement_status in ("clear", "obscured")
+    assert result.trace.deliberating == ""
+    assert world.porcelain.locate(PLAYER)[0] == "place:consulting_room"
+    assert result.trace.time_advanced == 75                   # the one estimate, reused
+
+
+def test_no_deadline_means_no_deliberation(world):
+    # distance uncertainty ALONE never warns (Cx 457): without an established
+    # deadline the unknown-distance move just commits and model-prices.
+    arc = make_arc()                                          # no failure_when
+    seed_arc(world, arc)
+    _hall_world(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the consulting room in the village",
+         "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+         "commitment": ""},
+        {"verdict": "new", "match": ""},
+        {"prose": "You walk down to the village."},
+        {"advance_minutes": 60, "jump_to_phase": "", "jump_days": 0,
+         "reason": "the walk"},                               # settle-time estimate
+    ])
+    result = run_turn(world, arc, provider,
+                      "I go to the consulting room in the village.", turn=2,
+                      scope=[PLAYER, "place:parlor"])
+    assert result.trace.deliberating == ""
+    assert result.trace.movement_status in ("clear", "obscured")
+    assert "YOUR OWN MIND WEIGHS IT" not in _narrate_prompt(provider)
+
+
+def test_near_move_under_deadline_never_deliberates(world):
+    # a provably-near step (siblings under the hall) never warns even with the
+    # deadline tight — the deliberation is for unpriceable travel, not doors.
+    arc = _deadline_arc(threshold=10.0)                       # nearly out of time
+    seed_arc(world, arc)
+    _hall_world(world)
+    world.porcelain.ingest_structured([
+        {"entity": "place:study", "attribute": "in", "value": "place:hall",
+         "value_type": "entity"}])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the study", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You cross the passage into the study."},
+    ])
+    result = run_turn(world, arc, provider, "I go to the study.", turn=2,
+                      scope=[PLAYER, "place:parlor", "place:study"])
+    assert result.trace.deliberating == ""
+    assert world.porcelain.locate(PLAYER)[0] == "place:study"
+
+
+def _door_between(world, a: str, b: str, state: str):
+    # PB's portal shape (test_route.py): host-declared traversal policy + links
+    world.porcelain.ingest_structured([
+        {"entity": "traversal:door", "attribute": "blocks_when_state", "value": "shut",
+         "timeless": True},
+        {"entity": "obj:door1", "attribute": "kind", "value": "door", "timeless": True},
+        {"entity": "obj:door1", "attribute": "state", "value": state},
+        {"entity": a, "attribute": "connects_to", "value": "obj:door1",
+         "value_type": "entity", "timeless": True},
+        {"entity": "obj:door1", "attribute": "connects_to", "value": b,
+         "value_type": "entity", "timeless": True},
+    ])
+
+
+def test_open_door_route_is_near_no_deliberation(world):
+    # Cx 465 #1: PB routes a door as place -> obj:door -> place (len 3). An OPEN
+    # door between differently-rooted places is a STEP — near, no deliberation even
+    # at deadline's edge, no distance_unknown, deterministic bucket.
+    from construct.arc.executor import turn_time as _tt
+    arc = _deadline_arc(threshold=10.0)                       # nearly out of time
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "name", "value": "the parlor"},
+        {"entity": "place:annex", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:annex", "attribute": "name", "value": "the annex"},
+        {"entity": PLAYER, "attribute": "in", "value": "place:parlor",
+         "value_type": "entity", "valid_from": _tt(1)},
+    ])
+    _door_between(world, "place:parlor", "place:annex", state="open")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the annex", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You step through the open door into the annex."},
+    ])
+    result = run_turn(world, arc, provider, "I go through to the annex.", turn=2,
+                      scope=[PLAYER, "place:parlor", "place:annex"])
+    assert world.porcelain.locate(PLAYER)[0] == "place:annex"
+    assert result.trace.deliberating == ""
+    assert result.trace.distance_unknown == ""                # the portal route is NEAR
+    assert result.trace.time_advanced == 6                    # the local bucket held
+
+
+def test_blocked_route_never_renders_as_deliberation(world):
+    # Cx 465 #2: a SHUT door is a blocked route, not a deadline choice — passability
+    # verdicts first; only a move that WOULD commit may deliberate.
+    from construct.arc.executor import turn_time as _tt
+    arc = _deadline_arc(threshold=10.0)
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "name", "value": "the parlor"},
+        {"entity": "place:annex", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:annex", "attribute": "name", "value": "the annex"},
+        {"entity": PLAYER, "attribute": "in", "value": "place:parlor",
+         "value_type": "entity", "valid_from": _tt(1)},
+    ])
+    _door_between(world, "place:parlor", "place:annex", state="shut")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the annex", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "The door will not give."},
+    ])
+    result = run_turn(world, arc, provider, "I go through to the annex.", turn=2,
+                      scope=[PLAYER, "place:parlor", "place:annex"])
+    assert result.trace.movement_status == "blocked"
+    assert result.trace.movement_obstruction is not None
+    assert result.trace.deliberating == ""                    # never a deadline choice
+    assert world.porcelain.locate(PLAYER)[0] == "place:parlor"
+
+
+def test_journey_accept_key_is_a_fixed_digest():
+    # Cx 465 #3: the marker key never substrings away its components — fixed-size
+    # digest over origin|destination|hazard|coordinate; a moved deadline re-warns.
+    from construct.turnloop import _journey_accept_key as k
+    long_origin = "place:" + "very_long_origin_" * 10
+    long_dest = "an_extraordinarily_long_novel_destination_slug_" * 4
+    a = k(long_origin, long_dest, 100.0)
+    b = k(long_origin, long_dest, 250.0)                      # the deadline moved
+    assert a != b                                             # fresh warning key
+    assert a == k(long_origin, long_dest, 100.0)              # deterministic
+    assert len(a) == len(b) == len("jacc_") + 20              # fixed size, no truncation
+    assert a.startswith("jacc_")

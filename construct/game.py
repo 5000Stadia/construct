@@ -398,6 +398,35 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # (A saga's opening chapters are often ATMOSPHERIC and place no cast, so the cast's `in` rows
     # first appear mid-text; `as_of=opening_as_of` here emptied the allowlist and failed the build.)
     located_people = _locatable_people(world, known_ids)
+    # #104 (the seaside-bookstore deadlock, Cx 470 §6): a generated world whose prose
+    # placed NOBODY leaves located_people EMPTY — the protagonist guard then fails
+    # every attempt, the fallback returns None, and the build dies with a misleading
+    # `[]`. A bare world is a STAGING gap, not a bad pick: deterministically place
+    # the first known person at the world's first place so the guard has ground to
+    # stand on. The guard's teeth for the MISPICK case (located non-empty, author
+    # chose an unlocated id) are unchanged.
+    if not located_people:
+        _people = [e for e in known_ids if str(e).startswith("person:")]
+        _places = sorted(e for e in _canon_entity_ids(world)
+                         if str(e).startswith("place:"))
+        if _people and _places:
+            # honor the player's asked-for role when choosing WHO gets staged
+            _want = {w for w in (play_as or "").lower().replace(":", " ").split()
+                     if len(w) > 3}
+
+            def _pscore(pid: str) -> int:
+                _nm = str(world.porcelain.state(pid, "name") or "")
+                return len(_want & set((pid + " " + _nm).lower()
+                                       .replace(":", " ").split()))
+            _anchor_person = (max(_people, key=_pscore) if _want else _people[0])
+            _anchor_place = _places[0]
+            world.porcelain.ingest_structured([
+                {"entity": _anchor_person, "attribute": "in",
+                 "value": _anchor_place, "value_type": "entity"}])
+            located_people = [_anchor_person]
+            logger.warning("no located people at arc authoring — staged %s at %s "
+                           "so the protagonist guard has ground (bare-world fix)",
+                           _anchor_person, _anchor_place)
     proto_feedback = ""
     _guard_failed_proposal: dict | None = None
     from construct.cohorts import FICTION_CRAFT
@@ -511,8 +540,13 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 # later lint-failed loop attempt.
                 proposal = _guard_failed_proposal
     if arc is None:
+        # #104 diagnosability: the old message printed only lint findings — an empty
+        # `[]` hid that every attempt died at the PROTAGONIST GUARD.
+        _tried = (_guard_failed_proposal or {}).get("protagonist")
         raise RuntimeError(
-            f"arc failed lint/protagonist guard after 3 attempts: {last_findings}")
+            f"arc failed lint/protagonist guard after 3 attempts — lint: "
+            f"{last_findings or 'clean'}; guard: tried {_tried!r} against located "
+            f"people {located_people or 'NONE (bare world)'}")
 
     # Resolve the game type(s) UP FRONT — player-chosen if given, else derived from the
     # fiction. The cast/pillar shape (below) AND the meta directive both need it; deriving

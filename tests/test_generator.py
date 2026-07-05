@@ -327,10 +327,13 @@ def test_build_arc_rebuild_rebinds_every_protagonist_gate(tmp_path):
     assert "knows:person:detective" not in _frames(good)    # NO stale gate survives the rebind
 
 
-def test_finalize_rejects_unstageable_protagonist(tmp_path):
-    # Cx 162 (blocking): a world with person:* kind rows but NO `in` rows (nobody located)
-    # must NOT publish through _finalize_scenario — the located-protagonist guard raises BEFORE
-    # cast authoring / arc_to_items, even on the ingest path (which skips _assess_viability).
+def test_finalize_stages_anchor_in_bare_world(tmp_path):
+    # #104 (the seaside-bookstore deadlock) SUPERSEDES the Cx-162 raise-on-bare-world
+    # mechanism while keeping its INVARIANT: an unstageable protagonist never
+    # publishes. A generated world whose prose placed nobody is a STAGING gap, not a
+    # bad pick — the play_as-matching person is deterministically staged at the
+    # world's first place and the build proceeds. (The mispick case — located people
+    # exist, author picks an unlocated id — keeps the 162 guard/fallback unchanged.)
     import pytest
     from construct.provider import StubProvider, task_of
     from construct import game
@@ -354,7 +357,7 @@ def test_finalize_rejects_unstageable_protagonist(tmp_path):
     proposal = {
         "protagonist": "person:a", "delta_type": "drive_inverted",
         "tension": ["person:a", "drive:doubt", "drive:proof"],
-        "goal_statement": "find the truth",
+        "goal_statement": "find the truth", "theme": "the truth beneath the office",
         "beats": [{"id": "beat:learn", "phase": "climax", "weight": "required",
                    "kind": "player_learns", "entity": "fact:secret",
                    "attribute": "culprit", "value": "person:b"}],
@@ -372,10 +375,51 @@ def test_finalize_rejects_unstageable_protagonist(tmp_path):
             return {"items": []}
 
     spath = tmp_path / "uns_scenario.world"
-    with pytest.raises(RuntimeError):                       # raises on the guard, never publishes
-        game._finalize_scenario(w, "uns", "Unstaged World", _ArcProvider(), spath,
+    game._finalize_scenario(w, "uns", "Unstaged World", _ArcProvider(), spath,
+                            endless=False, play_as="person a")
+    assert spath.with_suffix(".meta.json").exists()          # PUBLISHED — no deadlock
+    assert w.porcelain.locate("person:a")[0] == "place:office"   # anchored, play_as-matched
+    w.close()
+
+
+def test_finalize_still_raises_when_no_place_exists(tmp_path):
+    # the true dead-end keeps the 162 raise: no place to stage anyone anywhere —
+    # the anchor fix has no ground, and the guard error now SAYS so (no more `[]`).
+    import pytest
+    from construct import game
+    from construct.provider import StubProvider, task_of
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        return rule(prompt, schema) if prompt.startswith("Classify the lifetime") else {"items": []}
+    w = World(tmp_path / "npl.world", world_id="w:npl",
+              model=StubModel(fallback=fallback), stance="fiction", title="No Places")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "person:a", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "fact:secret", "attribute": "kind", "value": "proposition", "timeless": True},
+    ])
+    proposal = {"protagonist": "person:a", "delta_type": "drive_inverted",
+                "tension": ["person:a", "drive:doubt", "drive:proof"],
+                "goal_statement": "find the truth",
+                "beats": [{"id": "beat:learn", "phase": "climax", "weight": "required",
+                           "kind": "player_learns", "entity": "fact:secret",
+                           "attribute": "culprit", "value": "person:a"}]}
+
+    class _P(StubProvider):
+        def __init__(self): super().__init__([])
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if task_of(prompt) == "arc":
+                return dict(proposal)
+            return {"items": []}
+
+    spath = tmp_path / "npl_scenario.world"
+    with pytest.raises(RuntimeError, match="located people"):    # diagnosable, not `[]`
+        game._finalize_scenario(w, "npl", "No Places", _P(), spath,
                                 endless=False, play_as="person a")
-    assert not spath.with_suffix(".meta.json").exists()     # no sealed scenario meta
+    assert not spath.with_suffix(".meta.json").exists()
     w.close()
 
 

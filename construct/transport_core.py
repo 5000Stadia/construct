@@ -63,16 +63,38 @@ def _affirmative(text: str) -> bool:
 STATIC_REJECT = (
     "This Construct bot is invite-only. Send the CONS- invite code the operator "
     "gave you to begin.")
-HELP = ("Just type what you want to do — no commands needed; the story responds, "
-        "and it saves automatically each turn. If you ever want them: /play "
-        "(restart fresh), /resume (continue), /status (time & place now; /status "
-        "pin toggles the header atop each reply), /scenarios (your world), /dump "
-        "(save this chat to a log), /ooc <question> (ask the engine out of "
-        "character — what's available, how it works), 📓 /notebook (your character's "
-        "case-notes — the people, places, and things they've learned so far), 📝 /note "
-        "<text> (jot your own note — it follows you across adventures; /notes lists "
-        "them, /del # removes one), /exit (step out to the start menu — your game is "
-        "saved), /feedback <note> (flag the operator), /help.")
+HELP = (
+    "Just type what you want to do — the story answers, and every turn saves "
+    "itself. Commands, when you want them:\n"
+    "\n"
+    "🎭 YOUR STORY\n"
+    "/resume — pick up exactly where you left off\n"
+    "/restart — start this story over (asks how far back before touching anything)\n"
+    "/exit — step out to the start menu; your game stays saved\n"
+    "/world — which story you're in right now\n"
+    "\n"
+    "🧭 AT A GLANCE\n"
+    "/status — the in-world time and place (add “pin” to keep it atop every reply)\n"
+    "📓 /notebook — your character's own case-notes: the people, places, and "
+    "things they've learned so far (also answers to /journal and /case)\n"
+    "\n"
+    "📝 YOUR NOTES\n"
+    "/note <text> — jot a private note to yourself; it follows your character "
+    "across adventures\n"
+    "/notes — list your notes · /del 2 — delete note №2\n"
+    "\n"
+    "🗂 THE SHELF\n"
+    "/remove <title> — retire a world from the shelf (its files are archived, "
+    "never deleted)\n"
+    "\n"
+    "🛠 THE ENGINE\n"
+    "/ooc <question> — step outside the story and ask the host anything (what "
+    "worlds exist, how something works, what a rule means)\n"
+    "/feedback <what happened> — report a bug or something that felt wrong "
+    "DIRECTLY TO THE DEVELOPER; your last few turns are attached automatically "
+    "so it can be investigated\n"
+    "/dump — save this whole chat to a log file\n"
+    "/help — this menu")
 
 #: The Construct's first words — a SIMPLE welcome (founder: "first message should
 #: be a simple greeting… if the user knows what's up they'll just load what they
@@ -268,7 +290,18 @@ class TransportCore:
                 out = self._reply(ev, self._exit(pid, ev))
             else:
                 out = self._reply(ev, "Alright — staying in the story. Carry on.")
-        elif low == "/restart":
+        elif low == "/restart" or low.startswith("/play"):
+            # /play was a silent fresh-open that ERASED a run with no confirmation —
+            # the unsafe twin of /restart (founder audit 2026-07-05). Merged: with no
+            # saved progress they open fresh at once; with a save, the guided
+            # confirmation flow decides how far back.
+            if low.startswith("/play") and not self._resumable(ev):
+                # legacy /play with nothing saved: open fresh at once (nothing to
+                # protect). /restart ALWAYS runs the guided flow — keep/redo is
+                # meaningful even before a slot exists.
+                out = self._reply(ev, self._command(pid, ev, "/play", now=now))
+                self._log(ev, "BOT", "\n".join(out.chunks))
+                return out
             title = self._title_of(registry.scenario_for(self._conn, ev.platform,
                                                           ev.external_id))
             if self._in_episodes(pid, ev):
@@ -715,8 +748,9 @@ class TransportCore:
         if cmd == "/feedback":
             note = parts[1] if len(parts) > 1 else ""
             return self._feedback(ev, note)
-        if cmd == "/scenarios":
-            return f"Your world: {scenario}."
+        if cmd in ("/scenarios", "/world"):
+            title = self._title_of(scenario) or scenario
+            return f"You're in “{title}”. (/exit steps out to the start menu.)"
         if cmd == "/status":
             return self._status(pid, ev, parts[1].strip().lower() if len(parts) > 1 else "")
         if cmd == "/ooc":
@@ -729,6 +763,8 @@ class TransportCore:
             return self._note(pid, ev, parts[1].strip() if len(parts) > 1 else "", now=now)
         if cmd == "/del":
             return self._del(pid, ev, parts[1] if len(parts) > 1 else "")
+        if cmd == "/remove":
+            return self._remove_world(pid, ev, parts[1].strip() if len(parts) > 1 else "")
         if cmd in ("/play", "/resume"):
             # Scenario scope is locked to the invite (Codex): the argument, if
             # any, is ignored — a player cannot reach an ungranted scenario.
@@ -743,6 +779,44 @@ class TransportCore:
                 return f"(could not open {scenario}: {exc})"
             return self._sessions[pid].opening()
         return f"Unknown command. {HELP}"
+
+    # -- /remove: retire a world from the shelf (non-destructive attic move) ---
+    def _remove_world(self, pid: str, ev: InboundEvent, arg: str) -> str:
+        """FOUNDER (2026-07-05): built worlds accumulate on the shared shelf — let the
+        front end retire one. NON-DESTRUCTIVE (the anchor precedent): every file moves
+        to worlds/attic/, never deleted; per-player play slots are untouched. The world
+        you're currently INSIDE can't be pulled out from under you."""
+        if not arg:
+            names = ", ".join(f"“{w['title']}”" for w in self._library()) or "(none)"
+            return (f"Which world shall I retire to the attic? Say /remove <title>. "
+                    f"On the shelf: {names}")
+        from construct.game import scenario_path
+        catalog = self._catalog()
+        target = _resolve_removal(arg, catalog)
+        if target is None:
+            return (f"I don't see “{arg}” on the shelf. /remove with no argument "
+                    f"lists what's there.")
+        current = registry.scenario_for(self._conn, ev.platform, ev.external_id)
+        if target == current:
+            return ("That's the world you're standing in — step out first "
+                    "(build or pick another), then /remove it.")
+        try:
+            import shutil
+            base = scenario_path(target)
+            attic = base.parent / "attic"
+            attic.mkdir(exist_ok=True)
+            moved = 0
+            for f in sorted(base.parent.glob(f"{target}.*")):
+                if f.is_file():
+                    shutil.move(str(f), str(attic / f.name))
+                    moved += 1
+            title = catalog.get(target, target).split(" — ")[0]
+            logger.info("world %s retired to the attic (%d files)", target, moved)
+            return (f"“{title}” is retired to the attic — off the shelf, nothing "
+                    f"deleted. ({moved} files moved; saved games untouched.)")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("remove failed for %s", target)
+            return f"(couldn't retire that world: {exc})"
 
     # -- /status: the time|location header (toggle) + an on-demand one-liner ---
     def _status(self, pid: str, ev: InboundEvent, arg: str) -> str:
@@ -1006,6 +1080,10 @@ class TransportCore:
                 menu = self._world_menu(resumable)
                 if menu:
                     reply = f"{reply}\n\n{menu}" if reply else menu
+            if getattr(result, "show_styles", False):
+                wall = _styles_wall()
+                if wall:
+                    reply = f"{reply}\n\n{wall}" if reply else wall
             return self._reply(ev, reply)
         if result.outcome == LOAD and result.world:
             return self._enter_world(pid, ev, scenario=result.world, mode=None,
@@ -1440,6 +1518,41 @@ _ENDLESS_CUES = (
 _ASKING = "__asking__"
 #: The concrete modes a Session understands.
 _MODES = ("win_loss", "endless")
+
+
+def _styles_wall() -> str:
+    """The full wall of play-shapes (founder 2026-07-05): all 155 card names grouped
+    by their 19 families — host-rendered, plain text + emoji (the Telegram sender
+    uses no parse_mode). Compact: family headers with dot-joined names, so the wall
+    reads as nineteen short paragraphs, not 155 lines."""
+    try:
+        from construct.play_styles_data import STYLE_CARDS
+    except Exception:  # noqa: BLE001
+        return ""
+    fams: dict[str, list[str]] = {}
+    for c in STYLE_CARDS.values():
+        fams.setdefault(c["family"], []).append(c["name"])
+    lines = [f"🎭 THE WALL — {len(STYLE_CARDS)} shapes of play"]
+    for fam in sorted(fams):
+        lines.append("")
+        lines.append(f"— {fam} —")
+        lines.append(" · ".join(sorted(fams[fam])))
+    lines.append("")
+    lines.append("Name any of them (blends welcome) — or describe your own.")
+    return "\n".join(lines)
+
+
+def _resolve_removal(arg: str, catalog: dict[str, str]) -> str | None:
+    """Map a /remove argument to a scenario name — by name, exact title, or a
+    unique title substring (case-insensitive). Ambiguity resolves to nothing."""
+    low = arg.strip().lower()
+    if low in {k.lower() for k in catalog}:
+        return next(k for k in catalog if k.lower() == low)
+    hits = [k for k, t in catalog.items()
+            if low == str(t).split(" — ")[0].strip().lower()]
+    if not hits:
+        hits = [k for k, t in catalog.items() if low in str(t).lower()]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _valid_mode(mode: str | None) -> str | None:

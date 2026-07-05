@@ -428,8 +428,19 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
             "entity ids shown (they are the canon characters/objects the arc names — do not "
             "rename them). Miss one required target and that beat is dead, the ladder collapses, "
             "and the story lurches to its climax with no build-up:\n" + "\n".join(_lines))
+    # THE SUSPECT WEB (founder 2026-07-05, the two-horse-race finding): a deduction
+    # needs a FIELD of rival theories, not a fall guy and an answer.
+    web = ("\n\nTHE SUSPECT WEB (binding for this shape): field at least FOUR "
+           "SUSPECT-GRADE members besides pure witnesses — each with a plausible "
+           "motive of their OWN, a private secret worth lying about (guilty of "
+           "SOMETHING, even if not this), and reachable clues; at least TWO of them "
+           "carry a false-coverage clue (with its debunker) so misdirection lives "
+           "in several mouths. The field must sustain rival theories deep into "
+           "play — never a two-horse race where doubting the obvious suspect "
+           "leaves only the culprit standing.\n"
+           if "deduction" in (shape_label or "").lower() else "")
     return complete_sync(provider,
-        FICTION_CRAFT + sig +
+        FICTION_CRAFT + sig + web +
         f"Author the POPULATED CAST for this story. This is a '{shape_label}' shape.\n"
         f"THEME: {theme}\n"
         f"PROTAGONIST (the player — never a cast member): {protagonist}\n"
@@ -602,7 +613,8 @@ ARCHITECT_SCHEMA = {
                 "tool": {"type": "string",
                          "enum": ["add_element", "set_role", "set_ending",
                                   "set_game_type", "pick_world", "resume",
-                                  "begin_build", "show_library", "chat"]},
+                                  "begin_build", "reroll_surprise", "show_library",
+                                  "show_styles", "chat"]},
                 "detail": {"type": "string",
                            "description": "add_element: ONE world element to weave "
                            "in ('a space-station noir', 'a T-Rex with a machine "
@@ -855,17 +867,40 @@ def architect_turn(provider: Provider, history: str, brief_so_far: str,
         "- begin_build: ONLY once they signal they're satisfied / say go / 'surprise "
         "me, just start'. Start decisive, but BEFORE building do a final confirm — "
         "offer to weave in anything else — and keep accepting additions until they "
-        "say go. 'Surprise me' is license to fill the rest yourself and build.\n"
+        "say go. On a PURE 'surprise me' (nothing brought), begin_build makes the "
+        "HOST roll a shape and ASK the guest 'how does X sound?' — when the brief "
+        "shows a HOST-ROLLED PROPOSAL: their yes/go → begin_build (it builds the "
+        "proposal); 'another/no/roll again' → reroll_surprise; their own new idea → "
+        "ordinary tools (the proposal dissolves).\n"
+        "- reroll_surprise: the guest declined the host-rolled proposal and wants a "
+        "fresh roll. Only meaningful while a HOST-ROLLED PROPOSAL stands.\n"
         "- show_library: display the ready-made worlds. The host renders the clean "
         "menu — keep your reply a short intro line, don't list them yourself.\n"
+        "- show_styles: display the FULL WALL of play-shapes (all 155, grouped by "
+        "family) — when the guest asks what KINDS of stories exist, wants to browse "
+        "everything, or seems hungry for the whole menu. The host renders the wall; "
+        "keep your reply one short line and end with the question ('Anything on "
+        "this wall calling to you?'). A named shape they pick lands via "
+        "set_game_type as usual.\n"
         "- chat: just answer their question or ask the next one; no state change.\n\n"
         "OPENING A NEW BUILD — when the guest first signals they want a NEW world "
-        "but hasn't described one yet, your VERY FIRST move is to offer the fork "
-        "plainly, as a single light choice: either YOU dream one up for them ('I can "
-        "surprise you with one'), OR they describe any world and you'll build it. "
-        "Don't launch into the multi-step interview until they've picked — and 'you "
-        "choose / surprise me' is immediate license to invent the whole thing and "
-        "begin_build, no interview needed.\n"
+        "but hasn't described one yet, your FIRST move IS the interview's first beat "
+        "— never a bare either/or that ends without asking anything. In ONE short "
+        "message: offer two or three CONCRETE, CONTRASTING sparks, one evocative "
+        "line each — spanning DIFFERENT SHAPES OF PLAY, never two mysteries (vary "
+        "them every time — one beloved classic shape, one bolder or stranger: 'a "
+        "first command on a failing starship' beside 'a peace negotiation between "
+        "two dragon courts'), say plainly that anything of "
+        "their own works too — a premise, a place, a mood, a single odd ingredient "
+        "— that they can ask to SEE EVERYTHING (the full wall of story shapes, via "
+        "show_styles), or that 'surprise me' hands it all to you, and END WITH A "
+        "DIRECT "
+        "QUESTION ('Which of these calls to you — or what's the seed you're "
+        "carrying?'). 'You choose / surprise me' is immediate license to invent the "
+        "whole thing and begin_build, no interview needed.\n"
+        "EVERY interview reply ends with a QUESTION, or an explicit invitation to "
+        "say 'go' — never a statement that leaves the guest wondering whose turn it "
+        "is.\n"
         "BUILDING A NEW WORLD — once they choose to describe one, run a brief GUIDED, "
         "MULTI-STEP interview (like a character-creation, but for the fiction itself), "
         "ONE beat at a time, "
@@ -880,6 +915,10 @@ def architect_turn(provider: Provider, history: str, brief_so_far: str,
         "  • TONE — place it on a spectrum and NAME it: gritty realism ↔ heightened "
         "drama ↔ campy pulp (gritty realism is a very different world from campy "
         "pulp). Anchor it to an analog too.\n"
+        "  • THE SPARK — at least one concrete thing THEY want to exist in it (a "
+        "person, a place, an object, a grudge, an odd little ingredient). The world "
+        "grows its richness around what the guest actually brought — ask for it if "
+        "nothing personal has surfaced yet.\n"
         "Capture each via add_element with the analog folded in ('set in a port "
         "city like 1880s Marseille'). 'Surprise me / just go' is always license to "
         "fill these yourself and build — don't interrogate a guest who waved you on.\n\n"
@@ -891,8 +930,13 @@ def architect_turn(provider: Provider, history: str, brief_so_far: str,
         "concrete choice yourself, don't bounce it back. VARY where your pick lands on the "
         "spectrum from traditional-and-cliché to off-the-wall-and-out-there — roll loosely: "
         "sometimes a beloved classic, sometimes something unexpected; never the same safe "
-        "default every time. (A BOLD premise pick still gets grounded, credible execution — "
-        "'off the wall' means a daring choice, never sloppy or reflexively weird craft.)\n"
+        "default every time. THIS IS NOT A MURDER-MYSTERY MACHINE: when inventing, range "
+        "across the whole breadth of play — survival, courtship, heists, expeditions, "
+        "sieges, sport, hauntings, statecraft, trade, rebellion, pilgrimage — and if an "
+        "idea reflexively reaches for a body and a culprit, check whether a different "
+        "shape would delight more. (A BOLD premise pick still gets grounded, credible "
+        "execution — 'off the wall' means a daring choice, never sloppy or reflexively "
+        "weird craft.)\n"
         "Judgment: capturing is cheap; building the WRONG thing is costly — when in "
         "doubt, chat or add, never begin_build prematurely. Don't ask them to "
         "restate what they already told you (it's in the brief below). No "
@@ -1070,15 +1114,27 @@ ESTIMATE_ELAPSED_SCHEMA = {
 
 
 def estimate_elapsed(provider: Provider, *, now: str, hours_per_day: int,
-                     phases: list[str], action: str, narration: str) -> dict:
+                     phases: list[str], action: str, narration: str,
+                     distance_unknown: str = "") -> dict:
     """Estimate how much DIEGETIC time a turn consumed, relative to what happened
     (DIEGETIC-TIME.md) — intuitively, not per-turn-fixed. Honors the WORLD's day
     length (a 72-hour day means 'a few hours' is a smaller fraction of the day) and
     the player's explicit waits ('until sunset' → jump_to_phase; 'three days later'
-    → jump_days). Cheap tier (a small bounded estimate). `action`/`narration` are
-    untrusted — read as events to time, not instructions."""
+    → jump_days). `distance_unknown` (#101 inversion, Cx 454): the map could not
+    prove this move was LOCAL — price the movement at its true scale from the
+    fiction; never the room-to-room default, and never ASSUMED long. Cheap tier
+    (a small bounded estimate). `action`/`narration` are untrusted — read as events
+    to time, not instructions."""
     action = (action or "").strip()[:1000]
     narration = (narration or "").strip()[:2000]
+    journey_note = (
+        f"\nNOTE: the map CANNOT PROVE this movement was a local step "
+        f"({distance_unknown.replace('->', ' → ')}) — price it at its TRUE scale "
+        f"from what the fiction has established: a walk next door is still minutes, "
+        f"but travel between distant sites (another village, across a city, a ride "
+        f"through the night) is many minutes to hours. Never assume long; never "
+        f"default to the room-to-room amount.\n"
+        if distance_unknown else "")
     return complete_sync(provider,
         "You track the passage of IN-WORLD time in an interactive story. Given the "
         "current time, the player's action, and what happened, estimate how much "
@@ -1089,7 +1145,8 @@ def estimate_elapsed(provider: Provider, *, now: str, hours_per_day: int,
         "until sunset', 'rest until morning'), set jump_to_phase to that phase and "
         "leave advance_minutes 0. If they skip days ('three days later'), set "
         "jump_days. Respect this world's clock: a day here is "
-        f"{hours_per_day} hours long, with phases: {', '.join(phases)}.\n\n"
+        f"{hours_per_day} hours long, with phases: {', '.join(phases)}."
+        + journey_note + "\n\n"
         f"CURRENT TIME: {now}\n"
         f"PLAYER ACTION: {action}\n"
         f"WHAT HAPPENED: {narration}",
@@ -1929,6 +1986,10 @@ RENDER_LEASH = (
     "the player plucked from a sleeve is now in their hand, NOT back on the sleeve; a door "
     "they opened stays open; a thing they pocketed is in their pocket. Honor the player's "
     "completed actions on the world as real and persistent. "
+    "PLACES KEEP THEIR NAMES (binding): an established room or place is always called by "
+    "its established name — the parlor stays 'the parlor', never 'the drawing room'; the "
+    "study never becomes 'the library'. A synonym reads as a DIFFERENT room and fractures "
+    "the player's map of the world; if a place has been named, that name IS the place. "
     "Stay in voice; second person, present tense."
 )
 
@@ -2354,7 +2415,12 @@ def resolve_destination(provider: Provider, phrase: str, roster: list) -> dict:
         f"Is the player's phrase a REFERENCE to one of the known places (a definite "
         f"description, role, or paraphrase — e.g. 'the scene of the crime' refers to an "
         f"established murder-scene place), a GENUINELY NEW place this story never established, "
-        f"or AMBIGUOUS (could equally be more than one)? Bind only on a clear referent.",
+        f"or AMBIGUOUS (could equally be more than one)? Players speak NATURALLY: an everyday "
+        f"synonym or near-name for a known room IS a reference to it — 'the drawing room' for "
+        f"an established parlor, 'the bar's basement' for a tavern cellar, 'the shop' for the "
+        f"only store in town — including the room they are in RIGHT NOW (re-entering or naming "
+        f"it is still that room). Reserve GENUINELY NEW for a place the story truly never "
+        f"established; bind only on a clear referent.",
         RESOLVE_DEST_SCHEMA, tier="cheap", task="dst")
 
 

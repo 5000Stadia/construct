@@ -1433,3 +1433,112 @@ class TestDeathTerminalTransport:
         text = "\n".join(out.chunks)
         assert "End of Chapter" in text and "The story goes on" in text
         assert "telegram:dt2" in core._pending_continue
+
+
+# ---- /remove: retire a world from the shelf (founder 2026-07-05) ----------
+
+class TestRemoveWorld:
+    def _admit(self, conn, ext, scenario="bodycase"):
+        code = registry.mint_invite(conn, "telegram", scenario, now=NOW)
+        registry.claim_invite(conn, code, "telegram", ext, now=NOW)
+        registry.mark_started(conn, "telegram", ext)
+
+    def _fake_world(self, tmp_path, monkeypatch, name, title):
+        import json
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "worlds").mkdir(exist_ok=True)
+        (tmp_path / "worlds" / f"{name}.world").write_bytes(b"x")
+        (tmp_path / "worlds" / f"{name}.meta.json").write_text(json.dumps(
+            {"title": title, "genre": "test tale"}))
+
+    def test_remove_by_title_moves_files_to_attic(self, conn, tmp_path, monkeypatch):
+        self._fake_world(tmp_path, monkeypatch, "live_t_1", "The Glass Caravan")
+        self._admit(conn, "rw1")
+        core = _core(conn, _Factory())
+        out = core.handle(_ev("telegram", "rw1", "/remove The Glass Caravan"), now=NOW)
+        text = "\n".join(out.chunks)
+        assert "retired to the attic" in text and "nothing" in text.lower()
+        assert not (tmp_path / "worlds" / "live_t_1.world").exists()
+        assert (tmp_path / "worlds" / "attic" / "live_t_1.world").exists()
+        assert (tmp_path / "worlds" / "attic" / "live_t_1.meta.json").exists()
+
+    def test_remove_refuses_the_world_you_stand_in(self, conn, tmp_path, monkeypatch):
+        self._fake_world(tmp_path, monkeypatch, "bodycase", "The Rain in Bluegate Yard")
+        self._admit(conn, "rw2", scenario="bodycase")
+        core = _core(conn, _Factory())
+        out = core.handle(_ev("telegram", "rw2", "/remove The Rain in Bluegate Yard"),
+                          now=NOW)
+        assert "standing in" in "\n".join(out.chunks)
+        assert (tmp_path / "worlds" / "bodycase.world").exists()   # untouched
+
+    def test_remove_unknown_and_bare_list(self, conn, tmp_path, monkeypatch):
+        self._fake_world(tmp_path, monkeypatch, "live_t_2", "A Quiet Orbit")
+        self._admit(conn, "rw3")
+        core = _core(conn, _Factory())
+        out = core.handle(_ev("telegram", "rw3", "/remove Nonesuch Manor"), now=NOW)
+        assert "don't see" in "\n".join(out.chunks)
+        out2 = core.handle(_ev("telegram", "rw3", "/remove"), now=NOW)
+        t2 = "\n".join(out2.chunks)
+        assert "Which world" in t2 and "A Quiet Orbit" in t2
+
+
+def test_styles_wall_renders_all_families():
+    # the host-rendered wall: 155 names under 19 family headers, pick-ready.
+    from construct.play_styles_data import STYLE_CARDS
+    from construct.transport_core import _styles_wall
+    wall = _styles_wall()
+    assert "155 shapes of play" in wall
+    fams = {c["family"] for c in STYLE_CARDS.values()}
+    assert all(f"— {f} —" in wall for f in fams)        # every family present
+    assert "Mystery / Whodunnit" in wall and "Political Intrigue" in wall
+    assert wall.strip().endswith("or describe your own.")
+
+
+# ---- /help audit (founder 2026-07-05): every advertised command active & clear ----
+
+class TestHelpAudit:
+    def _admit(self, conn, ext, scenario="bodycase"):
+        code = registry.mint_invite(conn, "telegram", scenario, now=NOW)
+        registry.claim_invite(conn, code, "telegram", ext, now=NOW)
+        registry.mark_started(conn, "telegram", ext)
+
+    def test_help_is_grouped_and_every_command_is_real(self, conn):
+        from construct.transport_core import HELP
+        # grouped sections, not a run-on paragraph
+        for header in ("🎭 YOUR STORY", "🧭 AT A GLANCE", "📝 YOUR NOTES",
+                       "🗂 THE SHELF", "🛠 THE ENGINE"):
+            assert header in HELP
+        # /feedback says plainly WHO it reaches and that turns are attached
+        assert "DIRECTLY TO THE DEVELOPER" in HELP
+        assert "last few turns are attached" in HELP
+        # every advertised command has a live handler (dispatch smoke)
+        self._admit(conn, "ha1")
+        core = _core(conn, _Factory())
+        for cmd in ("/resume", "/world", "/status", "/notebook", "/notes",
+                    "/help", "/exit"):
+            out = core.handle(_ev("telegram", "ha1", cmd), now=NOW)
+            text = "\n".join(out.chunks)
+            assert "Unknown command" not in text, cmd
+        # the unsafe silent-erase /play is gone from HELP; /restart is advertised
+        assert "/play" not in HELP
+        assert "/restart — start this story over (asks how far back" in HELP
+
+    def test_play_with_a_real_save_asks_before_erasing(self, conn, tmp_path,
+                                                       monkeypatch):
+        # the footgun closed: /play with saved progress routes into /restart's
+        # guided confirmation instead of silently erasing the run.
+        import json
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "worlds").mkdir()
+        (tmp_path / "worlds" / "bodycase.meta.json").write_text(json.dumps(
+            {"title": "The Rain in Bluegate Yard"}))
+        self._admit(conn, "ha2")
+        from construct.game import slot_path
+        slot_path("bodycase", "telegram:ha2").parent.mkdir(parents=True, exist_ok=True)
+        slot_path("bodycase", "telegram:ha2").write_bytes(b"x")   # a REAL save exists
+        core = _core(conn, _Factory())
+        out = core.handle(_ev("telegram", "ha2", "/play"), now=NOW)
+        text = "\n".join(out.chunks)
+        assert "lose your saved progress" in text or "How far back" in text
+        core.handle(_ev("telegram", "ha2", "cancel"), now=NOW)    # and cancel works
+        assert slot_path("bodycase", "telegram:ha2").exists()     # nothing erased
