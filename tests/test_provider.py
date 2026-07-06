@@ -142,3 +142,53 @@ def test_codex_live_smoke():
         "Reply with the single word 'ready' in the answer field.",
         SCHEMA, tier="cheap"))
     assert isinstance(result.get("answer"), str)
+
+
+def test_transient_transport_failure_retries_then_succeeds(tmp_path):
+    # Founder live build sunk by ONE dropped stream ('peer closed connection /
+    # incomplete chunked read'): connection-level failures are transient —
+    # retried bounded before surfacing.
+    import asyncio
+    provider = CodexProvider(auth_path=tmp_path / "absent.json")
+    calls = {"n": 0}
+
+    async def flaky(prompt, schema, tier, deliberate=False):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            err = ProviderTransportError("peer closed connection (incomplete chunked read)")
+            err.transient = True
+            raise err
+        return '{"ok": true}'
+
+    provider._call_once = flaky
+    orig_sleep = asyncio.sleep
+
+    async def run():
+        asyncio.sleep = lambda s: orig_sleep(0)  # no real backoff in tests
+        try:
+            return await provider.complete("p", {"type": "object",
+                                                 "properties": {"ok": {"type": "boolean"}},
+                                                 "required": ["ok"]})
+        finally:
+            asyncio.sleep = orig_sleep
+
+    assert asyncio.run(run()) == {"ok": True}
+    assert calls["n"] == 3          # two transient failures, third lands
+
+
+def test_non_transient_transport_failure_fails_fast(tmp_path):
+    # API-level errors keep fail-fast semantics — no retry.
+    import asyncio
+    import pytest
+    provider = CodexProvider(auth_path=tmp_path / "absent.json")
+    calls = {"n": 0}
+
+    async def broken(prompt, schema, tier, deliberate=False):
+        calls["n"] += 1
+        raise ProviderTransportError("Codex API error (400): bad request")
+
+    provider._call_once = broken
+    with pytest.raises(ProviderTransportError):
+        asyncio.run(provider.complete("p", {"type": "object", "properties": {},
+                                            "required": []}))
+    assert calls["n"] == 1          # no retry on a non-transient failure

@@ -468,7 +468,8 @@ class CodexProvider(Provider):
                        deliberate: bool = False) -> dict:
         attempt_prompt = prompt
         for attempt in range(2):  # one bounded re-ask on schema mismatch
-            raw = await self._call_once(attempt_prompt, schema, tier, deliberate)
+            raw = await self._call_transient_retry(attempt_prompt, schema, tier,
+                                                   deliberate)
             try:
                 payload = strip_nulls(json.loads(raw))
             except json.JSONDecodeError as exc:
@@ -486,6 +487,28 @@ class CodexProvider(Provider):
                     f"Answer again with JSON valid against the schema.")
                 continue
             raise SchemaViolation(f"after re-ask: {exc_msg[:300]}")
+        raise AssertionError("unreachable")
+
+    async def _call_transient_retry(self, prompt: str, schema: dict, tier: Tier,
+                                    deliberate: bool = False) -> str:
+        """Bounded retry of TRANSIENT connection failures (founder live build
+        sunk by one 'peer closed connection / incomplete chunked read'): a
+        dropped stream mid-response is a network blip, not a verdict — retry
+        it up to twice with a short backoff before surfacing. Only failures
+        `_call_once` marks `transient` (connection-level httpx.TransportError)
+        qualify; API errors, auth failures, and timeouts keep their existing
+        fail-fast semantics (a timeout already consumed its full bound —
+        retrying it would double a player's worst-case wait)."""
+        for i in range(3):
+            try:
+                return await self._call_once(prompt, schema, tier, deliberate)
+            except ProviderTransportError as exc:
+                if i == 2 or not getattr(exc, "transient", False):
+                    raise
+                logger.warning("codex transient transport failure "
+                               "(retry %d/2, tier=%s): %s", i + 1, tier,
+                               str(exc)[:150])
+                await asyncio.sleep(2.0 * (i + 1))
         raise AssertionError("unreachable")
 
     @staticmethod
@@ -567,6 +590,15 @@ class CodexProvider(Provider):
             # so callers' fail-open (except ProviderError) catches it: a
             # network blip skips one cohort/frame, never crashes the build.
             raise ProviderTimeout(f"Codex network timeout (tier={tier}): {exc}") from exc
+        except httpx.TransportError as exc:
+            # Connection-level failure (reset, refused, incomplete chunked
+            # read): marked transient so `_call_transient_retry` re-tries it
+            # bounded — a dropped stream must not sink a whole build. (Caught
+            # BEFORE HTTPError; TimeoutException above stays a timeout.)
+            err = ProviderTransportError(
+                f"Codex transport error (tier={tier}): {exc}")
+            err.transient = True
+            raise err from exc
         except httpx.HTTPError as exc:
             raise ProviderTransportError(f"Codex transport error (tier={tier}): {exc}") from exc
 
