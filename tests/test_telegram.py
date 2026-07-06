@@ -1571,3 +1571,61 @@ class TestHelpAudit:
         assert "lose your saved progress" in text or "How far back" in text
         core.handle(_ev("telegram", "ha2", "cancel"), now=NOW)    # and cancel works
         assert slot_path("bodycase", "telegram:ha2").exists()     # nothing erased
+
+
+class TestBuildRetry:
+    def _enter(self, conn, ext):
+        # mirror the gate flow: invite → claimed, not yet started (Atrium)
+        code = registry.mint_invite(conn, "telegram", "anchor", now=NOW)
+        registry.claim_invite(conn, code, "telegram", ext, now=NOW)
+        registry.set_creation(conn, "telegram", ext, {"history": [], "state": {}})
+
+    def test_failed_build_retries_once_before_surfacing(self, conn, monkeypatch):
+        # DELAYED RETRY (founder 2026-07-06): the first build failure gets a
+        # breath + an automatic fresh attempt; the guest sees the snag ping and
+        # then a WORLD, never the failure message. The retry takes a fresh name.
+        import construct.transport_core as tc
+        monkeypatch.setattr(tc.time, "sleep", lambda s: None)
+        self._enter(conn, "rty")
+        f = _Factory()
+        attempts, pings = [], []
+
+        def flaky_builder(*, name, provider, seed, endless, win_direction,
+                          play_as, on_stage, game_types=None, reality_register=""):
+            attempts.append(name)
+            if len(attempts) == 1:
+                raise RuntimeError("peer closed connection (transient)")
+            return {}
+
+        provider = StubProvider([
+            _aturn("Cooking.", _aact("add_element", "a lighthouse vigil"),
+                   _aact("begin_build"))])
+        core = _core(conn, f, provider=provider, builder=flaky_builder,
+                     notify=lambda chat_id, text: pings.append(text))
+        out = core.handle(_ev("telegram", "rty", "a lighthouse vigil, go"), now=NOW)
+        assert len(attempts) == 2                          # failed once, retried
+        assert any("taking a breath" in p for p in pings)  # the snag ping
+        assert "couldn't quite stabilize" not in out.chunks[0]
+        assert registry.scenario_for(conn, "telegram", "rty") == attempts[-1]
+
+    def test_double_failure_surfaces_the_general_message(self, conn, monkeypatch):
+        import construct.transport_core as tc
+        monkeypatch.setattr(tc.time, "sleep", lambda s: None)
+        self._enter(conn, "rt2")
+        f = _Factory()
+        attempts = []
+
+        def broken_builder(*, name, provider, seed, endless, win_direction,
+                           play_as, on_stage, game_types=None, reality_register=""):
+            attempts.append(name)
+            raise RuntimeError("the grid is down")
+
+        provider = StubProvider([
+            _aturn("Cooking.", _aact("add_element", "a doomed expedition"),
+                   _aact("begin_build"))])
+        core = _core(conn, f, provider=provider, builder=broken_builder)
+        out = core.handle(_ev("telegram", "rt2", "a doomed expedition, go"), now=NOW)
+        assert len(attempts) == 2                          # exactly one retry
+        assert "couldn't quite stabilize" in out.chunks[0]
+        # never repointed at a built world — still on the invite's scenario (Atrium)
+        assert registry.scenario_for(conn, "telegram", "rt2") == "anchor"

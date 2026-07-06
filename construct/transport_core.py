@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -117,6 +118,11 @@ WELCOME_IMAGE = Path(__file__).resolve().parent / "assets" / "welcome.png"
 BUILD_HEADS_UP = (
     "🌐 Constructing your world — the initial build may take ~20 minutes. "
     "I'll tell you the moment the doors open.")
+
+#: The breath between a failed build attempt and its automatic retry (founder
+#: 2026-07-06): long enough for a transient provider spell to pass, short
+#: enough that the guest isn't left wondering.
+BUILD_RETRY_DELAY_S = 20.0
 
 #: Fired the instant the character is settled (the name turn), BEFORE the opening scene
 #: renders — that first turn takes a bit (staging + the opening render), so the chat doesn't
@@ -1285,23 +1291,45 @@ class TransportCore:
             if line:
                 self._notify(ev, line)
 
-        try:
-            slot = slot_path(name, pid)
-            if slot.exists():
-                slot.unlink()  # fresh name → paranoia only
-            self._build(name=name, provider=self._provider(),
-                        seed=brief.get("premise", ""),
-                        endless=brief.get("mode") != "win_loss",
-                        win_direction=brief.get("win_direction", ""),
-                        play_as=brief.get("play_as", ""),
-                        game_types=brief.get("game_types") or [],
-                        reality_register=brief.get("reality", ""),
-                        on_stage=on_stage)
-        except Exception as exc:
-            logger.exception("build failed for %s", pid)
+        # DELAYED RETRY (founder 2026-07-06, the dropped-stream build sink): one
+        # failed attempt gets a breath and a fresh try BEFORE the guest ever
+        # sees a failure — most build deaths are transient provider spells, and
+        # the guest already invested a whole interview. Only a second failure
+        # surfaces the general message (their brief stays intact either way).
+        last_exc: Exception | None = None
+        for _attempt in range(2):
+            try:
+                # Re-scan for a free name each attempt: a failed run cleans up
+                # after itself, but if anything lingers the retry must not trip
+                # over the corpse (FileExistsError) — it just takes the next slot.
+                while scenario_path(name).exists():
+                    _n += 1
+                    name = f"{base}_{_n}"
+                slot = slot_path(name, pid)
+                if slot.exists():
+                    slot.unlink()  # fresh name → paranoia only
+                self._build(name=name, provider=self._provider(),
+                            seed=brief.get("premise", ""),
+                            endless=brief.get("mode") != "win_loss",
+                            win_direction=brief.get("win_direction", ""),
+                            play_as=brief.get("play_as", ""),
+                            game_types=brief.get("game_types") or [],
+                            reality_register=brief.get("reality", ""),
+                            on_stage=on_stage)
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.exception("build failed for %s (attempt %d)", pid,
+                                 _attempt + 1)
+                if _attempt == 0:
+                    self._notify(ev, "(hit a snag mid-build — taking a breath "
+                                     "and trying again…)")
+                    time.sleep(BUILD_RETRY_DELAY_S)
+        if last_exc is not None:
             return self._reply(
-                ev, f"(I couldn't quite stabilize that world — {exc}. Tell me what "
-                    f"to change, or we can try again.)")
+                ev, f"(I couldn't quite stabilize that world — {last_exc}. Tell "
+                    f"me what to change, or we can try again.)")
         registry.set_scenario(self._conn, ev.platform, ev.external_id, name)
         self._notify(ev, "Your world is ready. Let's settle who you are in it…")
         return self._enter_world(pid, ev, scenario=name,
