@@ -1759,7 +1759,8 @@ def reseed_character_frames(name: str, provider: Provider,
     try:
         digest = _world_digest(world)
         for char in targets:                       # clear the old frame first
-            for row in world.buffer.visible(frame=f"knows:{char}"):
+            from construct.adapter import frame_facts as _ff
+            for row in _ff(world, f"knows:{char}"):
                 world.porcelain.retract(row.id, "reseed: re-authoring knowledge frame")
         # Honor the protagonist's concealment filter on reseed too (same bug-fix).
         from construct.adapter import PorcelainWorldReads
@@ -2373,7 +2374,8 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                     if _se and _sa:
                         _settled_lines.append(
                             f"{_se} · {_sa} · {getattr(_atom, 'value', '')} — ANSWERED")
-            for _row in world.buffer.visible(frame=SESSION):
+            from construct.adapter import frame_facts as _ffs
+            for _row in _ffs(world, SESSION):
                 if (str(_row.entity).startswith("card:")
                         and str(_row.attribute) == "weave_state"):
                     _settled_lines.append(f"{_row.entity}: {_row.value} — closed")
@@ -2453,7 +2455,8 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # valid_from write would override it; the reopened episode would silently run the OLD
         # main arc (its stale session:reckoning_ready then trips turn-1 expiry). Append-only
         # retraction of the visible rows clears the conflict so the new manifest reads clean.
-        for _row in world.buffer.visible(frame=PLOT):
+        from construct.adapter import frame_facts as _ffp
+        for _row in _ffp(world, PLOT, entity="arc:portfolio"):
             if _row.entity == "arc:portfolio" and _row.attribute in ("arc_ids", "main_arc"):
                 world.porcelain.retract(_row.id, "continuation: superseding the portfolio manifest")
         world.porcelain.ingest_structured(
@@ -2547,7 +2550,8 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # event's grade/shape/basis rows (row-level — the receipt is session bookkeeping, not a fold).
         _prior_shape: dict = {}
         try:
-            _rc_rows = [r for r in world.buffer.visible(frame=SESSION)
+            from construct.adapter import frame_facts as _ffr
+            _rc_rows = [r for r in _ffr(world, SESSION)
                         if str(r.entity).startswith("event:arc_outcome_")
                         and r.attribute in ("grade", "outcome_shape", "basis")]
             # group by the LATEST receipt ENTITY first (Cx 380: latest-row-per-attr could mix a
@@ -2568,16 +2572,16 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
             _cons = [e for _k in ("word_spreads", "reputation_changes", "debt_called",
                                   "door_closed", "ally_returns")
                      for e in reads.events(kind=_k)]
-            _surfaced = {str(r.entity) for r in world.buffer.visible(frame=SESSION)
-                         if str(r.attribute) == "surfaced_turn"}
+            from construct.adapter import frame_facts as _ffu
+            _surfaced = {str(r.entity) for r in _ffu(world, SESSION,
+                                                     attribute="surfaced_turn")}
             _fresh_cons = [e for e in _cons if e.event_id not in _surfaced]
             if _fresh_cons:
                 _ev = max(_fresh_cons, key=lambda e: (getattr(e, "at", 0) or 0))
                 # row-level read: event-entity attrs never fold via state() (the shape-
                 # receipt precedent) — scan visible rows for the detail directly.
-                _dtl = next((str(r.value) for r in world.buffer.visible()
-                             if str(r.entity) == _ev.event_id
-                             and str(r.attribute) == "detail"), None)
+                _dtl = next((str(r.value) for r in _ffu(world, "canon",
+                             entity=_ev.event_id, attribute="detail")), None)
                 _callback = (_ev.kind.replace("_", " ")
                              + (f" — {_dtl}" if _dtl else ""))
                 world.porcelain.ingest_structured(

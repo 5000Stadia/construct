@@ -16,6 +16,28 @@ from construct.arc.conditions import EventRow
 logger = logging.getLogger(__name__)
 
 
+def frame_facts(world: Any, frame: str, *, entity: str | None = None,
+                attribute: str | None = None, prefix: str | None = None,
+                as_of: float | None = None, include_meta: bool = False) -> list:
+    """BOUNDED-READS take-up (PB 092): the porcelain `facts()` frame-scan,
+    presented row-like (`.entity`/`.attribute`/`.value`/`.valid_from`) so the
+    host's audited scan sites read the SAME shape they always did — receipt
+    trails, knowledge digests, marker rows. This retires every direct
+    `buffer.visible(...)` reach; folded truth still comes from
+    `state`/`snapshot`, never from here."""
+    from types import SimpleNamespace
+    out = []
+    for f in world.porcelain.facts(frame, entity=entity, attribute=attribute,
+                                   prefix=prefix, as_of=as_of,
+                                   include_meta=include_meta):
+        valid = f.get("valid") or [None, None]
+        out.append(SimpleNamespace(entity=f["entity"], attribute=f["attribute"],
+                                   value=f["value"], valid_from=valid[0],
+                                   valid_to=valid[1],
+                                   id=(f.get("provenance") or {}).get("assertion_id")))
+    return out
+
+
 class PorcelainWorldReads:
     """WorldReads over a pattern-buffer World's porcelain."""
 

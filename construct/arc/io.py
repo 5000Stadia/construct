@@ -629,8 +629,9 @@ def replan_main_arc(world, new_arc, *, turn: int, frame: str = "plot:main") -> s
         ids = ids + [new_id]
     world.porcelain.ingest_structured(
         arc_to_items(new_arc, frame=frame) + index_items(new_arc, frame=frame), frame=frame)
-    for row in world.buffer.visible(frame=frame):
-        if row.entity == _PORTFOLIO and row.attribute in ("arc_ids", "main_arc"):
+    from construct.adapter import frame_facts
+    for row in frame_facts(world, frame, entity=_PORTFOLIO):
+        if row.attribute in ("arc_ids", "main_arc"):
             world.porcelain.retract(
                 row.id, "reshape replan: superseding the portfolio manifest")
     world.porcelain.ingest_structured(

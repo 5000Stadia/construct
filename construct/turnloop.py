@@ -1435,14 +1435,14 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                  if _undisc(n) and getattr(n, "location", "")}
         _places: list[tuple[str, str]] = []
         try:
-            # CANON-VISIBLE ONLY (Cx 398 blocker 1): `buffer.visible()` without a frame is
-            # UNFILTERED in PB — plot:/session:/knows: place rows would leak hidden topology
-            # into the prompt and let a `moved` tick relocate canon cast into a plot-only
-            # place. A destination qualifies only if its name/kind READS through the
+            # CANON-VISIBLE ONLY (Cx 398 blocker 1; BOUNDED-READS take-up, PB 092): the
+            # roster comes from the porcelain `entities("canon", …)` verb — frame-bound
+            # by construction, so plot:/session:/knows: place rows can never leak hidden
+            # topology. A destination still qualifies only if its name/kind READS through the
             # horizon-bound canon surface (the same self-screen the semantic-bind roster
             # uses); everything else is not world-truth geography.
-            for _row in world.buffer.visible(entity_prefix="place:"):
-                _pid = str(getattr(_row, "entity", "") or "")
+            for _pid in world.porcelain.entities("canon", prefix="place:"):
+                _pid = str(_pid or "")
                 if not _pid or _pid == scene or _pid in _excl:
                     continue
                 if any(_pid == q for q, _ in _places):
@@ -2205,8 +2205,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 return False  # provably near — no deliberation on a step
         _key = _journey_accept_key(pre_scene, _dest_key, _delib_deadline[1])
         try:  # accepted before (origin+dest+hazard+coordinate, Cx 457)? proceed, reuse est
-            for _r in world.buffer.visible(entity="session:journey_accept",
-                                           attribute=_key, frame=SESSION):
+            from construct.adapter import frame_facts as _ff
+            for _r in _ff(world, SESSION, entity="session:journey_accept",
+                          attribute=_key):
                 trace.journey_est = int(json.loads(str(_r.value)).get("est", -1))
                 return False
         except Exception:  # noqa: BLE001
@@ -2425,13 +2426,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                  if _undiscovered_offscene(n) and n.location} if cast else set()
                         _cand_places = set(scope or []) | ({pre_scene} if pre_scene else set()) \
                             | set(pre_chain or [])
-                        try:
-                            for _frm in (None, player_frame):
-                                for _row in world.buffer.visible(entity_prefix="place:",
-                                                                 frame=_frm):
-                                    _cand_places.add(getattr(_row, "entity", None) or "")
-                        except Exception:
-                            pass  # enumeration is best-effort; scope∪chain still serve
+                        # BOUNDED-READS (PB 092): every enumeration names its frame —
+                        # canon (world truth) + the player's own knowledge; the old
+                        # unframed scan is not expressible on the porcelain, by design.
+                        for _frm in ("canon", player_frame):
+                            try:
+                                for _pid2 in world.porcelain.entities(
+                                        _frm, prefix="place:"):
+                                    _cand_places.add(_pid2 or "")
+                            except Exception:
+                                pass  # enumeration is best-effort; scope∪chain still serve
                         _cand_places -= _excl | {""}
                         for _pid in sorted(_cand_places):
                             if not str(_pid).startswith("place:"):
@@ -4838,8 +4842,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # enter the canon bind path and get promoted into world truth.
         try:
             for _pfx in ("place:", "person:"):
-                for _nr in world.buffer.visible(attribute="name", entity_prefix=_pfx,
-                                                frame="canon", valid_as_of=_h):
+                from construct.adapter import frame_facts as _ff2
+                for _nr in _ff2(world, "canon", attribute="name", prefix=_pfx,
+                                as_of=_h):
                     _resolve_cands.add(str(_nr.entity))
         except Exception:  # noqa: BLE001 — roster widening is enrichment, never a gate
             pass

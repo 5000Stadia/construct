@@ -47,7 +47,8 @@ def build_sheet(world: Any, protagonist: str, arc: Any,
     concealed = concealed_tokens(protected)
     stamp = turn_time(0)
     latest: dict[tuple[str, str], Any] = {}
-    for r in world.buffer.visible(frame=f"knows:{protagonist}"):
+    from construct.adapter import frame_facts
+    for r in frame_facts(world, f"knows:{protagonist}"):
         ent, attr = str(r.entity), str(r.attribute)
         if attr in _SKIP_ATTRS:
             continue
@@ -74,7 +75,8 @@ def _existing_value(world: Any, entity: str, attribute: str, frame: str) -> str 
     """The latest visible value for (entity, attribute) in `frame`, or None."""
     best, best_vf = None, -1.0
     try:
-        for r in world.buffer.visible(entity=entity, attribute=attribute, frame=frame):
+        from construct.adapter import frame_facts
+        for r in frame_facts(world, frame, entity=entity, attribute=attribute):
             vf = getattr(r, "valid_from", None) or 0.0
             if vf >= best_vf:
                 best, best_vf = str(r.value), vf

@@ -317,7 +317,8 @@ class Session:
             return ((str(r.entity), str(r.attribute)) not in _protected
                     and not value_leaks(str(getattr(r, "value", "")), _ctoks))
 
-        rows = [r for r in self._world.buffer.visible(frame=f"knows:{proto}") if _shows(r)]
+        from construct.adapter import frame_facts
+        rows = [r for r in frame_facts(self._world, f"knows:{proto}") if _shows(r)]
 
         def _name_of(ent: str) -> str | None:
             try:
@@ -334,7 +335,8 @@ class Session:
         # render as closed knowledge, never as active leads.
         _settled_ids: set = set()
         try:
-            for r in self._world.buffer.visible(frame="session:main"):
+            from construct.adapter import frame_facts
+            for r in frame_facts(self._world, "session:main"):
                 if (str(r.entity).startswith("settled:episode_")
                         and str(r.attribute) == "record"):
                     rec = json.loads(str(r.value))
