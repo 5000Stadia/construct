@@ -414,6 +414,27 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
         if result.get("merges"):
             logger.info("identity reconcile: %d cross-chunk merge(s)", result["merges"])
         _adjudicate_residue(world, proposals)
+        # SHAPE-FIX take-up (#108, PB 090): merge the structurally-DECISIVE
+        # fragment subset (anchor subsumption, engine-vetted — no relating
+        # edges, no kind conflict, no aka), then triage its residue through
+        # the same safe adjudicator.
+        _da = world.porcelain.adjudicate_deferred()
+        if _da.get("merged"):
+            logger.info("deferred adjudication: %d fragment merge(s)",
+                        len(_da["merged"]))
+        _adjudicate_residue(world, _da.get("residue") or [])
+        # Typing slips (person:harth beside place:harth): surface + retype with
+        # absorb — the engine verifies the slip signature itself and vetoes a
+        # non-slip (`vetoed_not_a_slip`), so this pass cannot over-merge.
+        for _tc in world.porcelain.typing_conflicts():
+            _tk = (_tc.get("kinds") or [[], []])[1]
+            _r = world.porcelain.retype(
+                _tc["spurious"], _tk[0] if _tk else "object",
+                evidence=f"build-seal typing slip: shared anchor "
+                         f"{_tc.get('shared_anchor')!r}",
+                absorb=_tc["target"])
+            logger.info("typing slip %s -> %s: %s", _tc["spurious"],
+                        _tc["target"], _r.get("outcome"))
     except Exception as exc:  # a finalize-pass failure must never sink a build
         logger.warning("identity reconcile skipped: %s", exc)
 

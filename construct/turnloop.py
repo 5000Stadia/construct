@@ -2126,7 +2126,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     return v if isinstance(v, str) else ""
                 _pin_cands = (set(scope or []) | set(_pre_held) | set(pre_chain or [])
                               | ({pre_scene} if pre_scene else set()) | {arc.protagonist})
-                _raw = p.extract(player_input, scene=pre_scene, extract="lean")  # read-only
+                # pov= (PB SHAPE-FIX 4c, #108): the player's "I" IS the protagonist —
+                # deixis binds to them; person:you/person:i can never mint.
+                _raw = p.extract(player_input, scene=pre_scene, extract="lean",
+                                 pov=arc.protagonist)  # read-only
                 # PLAYER channel mint policy (founder 2026-06-30): no person/place by fiat — the
                 # player's "I am Bradford Clemense" must not mint a present NPC; the world introduces
                 # NPCs, the move channel makes places. Objects still mint (improv permanence).
@@ -3018,7 +3021,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         except Exception:
                             v = None
                     return v if isinstance(v, str) else ""
-                _nraw = p.extract(decision["action"], scene=scene, extract="lean")  # read-only
+                _nraw = p.extract(decision["action"], scene=scene, extract="lean",
+                                  pov=npc)  # read-only; the NPC's own "I" (PB 4c)
                 _nres, _nrec = resolve_rows(_nraw, scene=_ncands, protagonist=arc.protagonist,
                                             name_of=_npc_name, allow_mint=True)
                 trace.resolver = (trace.resolver or []) + _nrec
@@ -4859,7 +4863,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             return v if isinstance(v, str) else ""
         try:
             with _phase(trace, "post_extract"):
-                _raw = p.extract(prose, scene=scene, extract="lean")  # READ-ONLY (no write)
+                _raw = p.extract(prose, scene=scene, extract="lean",
+                                 pov=arc.protagonist)  # READ-ONLY; "you" = the protagonist (PB 4c)
                 # #98 live-probe finding: the lean extractor omits name rows — reconstruct
                 # the cased surface form from the prose (the stub gate's only evidence);
                 # synthetic names commit only WITH a stub, never onto bound entities.
