@@ -605,6 +605,44 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
         # arc_to_items on the ingest path, which never runs the viability gate). Re-author with
         # the located allowlist; keep the linted proposal for the fallback. Empty allowlist →
         # the loop exhausts, the fallback returns None, and we raise (never publish).
+        #
+        # THE PLAYER'S FIGURE IS STAGED, NEVER SWAPPED (#107, founder's Minutes Before
+        # Bullets): when the author picked exactly the figure the player asked to BE and
+        # that person is merely an UNPLACED stub, rejecting the pick trades the player's
+        # chosen identity for whichever stranger happened to hold a location (he asked for
+        # the defense apprentice; play cast him as a retrieval lead). Identity outranks
+        # staging: give the asked-for figure ground — an ordinary `in` row at the world's
+        # populated opening place — exactly the #104 anchor move, scoped to the play_as match.
+        if (arc.protagonist not in located_people
+                and play_as.strip() and arc.protagonist in known_ids):
+            def _toks(s: str) -> set[str]:
+                return set(s.lower().replace(":", " ").replace("_", " ").split())
+            _want = {w for w in _toks(play_as) if len(w) > 3}
+            _pick = _toks(arc.protagonist)
+            if _want & _pick:
+                _places = sorted(e for e in _canon_entity_ids(world)
+                                 if str(e).startswith("place:"))
+                # prefer the place where the located cast already stands (the
+                # opening scene), so the player wakes among the story's people
+                _crowd: dict[str, int] = {}
+                for _lp in located_people:
+                    try:
+                        _ch = world.porcelain.locate(_lp)
+                        if _ch:
+                            _crowd[_ch[0]] = _crowd.get(_ch[0], 0) + 1
+                    except Exception:  # noqa: BLE001
+                        continue
+                _ground = (max(_crowd, key=_crowd.get) if _crowd
+                           else (_places[0] if _places else None))
+                if _ground:
+                    world.porcelain.ingest_structured([
+                        {"entity": arc.protagonist, "attribute": "in",
+                         "value": _ground, "value_type": "entity"}])
+                    located_people = list(located_people) + [arc.protagonist]
+                    logger.warning(
+                        "protagonist %s matched play_as but was unplaced — staged "
+                        "at %s (identity outranks staging, #107)",
+                        arc.protagonist, _ground)
         if arc.protagonist not in located_people:
             _guard_failed_proposal = proposal
             proto_feedback = (

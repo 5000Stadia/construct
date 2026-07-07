@@ -110,15 +110,24 @@ def _parent_depth(reads: Any, source: str) -> int:
         return 0
 
 
+def _id_slug(s: str) -> str:
+    """Entity-id-safe local part: PB's identity gate (rightly) rejects ids with
+    embedded colons/odd characters as malformed — a reason like
+    'lint:1-referents' or a source like 'event:arc_terminal_x' must be slugged
+    before riding an id. The RAW string still travels as the row VALUE."""
+    import re
+    return re.sub(r"[^a-z0-9_]+", "_", (s or "").lower()).strip("_") or "x"
+
+
 def _lineage_exhausted(reads: Any, source: str) -> bool:
-    return reads.state(f"gen:exhausted:{source}", "kind",
+    return reads.state(f"gen:exhausted_{_id_slug(source)}", "kind",
                        frame=SESSION) == "exhausted_for_generation"
 
 
 # --- guard writes -------------------------------------------------------
 
 def _record_decline(world: Any, turn: int, reason: str) -> None:
-    eid = f"event:gen_declined_{turn}_{reason}"
+    eid = f"event:gen_declined_{turn}_{_id_slug(reason)}"
     world.porcelain.ingest_structured([
         {"entity": eid, "attribute": "kind", "value": "generation_declined",
          "valid_from": turn_time(turn)},
@@ -130,7 +139,7 @@ def _record_decline(world: Any, turn: int, reason: str) -> None:
 
 def _mark_exhausted(world: Any, source: str, turn: int) -> None:
     world.porcelain.ingest_structured([
-        {"entity": f"gen:exhausted:{source}", "attribute": "kind",
+        {"entity": f"gen:exhausted_{_id_slug(source)}", "attribute": "kind",
          "value": "exhausted_for_generation", "valid_from": turn_time(turn)},
     ], frame=SESSION)
 

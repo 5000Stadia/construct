@@ -762,3 +762,67 @@ def test_finalize_commits_laws_as_canon_and_meta(tmp_path):
     assert any(laws_block(laws) in p for p in provider.arc_prompts)
     assert any("TURN ON A LAW" in p for p in provider.arc_prompts)
     w.close()
+
+
+def test_finalize_stages_play_as_pick_instead_of_swapping(tmp_path):
+    # #107 (Minutes Before Bullets): the author picked EXACTLY the figure the
+    # player asked to be, but that person was an unplaced stub — the old guard
+    # swapped the player's identity for whichever stranger held a location.
+    # Identity outranks staging: the asked-for figure is STAGED (at the located
+    # cast's place), never traded away.
+    from construct import game
+    from construct.provider import StubProvider, task_of
+
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        return rule(prompt, schema) if prompt.startswith("Classify the lifetime") else {"items": []}
+
+    path = tmp_path / "ident.world"
+    w = World(path, world_id="w:ident", model=StubModel(fallback=fallback),
+              stance="fiction", title="Identity World")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:camp", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:road", "attribute": "kind", "value": "room", "timeless": True},
+        # the player's figure: a bare stub, never placed
+        {"entity": "person:defense_apprentice", "attribute": "kind", "value": "person",
+         "timeless": True},
+        # a located stranger the OLD guard would have swapped to
+        {"entity": "person:retrieval_lead", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:retrieval_lead", "attribute": "in", "value": "place:camp"},
+        {"entity": "fact:truth", "attribute": "kind", "value": "proposition",
+         "timeless": True},
+        {"entity": "fact:truth", "attribute": "holder", "value": "person:retrieval_lead"},
+    ])
+
+    proposal = {
+        "protagonist": "person:defense_apprentice", "delta_type": "drive_inverted",
+        "tension": ["person:defense_apprentice", "drive:doubt", "drive:proof"],
+        "goal_statement": "learn what the radio hides", "theme": "the puppet show",
+        "beats": [{"id": "beat:learn", "phase": "climax", "weight": "required",
+                   "kind": "player_learns", "entity": "fact:truth",
+                   "attribute": "holder", "value": "person:retrieval_lead"}],
+    }
+
+    class _ArcProvider(StubProvider):
+        def __init__(self):
+            super().__init__([])
+
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if task_of(prompt) == "arc":
+                return dict(proposal)
+            return {"items": []}
+
+    spath = tmp_path / "ident_scenario.world"
+    meta = game._finalize_scenario(w, "ident", "Identity World", _ArcProvider(), spath,
+                                   endless=False,
+                                   play_as="the defense apprentice, a young woman")
+    # published with the PLAYER'S figure — staged among the located cast, not swapped
+    assert meta["protagonist"] == "person:defense_apprentice"
+    assert w.porcelain.locate("person:defense_apprentice")[0] == "place:camp"
+    w.close()
