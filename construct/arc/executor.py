@@ -93,6 +93,10 @@ def compute_entry_epoch(world: Any) -> float:
     the source prose narrates (obs #3 half 3, Cx 127). Reads the append-log directly. Falls
     back to TURN_EPOCH when nothing exceeds it (one-timeframe worlds → a no-op)."""
     try:
+        # Deliberately the WHOLE append log, every frame (the epoch must sit
+        # above every pre-play valid_from, wherever it landed) — the one
+        # remaining direct read; a porcelain axis-head/log-max surface is
+        # asked of PB (letter 095) to retire it.
         marks = [r.valid_from for r in world.buffer.all_rows()
                  if getattr(r, "valid_from", None) is not None]
     except Exception:  # never let the epoch computation sink a build
