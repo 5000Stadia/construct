@@ -1,8 +1,8 @@
 <div align="center">
 
-# The Construct
+# Construct Projector
 
-**An interactive-fiction engine where the world's truth is a database and the model is only a voice.**
+**An interactive-fiction engine where the world's truth is a database and the model is only a voice.** *(“The Construct” for short.)*
 
 Step into a book, or a world built from one conversation. Put something in a drawer, wander for an hour, come back — it's still there. The world remembers, so the model doesn't have to.
 
