@@ -6,7 +6,7 @@
 > advances a hidden story arc, and only then lets a model narrate. Object
 > permanence, per-character knowledge frames, as-of queries — put a thing
 > down, walk away, come back: it's still there. Pre-1.0, research active;
-> 720+ tests green; evaluated over a 5-scenario live corpus plus an
+> 800+ tests green; evaluated over a 5-scenario live corpus plus an
 > adversarial critic campaign.
 
 Vocabulary: pattern-buffer holds a world's pattern -> the Construct loads
@@ -20,7 +20,7 @@ narrator's briefing; free-text writes pass one Entity Authority seam.
 - [README.md](README.md): research question, architectural contributions,
   evaluation methodology, honest capability status. Start here.
 - [docs/design/00-INDEX.md](docs/design/00-INDEX.md): the curated map of
-  all 58 design docs, by layer.
+  all 60 design docs, by layer.
 - [docs/CONCEPT.md](docs/CONCEPT.md): founding brief — vision, session-zero,
   host architecture, the arc layer.
 - [docs/design/OPTIMAL-IF-EXPERIENCE.md](docs/design/OPTIMAL-IF-EXPERIENCE.md):

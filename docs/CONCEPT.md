@@ -1,5 +1,14 @@
 # Holodeck — Concept & Founding Brief
 
+> **Preserved as written** (the project's founding name was Holodeck; it
+> shipped as **Construct Projector**). This is the pre-build brief, kept
+> verbatim for lineage — like pattern-buffer's own founding document. Two
+> things have since moved: the pattern-buffer porcelain is **frozen and
+> live** (`porcelain-v0.1`; the API sketch in §4 predates it — the real
+> signatures are pattern-buffer's `docs/ADOPTION.md`), and the integration
+> §9 gates on is **complete** — the engine described here plays end-to-end
+> today (see the README).
+
 > A text holodeck. A persistent world — ingested from a book or built live through an interview — held in a pattern-buffer world store and played turn by turn. The player chooses who they are and where in the timeline they enter, pursues an authored arc they cannot see, and the world remembers everything: object permanence, frame-scoped NPC knowledge, re-entry coherence.
 
 **Status:** Founding brief for design-first genesis. No code yet. This document is the debrief for the Holodeck (HD) instance — vision, the session-zero flow, the host architecture, the syntax for using pattern-buffer, the patterns worth adopting from Kernos, and the one genuinely new design surface (the arc layer). Brainstorm and outline from here.
@@ -63,6 +72,10 @@ The single most important framing, carried from how Kernos relates to its substr
 The dependency is one-way and the rule is absolute: **never import from or edit the pattern-buffer tree.** The engine takes one injected thing — a model callable. Holodeck supplies it (subscription auth — Codex-shape HTTP shim, the Kernos-proven pattern; see §7). If Holodeck needs a capability the engine lacks, that is a **[DECISION] letter to Kernos CC**, never a local fork.
 
 ## 4. The syntax for using pattern-buffer (the porcelain)
+
+*(Founding-era sketch, written before the porcelain froze — several
+signatures below no longer match the shipped API. The canonical contract is
+pattern-buffer's `docs/ADOPTION.md`; kept here unedited for lineage.)*
 
 Read `/home/k/pattern-buffer/docs/ADOPTION.md` for exact signatures; the shape:
 

@@ -8,7 +8,7 @@ Step into a book, or a world built from one conversation. Put something in a dra
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-720%2B%20green-brightgreen.svg)](#engineering-proof)
+[![Tests](https://img.shields.io/badge/tests-800%2B%20green-brightgreen.svg)](#engineering-proof)
 [![Substrate](https://img.shields.io/badge/substrate-pattern--buffer-8A2BE2.svg)](https://github.com/5000Stadia/pattern-buffer)
 [![Status](https://img.shields.io/badge/status-research%20active-blueviolet.svg)](#project-status)
 
@@ -49,7 +49,7 @@ Every hard problem in this genre — spoilers, secret-leaking, railroading, cont
 - Characters can't leak secrets because the secrets were **never in their context window** — each NPC decides its beat from its own `knows:` frame, nothing more.
 - The narrator can't spoil the arc because the hidden `plot:` frame is **never in its briefing**.
 - The story can't puppet your character because your character is **never handed to it** as a scene entity.
-- Prose can't mint phantom places because free-text extraction passes through a single resolver seam that **cannot type-slip** — bind to a known entity, mint once with the right kind, or drop.
+- Prose can't mint phantom places because free-text extraction passes through pattern-buffer's single resolve seam, which **cannot type-slip** — bind to a known entity, mint once with the right kind, or drop; Entity Authority adds the channel permissions on top (who may mint what).
 
 Where a rule would have been added, a doorway was narrowed instead. The design docs record each of these as a named decision with the live failure that forced it.
 
@@ -63,10 +63,11 @@ The substrate (permanence, frames, time) is pattern-buffer's. What the Construct
 | --- | --- |
 | **The hidden arc layer** | A story's destination authored into a private `plot:` frame the player never sees, navigated by beats, clocks, and a pacing ladder with anti-railroading guards. The arc pushes the world *at* you; it structurally cannot move *you*. |
 | **Conclusion-as-effect** | No win/loss verdict is ever computed and announced. A story ends on its own decisive event ("IT"), and the ending's *character* — triumphant, costly, bittersweet, quietly failed — is derived from which of the story's load-bearing causes the player actually established. Turns never force a close: a detective can study one clue for three hundred turns. |
-| **Entity Authority** | One coreference-and-typing-disciplined seam every free-text canon write must pass: bind-before-mint against a canon roster, channel-scoped mint permissions (player input cannot conjure people; prose cannot conjure places), ambiguity never mints. The misshapen entity graph becomes impossible to create instead of cleaned up after. |
+| **Entity Authority** | The channel-permission policy over pattern-buffer's resolve seam: every free-text canon write binds-before-minting against a canon roster, with channel-scoped mint permissions (player input cannot conjure people; prose cannot conjure places) and ambiguity never minting. The misshapen entity graph becomes impossible to create instead of cleaned up after. |
+| **World laws** | Every generated world is authored ON a constitution: 1–4 named, universe-governing dynamics (rule · cost · embodiment · texture), register-gated so a courtroom drama can never draw "the Force," anti-pastiche-judged, committed as queryable canon with embodiment links. Laws the character inherently understands ground the opening; *discovered* laws bind silently until play uncovers them. |
 | **First-mention permanence** | A proper-named detail the world establishes ("The Hart and Bell") commits immediately as a minimal, non-present stub — engagement paints the rest. The gate's evidence is real casing recovered from prose, fail-closed; generic descriptions ("the street") still never mint. |
 | **The Remembrancer** | The protagonist's own memory as a silent turn participant, symmetric with NPC engines: a screened knowledge-frame digest, contributing only felt interiority. It owns self-questions mechanically, and it powers **player-authored retconning** — "I remember my childhood friend John Johnson" commits real autobiography through a guarded channel where world-claims become beliefs that can never satisfy the mystery, and contradictions quarantine in favor of the first established truth. |
-| **Knowledge frames as gameplay** | Interviewing a witness is mechanically real: authored clues sit in *their* frame, gated by reveal conditions, and surface into *yours* only when your questioning earns them — which is what advances the case. A diegetic notebook renders your frame back to you as the case-board. |
+| **Knowledge frames as gameplay** | Interviewing a witness is mechanically real: authored clues sit in *their* frame (pattern-buffer's `knows:` frames), gated by Construct's reveal conditions, and surface into *yours* only when your questioning earns them — which is what advances the case. A diegetic notebook renders your frame back to you as the case-board. |
 | **Deterministic resolution deck** | Uncertain actions draw from a pre-rolled, seeded 100-tier outcome bag (fail-forward: every failure opens something) — drama without a per-check model call and fully replayable. |
 | **Death as staged permanence** | A per-chapter `death_policy` decides whether death ends the story (action/adventure), is transformed by the premise (time loops, ghosts), or is capped by genre convention (cozy mystery → wounds, capture, ruin). Mortal peril must be *staged* — the world warns before it kills — and a death ends in a testament epilogue: the world after you, and your effect on it. No respawn, no next chapter. |
 | **Episodic continuation with settled history** | A concluded story offers the next chapter over the same evolved world: consequences of your ending ride forward as canon events with causal receipts, answered questions become closed history that is *never re-opened as mystery*, and personal promises are extracted as first-class fuel the next chapter must honor or consciously pay off. |
@@ -83,7 +84,7 @@ The claim of a system like this can't be proven by unit tests alone — the prod
 - **An adversarial critic campaign** — player-agents *primed to break immersion and file their own bug reports* through the in-game `/feedback` channel, including deliberate off-path runs (pursuing a romance the story never offered) and cross-chapter continuations. Every filing was independently triaged against engine ground truth before anything was "fixed": [`eval/09-critic-campaign.md`](docs/design/eval/09-critic-campaign.md).
 - **A five-probe live acceptance set** — object permanence, loop closure, frame non-leak, player agency, honest adjudication — passed 5/5 in live play and re-verified as the engine grew.
 - **A generalized synthesis** — the campaign's findings distilled into five portable pillars of the optimal interactive-fiction experience (truth-keeping, the player's story is the story, proportion, initiative, the ending is the payoff): [`docs/design/OPTIMAL-IF-EXPERIENCE.md`](docs/design/OPTIMAL-IF-EXPERIENCE.md).
-- **720+ test functions across 35 files** — including structural pins for every invariant the design docs promise (frame non-leak, protected-key concealment, mint-channel discipline, terminal precedence, no-reopen of settled history).
+- **800+ test functions across 36 files** — including structural pins for every invariant the design docs promise (frame non-leak, protected-key concealment, mint-channel discipline, terminal precedence, no-reopen of settled history).
 
 ### Development methodology
 
@@ -132,7 +133,7 @@ Bring any LLM behind the provider interface; ships with a zero-marginal-cost Cha
 
 ## Documents
 
-The project is **design-first**: 58 design documents, each recording a decision, the live failure that motivated it, and the review verdict it shipped under.
+The project is **design-first**: 60 design documents, each recording a decision, the live failure that motivated it, and the review verdict it shipped under.
 
 - **[docs/CONCEPT.md](docs/CONCEPT.md)** — the founding brief: vision, host architecture, the arc layer.
 - **[docs/design/00-INDEX.md](docs/design/00-INDEX.md)** — the curated map of all design docs, by layer.
@@ -146,7 +147,7 @@ The project is **design-first**: 58 design documents, each recording a decision,
 
 ## Engineering proof
 
-- **720+ test functions, 35 files, zero live model calls in the suite** — engine extraction via pattern-buffer's `StubModel`, host cohorts via a canned provider; the full suite runs in under two minutes.
+- **800+ test functions, 36 files, zero live model calls in the suite** — engine extraction via pattern-buffer's `StubModel`, host cohorts via a canned provider; the full suite runs in under two minutes.
 - **Deterministic spine, model calls only at the boundaries.** Classification, adjudication, arc evaluation, entity resolution, and all bookkeeping are deterministic or cheap-tier; the expensive model renders prose and voices characters, nothing else. Turn latency is protected by a deferred-settle design: post-narration bookkeeping overlaps the player reading.
 - **Fail-open discipline everywhere it must be.** No enrichment call may sink a turn; the climax cannot be lost to a provider hiccup; every dropped cohort is receipted in the turn trace.
 - **Receipts-first debugging.** Every turn emits a structured trace — writes, resolver decisions with reasons, clocks fired, clues surfaced, cohort calls — the same record the debug CLI, the tests, and the eval reports all read.
@@ -168,9 +169,10 @@ The project is **design-first**: 58 design documents, each recording a decision,
 | The Remembrancer + player-authored memory (retcon) | Live | Contradictions quarantine; world-claims become beliefs |
 | Entity Authority + first-mention permanence | Live | Channel-scoped minting; prose-casing evidence, fail-closed |
 | Gauges, diegetic time, world-tick, companions | Live | — |
+| World laws (authored constitution, register-gated, disclosure axis) | Live | The narrator briefs it every turn on a reserved lane; adjudication enforces it |
 | Scene imagery (per-location AI illustration) | Live | Oil-painting style; regenerates only when the scene truly changes |
 | Telegram / Discord / CLI / REPL transports | Live | One session API; outbound-only, no inbound exposure |
-| Multi-player shared worlds | Designed, not built | [Design notes](docs/design/) — deferred to the substrate's multi-observer work |
+| Multi-player shared worlds | Designed, not built | [Design notes](docs/design/) — shared-world observer semantics to be worked jointly with the substrate |
 | Narrator-authored NPC movement (the narration seam) | Specified, gated | The highest-leverage known gap; named in the synthesis doc |
 
 ---
@@ -185,7 +187,7 @@ Three projects, one line of research — each a résumé of the last:
 
 ## Project status
 
-**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (720+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
+**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (800+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
 
 ## License
 

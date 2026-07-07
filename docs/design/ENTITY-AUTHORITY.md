@@ -58,8 +58,9 @@ A single seam every entity-write consults. In order:
 6. **Else** → None: no canon write; the narrator handles it diegetically (improv that isn't acted on
    stays prose, not canon).
 
-The matcher (step 4) reuses the cheap whole-token `_names_entity` against the live set; PB's
-`reconcile`/candidate surface is the coreference primitive for the harder cases (NOT reimplemented).
+The matcher (step 4) reuses the cheap whole-token `_names_entity` against the live set; the harder
+cross-chunk cases are reconciled AFTER THE FACT by PB's `reconcile()` — a host-invoked global
+finalize pass, never a per-mention lookup (NOT reimplemented, and never called live).
 Bind requires a UNIQUE match — ambiguity yields NO canon write (never a sibling), per the LOCKED
 DECISIONS below. Zero candidates + a sanctioned kind → typed mint; multiple → drop.
 

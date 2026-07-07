@@ -1,4 +1,4 @@
-# Lexicon — Holodeck
+# Lexicon — Construct Projector
 
 Working vocabulary, under the pattern-buffer lexicon rules adopted
 wholesale: (1) every exported name must double-read for an engineer with
