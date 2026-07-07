@@ -1060,30 +1060,26 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     except Exception as exc:
         logger.warning("death policy derivation skipped: %s", exc)
         meta["death_policy"] = "shielded"
-    # Batched durability classification (the deferred pass from
-    # create_scenario_from_ingest): ONE grouped sweep over everything ingested
-    # with inline classification off — the build's main efficiency win. A no-op
-    # on the interview path (inline classification already ran; classify_all only
-    # touches unclassified rows). Restores inline mode for live play after.
-    if not world.ingestor.classify_inline:
-        # BUILD LATENCY (#3 / PB 081 Win 1): rules-based durability classification — ZERO LM
-        # calls (~272s/build saved) vs. the batched LM pass. Ambiguous attrs take the doctrine's
-        # asymmetric default STATE (a rebuildable index; the erasing EVENT class is barred by
-        # CLASSIFIER-EVENT-SAFETY), so it is correctness-safe — the only thing lost is the LM's
-        # STATE-vs-DISP/CONSTITUTIVE nuance on ambiguous attrs (a quality call). Default ON;
-        # CONSTRUCT_FAST_CLASSIFY=0 restores the LM batch pass if a build ever needs that nuance.
-        _fast_classify = os.getenv("CONSTRUCT_FAST_CLASSIFY", "1") != "0"
+    # THE BUILD SEAL (BUILD-SESSION take-up, PB 094): both creation paths open a
+    # porcelain build session (`begin_build`) — every ingest defers durability
+    # classification, and this ONE `seal_build` pass classifies the session's
+    # rows and restores inline mode. Rules-only by default (BUILD LATENCY #3 /
+    # PB 081: ~272s/build saved; ambiguous attrs take the doctrine's asymmetric
+    # STATE default — correctness-safe); CONSTRUCT_FAST_CLASSIFY=0 sends
+    # ambiguous rows to the batch LM pass instead. No session open (a caller
+    # that never entered build mode) → nothing to seal, quietly.
+    _fast_classify = os.getenv("CONSTRUCT_FAST_CLASSIFY", "1") != "0"
+    try:
         _emit(on_stage, "Stage 6.2 · Classifying durability · "
                         + ("RULES (zero model calls — the build's main efficiency win)"
                            if _fast_classify else "BATCHED grouped model calls"))
-        try:
-            if _fast_classify:
-                world.classifier.classify_rows(world.buffer.all_rows(), model=False)
-            else:
-                world.classifier.classify_all(batch_size=CLASSIFY_BATCH_SIZE)
-        except Exception as exc:  # never sink a build on the optimization
-            logger.warning("durability classification failed: %s", exc)
-        world.ingestor.classify_inline = True
+        _seal = world.porcelain.seal_build(model=not _fast_classify)
+        logger.info("build sealed: %s row(s) classified (seq %s)",
+                    _seal.get("classified"), _seal.get("seq_range"))
+    except RuntimeError:
+        pass  # no build session open — nothing deferred, nothing to seal
+    except Exception as exc:  # never sink a build on the optimization
+        logger.warning("durability classification failed: %s", exc)
     spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
     return meta
 
@@ -1118,7 +1114,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         # rows land unclassified (read as the STATE default meanwhile), and one
         # BATCHED pass at the end of _finalize classifies them in grouped calls —
         # "same judgments, fewer round trips" (engine classify_all docstring).
-        world.ingestor.classify_inline = False
+        world.porcelain.begin_build()
         from construct.arc.executor import SOURCE_STEP
         chunks = _chunk_chapters(text)
         _emit(on_stage, f"Stage 1 · Ingesting prose → pattern-buffer · model "
@@ -1236,7 +1232,7 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
             raise RuntimeError("interview produced no world spine")
         # Authoring time: the interviewer is the author → `stated` canon
         # (the gate's default for structured items). Cursor at the opening.
-        world.ingestor.cursor.advance(1.0)
+        world.porcelain.begin_build(at=1.0)
         world.porcelain.ingest_structured(items)
         logger.info("interview authored %d spine items", len(items))
         # game_types pass-through (parity with the ingest path): a caller may FORCE the
@@ -1421,14 +1417,9 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
 
 
 def _canon_entity_ids(world: Any) -> set[str]:
-    """All entity ids that appear in canon — a session-zero/world-build
-    scan (not the hot turn path), so reading rows directly is fine and
-    far more robust than relying on event participation."""
-    ids: set[str] = set()
-    for row in world.buffer.all_rows():
-        if getattr(row, "frame", "canon") == "canon":
-            ids.add(row.entity)
-    return ids
+    """All entity ids that appear in canon — the porcelain roster verb
+    (BOUNDED-READS take-up, PB 092/094): frame-bound by construction."""
+    return set(world.porcelain.entities("canon"))
 
 
 def _known_people(world: Any) -> list[str]:
@@ -1885,12 +1876,12 @@ def _opening_scene_place(world: Any, protagonist: str,
         if chain:
             return chain[0]
         # earliest placed location (min valid_from `in` row) — their introduction, not the end
+        from construct.adapter import frame_facts as _ffo
         earliest_vf: float | None = None
-        for r in world.buffer.all_rows():
-            if (r.entity == protagonist and r.attribute == "in"
-                    and getattr(r, "valid_from", None) is not None):
-                if earliest_vf is None or r.valid_from < earliest_vf:
-                    earliest_vf = r.valid_from
+        for r in _ffo(world, "canon", entity=protagonist, attribute="in"):
+            if r.valid_from is not None and (earliest_vf is None
+                                             or r.valid_from < earliest_vf):
+                earliest_vf = r.valid_from
         if earliest_vf is not None:
             chain = p.locate(protagonist, as_of=earliest_vf)
             if chain:
