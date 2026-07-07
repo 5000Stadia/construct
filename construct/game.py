@@ -1155,10 +1155,11 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                     items = items_by_chunk.get(i)
                     if items is None:
                         continue  # extract already failed + logged
-                    # advance the cursor to this chunk's coordinate, then commit serially
-                    world.ingestor.cursor.advance(float(i) * SOURCE_STEP)
+                    # commit serially at this chunk's coordinate (AXIS-HEAD/at=
+                    # take-up, PB 096 — no cursor touch)
                     world.porcelain.ingest_structured(
-                        items, classify="defer", cursor_authoritative=True)
+                        items, classify="defer", cursor_authoritative=True,
+                        at=float(i) * SOURCE_STEP)
                 else:
                     # serial path (legacy / single chunk): extract+ingest in one call
                     world.porcelain.ingest(chunk, source=f"doc:{prose_path.stem}",

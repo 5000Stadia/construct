@@ -93,16 +93,14 @@ def compute_entry_epoch(world: Any) -> float:
     the source prose narrates (obs #3 half 3, Cx 127). Reads the append-log directly. Falls
     back to TURN_EPOCH when nothing exceeds it (one-timeframe worlds → a no-op)."""
     try:
-        # Deliberately the WHOLE append log, every frame (the epoch must sit
-        # above every pre-play valid_from, wherever it landed) — the one
-        # remaining direct read; a porcelain axis-head/log-max surface is
-        # asked of PB (letter 095) to retire it.
-        marks = [r.valid_from for r in world.buffer.all_rows()
-                 if getattr(r, "valid_from", None) is not None]
+        # AXIS-HEAD take-up (PB 096): the log's high-water mark over ALL rows,
+        # ALL frames — the epoch must sit above every pre-play valid_from,
+        # wherever it landed (a seeded knows: row anchoring the head is PB's
+        # own fixture now). The last engine-internal read, retired.
+        hi = float(world.porcelain.axis_heads().get("valid_head") or 0.0)
     except Exception:  # never let the epoch computation sink a build
-        logger.exception("compute_entry_epoch: all_rows read failed; using TURN_EPOCH")
-        marks = []
-    hi = max(marks) if marks else 0.0
+        logger.exception("compute_entry_epoch: axis_heads read failed; using TURN_EPOCH")
+        hi = 0.0
     # When TURN_EPOCH already sits above every authored row (the normal case — small chapter
     # coordinates 1..n), keep it EXACTLY (a true no-op for one-timeframe worlds). Only raise
     # when a row reaches/exceeds the epoch (the calendar-year leak), clearing it by the margin.

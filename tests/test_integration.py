@@ -3398,15 +3398,16 @@ def test_author_flavor_cohort():
 def test_compute_entry_epoch_above_aftermath_and_noop_when_low():
     from construct.arc.executor import TURN_EPOCH, compute_entry_epoch
 
-    class _Row:
-        def __init__(self, vf): self.valid_from = vf
-
-    class _Buf:
-        def __init__(self, vfs): self._vfs = vfs
-        def all_rows(self): return [_Row(v) for v in self._vfs]
+    # AXIS-HEAD take-up (PB 096): the epoch reads the porcelain's log
+    # high-water mark, never the raw buffer.
+    class _P:
+        def __init__(self, vfs): self._vfs = [v for v in vfs if v is not None]
+        def axis_heads(self):
+            return {"asserted_head": 0,
+                    "valid_head": max(self._vfs) if self._vfs else None}
 
     class _W:
-        def __init__(self, vfs): self.buffer = _Buf(vfs)
+        def __init__(self, vfs): self.porcelain = _P(vfs)
 
     # an aftermath calendar-year row (1974) → epoch strictly above it
     assert compute_entry_epoch(_W([1.0, 5.0, 1974.0])) > 1974.0

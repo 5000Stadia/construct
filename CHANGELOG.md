@@ -4,6 +4,8 @@ Notable changes to The Construct. Pre-1.0; dates are development milestones, not
 
 ## Unreleased (2026-07)
 
+- **Pure-porcelain integration (2026-07-07):** every Construct read and write now goes through pattern-buffer's porcelain API — zero engine-internal reaches (`buffer.*`/`ingestor.*`/`classifier.*` retired across 20+ sites via `entities()`/`facts()`/build sessions/`axis_heads()`/`ingest_structured(at=)`, PB letters 088–096). The first host runs entirely on the public surface; the integration boundary is now exactly the documented contract.
+
 ### Added
 - **Death & the testament** — a per-chapter `death_policy` (`mortal` / `premise` / `shielded`)
   decides whether the player character's death ends the story, is transformed by the premise
