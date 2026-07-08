@@ -826,3 +826,73 @@ def test_finalize_stages_play_as_pick_instead_of_swapping(tmp_path):
     assert meta["protagonist"] == "person:defense_apprentice"
     assert w.porcelain.locate("person:defense_apprentice")[0] == "place:camp"
     w.close()
+
+
+def test_seal_lint_catches_protagonist_split(tmp_path):
+    # #107 seal-lint: if the committed arc:main.protagonist row diverges from the
+    # authored (in-memory) protagonist the beat gates + meta are built from, the
+    # build receipts a `protagonist_split` incoherence (loud, never a raise). We
+    # force the split by monkeypatching arc_to_items to emit a DIFFERENT canonical
+    # protagonist row than the arc object carries.
+    from construct import game
+    from construct.arc import io as arc_io
+    from construct.provider import StubProvider, task_of
+
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        return rule(prompt, schema) if prompt.startswith("Classify the lifetime") else {"items": []}
+
+    path = tmp_path / "split.world"
+    w = World(path, world_id="w:split", model=StubModel(fallback=fallback),
+              stance="fiction", title="Split World")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:hall", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:hero", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:hero", "attribute": "in", "value": "place:hall"},
+        {"entity": "person:other", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:other", "attribute": "in", "value": "place:hall"},
+        {"entity": "fact:x", "attribute": "kind", "value": "proposition", "timeless": True},
+        {"entity": "fact:x", "attribute": "who", "value": "person:other"},
+    ])
+    proposal = {
+        "protagonist": "person:hero", "delta_type": "drive_inverted",
+        "tension": ["person:hero", "drive:a", "drive:b"],
+        "goal_statement": "learn it", "theme": "the split",
+        "beats": [{"id": "beat:l", "phase": "climax", "weight": "required",
+                   "kind": "player_learns", "entity": "fact:x",
+                   "attribute": "who", "value": "person:other"}],
+    }
+
+    class _P(StubProvider):
+        def __init__(self): super().__init__([])
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if task_of(prompt) == "arc":
+                return dict(proposal)
+            return {"items": []}
+
+    # force the divergence: the committed arc row names a DIFFERENT protagonist
+    _orig = arc_io.arc_to_items
+    def _splitting(arc, frame="plot:main"):
+        rows = _orig(arc, frame=frame)
+        for r in rows:
+            if r.get("entity") == arc.arc_id and r.get("attribute") == "protagonist":
+                r["value"] = "person:other"   # <- the split
+        return rows
+    game.arc_io.arc_to_items = _splitting
+    try:
+        spath = tmp_path / "split_scenario.world"
+        game._finalize_scenario(w, "split", "Split World", _P(), spath,
+                                endless=False, play_as="person hero")
+    finally:
+        game.arc_io.arc_to_items = _orig
+
+    from construct.adapter import frame_facts
+    kinds = {str(r.value) for r in frame_facts(w, "session:main",
+                                               entity="event:seal_incoherence")}
+    assert "protagonist_split" in kinds          # the lint fired + receipted
+    assert spath.with_suffix(".meta.json").exists()   # but never sank the build
+    w.close()

@@ -302,6 +302,20 @@ def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
                     "(adjudicable)", rejected, deferred)
 
 
+def _protagonist_coherence(world: Any, arc: Any) -> str | None:
+    """#107 seal-lint read: the committed `arc:main.protagonist` value off the
+    plot frame (the id an arc-reload binds play to). Public surface only
+    (`frame_facts` → porcelain `facts()`); returns None if unreadable. The
+    caller compares it to the in-memory `arc.protagonist` (from which the beat
+    gates + meta are built) — any drift means the arc's three protagonist
+    surfaces disagree."""
+    from construct.adapter import frame_facts
+    for r in frame_facts(world, "plot:main", entity=arc.arc_id,
+                         attribute="protagonist"):
+        return str(r.value)
+    return None
+
+
 def _author_world_laws(provider: Provider, brief: str, reality: str,
                        game_types: list | None) -> tuple[list[dict], str]:
     """WORLD LAWS (#105, Cx 470): author the universe's 1-4 governing dynamics
@@ -851,6 +865,34 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
 
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc) + arc_io.index_items(arc))
+    # #107 SEAL-LINT (protagonist coherence — the founder's Minutes Before Bullets
+    # split): the arc binds play through THREE surfaces that must name one figure —
+    # the committed `arc:main.protagonist` entity row (what arc-reload reads), the
+    # literal-pinned beat-gate `knows:<id>` frames (what beats watch), and
+    # `meta["protagonist"]`. A merge that rewrites the entity row but not the literal
+    # blobs (or an out-of-order identity pass) silently splits them: the played
+    # character can never write the frame the beats watch → an undeliverable arc that
+    # LOOKS built. The staged-not-swapped guard + PB's durable_contradiction veto
+    # close the known cause; this is the belt-and-suspenders invariant that catches
+    # ANY future cause at build. Loud + receipted, never a raise (fail-open: a false
+    # positive must not deny a player a world — the viability gate is the harder net).
+    try:
+        _committed = _protagonist_coherence(world, arc)
+        if _committed is not None and _committed != arc.protagonist:
+            logger.error("#107 SEAL-LINT: protagonist SPLIT — committed arc row %r "
+                         "!= authored %r (beat gates watch knows:%s); the arc is "
+                         "undeliverable as sealed", _committed, arc.protagonist,
+                         arc.protagonist)
+            world.porcelain.ingest_structured([
+                {"entity": "event:seal_incoherence", "attribute": "kind",
+                 "value": "protagonist_split", "valid_from": turn_time(0)},
+                {"entity": "event:seal_incoherence", "attribute": "committed",
+                 "value": _committed, "valid_from": turn_time(0)},
+                {"entity": "event:seal_incoherence", "attribute": "authored",
+                 "value": arc.protagonist, "valid_from": turn_time(0)},
+            ], frame="session:main")
+    except Exception as exc:  # the lint must never sink a build
+        logger.warning("#107 seal-lint skipped: %s", exc)
     # The portfolio manifest (LIVING-WORLD-GENERATOR P1): session zero authors
     # one (main) arc, so the registry is a single-entry portfolio. It is written
     # explicitly (rather than relying on the fail-open default) so the multi-arc
