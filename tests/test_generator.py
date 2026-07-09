@@ -896,3 +896,43 @@ def test_seal_lint_catches_protagonist_split(tmp_path):
     assert "protagonist_split" in kinds          # the lint fired + receipted
     assert spath.with_suffix(".meta.json").exists()   # but never sank the build
     w.close()
+
+
+def test_fidelity_vouched_pairs_allowlist_and_load_bearing_gates():
+    # #56 (Cx 482): the vouched-merge gate. Only merges a same-kind fragment when
+    # (a) EXACTLY ONE group id is load-bearing, AND (b) the exact pair is the
+    # engine's homonym-safe residue (status auto_declined + reason
+    # alias_not_specific). Everything else fails open.
+    from construct.game import _fidelity_vouched_pairs
+    PROT, REQ = "person:mara_venn", "person:lysa_fen"
+    lb = {PROT, REQ}
+
+    def pair(a, b, status="auto_declined", reason="alias_not_specific"):
+        return {"a": a, "b": b, "status": status, "reason": reason}
+
+    audit = [
+        # (1) protagonist + fragment, alias_not_specific → MERGE
+        {"live": True, "entities": [PROT, "person:mara"], "kinds": ["person", "person"],
+         "pairs": [pair(PROT, "person:mara")]},
+        # (2) required-cast + fragment, alias_not_specific → MERGE
+        {"live": True, "entities": [REQ, "person:lysa"], "kinds": ["person", "person"],
+         "pairs": [pair(REQ, "person:lysa")]},
+        # (3) protagonist + fragment but pair is UNLINKED → NO merge (allowlist)
+        {"live": True, "entities": [PROT, "person:mara2"], "kinds": ["person", "person"],
+         "pairs": [pair(PROT, "person:mara2", status="unlinked", reason=None)]},
+        # (4) NON-load-bearing split (a background pair) → NO merge (load-bearing gate)
+        {"live": True, "entities": ["person:bg", "person:bg_full"],
+         "kinds": ["person", "person"],
+         "pairs": [pair("person:bg", "person:bg_full")]},
+        # (5) TWO load-bearing ids in one group → NO merge (no unique canonical)
+        {"live": True, "entities": [PROT, REQ], "kinds": ["person", "person"],
+         "pairs": [pair(PROT, REQ)]},
+        # (6) cross-kind homonym (person↔place) → NO merge (reject() owns it)
+        {"live": True, "entities": [PROT, "place:mara"], "kinds": ["person", "place"],
+         "pairs": [pair(PROT, "place:mara")]},
+        # (7) durable_contradiction reason → NO merge
+        {"live": True, "entities": [PROT, "person:mara3"], "kinds": ["person", "person"],
+         "pairs": [pair(PROT, "person:mara3", reason="durable_contradiction")]},
+    ]
+    got = set(_fidelity_vouched_pairs(audit, lb))
+    assert got == {(PROT, "person:mara"), (REQ, "person:lysa")}, got

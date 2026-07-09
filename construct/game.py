@@ -302,6 +302,39 @@ def _adjudicate_residue(world: Any, proposals: list[dict]) -> None:
                     "(adjudicable)", rejected, deferred)
 
 
+def _fidelity_vouched_pairs(name_collisions: list, load_bearing: set,
+                            allow: tuple = ("alias_not_specific",)) -> list:
+    """#56 (Cx 480/482): decide which same-kind coreference fragments to fold
+    into a load-bearing id. A collision group qualifies ONLY when it is same-kind
+    (cross-kind homonyms are the reject() case) AND exactly ONE of its ids is
+    load-bearing (a unique canonical to fold into — Cx 480 #3). A fragment merges
+    ONLY when the engine classified the exact (keep, frag) pair as the
+    homonym-safe alias residue: per-pair `status == "auto_declined"` and
+    `reason in allow` (Cx 482 #1 allowlist — an `unlinked`/other/missing verdict
+    fails open, never force-merged). Returns [(keep, frag), …]; pure, testable."""
+    out: list = []
+    for g in name_collisions or []:
+        if not g.get("live"):
+            continue
+        ents = g.get("entities") or []
+        kinds = g.get("kinds") or []
+        if len({k for k in kinds if k}) > 1:
+            continue  # cross-kind → step 2's reject() owns it
+        lb = [e for e in ents if e in load_bearing]
+        if len(lb) != 1:
+            continue  # 0 or >1 load-bearing → no unique canonical
+        keep = lb[0]
+        verdict = {frozenset((pr.get("a"), pr.get("b"))): pr
+                   for pr in (g.get("pairs") or [])}
+        for frag in ents:
+            if frag == keep or frag in load_bearing:
+                continue
+            pr = verdict.get(frozenset((keep, frag)))
+            if pr and pr.get("status") == "auto_declined" and pr.get("reason") in allow:
+                out.append((keep, frag))
+    return out
+
+
 def _protagonist_coherence(world: Any, arc: Any) -> str | None:
     """#107 seal-lint read: the committed `arc:main.protagonist` value off the
     plot frame (the id an arc-reload binds play to). Public surface only
@@ -772,6 +805,7 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # terminal path rather than shipping an unsolvable mystery. Enrichment, never a blocker.
     cast_nodes: tuple = ()
     cast_proposal: dict | None = None
+    _required_cast: list = []  # #56 Cx 482: REQUIRED-cast holder ids for the vouch
     try:
         from construct.story_shapes import author_signature_directive, shapes_for
         _prof = shapes_for(resolved_game_types) if resolved_game_types else None
@@ -827,6 +861,7 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                     logger.info("cast identity collision(s) disambiguated: %s", _remaps)
                 _cast, _specs = cast_from_proposal(_cprop)
                 _req = [pid for pid, _label, required in _specs if required]
+                _required_cast = list(_req)  # survive the try for the #56 vouch
                 # Validate holders against canon ids too (Cx 032: a clue on a phantom NPC
                 # can never be interviewed) — known_ids is the canon allowlist above.
                 # For DEDUCTION, also gate on PHYSICAL staging (INVESTIGATION-SHAPE.md §3d):
@@ -899,37 +934,27 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # HERE — after cast authoring, BEFORE the arc_to_items write below — so the plot
     # rows are written with the merged canonical id, and never after Stage-5's
     # literal knows:<id> frame seeding (Cx 480 insertion-point ruling). Fail-open.
-    _load_bearing = {arc.protagonist} | {n.node_id for n in (cast_nodes or ())}
+    # Load-bearing = protagonist ∪ REQUIRED cast only (Cx 482 #2 — NOT all cast
+    # nodes; optional/red-herring cast is a different safety claim).
+    _load_bearing = {arc.protagonist} | set(_required_cast)
+    # The vouch ALLOWLIST (Cx 482 #1): merge a same-kind fragment ONLY when the
+    # engine itself classified the exact pair as the homonym-safe alias residue —
+    # status "auto_declined" AND reason "alias_not_specific". An `unlinked` pair
+    # (also live) or any other/missing reason FAILS OPEN (never force-merged);
+    # merge() is host-authoritative past the soft heuristic, so the allowlist is
+    # the safety, not guarded_merge.
     try:
-        for _g in world.porcelain.fidelity_audit().get("name_collisions", []):
-            if not _g.get("live"):
-                continue
-            _ents = _g.get("entities") or []
-            _kinds = _g.get("kinds") or []
-            if len({k for k in _kinds if k}) > 1:
-                continue  # cross-kind homonym — step 2's reject() owns it
-            _lb = [e for e in _ents if e in _load_bearing]
-            if len(_lb) != 1:
-                continue  # 0 or >1 load-bearing → no unique canonical (Cx 480 #3)
-            _keep = _lb[0]
-            # Cx 480 #1: guarded_merge does NOT veto durable-contradiction /
-            # relating-edge — exclude those pairs host-side by reason.
-            _bad = {"durable_contradiction", "relating_edge", "kind_conflict",
-                    "typing_slip", "containment", "hard_blocked"}
-            _blocked = {p for pr in (_g.get("pairs") or [])
-                        if (pr.get("reason") in _bad or pr.get("status") in _bad)
-                        for p in (pr.get("a"), pr.get("b"))}
-            for _frag in _ents:
-                if _frag == _keep or _frag in _load_bearing or _frag in _blocked:
-                    continue
-                _mr = world.porcelain.merge(
-                    _keep, _frag, evidence="fidelity-repair: same-name same-kind "
-                    "coref folded into the arc-load-bearing id (#56)")
-                if _mr.get("outcome") in ("merged", "noop_already_merged"):
-                    logger.info("fidelity merge: %s <- %s", _keep, _frag)
-                else:  # vetoed → leave unresolved, fail-open (Cx 480 receipt rule)
-                    logger.warning("fidelity merge vetoed: %s <- %s (%s)",
-                                   _keep, _frag, _mr.get("outcome"))
+        for _keep, _frag in _fidelity_vouched_pairs(
+                world.porcelain.fidelity_audit().get("name_collisions", []),
+                _load_bearing):
+            _mr = world.porcelain.merge(
+                _keep, _frag, evidence="fidelity-repair: alias_not_specific "
+                "coref folded into the arc-load-bearing id (#56)")
+            if _mr.get("outcome") in ("merged", "noop_already_merged"):
+                logger.info("fidelity merge: %s <- %s", _keep, _frag)
+            else:  # vetoed → leave unresolved, fail-open (Cx 480 receipt rule)
+                logger.warning("fidelity merge vetoed: %s <- %s (%s)",
+                               _keep, _frag, _mr.get("outcome"))
     except Exception as exc:  # noqa: BLE001 — repair NEVER sinks a build
         logger.warning("fidelity vouched-merge skipped: %s", exc)
 

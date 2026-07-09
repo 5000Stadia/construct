@@ -120,12 +120,15 @@ folded:
    undirected; `resolve()` elects first-seen in log order — so `merge(fragment,
    arc_id)` does NOT guarantee `resolve(arc_id)==arc_id`. Keep `arc.protagonist`,
    required-cast ids, beat/pillar frames, and meta pointed at the retained
-   (load-bearing) id; merge only non-load-bearing fragments. **Seal-lint
-   interaction:** because the vouched merge may make PB elect a fragment as the
-   canonical representative, the #107 seal-lint must compare protagonist
-   coherence by **identity (resolve both sides), not literal string** — else a
-   correct merge triggers a false `protagonist_split`. (Amend
-   `_protagonist_coherence` to resolve, or compare via the registry.)
+   (load-bearing) id; merge only non-load-bearing fragments.
+   **Seal-lint interaction — NO amendment needed (Cx 482 confirmed, measured
+   zero false alarms):** the #107 seal-lint reads the committed
+   `arc:main.protagonist` via `frame_facts()` → PB `facts()` is a RAW frame scan,
+   not a folded/resolved read, and `arc_to_items()` writes the LITERAL
+   `arc.protagonist`. So the lint compares literal-to-literal (both = the
+   retained id) regardless of PB's canonical election → no false
+   `protagonist_split`. `_protagonist_coherence` is left unchanged. (If `facts()`
+   ever becomes a resolved read, revisit with a defensive identity compare.)
 
 **Insertion point (Cx Q1 ruling).** Steps 1–3 stay at Stage 2 (pre-arc,
 extending the #108 block; add the reject step). Step 4 (vouched merge) runs
