@@ -167,13 +167,24 @@ delta, and the cohort wakes ONLY when it finds a qualifying moment:
      moment — that is ambient's domain, and discovery-gating parity applies).
   3. **Causal ripple:** a window event with non-empty `caused_by` — something
      durable just rippled. (Fact-row `caused_by` can join the set later; events
-     carry it today on the shipped `EventRow`.)
+     carry it today on the shipped `EventRow`.) The ROUTINE-kind and tick
+     exclusions apply to this signal too — a bookkeeping event carrying causal
+     linkage is not a dramatic moment; without this, live worlds where engine
+     events routinely carry `caused_by` are salient EVERY turn and the filter
+     stops filtering (implementation finding, pinned by test).
 - No qualifying signal → **no cohort call, no receipt, no session row, no cost**
   (a non-salient turn is not an attempt; pacing must not see it — Cx 496 ruled
   this sound: `_last_try_turn` reads only attempt/decline receipts).
   A salient turn → the existing pacing guard (`_pacing_ok`: cooldown + active
   cap) still applies, then the cohort fires with the salient rows phrased as
   `fuel` lines.
+- **Presence gate (implementation decision, conservative):** the P2b/P2c cohort
+  call additionally requires ≥1 PRESENT spine-carrying NPC (the `spined` set
+  non-empty) — without one, the DM has no grounded NPC protagonist in scene to
+  propose, and P2 arcs are NPC-protagonist by invariant (§D). Known narrowing:
+  a quiet EMPTY scene never fires ambient even in endless mode. Deliberate for
+  the first slice of a spam-risk feature; relax to "any spined NPC in scope"
+  only if live-test shows real quiet-empty-scene developments being missed.
 
 **Shape it as a reusable PURE reader** (Cx 496 amendment 1 — explicit inputs,
 no hidden reads, unit-testable without a world):

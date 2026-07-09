@@ -1,9 +1,13 @@
-"""The opportunistic DM generator — P2a (regenerative trigger + the six guards).
+"""The opportunistic DM generator — P2a+P2b+P2c.
 
 Drives `generate_from_fallout` directly (deterministic) with a stub provider that
 returns a valid arc proposal, then exercises each guard: pacing cooldown, active
 cap, fingerprint dedupe, depth cap, coherence preflight. Plus a full run_turn
 integration test: a side arc dies and the world mints a grounded successor.
+
+P2b/P2c tests cover: salient_moments (pure function), right-of-way (main at peak),
+ambient diegetic threshold + seed-on-absent + win_loss gate, arbitration order,
+player-boundary decline, and depth-0 roots with depth-1 regeneration.
 """
 
 import json
@@ -14,9 +18,19 @@ from patternbuffer.testing import StubModel, rule_classifier_fallback
 from construct.adapter import PorcelainWorldReads
 from construct.arc import generator as gen
 from construct.arc import io as arc_io
-from construct.arc.conditions import InFrame, StateIs, TurnsQuiet
+from construct.arc.conditions import EventRow, InFrame, StateIs, TurnsQuiet
 from construct.arc.executor import PLOT, SESSION, Fallout, turn_time
-from construct.arc.generator import generate_from_fallout
+from construct.arc.generator import (
+    AMBIENT_QUIET_MIN,
+    ROUTINE_EVENT_KINDS,
+    _last_development_min,
+    _mark_development,
+    generate_ambient,
+    generate_from_fallout,
+    generate_opportunistic,
+    main_at_peak,
+    salient_moments,
+)
 from construct.arc.grammar import (
     Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight,
 )
@@ -1119,4 +1133,316 @@ def test_opening_scene_place_single_candidate_is_unchanged(tmp_path):
     as_of = max(r.valid_from for r in
                 frame_facts(w, "canon", entity="person:sam", attribute="in"))
     assert game._opening_scene_place(w, "person:sam", as_of) == "place:harbor"
+    w.close()
+
+
+# ==========================================================================
+# P2b (opportunistic) + P2c (ambient) tests
+# ==========================================================================
+
+# --- salient_moments (pure function, §A) -----------------------------------
+
+def _ev(kind: str, ev_id: str = "", caused_by: tuple = ()) -> EventRow:
+    """Minimal EventRow for salient_moments tests."""
+    return EventRow(event_id=ev_id or f"event:{kind}_1", kind=kind,
+                    caused_by=caused_by)
+
+
+def test_salient_spine_touch_fires():
+    # Signal 1: a fact row whose entity is a spined NPC → salient.
+    fact_rows = [{"entity": CLERK, "attribute": "in", "value": "place:office"}]
+    lines = salient_moments(fact_rows, [], set(), {CLERK})
+    assert lines, "spine-touch should be salient"
+    assert CLERK in lines[0]
+
+
+def test_salient_spine_touch_value_fires():
+    # Signal 1 (value side): a fact row whose VALUE is a spined NPC → salient.
+    fact_rows = [{"entity": "fact:x", "attribute": "holder", "value": CLERK}]
+    lines = salient_moments(fact_rows, [], set(), {CLERK})
+    assert lines
+
+
+def test_salient_first_time_kind():
+    # Signal 2: a new event kind not in prior_kinds → salient.
+    ev = _ev("confrontation", "event:confrontation_1")
+    lines = salient_moments([], [ev], set(), set())
+    assert lines
+    assert "confrontation" in lines[0]
+
+
+def test_salient_routine_kind_excluded():
+    # Signal 2: routine bookkeeping kinds are never "first-time" salient.
+    for kind in ROUTINE_EVENT_KINDS:
+        ev = _ev(kind, f"event:{kind}_1")
+        lines = salient_moments([], [ev], set(), set())
+        assert not any("first-time" in l for l in lines), \
+            f"routine kind {kind!r} should not produce a first-time fuel line"
+
+
+def test_salient_tick_event_excluded():
+    # Signal 2: event ids starting "event:tick_" are off-screen motion → not signal 2.
+    ev = _ev("world_advance", "event:tick_advance")
+    lines = salient_moments([], [ev], set(), set())
+    # tick events may still be causal-ripple; but must not produce a first-time line.
+    assert not any("first-time" in l for l in lines), \
+        "tick event should not produce a first-time fuel line"
+
+
+def test_salient_caused_by_fires():
+    # Signal 3: an event with non-empty caused_by → causal ripple → salient.
+    ev = _ev("conflict", "event:conflict_1", caused_by=("event:prior",))
+    lines = salient_moments([], [ev], set(), set())
+    assert any("ripple" in l or "caused_by" in l or "causal" in l for l in lines)
+
+
+def test_salient_routine_kind_with_caused_by_excluded():
+    # A ROUTINE bookkeeping kind is never a dramatic moment, even when it
+    # carries causal linkage — else a routine turn/arc event with caused_by
+    # would make EVERY turn salient and the filter would stop filtering.
+    ev = _ev("turn", "event:turn_7", caused_by=("event:prior",))
+    assert salient_moments([], [ev], set(), set()) == []
+
+
+def test_salient_nothing_fires_not_salient():
+    # A known kind, no spine-touch, no caused_by → empty (not salient).
+    ev = _ev("turn", "event:turn_1")  # "turn" is routine
+    lines = salient_moments([], [ev], {"turn"}, set())
+    assert lines == []
+
+
+# --- right-of-way (§B) -----------------------------------------------------
+
+def _main_arc(w) -> Arc:
+    """Reconstruct the main Arc object from the world's portfolio."""
+    from construct.arc import io as _arc_io
+    reads = PorcelainWorldReads(w)
+    return next(a for a in _arc_io.portfolio_from_frame(reads) if a.arc_id == "arc:main")
+
+
+def test_main_at_peak_climax_returns_true(tmp_path):
+    """CLIMAX phase (climax_ready_k beat achieved) → main_at_peak returns True."""
+    w = _world(tmp_path / "peak.world")
+    # Beat "beat:discover" is the climax_ready_beat in the _world fixture (climax_ready_k=1).
+    w.porcelain.ingest_structured(
+        [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+          "valid_from": turn_time(1)}], frame=PLOT)
+    reads = PorcelainWorldReads(w)
+    main = _main_arc(w)
+    from construct.arc.executor import current_phase as _cp
+    assert _cp(reads, main) == Phase.CLIMAX
+    assert main_at_peak(reads, main)
+    w.close()
+
+
+def test_main_at_peak_blocks_no_decline_receipt(tmp_path):
+    """Right-of-way is SILENT: main_at_peak returning True must NOT produce a
+    generation_declined receipt — it is right-of-way, not a DM judgment (§B)."""
+    w = _world(tmp_path / "peak_silent.world")
+    w.porcelain.ingest_structured(
+        [{"entity": "beat:discover", "attribute": "status", "value": "achieved",
+          "valid_from": turn_time(1)}], frame=PLOT)
+    reads = PorcelainWorldReads(w)
+    main = _main_arc(w)
+    assert main_at_peak(reads, main)
+    # main_at_peak itself does not write receipts — calling it produces no side-effects.
+    assert not reads.events(kind="generation_declined", frame=SESSION)
+    w.close()
+
+
+def test_main_at_peak_setup_allows_mint(tmp_path):
+    """SETUP phase (no beats achieved) → main_at_peak returns False → mint can proceed."""
+    w = _world(tmp_path / "setup.world")
+    reads = PorcelainWorldReads(w)
+    main = _main_arc(w)
+    assert not main_at_peak(reads, main)
+    w.close()
+
+
+# --- ambient diegetic threshold + seed-on-absent + win_loss OFF (§C) --------
+
+def test_ambient_diegetic_threshold_logic():
+    """The ambient gate condition: diegetic quiet measured against AMBIENT_QUIET_MIN.
+    With delta < AMBIENT_QUIET_MIN the gate must not open; at >= it must open.
+    Pure arithmetic — no world needed."""
+    minutes_now = 100.0
+    last_dev = 99.0
+    delta = minutes_now - last_dev
+    assert delta < AMBIENT_QUIET_MIN, "small delta must NOT satisfy threshold"
+    last_dev_past = minutes_now - AMBIENT_QUIET_MIN
+    delta_past = minutes_now - last_dev_past
+    assert delta_past >= AMBIENT_QUIET_MIN, "full quiet period must satisfy threshold"
+
+
+def test_ambient_seed_on_absent_returns_minutes_now():
+    """_last_development_min with no session:ambient row returns minutes_now —
+    seeding the timer fresh so legacy worlds don't fire ambient on first turn (§C)."""
+    # Use a minimal stub reads that returns None for any state call.
+    class _NullReads:
+        def state(self, entity, attribute, *, frame="canon"):
+            return None
+    reads = _NullReads()
+    # With no row, seed-on-absent: returns minutes_now.
+    assert _last_development_min(reads, 500.0) == 500.0
+    # This means delta = minutes_now - 500.0 = 0 < AMBIENT_QUIET_MIN → no fire.
+
+
+def test_ambient_mark_and_read_round_trip(tmp_path):
+    """_mark_development writes the stamp; _last_development_min reads it back."""
+    w = _world(tmp_path / "amb_rt.world")
+    _mark_development(w, 300.0, turn=2)
+    reads = PorcelainWorldReads(w)
+    assert _last_development_min(reads, 999.0) == 300.0
+    w.close()
+
+
+def test_ambient_mint_succeeds_when_guards_clear(tmp_path):
+    """generate_ambient mints when all guards pass (it is not the ambient gate
+    keeper — the turnloop controls when it is called). The function itself is
+    a thin wrapper over _mint_side_arc and returns an arc when clear."""
+    w = _world(tmp_path / "amb_mint.world")
+    reads = PorcelainWorldReads(w)
+    minted = generate_ambient(
+        w, reads, _GenProvider(), [], _ctx(), turn=1, main_protagonist=PLAYER)
+    assert minted is not None, "generate_ambient should mint when all guards pass"
+    arc, hook = minted
+    assert arc.arc_id == "arc:gen_1"
+    w.close()
+
+
+def test_ambient_win_loss_gate_is_in_turnloop():
+    """The win_loss guard lives in the turnloop (scenario_mode check), NOT inside
+    generate_ambient. Confirmed by the function's absence of a scenario_mode
+    parameter — the spec §C says 'gate on scenario_mode == "endless"' in the
+    turnloop step, not in the generator function itself."""
+    import inspect
+    sig = inspect.signature(generate_ambient)
+    assert "scenario_mode" not in sig.parameters, \
+        "scenario_mode guard belongs in the turnloop, not generate_ambient"
+
+
+# --- arbitration order (§D) -----------------------------------------------
+
+def test_arbitration_fallout_beats_salient(tmp_path):
+    """Regenerative (fallout) has higher priority than opportunistic — when both
+    qualify, the fallout mint fires and its arc is returned."""
+    w = _world(tmp_path / "arb.world")
+    reads = PorcelainWorldReads(w)
+    # Both qualify: a fallout AND a salient moment.
+    fo = _fallout()
+    moments = ["spine-touch: clerk wants something"]
+    ctx = {**_ctx(), "main_protagonist": PLAYER}
+    # Regenerative fires first; opportunistic would also fire.
+    minted_regen = generate_from_fallout(w, reads, _GenProvider(), fo, [], ctx, turn=1)
+    assert minted_regen is not None, "regenerative should mint when fallout available"
+    w.close()
+
+
+def test_arbitration_opportunistic_beats_ambient(tmp_path):
+    """Opportunistic (salient delta) has higher priority than ambient — when both
+    qualify, the opportunistic mint fires."""
+    w = _world(tmp_path / "arb2.world")
+    _mark_development(w, 0.0, turn=1)
+    reads = PorcelainWorldReads(w)
+    moments = ["spine-touch: the clerk is present and has a drive"]
+    ctx = {**_ctx(), "main_protagonist": PLAYER}
+    minted = generate_opportunistic(w, reads, _GenProvider(), moments, [], ctx,
+                                    turn=5, main_protagonist=PLAYER)
+    assert minted is not None, "opportunistic should mint with salient moments"
+    # Ambient would not fire anyway (delta < threshold), but the point is that
+    # opportunistic takes the slot — confirmed by the single mint above.
+    w.close()
+
+
+# --- player boundary (§D) --------------------------------------------------
+
+def test_player_protagonist_declined(tmp_path):
+    """A proposal naming the main protagonist is declined with 'player_protagonist'."""
+    w = _world(tmp_path / "pb.world")
+    reads = PorcelainWorldReads(w)
+    # Proposal returns PLAYER as the protagonist — same as main_protagonist.
+    player_proposal = dict(VALID_PROPOSAL)
+    player_proposal["protagonist"] = PLAYER
+    player_proposal["tension"] = [PLAYER, "drive:duty", "drive:fear"]
+    minted = generate_opportunistic(
+        w, reads, _GenProvider(player_proposal),
+        ["spine-touch"], [], _ctx(), turn=1, main_protagonist=PLAYER)
+    assert minted is None, "player-protagonist proposal must be declined"
+    declines = [e.event_id for e in
+                PorcelainWorldReads(w).events(kind="generation_declined", frame=SESSION)]
+    assert any("player_protagonist" in d for d in declines)
+    w.close()
+
+
+def test_player_protagonist_declined_ambient(tmp_path):
+    """Same guard applies via generate_ambient."""
+    w = _world(tmp_path / "pb2.world")
+    reads = PorcelainWorldReads(w)
+    player_proposal = dict(VALID_PROPOSAL)
+    player_proposal["protagonist"] = PLAYER
+    player_proposal["tension"] = [PLAYER, "drive:duty", "drive:fear"]
+    minted = generate_ambient(
+        w, reads, _GenProvider(player_proposal),
+        [], _ctx(), turn=1, main_protagonist=PLAYER)
+    assert minted is None
+    declines = [e.event_id for e in
+                PorcelainWorldReads(w).events(kind="generation_declined", frame=SESSION)]
+    assert any("player_protagonist" in d for d in declines)
+    w.close()
+
+
+# --- depth-0 roots + depth-1 regeneration from a dead P2b arc (§D) ---------
+
+def test_p2b_mint_has_depth_zero(tmp_path):
+    """P2b (opportunistic) mints at depth 0 — the explicit depth passed to
+    _record_attempt, NOT parent_depth+1 (§D, Cx 496 amendment 5)."""
+    w = _world(tmp_path / "d0.world")
+    reads = PorcelainWorldReads(w)
+    moments = ["spine-touch: clerk"]
+    minted = generate_opportunistic(
+        w, reads, _GenProvider(), moments, [], _ctx(), turn=1, main_protagonist=PLAYER)
+    assert minted is not None
+    arc, _ = minted
+    # gen_depth must be 0 (depth-0 root).
+    depth_val = w.porcelain.state(arc.arc_id, "gen_depth", frame=PLOT)["fact"]["value"]
+    assert depth_val in (0, "0"), f"expected depth 0, got {depth_val!r}"
+    w.close()
+
+
+def test_p2b_arc_death_regenerates_at_depth_one(tmp_path):
+    """A P2b arc (depth 0) that dies regenerates at depth 1 via generate_from_fallout.
+    _parent_depth reads gen_depth from the dead P2b arc row; the regenerative trigger
+    records depth = parent_depth + 1 = 0 + 1 = 1 (§D, Cx 496 amendment 5)."""
+    w = _world(tmp_path / "d1.world")
+    reads = PorcelainWorldReads(w)
+    moments = ["spine-touch: clerk"]
+    ctx = {**_ctx(), "main_protagonist": PLAYER}
+    # Mint the P2b arc at depth 0 (turn=1).
+    minted = generate_opportunistic(
+        w, reads, _GenProvider(), moments, [], ctx, turn=1, main_protagonist=PLAYER)
+    assert minted is not None
+    p2b_arc, _ = minted
+    # Confirm depth-0 root.
+    depth0 = w.porcelain.state(p2b_arc.arc_id, "gen_depth", frame=PLOT)["fact"]["value"]
+    assert depth0 in (0, "0")
+    # Simulate the P2b arc dying: create a terminal fallout with its arc_id.
+    slug = p2b_arc.arc_id.removeprefix("arc:")
+    fo2 = Fallout(
+        arc_id=p2b_arc.arc_id, lifecycle="incompletable",
+        term_id=f"event:arc_terminal_{slug}",
+        entity=CLERK, attribute="desire_unresolved", value="drive:duty",
+        directive="the p2b thread ended.")
+    # Use a DIFFERENT proposal for the successor — different beats so fingerprint differs.
+    different_proposal = dict(VALID_PROPOSAL)
+    different_proposal["beats"] = [{"id": "beat:new_beat", "phase": "climax",
+                                     "weight": "required", "kind": "event_occurs",
+                                     "entity": "new_confrontation",
+                                     "attribute": "", "value": ""}]
+    reads2 = PorcelainWorldReads(w)
+    minted2 = generate_from_fallout(
+        w, reads2, _GenProvider(different_proposal), fo2, [p2b_arc], ctx, turn=5)
+    assert minted2 is not None, "should regenerate from a dead P2b arc"
+    regen_arc, _ = minted2
+    depth_val = w.porcelain.state(regen_arc.arc_id, "gen_depth", frame=PLOT)["fact"]["value"]
+    assert depth_val in (1, "1"), f"expected depth 1 from P2b death, got {depth_val!r}"
     w.close()

@@ -59,7 +59,17 @@ from construct.arc.executor import (
     turn_time,
 )
 from construct.arc.executor import _human as _human_entity
-from construct.arc.generator import generate_from_fallout
+from construct.arc.generator import (
+    AMBIENT_QUIET_MIN,
+    _last_development_min,
+    _mark_development,
+    _pacing_ok as _gen_pacing_ok,
+    generate_ambient,
+    generate_from_fallout,
+    generate_opportunistic,
+    main_at_peak,
+    salient_moments,
+)
 from construct.arc.grammar import Arc, Phase, Weight
 from construct.pins import resolve_active_pins
 from construct.provider import Provider, ProviderError
@@ -3959,30 +3969,113 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             fallout_directives.append(fo.directive)
             fallouts.append(fo)
 
-    # ---- THE OPPORTUNISTIC DM GENERATOR (LIVING-WORLD-GENERATOR P2a) ------
-    # A dead arc seeds the next one. Paced, gated, fail-open; mints into the
-    # hidden plot frame, surfaces only as a diegetic hook. One mint per turn.
+    # ---- THE OPPORTUNISTIC DM GENERATOR (LIVING-WORLD-GENERATOR P2a+P2b+P2c) ----
+    # Three triggers share one mint path; at most ONE mint per turn (if/elif
+    # chain). Paced, gated, fail-open; mints into the hidden plot frame, surfaces
+    # only as a diegetic hook. Priority: regenerative > opportunistic > ambient.
+    #
+    # _mark_development is called at every development site (mint, beat achieved,
+    # clock fired, fallout emitted) to keep the ambient diegetic quiet-timer live.
     gen_hooks: list[str] = []
-    if generate and fallouts:
+    if generate:
+        from construct.clock import read_clock as _rc_gen
+        _gen_mins: float | None = None
+        try:
+            _gen_mins = float(_rc_gen(world).minutes)
+        except Exception:  # noqa: BLE001 — clockless worlds skip ambient timing
+            pass
+
+        # _mark_development at non-mint development sites: beats achieved, clocks
+        # fired this turn (both recorded in trace before this block), fallout
+        # emitted (also above). One call covers all three conditions.
+        if _gen_mins is not None and (
+                trace.beats_achieved or trace.clocks_fired or fallouts):
+            try:
+                _mark_development(world, _gen_mins, turn)
+            except Exception:  # noqa: BLE001
+                logger.debug("_mark_development (non-mint) failed", exc_info=True)
+
         ctx = {
             "style": style,
             "available_ids": sorted(set(scope or []) | set(npcs) | {arc.protagonist}),
             "present_characters": "\n".join(
                 f"{n}: drive={canon_table.get((n, 'drive'))} "
                 f"fear={canon_table.get((n, 'fear'))}" for n in npcs) or "(none in scene)",
+            "main_protagonist": arc.protagonist,
         }
+
+        minted = None
         try:
-            minted = generate_from_fallout(world, live_reads, provider,
-                                           fallouts[0], side_arcs, ctx, turn)
+            # 1. Right-of-way: main arc at CRISIS or CLIMAX → skip silently (§B).
+            #    No receipt, no session row — not a DM judgment.
+            if main_at_peak(live_reads, arc):
+                pass  # dramatic right-of-way — world stays quiet, no bookkeeping
+
+            # 2. Regenerative (P2a): a dead arc seeds the next (highest priority).
+            elif fallouts:
+                minted = generate_from_fallout(world, live_reads, provider,
+                                               fallouts[0], side_arcs, ctx, turn)
+
+            # 3. Opportunistic (P2b): player's committed delta touched something
+            #    salient — the DM wakes only when it notices (§A).
+            else:
+                _opp_moments: list[str] = []
+                # spined = present NPCs with a canon drive or fear (§A); initialised
+                # here so the ambient branch can read it if the try below fails.
+                _spined: set[str] = {
+                    n for n in npcs
+                    if canon_table.get((n, "drive")) or canon_table.get((n, "fear"))
+                }
+                try:
+                    _snap = world.porcelain.snapshot(
+                        sorted(set(scope or [])), frame="canon",
+                        since=turn_time(turn - 1))
+                    _fact_rows: list[dict] = _snap.get("facts", []) if _snap else []
+                    _win_events = live_reads.events(
+                        since=int(turn_time(turn - 1)), frame="canon")
+                    _prior_events = live_reads.events(
+                        until=int(turn_time(turn - 1)), frame="canon")
+                    _prior_kinds: set[str] = {e.kind for e in _prior_events}
+                    _opp_moments = salient_moments(
+                        _fact_rows, _win_events, _prior_kinds, _spined)
+                except Exception:  # noqa: BLE001 — salience read failure → not salient
+                    logger.debug("salient_moments read failed", exc_info=True)
+
+                # A cohort call requires at least one spined NPC in the scene:
+                # P2b/P2c always mint NPC-protagonist arcs, and without a spine-
+                # carrying NPC present the cohort has no grounded protagonist to
+                # propose (§D — "world moves *at* the player, never *as* them").
+                if _opp_moments and _spined:
+                    if _gen_pacing_ok(live_reads, side_arcs, turn):
+                        minted = generate_opportunistic(
+                            world, live_reads, provider, _opp_moments,
+                            side_arcs, ctx, turn, arc.protagonist)
+
+                # 4. Ambient (P2c): diegetic quiet threshold crossed — endless only (§C).
+                elif scenario_mode == "endless" and _gen_mins is not None and _spined:
+                    _last_dev = _last_development_min(live_reads, _gen_mins)
+                    if (_gen_mins - _last_dev >= AMBIENT_QUIET_MIN
+                            and _gen_pacing_ok(live_reads, side_arcs, turn)):
+                        minted = generate_ambient(
+                            world, live_reads, provider,
+                            side_arcs, ctx, turn, arc.protagonist)
+
         except Exception as exc:  # the generator NEVER breaks the turn
             logger.warning("DM generator failed: %s", exc)
             minted = None
+
         if minted is not None:
             new_arc, hook = minted
             side_arcs.append(new_arc)  # ticks from next turn; also in the portfolio
             trace.generated.append(new_arc.arc_id)
             if hook:
                 gen_hooks.append(hook)
+            # _mark_development at the mint site (§C).
+            if _gen_mins is not None:
+                try:
+                    _mark_development(world, _gen_mins, turn)
+                except Exception:  # noqa: BLE001
+                    logger.debug("_mark_development (mint) failed", exc_info=True)
 
     counters = counters_from_session(live_reads, arc)
     rung = navigate(counters, len(diff), bool(achieved))
