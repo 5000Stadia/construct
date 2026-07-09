@@ -142,22 +142,37 @@ the answer is no. A good DM doesn't poll; they *notice*. So P2b's trigger is a
 **deterministic, zero-model-call salience read** over the turn's committed
 delta, and the cohort wakes ONLY when it finds a qualifying moment:
 
-- **Source (guard #6, already binding — Cx 496 amendment 1 + Cx 498 correction,
-  exact surfaces):**
-  - fact rows — **NOT `snapshot(..., since=…)`**: PB applies `since` only to the
-    `what_happened` lens; on the default `current_state` lens it is ignored and
-    the "delta" is the full standing state, which defeats the filter (any scene
-    with a spined NPC reads salient every turn — Cx 498 BLOCKED, verified
-    against PB project.py). The real windowed source is the BOUNDED-READS facts
-    scan, per scope entity, horizon-bound:
-    `frame_facts(world, "canon", entity=e, as_of=_h)` for each `e` in the scene
-    scope, keeping only rows with `valid_from > turn_time(turn-1)` — rows that
-    canonized IN this turn's window, read at the play horizon (never
-    timeline-head on a horizon world).
-  - event rows: `reads.events(since=int(turn_time(turn-1)), frame="canon")`,
-    then client-filtered to `e.at > turn_time(turn-1)` — PB's event window is
-    INCLUSIVE at `since`, so the boundary filter excludes the previous turn's
-    own events (Cx 498 note, pinned by test).
+- **Source (guard #6 — THIRD revision; the first two were falsified by
+  evidence, chain recorded):**
+  1. ~~`snapshot(scope, since=…)`~~ — falsified by Cx 498: PB applies `since`
+     only to the `what_happened` lens; on `current_state` it is ignored and the
+     "delta" is the full standing state (any scene with a spined NPC reads
+     salient every turn).
+  2. ~~valid_from-window over `frame_facts`~~ (`valid_from > turn_time(turn-1)`)
+     — falsified by the FIRST LIVE §F RUN (2026-07-09): narrator-extracted
+     facts are committed UNSTAMPED in the settle tail and land at the engine
+     CURSOR, which never moves during play. In a session-zero/harness world
+     the cursor sits BELOW `TURN_EPOCH` → promote rows can never enter any
+     window (the trigger is BLIND to dialogue-driven deltas — the live Probe 1
+     failure); in an ingested world the cursor sits at the LAST SOURCE CHUNK,
+     above every `turn_time` → all past narrator facts qualify forever
+     (permanently salient). A time-window over unstamped rows is the wrong
+     predicate in both directions.
+  3. **CURRENT — the explicit committed batch** (what Cx 496 amendment 1
+     offered first): the turn loop passes the actual commit lists, no
+     time-window read at all —
+     - *previous turn's narrator delta:* the settle tail persists its `promote`
+       list (entity/attribute/value triples, capped ~60 rows, truncation
+       logged) as a hidden session row `session:gen` / `last_promote`
+       (JSON, superseding, written EVERY settle — an empty list on quiet turns
+       so a stale batch can never reappear). Settle is joined before the next
+       turn, so at turn n the folded read IS turn n-1's batch.
+     - *current turn's player-action delta:* `receipt_rows` (the adjudication/
+       input-extraction commits, already in scope in `run_turn`).
+     Both are post-gate committed rows — guard #6 (never prose) holds.
+  - event rows (unchanged, they carry explicit stamps):
+    `reads.events(since=int(turn_time(turn-1)), frame="canon")` client-filtered
+    via `window_events` to `e.at > turn_time(turn-1)`.
   - Never prose.
 - **Qualifying signals (the initial set — small, tunable in live-test):**
   1. **Spine-touch:** a window fact row whose `entity` or `value` is a person id
