@@ -170,6 +170,7 @@ The project is **design-first**: 60 design documents, each recording a decision,
 | The Remembrancer + player-authored memory (retcon) | Live | Contradictions quarantine; world-claims become beliefs |
 | Entity Authority + first-mention permanence | Live | Channel-scoped minting; prose-casing evidence, fail-closed |
 | Build-seal fidelity repair (coreference / typing) | Live | Tiered safest-first pass; arc-vouched merge only for load-bearing ids; fail-open |
+| Shape-aware place granularity | Live | Intimate/domestic shapes ground the interior at room scale; the opening anchors to the most specific place, not the enclosing city |
 | Gauges, diegetic time, world-tick, companions | Live | — |
 | World laws (authored constitution, register-gated, disclosure axis) | Live | The narrator briefs it every turn on a reserved lane; adjudication enforces it |
 | Scene imagery (per-location AI illustration) | Live | Oil-painting style; regenerates only when the scene truly changes |

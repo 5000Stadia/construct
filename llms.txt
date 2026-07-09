@@ -40,6 +40,10 @@ narrator's briefing; free-text writes pass one Entity Authority seam.
   the build-seal coreference/typing repair — a tiered, safest-first host
   pass that de-fragments an ingested world, arc-vouched merges only for
   load-bearing ids, fail-open.
+- [docs/design/SHAPE-PLACE-GRANULARITY.md](docs/design/SHAPE-PLACE-GRANULARITY.md):
+  shape-aware place granularity — intimate/domestic shapes author the
+  interior at room scale and the opening anchors to the most specific
+  co-asserted place, not the enclosing city.
 - [docs/design/REMEMBRANCER.md](docs/design/REMEMBRANCER.md): the player's
   own memory as a turn participant + player-authored retcon with
   contradiction quarantine.

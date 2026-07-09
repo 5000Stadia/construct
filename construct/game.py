@@ -2079,10 +2079,12 @@ def _live_in_candidates(world: Any, entity: str, as_of: float) -> list[str]:
 
 def _specific_opening_place(world: Any, protagonist: str, as_of: float,
                             locate_pick: str) -> str:
-    """#109 (Cx 490): when the protagonist is co-asserted at several places at the opening
-    horizon, prefer the most SPECIFIC over `locate()`'s first-inserted pick — but ONLY
-    when it is a strict improvement (never make the anchor coarser). Returns `locate_pick`
-    unchanged for the single-candidate / no-improvement case (backward compatible)."""
+    """#109 (Cx 490/492): when the protagonist is co-asserted at several places at the
+    resolved opening layer (`as_of` — the opening horizon OR the earliest-source layer,
+    whichever branch resolved), prefer the most SPECIFIC over `locate()`'s first-inserted
+    pick — but ONLY when it is a strict improvement (never make the anchor coarser).
+    Returns `locate_pick` unchanged for the single-candidate / no-improvement case
+    (backward compatible)."""
     cands = _live_in_candidates(world, protagonist, as_of)
     if len(cands) < 2:
         return locate_pick
