@@ -936,3 +936,62 @@ def test_fidelity_vouched_pairs_allowlist_and_load_bearing_gates():
     ]
     got = set(_fidelity_vouched_pairs(audit, lb))
     assert got == {(PROT, "person:mara"), (REQ, "person:lysa")}, got
+
+
+def test_failed_cast_does_not_widen_the_vouch_set(tmp_path):
+    # #56 (Cx 484): _required_cast must be populated ONLY on cast ACCEPTANCE. If
+    # cast authoring fails solvability and ships pillar-less, the vouched-merge
+    # load-bearing set must be {protagonist} only — a failed proposal's holders
+    # are not load-bearing truth. Spy on the gate's load_bearing arg.
+    from construct import game
+    from construct.provider import StubProvider, task_of
+
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        return rule(prompt, schema) if prompt.startswith("Classify the lifetime") else {"items": []}
+
+    path = tmp_path / "fc.world"
+    w = World(path, world_id="w:fc", model=StubModel(fallback=fallback),
+              stance="fiction", title="Failed Cast World")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:hall", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:hero", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:hero", "attribute": "in", "value": "place:hall"},
+        {"entity": "person:witness", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:witness", "attribute": "in", "value": "place:hall"},
+        {"entity": "fact:x", "attribute": "kind", "value": "proposition", "timeless": True},
+        {"entity": "fact:x", "attribute": "who", "value": "person:witness"},
+    ])
+    proposal = {
+        "protagonist": "person:hero", "delta_type": "drive_inverted",
+        "tension": ["person:hero", "drive:a", "drive:b"],
+        "goal_statement": "learn it", "theme": "the case",
+        "beats": [{"id": "beat:l", "phase": "climax", "weight": "required",
+                   "kind": "player_learns", "entity": "fact:x",
+                   "attribute": "who", "value": "person:witness"}],
+    }
+
+    class _P(StubProvider):
+        def __init__(self): super().__init__([])
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if task_of(prompt) == "arc":
+                return dict(proposal)
+            if task_of(prompt) == "cast":  # UNSOLVABLE cast → ships pillar-less
+                return {"pillars": [], "cast": []}
+            return {"items": []}
+
+    seen = {}
+    _orig = game._fidelity_vouched_pairs
+    game._fidelity_vouched_pairs = lambda nc, lb, **k: (seen.__setitem__("lb", set(lb)), _orig(nc, lb, **k))[1]
+    try:
+        game._finalize_scenario(w, "fc", "Failed Cast World", _P(), tmp_path / "fc_s.world",
+                                endless=False, game_types=["mystery_whodunnit"])
+    finally:
+        game._fidelity_vouched_pairs = _orig
+    # the vouch set is protagonist ONLY — no required cast leaked from the failed proposal
+    assert seen.get("lb") == {"person:hero"}, seen.get("lb")
+    w.close()

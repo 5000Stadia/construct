@@ -861,7 +861,6 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                     logger.info("cast identity collision(s) disambiguated: %s", _remaps)
                 _cast, _specs = cast_from_proposal(_cprop)
                 _req = [pid for pid, _label, required in _specs if required]
-                _required_cast = list(_req)  # survive the try for the #56 vouch
                 # Validate holders against canon ids too (Cx 032: a clue on a phantom NPC
                 # can never be interviewed) — known_ids is the canon allowlist above.
                 # For DEDUCTION, also gate on PHYSICAL staging (INVESTIGATION-SHAPE.md §3d):
@@ -890,6 +889,11 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                     arc = _dc.replace(arc,
                                       pillars=build_pillars(_specs, _cast, arc.protagonist))
                     cast_nodes, cast_proposal = _cast, _cprop
+                    # #56 (Cx 484): publish required-cast ids into the vouch set
+                    # ONLY on ACCEPTANCE — a failed proposal's holders are not
+                    # load-bearing truth (a pillar-less ship must not widen the
+                    # merge set). Stays [] on the unsolvable/exception paths.
+                    _required_cast = list(_req)
                     # ADMIT disambiguated persons as cast-authored canon (#92, Cx 404 req 3):
                     # a fresh person:<slug>_N exists nowhere yet — seed kind/name/role (+
                     # pronouns if authored) so presence, staging, and reference all work.
@@ -929,8 +933,9 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # FIDELITY-REPAIR step 4 (#56, Cx 480): vouched merge of same-name SAME-KIND
     # true splits the safe tools declined for homonym-safety (alias_not_specific)
     # — person:mara/person:mara_venn, person:lysa/person:lysa_fen. The host vouches
-    # ONLY when EXACTLY ONE id in the group is load-bearing (arc protagonist ∪ cast
-    # nodes); it folds the other, non-load-bearing fragments INTO that id. Runs
+    # ONLY when EXACTLY ONE id in the group is load-bearing (arc protagonist ∪
+    # REQUIRED cast — populated only on cast acceptance); it folds the other,
+    # non-load-bearing fragments INTO that id. Runs
     # HERE — after cast authoring, BEFORE the arc_to_items write below — so the plot
     # rows are written with the merged canonical id, and never after Stage-5's
     # literal knows:<id> frame seeding (Cx 480 insertion-point ruling). Fail-open.
