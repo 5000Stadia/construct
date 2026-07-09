@@ -31,7 +31,7 @@ from construct.resolve import (
     resolve_rows, bind_or_mint, _PLAYER_INPUT_MINT_KINDS,
     _NARRATION_MINT_KINDS, _NARRATION_STUB_KINDS, _PLACE_LIKE_KINDS,
 )
-from construct.adapter import PorcelainWorldReads
+from construct.adapter import PorcelainWorldReads, frame_facts
 from construct.gauge import (
     apply_gauge_terminals, gauge_coloring, gauge_lines, gauge_pass,
 )
@@ -3973,28 +3973,32 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # Three triggers share one mint path; at most ONE mint per turn (if/elif
     # chain). Paced, gated, fail-open; mints into the hidden plot frame, surfaces
     # only as a diegetic hook. Priority: regenerative > opportunistic > ambient.
-    #
-    # _mark_development is called at every development site (mint, beat achieved,
-    # clock fired, fallout emitted) to keep the ambient diegetic quiet-timer live.
     gen_hooks: list[str] = []
-    if generate:
-        from construct.clock import read_clock as _rc_gen
-        _gen_mins: float | None = None
+
+    # The development LEDGER records that the WORLD developed (beats achieved,
+    # clocks fired, fallout emitted) — not generator bookkeeping. It is written
+    # UNCONDITIONALLY (outside `if generate:`), so peak-turn developments are
+    # recorded even when the right-of-way gate silences the trigger chain.
+    # Skipping it at peak would make a beat-rich climax read as a false half-day
+    # of silence and fire ambient the moment the climax breaks (§B, Cx 498).
+    from construct.clock import read_clock as _rc_gen
+    _gen_mins: float | None = None
+    try:
+        _gen_mins = float(_rc_gen(world).minutes)
+    except Exception:  # noqa: BLE001 — clockless worlds skip ambient timing
+        pass
+
+    # _mark_development at non-mint development sites: beats achieved, clocks
+    # fired this turn (both recorded in trace before this block), fallout
+    # emitted (also above). One call covers all three conditions.
+    if _gen_mins is not None and (
+            trace.beats_achieved or trace.clocks_fired or fallouts):
         try:
-            _gen_mins = float(_rc_gen(world).minutes)
-        except Exception:  # noqa: BLE001 — clockless worlds skip ambient timing
-            pass
+            _mark_development(world, _gen_mins, turn)
+        except Exception:  # noqa: BLE001
+            logger.debug("_mark_development (non-mint) failed", exc_info=True)
 
-        # _mark_development at non-mint development sites: beats achieved, clocks
-        # fired this turn (both recorded in trace before this block), fallout
-        # emitted (also above). One call covers all three conditions.
-        if _gen_mins is not None and (
-                trace.beats_achieved or trace.clocks_fired or fallouts):
-            try:
-                _mark_development(world, _gen_mins, turn)
-            except Exception:  # noqa: BLE001
-                logger.debug("_mark_development (non-mint) failed", exc_info=True)
-
+    if generate:
         ctx = {
             "style": style,
             "available_ids": sorted(set(scope or []) | set(npcs) | {arc.protagonist}),
@@ -4007,9 +4011,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         minted = None
         try:
             # 1. Right-of-way: main arc at CRISIS or CLIMAX → skip silently (§B).
-            #    No receipt, no session row — not a DM judgment.
+            #    No receipt, no session row — not a DM judgment. The development
+            #    ledger was already written above (unconditional); the trigger
+            #    chain contributes ZERO rows on a peak turn.
             if main_at_peak(live_reads, arc):
-                pass  # dramatic right-of-way — world stays quiet, no bookkeeping
+                pass  # dramatic right-of-way — trigger chain stays quiet
 
             # 2. Regenerative (P2a): a dead arc seeds the next (highest priority).
             elif fallouts:
@@ -4027,14 +4033,31 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     if canon_table.get((n, "drive")) or canon_table.get((n, "fear"))
                 }
                 try:
-                    _snap = world.porcelain.snapshot(
-                        sorted(set(scope or [])), frame="canon",
-                        since=turn_time(turn - 1))
-                    _fact_rows: list[dict] = _snap.get("facts", []) if _snap else []
-                    _win_events = live_reads.events(
-                        since=int(turn_time(turn - 1)), frame="canon")
+                    # Fact-delta source: bounded per-entity indexed scan, horizon-bound
+                    # (§A, Cx 498 BLOCKED). NOT snapshot(..., since=...) — PB applies
+                    # `since` only to the what_happened lens; on current_state it is
+                    # ignored, returning the full standing state (any scene with a
+                    # spined NPC reads salient every turn, defeating the filter).
+                    _turn_floor = turn_time(turn - 1)
+                    _fact_rows: list[dict] = []
+                    for _e in sorted(set(scope or [])):
+                        for _r in frame_facts(world, "canon", entity=_e, as_of=_h):
+                            # Keep only rows that canonized IN this turn's window.
+                            if _r.valid_from is not None and _r.valid_from > _turn_floor:
+                                _fact_rows.append({
+                                    "entity": _r.entity,
+                                    "attribute": _r.attribute,
+                                    "value": _r.value,
+                                })
+                    # Event window: PB's `since` is INCLUSIVE; client-filter to
+                    # strictly-after to exclude the previous turn's own events (§A,
+                    # Cx 498 note).
+                    _all_win_events = live_reads.events(
+                        since=int(_turn_floor), frame="canon")
+                    _win_events = [e for e in _all_win_events
+                                   if e.at is not None and e.at > _turn_floor]
                     _prior_events = live_reads.events(
-                        until=int(turn_time(turn - 1)), frame="canon")
+                        until=int(_turn_floor), frame="canon")
                     _prior_kinds: set[str] = {e.kind for e in _prior_events}
                     _opp_moments = salient_moments(
                         _fact_rows, _win_events, _prior_kinds, _spined)
@@ -4053,7 +4076,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
 
                 # 4. Ambient (P2c): diegetic quiet threshold crossed — endless only (§C).
                 elif scenario_mode == "endless" and _gen_mins is not None and _spined:
-                    _last_dev = _last_development_min(live_reads, _gen_mins)
+                    _last_dev = _last_development_min(world, live_reads, _gen_mins, turn)
                     if (_gen_mins - _last_dev >= AMBIENT_QUIET_MIN
                             and _gen_pacing_ok(live_reads, side_arcs, turn)):
                         minted = generate_ambient(

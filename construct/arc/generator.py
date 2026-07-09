@@ -212,17 +212,26 @@ def main_at_peak(reads: Any, main_arc: Arc) -> bool:
 
 # --- ambient clock (P2c, §C) -------------------------------------------
 
-def _last_development_min(reads: Any, minutes_now: float) -> float:
+def _last_development_min(world: Any, reads: Any, minutes_now: float,
+                          turn: int) -> float:
     """The diegetic-minute stamp of the most recent development (any mint, beat
-    achieved, clock fired, or fallout emitted). Seed-on-absent: if the row is
-    missing, treat the current clock as the baseline — never at genesis, so
-    legacy worlds don't fire ambient on their first turn (§C)."""
+    achieved, clock fired, or fallout emitted).
+
+    Seed-on-absent is a WRITE-ONCE baseline (§C, Cx 498): if the row is missing
+    or malformed, write current diegetic minutes before returning them — the
+    quiet-timer starts "now", never at genesis. A read-only seed that merely
+    returns "now" reseeds every check and the interval never accrues (ambient
+    would be structurally dead on fresh worlds)."""
     raw = reads.state("session:ambient", "last_development_min", frame=SESSION)
     if raw is None:
-        return minutes_now  # treat now as the last development; timer starts fresh
+        # No baseline yet — write it so the timer accrues from this turn.
+        _mark_development(world, minutes_now, turn)
+        return minutes_now
     try:
         return float(raw)
     except (TypeError, ValueError):
+        # Malformed row — overwrite with a clean baseline.
+        _mark_development(world, minutes_now, turn)
         return minutes_now
 
 

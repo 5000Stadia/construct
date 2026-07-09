@@ -142,14 +142,22 @@ the answer is no. A good DM doesn't poll; they *notice*. So P2b's trigger is a
 **deterministic, zero-model-call salience read** over the turn's committed
 delta, and the cohort wakes ONLY when it finds a qualifying moment:
 
-- **Source (guard #6, already binding — Cx 496 amendment 1, exact surfaces):**
-  - fact rows: `world.porcelain.snapshot(scope, frame="canon",
-    since=turn_time(turn-1))["facts"]` — the scene `scope` already computed in
-    `run_turn` (the same set the P2a ctx uses), `since`-bounded to this turn's
-    window. A shipped porcelain read (P2 spec §3; PB 072 §1).
-  - event rows: `reads.events(since=int(turn_time(turn-1)), frame="canon")` —
-    `PorcelainWorldReads.events` returns `EventRow` with `kind`/`agents`/
-    `caused_by` (adapter.py).
+- **Source (guard #6, already binding — Cx 496 amendment 1 + Cx 498 correction,
+  exact surfaces):**
+  - fact rows — **NOT `snapshot(..., since=…)`**: PB applies `since` only to the
+    `what_happened` lens; on the default `current_state` lens it is ignored and
+    the "delta" is the full standing state, which defeats the filter (any scene
+    with a spined NPC reads salient every turn — Cx 498 BLOCKED, verified
+    against PB project.py). The real windowed source is the BOUNDED-READS facts
+    scan, per scope entity, horizon-bound:
+    `frame_facts(world, "canon", entity=e, as_of=_h)` for each `e` in the scene
+    scope, keeping only rows with `valid_from > turn_time(turn-1)` — rows that
+    canonized IN this turn's window, read at the play horizon (never
+    timeline-head on a horizon world).
+  - event rows: `reads.events(since=int(turn_time(turn-1)), frame="canon")`,
+    then client-filtered to `e.at > turn_time(turn-1)` — PB's event window is
+    INCLUSIVE at `since`, so the boundary filter excludes the previous turn's
+    own events (Cx 498 note, pinned by test).
   - Never prose.
 - **Qualifying signals (the initial set — small, tunable in live-test):**
   1. **Spine-touch:** a window fact row whose `entity` or `value` is a person id
@@ -207,11 +215,23 @@ to care" read. One reader, several consumers; don't fuse it into the DM.
 Nothing in the shipped guards knows where the MAIN story is. A DM who launches a
 fresh subplot during the climax is a bad DM. New structural rule: **no generation
 while the main arc is in CRISIS or CLIMAX** (`executor.current_phase(reads,
-main_arc)` — a cheap derived read). This gate runs FIRST and is **silent**,
-meaning exactly (Cx 496 amendment 2): no `generation_declined` receipt, no
-session row, no bookkeeping of any kind — return before everything (it isn't a
-DM judgment; it's right-of-way, and receipting every peak turn would churn rows
-and distort the `_last_try_turn` pacing read). Applies to all three triggers.
+main_arc)` — a cheap derived read). This gate runs FIRST in the trigger chain
+and is **silent**, meaning exactly (Cx 496 amendment 2, boundary sharpened per
+Cx 498): **no GENERATOR bookkeeping** — no `generation_declined` receipt, no
+pacing-visible row, no fingerprint, nothing the DM's own audit trail would
+record (it isn't a DM judgment; it's right-of-way, and receipting every peak
+turn would churn rows and distort the `_last_try_turn` pacing read). Applies to
+all three triggers.
+
+**The development LEDGER is not generator bookkeeping.** The `session:ambient`
+/ `last_development_min` row (§C) records that the WORLD developed — a beat
+achieved, a clock fired, a fallout emitted — and must record peak-turn
+developments too, so it is written OUTSIDE the trigger chain (before the gate,
+independent of `generate`). Skipping it at peak would make a beat-rich climax
+read as a false half-day of silence and fire ambient the moment the climax
+breaks — the exact misfire the ledger exists to prevent. The right-of-way
+silence contract is therefore: on a peak turn the trigger chain contributes
+ZERO rows; the ledger still tracks real developments, as it does on every turn.
 
 **Acceptable loss, ruled by Cx 496 — no fallout queue.** The regenerative
 trigger consumes only the SAME-TURN `fallouts` list; a side-arc death during
@@ -240,10 +260,14 @@ there would punish exactly the play the ruling protects. So:
   - **Update points:** any generation MINT (all triggers), any beat achieved,
     any clock fired, any fallout emitted — all sites already explicit in
     `run_turn`.
-  - **Seed-on-absent:** if the row is missing (fresh or pre-P2c world), treat
-    `last_development_min` as the CURRENT `read_clock(world).minutes` and write
-    it — the quiet-timer starts "now", never at genesis (else every legacy
-    world fires ambient on its first turn).
+  - **Seed-on-absent is a WRITE-ONCE baseline (Cx 498):** if the row is missing
+    (fresh or pre-P2c world), WRITE the current `read_clock(world).minutes` as
+    the baseline before returning it — the quiet-timer starts "now", never at
+    genesis. A read-only seed that merely RETURNS "now" reseeds every check and
+    the interval never accrues: ambient would be structurally dead on fresh
+    worlds. Regression required: a fresh quiet endless world does not fire
+    immediately, and DOES fire once `AMBIENT_QUIET_MIN` diegetic minutes accrue
+    past the seeded baseline.
   - **The trigger test** (after right-of-way and `_pacing_ok`):
     `read_clock(world).minutes - last_development_min >= AMBIENT_QUIET_MIN`
     (default `720.0` — half an in-world day; genre-tunable later).
