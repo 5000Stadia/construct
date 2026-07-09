@@ -93,6 +93,55 @@ are idempotent (re-running finds nothing new). Emits per-stage receipts
 - **The 1 residual** is the only bin-B/V2 candidate — reported to PB, not fixed
   speculatively.
 
+## Cx 480 amendments (folded — required for GREEN)
+
+Cx spec review (letter 480, YELLOW→amendments) caught four safety holes; all
+folded:
+
+1. **`guarded_merge()` does NOT veto durable-contradictions** — only containment
+   / `distinct_from` (porcelain.py:531, identity.py:578). `adjudicate_deferred`
+   only *skips* a durable-contradiction pair into residue; a later host
+   `merge()` would override it. So step 4 must **host-side exclude** pairs whose
+   audit/residue reason is `durable_contradiction` OR `relating_edge` (read the
+   structured reason surface); guarded_merge only backstops
+   `distinct_from`/containment.
+2. **Reject after retype, not before.** Typing-slips are cross-kind too; a
+   `reject()` on a slip writes `distinct_from` and then `retype(absorb=)` vetoes
+   on it. Order: `adjudicate_deferred` → **`retype(absorb=)` (slips)** →
+   **`reject()` (remaining cross-kind homonyms — exclude any pair still returned
+   by `typing_conflicts()` / with per-pair status `typing_slip`)**.
+3. **Vouched merge fires only when EXACTLY ONE id in the group is load-bearing.**
+   A group with two load-bearing ids (protagonist + a required-cast member, or
+   two cast members, same name) has no unique canonical to fold into → leave as
+   residue + log. Required-cast ids are `_req` (game.py:801); the accepted cast
+   nodes are retained (game.py:827).
+4. **Preserve the literal arc/cast ids; do not assume PB canonical election
+   follows merge direction.** `merge(a,b)` appends `a same_as b`; closure is
+   undirected; `resolve()` elects first-seen in log order — so `merge(fragment,
+   arc_id)` does NOT guarantee `resolve(arc_id)==arc_id`. Keep `arc.protagonist`,
+   required-cast ids, beat/pillar frames, and meta pointed at the retained
+   (load-bearing) id; merge only non-load-bearing fragments. **Seal-lint
+   interaction:** because the vouched merge may make PB elect a fragment as the
+   canonical representative, the #107 seal-lint must compare protagonist
+   coherence by **identity (resolve both sides), not literal string** — else a
+   correct merge triggers a false `protagonist_split`. (Amend
+   `_protagonist_coherence` to resolve, or compare via the registry.)
+
+**Insertion point (Cx Q1 ruling).** Steps 1–3 stay at Stage 2 (pre-arc,
+extending the #108 block; add the reject step). Step 4 (vouched merge) runs
+AFTER successful cast authoring and BEFORE the `arc_to_items(arc)+index_items`
+write (game.py:866) — so the plot rows are written with the already-merged
+canonical id. It MUST NOT run after `cast_seed_plan()` / `cast_location_plan()`
+(Stage 5), which emit literal `knows:<node_id>` frames + staging rows a later
+merge would strand.
+
+**Vouched-merge receipt discipline (Cx Q2).** Treat only `merged` /
+`noop_already_merged` as success; a `vetoed` result leaves the group unresolved
+and logs fail-open. Candidate allowlist: same folded kind + per-pair reason in
+`{alias_not_specific}` by default (add reasons only with tests). Never merge
+`typing_slip`, `kind_conflict`, `durable_contradiction`, `relating_edge`,
+`containment`, `hard_blocked`.
+
 ## Test bar
 - A world with `person:X`/`place:X` → after the pass they carry `distinct_from`
   and drop from `name_collisions`; `refer("X")` resolves person-vs-place by scene.

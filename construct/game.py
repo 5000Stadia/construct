@@ -449,6 +449,34 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 absorb=_tc["target"])
             logger.info("typing slip %s -> %s: %s", _tc["spurious"],
                         _tc["target"], _r.get("outcome"))
+        # FIDELITY-REPAIR step 2 (#56, Cx 480): person↔place HOMONYMS — a
+        # collision group carrying >1 folded kind is two genuinely-distinct
+        # entities sharing a name (a character AND a village, e.g.
+        # person:harth/place:harth), not a fragment. reject() writes
+        # distinct_from → drops them from the live count AND gives refer() the
+        # kind+scene signal to disambiguate at render (the presence-flicker fix).
+        # RUN AFTER retype (Cx 480 #2): a slip is cross-kind too, so exclude any
+        # pair still flagged by typing_conflicts() — reject only genuine homonyms.
+        _slip_pairs = {tuple(sorted((tc.get("spurious"), tc.get("target"))))
+                       for tc in world.porcelain.typing_conflicts()}
+        for _g in world.porcelain.fidelity_audit().get("name_collisions", []):
+            if not _g.get("live"):
+                continue
+            _ents, _kinds = _g.get("entities") or [], _g.get("kinds") or []
+            for _i in range(len(_ents)):
+                for _j in range(_i + 1, len(_ents)):
+                    _ka, _kb = (_kinds[_i] if _i < len(_kinds) else None,
+                                _kinds[_j] if _j < len(_kinds) else None)
+                    if not (_ka and _kb and _ka != _kb):
+                        continue  # same-kind → not a homonym (step 4 handles)
+                    if tuple(sorted((_ents[_i], _ents[_j]))) in _slip_pairs:
+                        continue  # a typing slip retype owns — never reject it
+                    try:
+                        world.porcelain.reject(_ents[_i], _ents[_j])
+                        logger.info("fidelity homonym distinct: %s / %s",
+                                    _ents[_i], _ents[_j])
+                    except Exception:  # noqa: BLE001 — one reject never sinks the build
+                        pass
     except Exception as exc:  # a finalize-pass failure must never sink a build
         logger.warning("identity reconcile skipped: %s", exc)
 
@@ -862,6 +890,48 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     except Exception as exc:  # cast authoring NEVER sinks a build
         logger.warning("cast authoring skipped: %s", exc)
         cast_nodes, cast_proposal = (), None
+
+    # FIDELITY-REPAIR step 4 (#56, Cx 480): vouched merge of same-name SAME-KIND
+    # true splits the safe tools declined for homonym-safety (alias_not_specific)
+    # — person:mara/person:mara_venn, person:lysa/person:lysa_fen. The host vouches
+    # ONLY when EXACTLY ONE id in the group is load-bearing (arc protagonist ∪ cast
+    # nodes); it folds the other, non-load-bearing fragments INTO that id. Runs
+    # HERE — after cast authoring, BEFORE the arc_to_items write below — so the plot
+    # rows are written with the merged canonical id, and never after Stage-5's
+    # literal knows:<id> frame seeding (Cx 480 insertion-point ruling). Fail-open.
+    _load_bearing = {arc.protagonist} | {n.node_id for n in (cast_nodes or ())}
+    try:
+        for _g in world.porcelain.fidelity_audit().get("name_collisions", []):
+            if not _g.get("live"):
+                continue
+            _ents = _g.get("entities") or []
+            _kinds = _g.get("kinds") or []
+            if len({k for k in _kinds if k}) > 1:
+                continue  # cross-kind homonym — step 2's reject() owns it
+            _lb = [e for e in _ents if e in _load_bearing]
+            if len(_lb) != 1:
+                continue  # 0 or >1 load-bearing → no unique canonical (Cx 480 #3)
+            _keep = _lb[0]
+            # Cx 480 #1: guarded_merge does NOT veto durable-contradiction /
+            # relating-edge — exclude those pairs host-side by reason.
+            _bad = {"durable_contradiction", "relating_edge", "kind_conflict",
+                    "typing_slip", "containment", "hard_blocked"}
+            _blocked = {p for pr in (_g.get("pairs") or [])
+                        if (pr.get("reason") in _bad or pr.get("status") in _bad)
+                        for p in (pr.get("a"), pr.get("b"))}
+            for _frag in _ents:
+                if _frag == _keep or _frag in _load_bearing or _frag in _blocked:
+                    continue
+                _mr = world.porcelain.merge(
+                    _keep, _frag, evidence="fidelity-repair: same-name same-kind "
+                    "coref folded into the arc-load-bearing id (#56)")
+                if _mr.get("outcome") in ("merged", "noop_already_merged"):
+                    logger.info("fidelity merge: %s <- %s", _keep, _frag)
+                else:  # vetoed → leave unresolved, fail-open (Cx 480 receipt rule)
+                    logger.warning("fidelity merge vetoed: %s <- %s (%s)",
+                                   _keep, _frag, _mr.get("outcome"))
+    except Exception as exc:  # noqa: BLE001 — repair NEVER sinks a build
+        logger.warning("fidelity vouched-merge skipped: %s", exc)
 
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc) + arc_io.index_items(arc))
