@@ -47,8 +47,9 @@ routed off `fidelity_audit()`'s per-group `kinds[]` (index-aligned with
    true splits `adjudicate_deferred` declined for homonym-safety
    (`alias_not_specific`) — `person:lysa`/`person:lysa_fen`,
    `person:mara`/`person:mara_thist`. The host merges these ONLY when the group
-   touches the **arc protagonist or a required-cast id** (the host can vouch:
-   the story authored one such character). `guarded_merge` still enforces
+   touches the **arc protagonist or a required-clue holder id** (the entity
+   surface a required pillar is delivered through — the host can vouch: the story
+   authored one such character). `guarded_merge` still enforces
    `distinct_from`/containment absolutely, so a vouched merge can never cross a
    step-2 `reject()`. *(NEW.)*
 
@@ -58,8 +59,9 @@ routed off `fidelity_audit()`'s per-group `kinds[]` (index-aligned with
 **arc-independent** (anchor subsumption, homonyms, slips) and stay at Stage 2
 (extending the #108 block; add step 2).
 
-Step 4 (vouched merge) NEEDS the arc protagonist + required cast, authored at
-Stage 4. So it runs as a **second pass after Stage 4, before the seal** — and
+Step 4 (vouched merge) NEEDS the arc protagonist + required-clue holders,
+authored at Stage 4. So it runs as a **second pass after Stage 4, before the
+seal** — and
 it merges the OTHER fragments **INTO** the arc-canonical id, **never away from
 it**. This is the hard invariant: the arc's `protagonist`/cast rows and the
 literal beat-gate `knows:<id>` frames must keep naming the same id, so we only
@@ -70,8 +72,10 @@ after this — a residual divergence is caught + receipted.)
 ## Severity join (host-only, arc-aware)
 
 For step 4's "does this group touch a load-bearing id?" the host joins each
-`fidelity_audit()` group's `entities[]` against the arc protagonist ∪ required
-cast. `kinds[]` (PB's additive) makes the person↔place weighting namespace-lie-
+`fidelity_audit()` group's `entities[]` against the arc protagonist ∪ required-
+clue holder ids (`required_holder_ids(_req, _cast)` — the entity surface of the
+required pillars, NOT the `pillar:*` ids). `kinds[]` (PB's additive) makes the
+person↔place weighting namespace-lie-
 proof. The engine stays arc-blind (the membrane); severity is host truth.
 
 ## Fail-open + idempotence
@@ -111,10 +115,12 @@ folded:
    **`reject()` (remaining cross-kind homonyms — exclude any pair still returned
    by `typing_conflicts()` / with per-pair status `typing_slip`)**.
 3. **Vouched merge fires only when EXACTLY ONE id in the group is load-bearing.**
-   A group with two load-bearing ids (protagonist + a required-cast member, or
-   two cast members, same name) has no unique canonical to fold into → leave as
-   residue + log. Required-cast ids are `_req` (game.py:801); the accepted cast
-   nodes are retained (game.py:827).
+   A group with two load-bearing ids (protagonist + a required holder, or two
+   holders, same name) has no unique canonical to fold into → leave as residue +
+   log. **Load-bearing holders are ENTITY ids, not pillar ids (Cx 486):** `_req`
+   is the required `pillar:*` list; the vouch set is
+   `required_holder_ids(_req, _cast)` — the cast members carrying a genuine, live-
+   reachable clue for a required pillar — published only on cast acceptance.
 4. **Preserve the literal arc/cast ids; do not assume PB canonical election
    follows merge direction.** `merge(a,b)` appends `a same_as b`; closure is
    undirected; `resolve()` elects first-seen in log order — so `merge(fragment,

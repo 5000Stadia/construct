@@ -805,7 +805,7 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # terminal path rather than shipping an unsolvable mystery. Enrichment, never a blocker.
     cast_nodes: tuple = ()
     cast_proposal: dict | None = None
-    _required_cast: list = []  # #56 Cx 482: REQUIRED-cast holder ids for the vouch
+    _required_holders: set = set()  # #56 Cx 486: REQUIRED-clue HOLDER entity ids for the vouch
     try:
         from construct.story_shapes import author_signature_directive, shapes_for
         _prof = shapes_for(resolved_game_types) if resolved_game_types else None
@@ -821,6 +821,7 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                 cast_from_proposal,
                 check_solvability,
                 disambiguate_cast_identities,
+                required_holder_ids,
                 validate_beat_delivery,
                 validate_signature_support,
             )
@@ -889,11 +890,15 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                     arc = _dc.replace(arc,
                                       pillars=build_pillars(_specs, _cast, arc.protagonist))
                     cast_nodes, cast_proposal = _cast, _cprop
-                    # #56 (Cx 484): publish required-cast ids into the vouch set
-                    # ONLY on ACCEPTANCE — a failed proposal's holders are not
-                    # load-bearing truth (a pillar-less ship must not widen the
-                    # merge set). Stays [] on the unsolvable/exception paths.
-                    _required_cast = list(_req)
+                    # #56 (Cx 486): publish the required HOLDER ENTITY ids into the
+                    # vouch set — NOT the required pillar ids (`_req` is `pillar:*`,
+                    # which never match `fidelity_audit()` collision ENTITY ids).
+                    # A required holder = a cast member carrying a genuine, live-
+                    # reachable clue for a required pillar (the entity surface the
+                    # arc leans on). Published ONLY on ACCEPTANCE (Cx 484) — a failed
+                    # proposal's holders are not load-bearing truth; stays [] on the
+                    # unsolvable/exception paths.
+                    _required_holders = required_holder_ids(_req, _cast)
                     # ADMIT disambiguated persons as cast-authored canon (#92, Cx 404 req 3):
                     # a fresh person:<slug>_N exists nowhere yet — seed kind/name/role (+
                     # pronouns if authored) so presence, staging, and reference all work.
@@ -934,14 +939,15 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
     # true splits the safe tools declined for homonym-safety (alias_not_specific)
     # — person:mara/person:mara_venn, person:lysa/person:lysa_fen. The host vouches
     # ONLY when EXACTLY ONE id in the group is load-bearing (arc protagonist ∪
-    # REQUIRED cast — populated only on cast acceptance); it folds the other,
+    # REQUIRED-clue holder entity ids — populated only on cast acceptance); folds the other,
     # non-load-bearing fragments INTO that id. Runs
     # HERE — after cast authoring, BEFORE the arc_to_items write below — so the plot
     # rows are written with the merged canonical id, and never after Stage-5's
     # literal knows:<id> frame seeding (Cx 480 insertion-point ruling). Fail-open.
-    # Load-bearing = protagonist ∪ REQUIRED cast only (Cx 482 #2 — NOT all cast
+    # Load-bearing = protagonist ∪ REQUIRED-clue holder ids only (Cx 486 — the
+    # entity surface of required pillars, NOT the pillar ids and NOT all cast
     # nodes; optional/red-herring cast is a different safety claim).
-    _load_bearing = {arc.protagonist} | set(_required_cast)
+    _load_bearing = {arc.protagonist} | set(_required_holders)
     # The vouch ALLOWLIST (Cx 482 #1): merge a same-kind fragment ONLY when the
     # engine itself classified the exact pair as the homonym-safe alias residue —
     # status "auto_declined" AND reason "alias_not_specific". An `unlinked` pair

@@ -118,6 +118,21 @@ def _live_reachable(clue: Clue) -> bool:
     return clue.reveal_condition in LIVE_REVEAL_CONDITIONS
 
 
+def required_holder_ids(required_pillar_ids: list[str],
+                        cast: tuple[CastNode, ...]) -> set[str]:
+    """The HOLDER entity ids (person:/obj:/place:) that carry a genuine, non-red-herring,
+    LIVE-reachable clue for a REQUIRED pillar — i.e. the cast members the arc genuinely
+    leans on to be solvable. Distinct from the required PILLAR ids (`pillar:*`): this is
+    the entity surface those pillars are delivered through. Used by the #56 fidelity-repair
+    vouch to build its load-bearing set (arc protagonist ∪ these holders), which is joined
+    against `fidelity_audit()` collision ENTITY ids — a `pillar:*` id would never match."""
+    req = set(required_pillar_ids)
+    return {node.node_id for node in cast
+            for c in node.holds_clues
+            if c.pillar_id in req and c.coverage_effect == "genuine"
+            and not c.is_red_herring and _live_reachable(c)}
+
+
 def genuine_reachable(pillar_id: str, cast: tuple[CastNode, ...]) -> int:
     """How many genuine, non-red-herring, LIVE-reachable clues across the cast cover this
     pillar — the §8.2 reachability count (≥1 required per required pillar). A clue behind an

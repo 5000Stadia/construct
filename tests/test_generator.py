@@ -939,11 +939,18 @@ def test_fidelity_vouched_pairs_allowlist_and_load_bearing_gates():
 
 
 def test_failed_cast_does_not_widen_the_vouch_set(tmp_path):
-    # #56 (Cx 484): _required_cast must be populated ONLY on cast ACCEPTANCE. If
-    # cast authoring fails solvability and ships pillar-less, the vouched-merge
-    # load-bearing set must be {protagonist} only — a failed proposal's holders
-    # are not load-bearing truth. Spy on the gate's load_bearing arg.
+    # #56 (Cx 486): the Step-4 load-bearing set must be populated ONLY on cast
+    # ACCEPTANCE. This failed proposal DOES carry a required pillar (pillar:means)
+    # AND a real holder (person:witness) that WOULD be in the derived required-
+    # holder set if the cast were accepted — but the cast fails deduction staging
+    # (no culprit / no first_witness), so it ships pillar-less. The vouch load-
+    # bearing set must therefore be {protagonist} only: neither the required PILLAR
+    # id nor the required HOLDER id may leak from a failed proposal. (Under the old
+    # premature assignment this test would FAIL — pillar:means/person:witness would
+    # appear in the spied set.) We also spy porcelain.merge and assert it is never
+    # called for the failed holder.
     from construct import game
+    from construct.cast import required_holder_ids, cast_from_proposal
     from construct.provider import StubProvider, task_of
 
     rule = rule_classifier_fallback()
@@ -972,6 +979,24 @@ def test_failed_cast_does_not_widen_the_vouch_set(tmp_path):
                    "kind": "player_learns", "entity": "fact:x",
                    "attribute": "who", "value": "person:witness"}],
     }
+    # A cast with a genuine, live-reachable required clue on person:witness — so the
+    # holder IS load-bearing IF accepted — but with NO culprit and NO first_witness,
+    # so deduction staging rejects it and it ships pillar-less.
+    failed_cast = {
+        "pillars": [{"id": "pillar:means", "label": "the means", "required": True}],
+        "cast": [{
+            "id": "person:witness", "shape_role": "witness", "surface_role": "a bystander",
+            "presence": "at_scene", "location": "place:hall",
+            "clues": [{"clue_id": "clue:m1", "pillar_id": "pillar:means",
+                       "fact": {"entity": "fact:x", "attribute": "who", "value": "person:witness"},
+                       "coverage_effect": "genuine", "reveal_condition": "none",
+                       "hook_text": "a muddy footprint"}],
+        }],
+    }
+    # sanity: the holder WOULD be load-bearing on acceptance (proves the test has teeth)
+    _fc_cast, _fc_specs = cast_from_proposal(failed_cast)
+    _fc_req = [pid for pid, _l, req in _fc_specs if req]
+    assert required_holder_ids(_fc_req, _fc_cast) == {"person:witness"}
 
     class _P(StubProvider):
         def __init__(self): super().__init__([])
@@ -980,18 +1005,24 @@ def test_failed_cast_does_not_widen_the_vouch_set(tmp_path):
                 return {"durability": "STATE", "confidence": 0.9}
             if task_of(prompt) == "arc":
                 return dict(proposal)
-            if task_of(prompt) == "cast":  # UNSOLVABLE cast → ships pillar-less
-                return {"pillars": [], "cast": []}
+            if task_of(prompt) == "cast":  # UNSOLVABLE (no culprit/first_witness) → pillar-less
+                return dict(failed_cast)
             return {"items": []}
 
     seen = {}
+    merged = []
     _orig = game._fidelity_vouched_pairs
     game._fidelity_vouched_pairs = lambda nc, lb, **k: (seen.__setitem__("lb", set(lb)), _orig(nc, lb, **k))[1]
+    _orig_merge = w.porcelain.merge
+    w.porcelain.merge = lambda a, b, **k: (merged.append((a, b)), _orig_merge(a, b, **k))[1]
     try:
         game._finalize_scenario(w, "fc", "Failed Cast World", _P(), tmp_path / "fc_s.world",
                                 endless=False, game_types=["mystery_whodunnit"])
     finally:
         game._fidelity_vouched_pairs = _orig
-    # the vouch set is protagonist ONLY — no required cast leaked from the failed proposal
+        w.porcelain.merge = _orig_merge
+    # the vouch set is protagonist ONLY — no required pillar id and no required
+    # holder id leaked from the failed proposal
     assert seen.get("lb") == {"person:hero"}, seen.get("lb")
+    assert all("person:witness" not in pair for pair in merged), merged
     w.close()
