@@ -36,6 +36,10 @@ narrator's briefing; free-text writes pass one Entity Authority seam.
 - [docs/design/ENTITY-AUTHORITY.md](docs/design/ENTITY-AUTHORITY.md): the
   one disciplined write seam (bind-before-mint, channel-scoped minting,
   first-mention permanence).
+- [docs/design/INGESTION-FIDELITY-REPAIR.md](docs/design/INGESTION-FIDELITY-REPAIR.md):
+  the build-seal coreference/typing repair — a tiered, safest-first host
+  pass that de-fragments an ingested world, arc-vouched merges only for
+  load-bearing ids, fail-open.
 - [docs/design/REMEMBRANCER.md](docs/design/REMEMBRANCER.md): the player's
   own memory as a turn participant + player-authored retcon with
   contradiction quarantine.

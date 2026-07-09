@@ -914,7 +914,7 @@ def test_fidelity_vouched_pairs_allowlist_and_load_bearing_gates():
         # (1) protagonist + fragment, alias_not_specific → MERGE
         {"live": True, "entities": [PROT, "person:mara"], "kinds": ["person", "person"],
          "pairs": [pair(PROT, "person:mara")]},
-        # (2) required-cast + fragment, alias_not_specific → MERGE
+        # (2) required holder + fragment, alias_not_specific → MERGE
         {"live": True, "entities": [REQ, "person:lysa"], "kinds": ["person", "person"],
          "pairs": [pair(REQ, "person:lysa")]},
         # (3) protagonist + fragment but pair is UNLINKED → NO merge (allowlist)
