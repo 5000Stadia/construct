@@ -1,61 +1,40 @@
-"""Ingestion-fidelity audit (host-side, read-only) — the tracked metric for
-the PB-099 collaboration. For any built world, count the structural gaps the
-run-4 bins represent, weight coreference splits by arc-role severity (a split
-on the protagonist or a required clue-holder is show-stopping; a background
-prop split is cosmetic), and emit one fidelity score. No writes, no model."""
+"""Ingestion-fidelity audit — the tracked metric for the PB-099 collaboration.
+Uses the ENGINE read p.fidelity_audit() (PB 101, ca9c87a) for the canonical
+live-fragmentation count, and adds the host-only severity weighting by joining
+the flagged entity ids against the arc protagonist + required cast. Read-only."""
 import json, sys
-from collections import defaultdict
 from pathlib import Path
 from patternbuffer import World
 from patternbuffer.testing import StubModel
 
 def audit(name):
     wp = Path(f"worlds/{name}.world")
-    mp = Path(f"worlds/{name}.meta.json")
-    if not wp.exists():
-        return None
-    meta = json.loads(mp.read_text()) if mp.exists() else {}
-    prot = meta.get("protagonist")
-    cast = {c.get("id") for c in (meta.get("cast") or {}).get("cast") or []}
-    load_bearing = (cast | {prot}) - {None}
+    if not wp.exists(): return None
+    meta = json.loads(Path(f"worlds/{name}.meta.json").read_text()) if Path(f"worlds/{name}.meta.json").exists() else {}
+    load_bearing = ({c.get("id") for c in (meta.get("cast") or {}).get("cast") or []}
+                    | {meta.get("protagonist")}) - {None}
     w = World(wp, world_id=f"w:{name}", model=StubModel(fallback=lambda p,s:{"items":[]}))
-    p = w.porcelain
-    byname, kinds, timed_missing = defaultdict(set), {}, 0
-    for r in w.buffer.visible():
-        e = str(r.entity)
-        a = str(r.attribute)
-        if a == "kind": kinds[e] = str(r.value)
-        if a in ("name","alias") and isinstance(r.value, str):
-            byname[r.value.strip().lower()].add(e)
-    # bin A: coreference splits (name shared across ≥2 ids), by severity
-    splits = {n:s for n,s in byname.items() if len(s) > 1}
-    severe = [n for n,s in splits.items() if s & load_bearing]  # touches protagonist/cast
-    # bin A (engine view): open typing slips
-    try: tconf = len(p.typing_conflicts())
-    except Exception: tconf = -1
-    # bin A residue: unmerged coreference proposals the seal couldn't decide
-    try: residue = len(p.adjudicate_deferred().get("residue") or [])
-    except Exception: residue = -1
+    fa = w.porcelain.fidelity_audit()
+    s = fa.get("summary", {})
+    # severity: which LIVE collision groups touch the protagonist/required cast?
+    severe = 0
+    for g in fa.get("name_collisions", []):
+        if not g.get("live"): continue
+        if set(g.get("entities", [])) & load_bearing: severe += 1
     w.close()
-    # weighted score: severe splits ×5, other splits ×1, residue ×1, slips ×2
-    score = len(severe)*5 + (len(splits)-len(severe)) + max(residue,0) + max(tconf,0)*2
-    return {"name": name, "splits": len(splits), "severe": len(severe),
-            "severe_names": severe[:6], "typing_slips": tconf,
-            "residue": residue, "score": score, "protagonist": prot}
+    live = s.get("name_collisions", 0)
+    score = severe*5 + (live-severe) + s.get("unstamped_timed",0)//4 + s.get("orphan_entities",0)//4
+    return {"name":name, "live":live, "severe":severe,
+            "unstamped":s.get("unstamped_timed",0), "orphans":s.get("orphan_entities",0),
+            "conflicts":s.get("open_conflicts",0), "score":score}
 
-worlds = [a for a in sys.argv[1:]] or [
-    "bodycase","emberroad","thedeep",
+worlds = sys.argv[1:] or ["bodycase","emberroad","thedeep",
     "live_telegram_8786956263_3","live_telegram_8897888758_1"]
-print(f"{'world':<32} {'splits':>6} {'severe':>6} {'slips':>5} {'resid':>5} {'SCORE':>6}")
-print("-"*70)
-rows = []
-for wname in worlds:
-    r = audit(wname)
-    if r is None:
-        print(f"{wname:<32}  (not built)"); continue
-    rows.append(r)
-    print(f"{r['name']:<32} {r['splits']:>6} {r['severe']:>6} "
-          f"{r['typing_slips']:>5} {r['residue']:>5} {r['score']:>6}"
-          + (f"   ⚠ {r['severe_names']}" if r['severe'] else ""))
-print("-"*70)
-print("SCORE = severe×5 + splits + residue + slips×2  (lower = cleaner; 0 = ideal)")
+print(f"{'world':<32}{'live':>5}{'sev':>4}{'unstmp':>7}{'orph':>5}{'conf':>5}{'SCORE':>6}")
+print("-"*68)
+for wn in worlds:
+    r = audit(wn)
+    print(f"{wn:<32}  (not built)" if r is None else
+          f"{r['name']:<32}{r['live']:>5}{r['severe']:>4}{r['unstamped']:>7}{r['orphans']:>5}{r['conflicts']:>5}{r['score']:>6}")
+print("-"*68)
+print("live=genuine coreference gaps (engine; excludes correctly-distinct)  SCORE=sev*5+live+unstmp/4+orph/4")
