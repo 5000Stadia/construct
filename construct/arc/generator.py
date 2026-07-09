@@ -149,6 +149,16 @@ def _lineage_exhausted(reads: Any, source: str) -> bool:
 
 # --- salience pre-filter (P2b, §A) -------------------------------------
 
+def window_events(events: list, floor: float) -> list:
+    """Filter a PB event list to strictly-after `floor` (exclusive).
+
+    PB's ``since`` param is inclusive; this client-side filter removes events
+    AT the boundary so a previous turn's own events are excluded from the
+    current turn's salience window (§A, Cx 498 note).  Pure function — the
+    canonical implementation used by the turn loop and its regression tests."""
+    return [e for e in events if getattr(e, "at", None) is not None and e.at > floor]
+
+
 def salient_moments(fact_rows: list[dict], events: list,
                     prior_kinds: set[str], spined: set[str]) -> list[str]:
     """Deterministic, zero-model-call salience read over the turn's committed delta.

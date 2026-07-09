@@ -69,6 +69,7 @@ from construct.arc.generator import (
     generate_opportunistic,
     main_at_peak,
     salient_moments,
+    window_events,
 )
 from construct.arc.grammar import Arc, Phase, Weight
 from construct.pins import resolve_active_pins
@@ -4049,13 +4050,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                     "attribute": _r.attribute,
                                     "value": _r.value,
                                 })
-                    # Event window: PB's `since` is INCLUSIVE; client-filter to
-                    # strictly-after to exclude the previous turn's own events (§A,
-                    # Cx 498 note).
+                    # Event window: PB's `since` is INCLUSIVE; window_events
+                    # client-filters to strictly-after to exclude the previous
+                    # turn's own events (§A, Cx 498 note).
                     _all_win_events = live_reads.events(
                         since=int(_turn_floor), frame="canon")
-                    _win_events = [e for e in _all_win_events
-                                   if e.at is not None and e.at > _turn_floor]
+                    _win_events = window_events(_all_win_events, _turn_floor)
                     _prior_events = live_reads.events(
                         until=int(_turn_floor), frame="canon")
                     _prior_kinds: set[str] = {e.kind for e in _prior_events}

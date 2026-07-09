@@ -30,6 +30,7 @@ from construct.arc.generator import (
     generate_opportunistic,
     main_at_peak,
     salient_moments,
+    window_events,
 )
 from construct.arc.grammar import (
     Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight,
@@ -1485,8 +1486,13 @@ class _TurnProvider(StubProvider):
         return {"items": []}
 
 
-def test_ambient_seed_write_once_and_quiet_then_fires(tmp_path):
-    """(b) Fresh quiet endless world:
+def test_ambient_seed_write_once_helper(tmp_path):
+    """(b-unit) _last_development_min helper: write-once baseline arithmetic.
+
+    Focused unit test of the helper function itself (no run_turn).  The full
+    production-semantics integration (seed → quiet → fires) is in
+    test_ambient_seed_write_once_and_fires_integration below.
+
     - First _last_development_min call seeds the row (write-once baseline).
     - Delta immediately after seeding is 0 → below AMBIENT_QUIET_MIN → no fire.
     - After advancing the diegetic clock past AMBIENT_QUIET_MIN without any
@@ -1526,14 +1532,116 @@ def test_ambient_seed_write_once_and_quiet_then_fires(tmp_path):
     w.close()
 
 
+def test_ambient_seed_write_once_and_fires_integration(tmp_path):
+    """(b-integration) Ambient trigger: seed → quiet → fires.
+
+    Production-semantics endless world mirrors the successful Cx probe (letter
+    500): seeded at 100 minutes, made no first-turn attempt, minted arc:gen_2
+    after 730 quiet minutes.
+
+    Sequence:
+      (1) Turn 1 — quiet (no development); ambient threshold not yet crossed.
+          Assert: no 'gen' prompt dispatched; no generation_attempt receipt;
+          session:ambient/last_development_min IS written (seed-on-absent).
+      (2) Advance real diegetic accrue counter by 730 minutes via commit_elapsed.
+      (3) Turn 2 — quiet again; provider returns a valid gen-arc proposal for
+          task='gen'.  Threshold is now crossed → ambient fires.
+          Assert: exactly one generation_attempt receipt; one arc:gen_2 in the
+          portfolio with generated_from == 'ambient:2' and gen_depth == 0.
+
+    Turn numbers respect GEN_COOLDOWN=2: no attempt is recorded on turn 1
+    (threshold not crossed), so _last_try_turn returns -(10**9); turn 2
+    trivially satisfies the cooldown gap."""
+    from construct.clock import commit_elapsed
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    # attribute_default is required so commit_elapsed's delta writes fold into an
+    # accumulating total (fold_policy=accrue on elapsed_minutes) — without it
+    # read_clock always returns 0 and the ambient threshold never crosses.
+    w = _world(tmp_path / "amb_int.world", attribute_default=attr_default)
+    # Seed the diegetic clock so read_clock returns a non-zero value (100 minutes).
+    commit_elapsed(w, 100)
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+
+    # ---- Turn 1: quiet endless run; threshold NOT yet crossed --------------------
+    provider_quiet = _TurnProvider(fail_on_gen=False)
+    run_turn(w, by_id["arc:main"], provider_quiet, "I wait.", turn=1,
+             scope=[CLERK, PLAYER, "place:office"],
+             scenario_mode="endless", side_arcs=[], generate=True)
+
+    gen_calls_t1 = [p for p, _s, _t in provider_quiet.calls if task_of(p) == "gen"]
+    assert gen_calls_t1 == [], "no gen cohort on turn 1 — threshold not yet crossed"
+    reads1 = PorcelainWorldReads(w)
+    assert not reads1.events(kind="generation_attempt", frame=SESSION), (
+        "no generation_attempt receipt on turn 1")
+    # seed-on-absent must have written the baseline.
+    seed_val = reads1.state("session:ambient", "last_development_min", frame=SESSION)
+    assert seed_val is not None, "last_development_min must be seeded after turn 1"
+
+    # ---- Advance clock 730 minutes past seed — crosses AMBIENT_QUIET_MIN (720) ---
+    commit_elapsed(w, 730)
+
+    # ---- Turn 2: quiet again; threshold crossed; provider returns valid proposal ---
+    class _AmbientProvider(_TurnProvider):
+        """Returns a valid gen-arc proposal for task='gen'; permissive elsewhere."""
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if task_of(prompt) == "gen":
+                return dict(VALID_PROPOSAL)
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if prompt.startswith("Extract world-state"):
+                return {"items": []}
+            if prompt.startswith("Resolve an unestablished aspect"):
+                return {"items": [{"value": "A lamplit office."}]}
+            if task_of(prompt) == "cls":
+                return {"kind": "action", "moves_to": "", "requires": []}
+            if task_of(prompt) == "ndg":
+                return {"thread": "", "directive": ""}
+            if task_of(prompt) == "nar":
+                return {"prose": "The office is still."}
+            if task_of(prompt) == "npt":
+                return {"acts": False, "action": "", "speaks": False, "intent": "",
+                        "line_hint": ""}
+            return {"items": []}
+
+    provider_fire = _AmbientProvider(fail_on_gen=False)
+    result2 = run_turn(w, by_id["arc:main"], provider_fire, "I wait.", turn=2,
+                       scope=[CLERK, PLAYER, "place:office"],
+                       scenario_mode="endless", side_arcs=[], generate=True)
+
+    # (a) Exactly one generation_attempt receipt.
+    reads2 = PorcelainWorldReads(w)
+    attempts = reads2.events(kind="generation_attempt", frame=SESSION)
+    assert len(attempts) == 1, (
+        f"exactly one generation_attempt expected after ambient fires; got {len(attempts)}")
+
+    # (b) arc:gen_2 in portfolio with generated_from == 'ambient:2' and gen_depth == 0.
+    assert "arc:gen_2" in result2.trace.generated, "arc:gen_2 must be in trace.generated"
+    arc_ids = arc_io.arc_ids_from_frame(PorcelainWorldReads(w))
+    assert "arc:gen_2" in arc_ids, "arc:gen_2 must be registered in the portfolio"
+    from_val = w.porcelain.state("arc:gen_2", "generated_from", frame=PLOT)["fact"]["value"]
+    assert from_val == "ambient:2", (
+        f"generated_from must be 'ambient:2'; got {from_val!r}")
+    depth_val = w.porcelain.state("arc:gen_2", "gen_depth", frame=PLOT)["fact"]["value"]
+    assert depth_val in (0, "0"), (
+        f"gen_depth must be 0 (depth-0 root); got {depth_val!r}")
+    w.close()
+
+
 def test_no_gen_call_when_spined_npc_existed_before_turn(tmp_path):
     """(c) Integration pin (Cx 498 BLOCKED): a spined NPC (canon drive row) that
     existed BEFORE the current turn does not make the turn salient. When the player
     performs a non-salient action, no generate_arc cohort call must happen and no
     generation_attempt event must be recorded.
 
-    The _TurnProvider raises AssertionError if task 'gen' is requested, proving
-    that the DM cohort path is never entered on a pre-existing-drive-only turn."""
+    Production-shaped scope (CLERK + PLAYER + office) is passed so the fact-delta
+    loop actually iterates entities and exercises the valid_from filter.  The
+    provider RECORDS all prompts (never raises) so we can assert afterward that no
+    'gen' cohort was dispatched — the old raise-on-gen approach was swallowed by
+    the fail-open wrapper and gave a false pass."""
     from construct.clock import commit_elapsed
     from construct.turnloop import run_turn
 
@@ -1544,17 +1652,25 @@ def test_no_gen_call_when_spined_npc_existed_before_turn(tmp_path):
     commit_elapsed(w, 5)  # small diegetic advance; no development
 
     by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
-    provider = _TurnProvider(fail_on_gen=True)
+    # Recording provider — does NOT raise on gen; we assert absence afterward.
+    provider = _TurnProvider(fail_on_gen=False)
+    # Production-shaped scope: CLERK (spined NPC) + player + place.
+    scope = [CLERK, PLAYER, "place:office"]
     # generate=True so the block runs; the delta filter must suppress the cohort call.
     run_turn(w, by_id["arc:main"], provider, "I wait.", turn=1,
-             scenario_mode="endless", side_arcs=[], generate=True)
+             scope=scope, scenario_mode="endless", side_arcs=[], generate=True)
 
-    # Confirm no generation_attempt receipt (belt-and-suspenders on top of the
-    # provider's AssertionError gate).
+    # (a) No 'gen' cohort prompt was dispatched at all.
+    gen_calls = [p for p, _s, _t in provider.calls if task_of(p) == "gen"]
+    assert gen_calls == [], (
+        "generate_arc cohort must not be called when the turn's delta is empty "
+        "(pre-existing drive row must not trigger the opportunistic DM); "
+        f"got {len(gen_calls)} gen call(s)")
+
+    # (b) Belt-and-suspenders: no generation_attempt receipt written.
     reads = PorcelainWorldReads(w)
     assert not reads.events(kind="generation_attempt", frame=SESSION), (
-        "no generation_attempt may be recorded when the turn's delta is empty "
-        "(pre-existing drive row must not trigger the opportunistic DM)")
+        "no generation_attempt may be recorded when the turn's delta is empty")
     w.close()
 
 
@@ -1563,8 +1679,9 @@ def test_event_boundary_prior_turn_event_excluded(tmp_path):
     excluded from the salience window (the `e.at > turn_floor` filter). An event
     at turn_time(turn-1)+0.5 (strictly inside the window) must be included.
 
-    Tested at the salient_moments level with synthetic EventRow instances, which
-    is the cleanest surface for this predicate."""
+    Uses `window_events` — the shared helper now used by the turnloop — so if
+    the production filter were removed, this test would catch it (the inline
+    duplicate would no longer protect it)."""
     turn = 3
     turn_floor = turn_time(turn - 1)
 
@@ -1579,16 +1696,14 @@ def test_event_boundary_prior_turn_event_excluded(tmp_path):
     # prior_kinds: "confrontation" not in it, so first-time-kind signal fires.
     prior_kinds: set[str] = set()
 
-    # With only the boundary event — must be excluded by the filter before
-    # salient_moments sees it, confirming the turnloop filter shape.
-    # We apply the filter explicitly here (mirroring the turnloop logic).
-    filtered_boundary = [e for e in [ev_boundary] if e.at is not None and e.at > turn_floor]
+    # With only the boundary event — window_events must exclude it.
+    filtered_boundary = window_events([ev_boundary], turn_floor)
     assert filtered_boundary == [], "event at exactly turn_floor must be excluded"
     lines_boundary = salient_moments([], filtered_boundary, prior_kinds, set())
     assert lines_boundary == [], "boundary-excluded event must not produce salient lines"
 
-    # With the inside event — must pass through.
-    filtered_inside = [e for e in [ev_inside] if e.at is not None and e.at > turn_floor]
+    # With the inside event — window_events must pass it through.
+    filtered_inside = window_events([ev_inside], turn_floor)
     assert filtered_inside == [ev_inside], "event strictly inside window must be included"
     lines_inside = salient_moments([], filtered_inside, prior_kinds, set())
     assert lines_inside, "inside-window event (new kind) must produce a salient line"
@@ -1600,13 +1715,17 @@ def test_peak_turn_ledger_written_no_generation_receipts(tmp_path):
     IS written (the development happened), but the trigger chain contributes zero
     rows — no generation_attempt, no generation_declined, no mint.
 
-    Exercised at run_turn level: we seed a beat-achieved event to put the arc in
-    CLIMAX, then run a turn that has a development (we mark it manually since
-    seeding trace.beats_achieved isn't directly injectable, but we can verify the
-    ledger by checking _mark_development was called via the written row). The
-    simplest approach: put the arc in CLIMAX, mark an explicit development via
-    _mark_development before the turn (so _gen_mins branch runs), run a turn,
-    and confirm no generation receipts appear."""
+    A side arc with an always-true beat (StateIs CLERK kind person) is passed so
+    beat_pass fires it during the turn, producing a real same-turn development.
+    The right-of-way gate must then be silent despite _mark_development being
+    called (§B split contract: ledger written, trigger chain contributes zero rows).
+
+    All four outcomes are asserted:
+      (1) session:ambient/last_development_min is present/updated this turn,
+      (2) no 'gen' cohort prompt dispatched,
+      (3) zero generation_attempt AND generation_declined receipts,
+      (4) no new arc in trace.generated and none added to the portfolio."""
+    from construct.arc.conditions import StateIs
     from construct.clock import commit_elapsed
     from construct.turnloop import run_turn
 
@@ -1622,21 +1741,63 @@ def test_peak_turn_ledger_written_no_generation_receipts(tmp_path):
     # Advance clock so _gen_mins is non-None.
     commit_elapsed(w, 100)
 
-    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
-    provider = _TurnProvider(fail_on_gen=True)
-    # generate=True — the right-of-way gate must fire and keep the trigger chain silent.
-    run_turn(w, by_id["arc:main"], provider, "I wait.", turn=2,
-             scenario_mode="endless", side_arcs=[], generate=True)
+    # Build a minimal side arc whose single required beat is immediately achievable
+    # (StateIs CLERK kind person — always TRUE since the fixture writes CLERK's kind
+    # row at cursor=1.0).  beat_pass will fire it during the measured turn, producing
+    # a real same-turn development without requiring any prose or player action.
+    side_beat = Beat("beat:side_noop", Phase.CLIMAX, Weight.REQUIRED,
+                     achievable_via=StateIs(CLERK, "kind", "person"))
+    side_shape = ConclusionShape("shape:side", "drive_inverted",
+                                 (CLERK, "drive:duty", "drive:fear"),
+                                 world_condition=StateIs(CLERK, "kind", "person"),
+                                 premise=StateIs(CLERK, "kind", "person"),
+                                 refusal_variant_id="shape:side_refused")
+    side_refusal_clock = Clock("clock:side_refusal", TurnsQuiet(999),
+                               effects=({"entity": "event:side_refused", "attribute": "kind",
+                                         "value": "refusal_conclusion"},),
+                               bound_to="arc:side_peak", rung=Rung.REFUSAL)
+    side_arc = Arc("arc:side_peak", CLERK, side_shape, (side_beat,), (),
+                   side_refusal_clock, 0, (), {Phase.CLIMAX: 1})
+    # Register the side arc in the plot frame so portfolio_from_frame sees it.
+    w.porcelain.ingest_structured(
+        arc_io.arc_to_items(side_arc, frame=PLOT) + arc_io.index_items(side_arc, frame=PLOT),
+        frame=PLOT)
+    w.porcelain.ingest_structured(
+        arc_io.portfolio_add_items(PorcelainWorldReads(w), "arc:side_peak",
+                                   valid_from=turn_time(1)),
+        frame=PLOT)
 
-    # No DM trigger receipts — the peak gate is silent.
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    provider = _TurnProvider(fail_on_gen=False)
+    # generate=True — the right-of-way gate must fire and keep the trigger chain silent.
+    result = run_turn(w, by_id["arc:main"], provider, "I wait.", turn=2,
+                      scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[by_id["arc:side_peak"]],
+                      generate=True)
+
+    # (1) session:ambient/last_development_min must be present/updated this turn —
+    #     the side-beat achievement caused _mark_development to be called.
     reads2 = PorcelainWorldReads(w)
+    ledger_val = reads2.state("session:ambient", "last_development_min", frame=SESSION)
+    assert ledger_val is not None, (
+        "last_development_min must be written when a development occurs this turn")
+
+    # (2) No 'gen' cohort prompt dispatched — right-of-way silenced the trigger.
+    gen_calls = [p for p, _s, _t in provider.calls if task_of(p) == "gen"]
+    assert gen_calls == [], (
+        f"generate_arc cohort must not be called at peak; got {len(gen_calls)} call(s)")
+
+    # (3) Zero generation_attempt AND generation_declined receipts — trigger chain silent.
     assert not reads2.events(kind="generation_attempt", frame=SESSION), (
         "no generation_attempt on a peak turn")
     assert not reads2.events(kind="generation_declined", frame=SESSION), (
         "no generation_declined on a peak turn (right-of-way is silent, not a DM judgment)")
-    # No mint.
-    assert not reads2.events(kind="arc_terminal", frame=PLOT) or True, (
-        "no generated arc should exist")
+
+    # (4) No new arc in trace.generated and no generated arc added to the portfolio.
+    assert result.trace.generated == [], "no arc should be minted on a peak turn"
+    arc_ids_after = arc_io.arc_ids_from_frame(PorcelainWorldReads(w))
+    assert not any(aid.startswith("arc:gen_") for aid in arc_ids_after), (
+        "no generated arc should appear in the portfolio on a peak turn")
 
 
 def _main_arc_from(w) -> Arc:
