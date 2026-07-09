@@ -53,8 +53,11 @@ canon; is it the host's own plan/audit? → fine"). NONE is canon world-truth.
    term_id or "player_delta:<turn>" or "ambient:<turn>">` on its `arc:<id>` row —
    provenance for audit and for the depth cap.
 3. **Fingerprint dedupe.** Before minting, compute a stable **fingerprint** of the
-   proposed arc (the sorted tension triple + the gated entities + trigger source);
-   store it in a `gen_fingerprint` index (session frame). A fingerprint already
+   proposed arc — the sorted tension triple + the gated beat entities,
+   **deliberately EXCLUDING the trigger source** (Codex review: source-scoping
+   let identical situations reappear from a different dead arc; the shipped
+   `_fingerprint` is situation-scoped and a test pins cross-source dedupe).
+   Store it in a `gen_fingerprint` index (session frame). A fingerprint already
    present → DECLINE (a `generation_declined` receipt). Stops the same situation
    regenerating (the "find the dockworker" five times problem).
 4. **Depth cap.** A generated arc's depth = its parent's depth + 1 (a
@@ -117,6 +120,205 @@ Each slice: build → Codex review → live-test (logged) before the next.
 - Whether the minted hook briefs THIS turn or strictly next (pacing feel) — start
   with next-turn to avoid a same-turn whiplash; tune in live-test.
 
-## 9. Not built
-Spec only. On build: P2a first (regenerative + six guards) → review → live-test.
-Nothing ships before the guards are in — they are the gate, not an afterthought.
+## 9. Status
+P2a SHIPPED (regenerative + all six guards, Codex-reviewed; `arc/generator.py`,
+`cohorts.generate_arc`, turnloop step, 13 tests). P2b/P2c: spec'd below, for
+review then build.
+
+---
+
+# P2b (opportunistic) + P2c (ambient) — build spec
+
+**Status:** SPEC, for Cx review then build. Extends the shipped P2a machinery —
+same cohort (`generate_arc`), same guards, same mint path (`_build_arc` →
+preflight → commit → portfolio → hook). What P2b/P2c add is *when the DM wakes
+and what fuel it reads*. Four fresh-eyes amendments below are load-bearing.
+
+## A. The salience pre-filter (P2b's gate — "waits for the moment" made structural)
+
+The naive P2b fires the DM cohort every `GEN_COOLDOWN` turns and asks "anything
+interesting?" — expensive (main-tier, deliberate) and spammy in spirit even when
+the answer is no. A good DM doesn't poll; they *notice*. So P2b's trigger is a
+**deterministic, zero-model-call salience read** over the turn's committed
+delta, and the cohort wakes ONLY when it finds a qualifying moment:
+
+- **Source (guard #6, already binding — Cx 496 amendment 1, exact surfaces):**
+  - fact rows: `world.porcelain.snapshot(scope, frame="canon",
+    since=turn_time(turn-1))["facts"]` — the scene `scope` already computed in
+    `run_turn` (the same set the P2a ctx uses), `since`-bounded to this turn's
+    window. A shipped porcelain read (P2 spec §3; PB 072 §1).
+  - event rows: `reads.events(since=int(turn_time(turn-1)), frame="canon")` —
+    `PorcelainWorldReads.events` returns `EventRow` with `kind`/`agents`/
+    `caused_by` (adapter.py).
+  - Never prose.
+- **Qualifying signals (the initial set — small, tunable in live-test):**
+  1. **Spine-touch:** a window fact row whose `entity` or `value` is a person id
+     in the SPINED set — the present NPCs whose `drive`/`fear` the turn loop
+     already read into `canon_table` (the P2a `present_characters` source). The
+     player touched someone who *wants* something.
+  2. **First-time event kind:** a window event whose `kind` is not in
+     `prior_kinds` (the kinds of all events BEFORE the window — one
+     `reads.events(until=int(turn_time(turn-1)))` scan, kinds collected),
+     EXCLUDING the routine bookkeeping kinds
+     `{"turn", "player_action", "arc_touch", "arc_terminal", "arc_won",
+     "arc_lost", "generation_attempt", "generation_declined", "conclusion",
+     "commitment", "seal_incoherence"}` AND any event whose id starts with
+     `event:tick_` (the world's own off-screen motion is not a player-caused
+     moment — that is ambient's domain, and discovery-gating parity applies).
+  3. **Causal ripple:** a window event with non-empty `caused_by` — something
+     durable just rippled. (Fact-row `caused_by` can join the set later; events
+     carry it today on the shipped `EventRow`.)
+- No qualifying signal → **no cohort call, no receipt, no session row, no cost**
+  (a non-salient turn is not an attempt; pacing must not see it — Cx 496 ruled
+  this sound: `_last_try_turn` reads only attempt/decline receipts).
+  A salient turn → the existing pacing guard (`_pacing_ok`: cooldown + active
+  cap) still applies, then the cohort fires with the salient rows phrased as
+  `fuel` lines.
+
+**Shape it as a reusable PURE reader** (Cx 496 amendment 1 — explicit inputs,
+no hidden reads, unit-testable without a world):
+
+```python
+def salient_moments(fact_rows: list[dict], events: list,      # EventRow
+                    prior_kinds: set[str], spined: set[str]) -> list[str]
+```
+
+returning human-phrased fuel lines (empty = not salient). The turn loop
+assembles the four inputs (snapshot-since facts, events-since window,
+`prior_kinds` = the kinds already seen before the window, `spined` = present
+NPC ids with a canon `drive`/`fear`). Separate from the generator because the
+founder's captured drift-handling designs (relocate-the-beat,
+absence-consequence) will need the SAME "what just changed + who is positioned
+to care" read. One reader, several consumers; don't fuse it into the DM.
+
+## B. Dramatic right-of-way (a NEW guard, all triggers)
+
+Nothing in the shipped guards knows where the MAIN story is. A DM who launches a
+fresh subplot during the climax is a bad DM. New structural rule: **no generation
+while the main arc is in CRISIS or CLIMAX** (`executor.current_phase(reads,
+main_arc)` — a cheap derived read). This gate runs FIRST and is **silent**,
+meaning exactly (Cx 496 amendment 2): no `generation_declined` receipt, no
+session row, no bookkeeping of any kind — return before everything (it isn't a
+DM judgment; it's right-of-way, and receipting every peak turn would churn rows
+and distort the `_last_try_turn` pacing read). Applies to all three triggers.
+
+**Acceptable loss, ruled by Cx 496 — no fallout queue.** The regenerative
+trigger consumes only the SAME-TURN `fallouts` list; a side-arc death during
+the main peak therefore **intentionally forfeits its same-turn regenerative
+mint** — there is no backlog scan and none is added in this slice. This is
+acceptable because `emit_fallout` has already written the terminal event AND
+the `caused_by`-linked canon consequence: the fuel persists as world truth and
+remains available to the later opportunistic (causal-ripple signal) and ambient
+triggers. Do NOT implement a queue.
+
+## C. P2c ambient keys on DIEGETIC time, never turn count (founder-ruling conflict)
+
+The P2 spec's original "too many quiet turns" phrasing **violates the sealed
+ruling** (2026-06-25): *turns are free; only diegetic time is the clock.* Thirty
+contemplation turns = five in-world minutes — the world throwing something up
+there would punish exactly the play the ruling protects. So:
+
+- **Quietness is measured on the story clock**, with explicit bookkeeping (Cx
+  496 amendment 3 — existing receipts are stamped `turn_time(turn)`, a TURN
+  coordinate; there is no historical clock read, so the diegetic minutes of the
+  last development must be STORED, never derived):
+  - A hidden session row **`session:ambient` / `last_development_min`** holds
+    the diegetic-minute stamp (a float from `read_clock(world).minutes`) of the
+    most recent development. One helper `_mark_development(world, minutes_now,
+    turn)` writes it (`valid_from=turn_time(turn)`, superseding).
+  - **Update points:** any generation MINT (all triggers), any beat achieved,
+    any clock fired, any fallout emitted — all sites already explicit in
+    `run_turn`.
+  - **Seed-on-absent:** if the row is missing (fresh or pre-P2c world), treat
+    `last_development_min` as the CURRENT `read_clock(world).minutes` and write
+    it — the quiet-timer starts "now", never at genesis (else every legacy
+    world fires ambient on its first turn).
+  - **The trigger test** (after right-of-way and `_pacing_ok`):
+    `read_clock(world).minutes - last_development_min >= AMBIENT_QUIET_MIN`
+    (default `720.0` — half an in-world day; genre-tunable later).
+- **Scope: endless mode only** — gate on `scenario_mode == "endless"` (the
+  string `run_turn` already receives; NOT the legacy `endless` bool — Cx 496),
+  incl. post-conclusion continuation. In a win_loss story the refusal clock +
+  the nudge ladder already own drift, and ambient filler would dilute an
+  authored destination. Default OFF in win_loss.
+- Ambient fuel = the standing tensions (`live_threads` / situation) + present
+  NPC spines; trigger string names it ambient; `generated_from =
+  "ambient:<turn>"` (the lineage shape §4.2 already reserves).
+
+## D. Trigger arbitration + the player boundary
+
+- **At most ONE mint per turn** (already the P2a invariant). Priority when
+  several triggers qualify: **regenerative > opportunistic > ambient** —
+  reaction to a death beats reaction to a deed beats filling silence.
+- **P2b/P2c always mint NPC-protagonist arcs, enforced HOST-SIDE** (Cx 496
+  amendment 4 — the prompt branch is not an invariant): `generate_arc` is
+  called WITHOUT `protagonist=` (that kwarg is the episodic-continuation path),
+  AND the wrapper deterministically rejects a proposal whose built
+  `arc.protagonist == main_arc.protagonist` — decline with reason
+  `"player_protagonist"` (a normal `generation_declined` receipt; this IS a DM
+  judgment, unlike right-of-way). The world moves *at* the player, never *as*
+  them.
+- **Depth-0 roots, enforced explicitly** (Cx 496 amendment 5): P2b/P2c wrappers
+  call `_record_attempt(world, arc, source, 0, fp, turn)` — the literal depth
+  `0`, with `source = "player_delta:<turn>"` / `"ambient:<turn>"`. They must
+  NOT reuse the regenerative path's `parent_depth + 1` increment (which would
+  wrongly record depth 1). `_parent_depth` returning 0 for non-terminal sources
+  keeps any FUTURE death of a P2b/P2c arc at regenerative depth 1.
+- Fingerprint/dedupe (situation-scoped, source-EXCLUDED — see §4.3), active
+  cap, cooldown, preflight, hook sanitizer: unchanged, shared across triggers.
+
+## E. Build inventory (small; all shipped surfaces)
+
+- `construct/arc/generator.py`:
+  - `+salient_moments(fact_rows, events, prior_kinds, spined) -> list[str]`
+    (PURE — §A signature; plus the module-level `ROUTINE_EVENT_KINDS` frozenset).
+  - `+_mint_side_arc(world, reads, provider, trigger, fuel, source, side_arcs,
+    ctx, turn, main_protagonist)` — the shared mint path factored from
+    `generate_from_fallout`'s body (cohort → fingerprint → `_build_arc` →
+    preflight → player-protagonist reject → commit → portfolio →
+    `_record_attempt` with an EXPLICIT depth arg → sanitized hook), so all
+    three triggers share one audited path. `generate_from_fallout` keeps its
+    exact signature + behavior (depth = parent+1, exhaust/depth-cap logic);
+    P2b/P2c wrappers pass depth 0.
+  - `+generate_opportunistic(world, reads, provider, moments, side_arcs, ctx,
+    turn, main_protagonist)` and `+generate_ambient(...)` — thin wrappers:
+    trigger strings "the player's actions opened a door (opportunistic)" /
+    "the world has been quiet a while (ambient)", fuel from the moment lines /
+    standing threads + spines, `source = "player_delta:<turn>"` /
+    `"ambient:<turn>"`, depth 0.
+  - `+main_at_peak(reads, main_arc) -> bool` (right-of-way:
+    `current_phase(reads, main_arc) in (Phase.CRISIS, Phase.CLIMAX)`).
+  - `+AMBIENT_QUIET_MIN = 720.0`, `+_last_development_min(reads, minutes_now)`,
+    `+_mark_development(world, minutes_now, turn)` (the `session:ambient` row,
+    §C).
+- `construct/turnloop.py` — extend the existing P2a step (same location, same
+  fail-open wrapper, same hook briefing):
+  1. `main_at_peak(...)` → skip everything, SILENTLY (no receipt).
+  2. Regenerative exactly as today (fallouts non-empty).
+  3. Else opportunistic: assemble the §A inputs (snapshot-since over `scope`,
+     events-since, prior_kinds, spined-present set from `canon_table`) → if
+     `salient_moments(...)` non-empty and `_pacing_ok`, mint.
+  4. Else ambient: `scenario_mode == "endless"` and the §C diegetic test and
+     `_pacing_ok`, mint from standing threads + spines.
+  5. `_mark_development(...)` calls at: mint (any trigger), beat achieved,
+     clock fired, fallout emitted.
+  At most ONE mint per turn (the if/elif chain enforces it structurally).
+- Tests — salience unit cases on the PURE function (spine-touch / first-kind /
+  routine-kind excluded / tick excluded / caused_by / non-salient); right-of-way
+  (CRISIS/CLIMAX → no mint AND no decline receipt; SETUP/RISING mints);
+  ambient diegetic threshold (many quiet turns + few in-world minutes → NO
+  mint; a quiet half-day → mint; seed-on-absent → no first-turn fire) +
+  win_loss OFF; arbitration order (fallout beats salient delta beats quiet);
+  player-boundary (a proposal naming the main protagonist → declined
+  `player_protagonist`, no mint); depth-0 roots (`gen_depth == 0` on a P2b
+  mint; a P2b arc's later death regenerates at depth 1).
+- No engine work; no new frames; membrane unchanged (all bookkeeping stays
+  `plot:`/`session:`).
+
+## F. Live acceptance (post-GREEN, logged to the founder)
+
+In an endless world: (1) antagonize a spine-carrying NPC → a grounded
+complication arrives within a few turns (P2b); (2) contemplate for 30 turns (5
+in-world minutes) → the world stays quiet (the ruling holds); (3) let a half
+in-world day pass idle → the world throws something up (P2c); (4) drive the main
+arc to crisis → no mints until it breaks (right-of-way).
