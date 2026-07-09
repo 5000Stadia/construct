@@ -112,3 +112,29 @@ def test_signature_blend_unions_primary_and_secondary():
     auth = ss.author_signature_directive(["mystery_whodunnit", "political_intrigue"]).lower()
     assert "alibis" in auth                  # deduction (primary)
     assert "interests cross" in auth         # gambit (secondary) factions element
+
+
+def _names(game_types, channel="author"):
+    return {el["name"] for el in ss.signature_elements(game_types, channel)}
+
+
+def test_grounded_interior_grounds_intimate_shapes_only():
+    # #109: the bond author-signature element grounds the immediate interior at ROOM
+    # granularity — a domestic/relationship shape's scene IS a room, not a city.
+    # It rides the bond shape, so it reaches romance (bond primary) AND relationship/
+    # psych drama (transformation + bond secondary), but NOT the traversable-geography
+    # shapes when they're pure.
+    assert "the_grounded_interior" in _names(["romance"])
+    assert "room granularity" in ss.author_signature_directive(["romance"]).lower()
+    # relationship/psych literary drama: transformation primary + bond secondary → included
+    assert "the_grounded_interior" in _names(["coming_of_age"])
+    # pure deduction / endurance / gambit do NOT get it
+    assert "the_grounded_interior" not in _names(["mystery_whodunnit"])
+    assert "room granularity" not in ss.author_signature_directive(["mystery_whodunnit"]).lower()
+
+
+def test_grounded_interior_applies_to_mixed_bond_blends():
+    # Cx 490 amendment: a MIXED world whose blend includes a bond-shaped type receives
+    # the element by design (shapes_for folds later types' shapes into secondary) — a
+    # mystery-romance still wants its intimate scenes grounded in a shared interior.
+    assert "the_grounded_interior" in _names(["mystery_whodunnit", "romance"])

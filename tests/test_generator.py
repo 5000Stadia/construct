@@ -1026,3 +1026,62 @@ def test_failed_cast_does_not_widen_the_vouch_set(tmp_path):
     assert seen.get("lb") == {"person:hero"}, seen.get("lb")
     assert all("person:witness" not in pair for pair in merged), merged
     w.close()
+
+
+def test_opening_scene_place_prefers_specific_interior_over_coarse(tmp_path):
+    # #109 (Cx 490): the prose-grounding lever is NOT sufficient alone — PB.locate()
+    # collapses same-timestamp co-asserted `in` rows to the FIRST-inserted one. Here the
+    # protagonist is co-asserted at a coarse CITY (inserted first) AND a ROOM contained
+    # in it, at the same opening horizon. locate() returns the city; the #109 backstop
+    # must anchor the opening tableau to the ROOM instead.
+    from construct import game
+    from construct.adapter import frame_facts
+
+    w = World(tmp_path / "op.world", world_id="w:op",
+              model=StubModel(fallback=lambda p, s: {"items": []}),
+              stance="fiction", title="Opening Place")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:lisbon", "attribute": "kind", "value": "city", "timeless": True},
+        {"entity": "place:kitchen", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:kitchen", "attribute": "in", "value": "place:lisbon",
+         "value_type": "entity"},
+        {"entity": "person:marta", "attribute": "kind", "value": "person", "timeless": True},
+        # CITY row inserted FIRST, the ROOM row SECOND — SAME timestamp (the ambiguity)
+        {"entity": "person:marta", "attribute": "in", "value": "place:lisbon",
+         "value_type": "entity"},
+        {"entity": "person:marta", "attribute": "in", "value": "place:kitchen",
+         "value_type": "entity"},
+    ])
+    as_of = max(r.valid_from for r in
+                frame_facts(w, "canon", entity="person:marta", attribute="in"))
+    # both places are co-asserted at the same horizon (the gap this fix targets)
+    assert set(game._live_in_candidates(w, "person:marta", as_of)) == {
+        "place:lisbon", "place:kitchen"}
+    # PB.locate() collapses to the first-inserted COARSE city
+    assert w.porcelain.locate("person:marta", as_of=as_of)[0] == "place:lisbon"
+    # the backstop recovers the specific INTERIOR
+    assert game._opening_scene_place(w, "person:marta", as_of) == "place:kitchen"
+    w.close()
+
+
+def test_opening_scene_place_single_candidate_is_unchanged(tmp_path):
+    # #109 backward-compat: with a single `in` candidate the backstop returns locate()'s
+    # pick unchanged (no coarser/never-worse rule; non-domestic worlds are untouched).
+    from construct import game
+
+    w = World(tmp_path / "op1.world", world_id="w:op1",
+              model=StubModel(fallback=lambda p, s: {"items": []}),
+              stance="fiction", title="Single Place")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:harbor", "attribute": "kind", "value": "city", "timeless": True},
+        {"entity": "person:sam", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:sam", "attribute": "in", "value": "place:harbor",
+         "value_type": "entity"},
+    ])
+    from construct.adapter import frame_facts
+    as_of = max(r.valid_from for r in
+                frame_facts(w, "canon", entity="person:sam", attribute="in"))
+    assert game._opening_scene_place(w, "person:sam", as_of) == "place:harbor"
+    w.close()

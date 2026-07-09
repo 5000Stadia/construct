@@ -2031,6 +2031,69 @@ def _locatable_people(world: Any, known_ids: list[str],
             if e.startswith("person:") and world.porcelain.locate(e, as_of=as_of)]
 
 
+#: Coarse place kinds — settlement/region scale. When the protagonist is co-asserted
+#: at BOTH a coarse place AND a specific interior at the same opening horizon, PB's
+#: `locate()` collapses to the first-inserted row (which may be the city), leaving an
+#: intimate opening unanchored (#109, Cx 490 — the romance front-room-to-kitchen snap).
+#: The opening backstop prefers the specific interior over any of these.
+_COARSE_PLACE_KINDS = frozenset({
+    "city", "town", "village", "hamlet", "metropolis", "settlement", "municipality",
+    "neighborhood", "neighbourhood", "district", "quarter", "borough", "ward", "suburb",
+    "region", "province", "state", "county", "country", "nation", "continent",
+    "area", "zone", "territory", "world", "planet", "realm", "land", "kingdom",
+})
+
+
+def _place_kind(world: Any, place: str) -> str:
+    """The resolved (folded) `kind` value for a place, lower-cased; '' if unknown. Reads
+    the holding value under an open conflict too (kind is normally timeless canon)."""
+    st = world.porcelain.state(place, "kind")
+    if st.get("status") in ("known", "conflicted"):
+        return str((st.get("fact") or {}).get("value") or "").lower()
+    return ""
+
+
+def _place_specificity(world: Any, place: str) -> tuple[int, int]:
+    """Specificity score for anchoring a tableau (#109): (non-coarse?, containment depth).
+    A room/cafe/hall (non-coarse) outranks a city/neighborhood; among equals the deeper
+    containment chain wins. Higher tuple = more specific."""
+    coarse = _place_kind(world, place) in _COARSE_PLACE_KINDS
+    depth = len(world.porcelain.locate(place) or ())
+    return (0 if coarse else 1, depth)
+
+
+def _live_in_candidates(world: Any, entity: str, as_of: float) -> list[str]:
+    """The entity's CO-ASSERTED `in` places live at `as_of` — the current state layer
+    (rows at the max valid_from ≤ as_of, later supersedes earlier). This is the same-
+    timestamp ambiguity PB's `locate()` collapses to a single first-inserted pick (#109)."""
+    from construct.adapter import frame_facts as _ff
+    rows = [r for r in _ff(world, "canon", entity=entity, attribute="in")
+            if r.valid_from is not None and r.valid_from <= as_of
+            and (r.valid_to is None or r.valid_to > as_of)]
+    if not rows:
+        return []
+    top = max(r.valid_from for r in rows)
+    # de-dup, preserve first-seen order
+    return list(dict.fromkeys(r.value for r in rows if r.valid_from == top))
+
+
+def _specific_opening_place(world: Any, protagonist: str, as_of: float,
+                            locate_pick: str) -> str:
+    """#109 (Cx 490): when the protagonist is co-asserted at several places at the opening
+    horizon, prefer the most SPECIFIC over `locate()`'s first-inserted pick — but ONLY
+    when it is a strict improvement (never make the anchor coarser). Returns `locate_pick`
+    unchanged for the single-candidate / no-improvement case (backward compatible)."""
+    cands = _live_in_candidates(world, protagonist, as_of)
+    if len(cands) < 2:
+        return locate_pick
+    best = max(sorted(cands), key=lambda p: _place_specificity(world, p))
+    if best != locate_pick and _place_specificity(world, best) > _place_specificity(world, locate_pick):
+        logger.info("opening scene anchored to the more specific co-asserted place "
+                    "%s (over locate's %s) — #109 interior grounding", best, locate_pick)
+        return best
+    return locate_pick
+
+
 def _opening_scene_place(world: Any, protagonist: str,
                          opening_as_of: float | None) -> str | None:
     """The place to anchor the opening tableau on (cast staging). Resolution order:
@@ -2039,12 +2102,14 @@ def _opening_scene_place(world: Any, protagonist: str,
     2. their EARLIEST source location (a saga whose hero is first placed mid-text: their
        introduction/home — NEVER the head, which is the aftermath the horizon excludes); else
     3. head (single-timeframe / legacy worlds).
-    This is the Cx-255 blocking-#1 fix generalized to bibles whose opening is atmospheric."""
+    This is the Cx-255 blocking-#1 fix generalized to bibles whose opening is atmospheric.
+    When several places are co-asserted at the horizon, the most SPECIFIC interior wins
+    over `locate()`'s first-inserted pick (#109 — a domestic scene IS a room, not a city)."""
     p = world.porcelain
     if opening_as_of is not None:
         chain = p.locate(protagonist, as_of=opening_as_of)
         if chain:
-            return chain[0]
+            return _specific_opening_place(world, protagonist, opening_as_of, chain[0])
         # earliest placed location (min valid_from `in` row) — their introduction, not the end
         from construct.adapter import frame_facts as _ffo
         earliest_vf: float | None = None

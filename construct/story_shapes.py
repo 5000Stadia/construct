@@ -185,6 +185,13 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
          "element": "connection is proven by a choice that costs something"},
         {"name": "a_two_sided_other", "channels": ("author",),
          "element": "the other party has their own wants and wounds, not a mirror"},
+        {"name": "the_grounded_interior", "channels": ("author",),
+         "element": "the intimacy lives INSIDE named rooms of a home or shared venue — "
+                    "author the immediate interior at ROOM granularity (a kitchen, a "
+                    "sitting room, a bedroom, a hallway, a studio, a cafe's back room) and "
+                    "OPEN the story inside one specific named room with the protagonist "
+                    "there, never at street, neighborhood, or city scale; a bond is built "
+                    "in a place small enough to share"},
     ],
     "endurance": [
         {"name": "mounting_threat", "channels": ("narrator",),
