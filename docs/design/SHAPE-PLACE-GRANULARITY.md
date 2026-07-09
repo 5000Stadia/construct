@@ -101,7 +101,11 @@ Marta is co-asserted `in place:lisbon` / `place:campo_de_ourique` /
 `place:pastelaria_estrela_do_norte` at one timestamp, and `locate()` returns the
 city).
 
-The backstop (`_specific_opening_place`, called only inside the horizon branch):
+The backstop (`_specific_opening_place`) is applied in **both** place-resolution
+branches of `_opening_scene_place` — the opening-horizon branch AND the
+earliest-source-location fallback (Cx 492: the earliest fallback is the actual
+production path for an atmospheric opening, where `opening_as_of` sits below the
+protagonist's first `in` row — the archived romance's real path). The selector:
 1. `_live_in_candidates(world, prot, as_of)` — the protagonist's co-asserted `in`
    places at the current state layer (rows at the max `valid_from ≤ as_of`).
 2. Score each by `_place_specificity` = **(non-coarse kind?, containment depth)**:
@@ -150,8 +154,11 @@ Half B makes sure the opening actually anchors to it.
   at a coarse `place:lisbon` (kind `city`, inserted FIRST) AND a `place:kitchen`
   (kind `room`, `in place:lisbon`) at the SAME `valid_from`; assert
   `locate()[0] == "place:lisbon"` (the collapse) but
-  `_opening_scene_place(...) == "place:kitchen"` (the recovery). Plus a
-  single-candidate world returns `locate()`'s pick unchanged (backward compat).
+  `_opening_scene_place(...) == "place:kitchen"` (the recovery). A second
+  regression drives the **earliest-fallback branch** (Cx 492): `opening_as_of`
+  below the first `in` row, the earliest layer co-asserting city-first + room →
+  the opening still anchors to the room. Plus a single-candidate world returns
+  `locate()`'s pick unchanged (backward compat).
 - **Acceptance (live, post-GREEN):** a fresh romance rebuild stages the
   protagonist at ROOM granularity (a place contained within the home/venue) and
   the opening tableau anchors to a room/interior, not a city/neighborhood/street;

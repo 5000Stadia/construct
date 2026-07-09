@@ -2120,9 +2120,14 @@ def _opening_scene_place(world: Any, protagonist: str,
         if earliest_vf is not None:
             chain = p.locate(protagonist, as_of=earliest_vf)
             if chain:
+                # #109 (Cx 492): the earliest-fallback is the PRODUCTION path for an
+                # atmospheric opening (opening_as_of below the first `in` row) — the
+                # specificity backstop must run HERE too, not only in the horizon branch,
+                # or a co-asserted city still wins over the room at the earliest layer.
+                pick = _specific_opening_place(world, protagonist, earliest_vf, chain[0])
                 logger.info("opening scene for %s anchored to earliest source location "
-                            "(as-of %.0f): %s", protagonist, earliest_vf, chain[0])
-                return chain[0]
+                            "(as-of %.0f): %s", protagonist, earliest_vf, pick)
+                return pick
     chain = p.locate(protagonist)  # head (legacy / last resort)
     return chain[0] if chain else None
 

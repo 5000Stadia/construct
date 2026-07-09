@@ -1065,6 +1065,41 @@ def test_opening_scene_place_prefers_specific_interior_over_coarse(tmp_path):
     w.close()
 
 
+def test_opening_scene_place_backstop_applies_in_earliest_fallback(tmp_path):
+    # #109 (Cx 492): the earliest-location fallback is the PRODUCTION path for an
+    # atmospheric opening — opening_as_of sits BELOW the protagonist's first `in` row,
+    # so the horizon `locate()` is empty and resolution falls to the earliest source
+    # layer. The specificity backstop must run there too: the earliest layer co-asserts
+    # a coarse city (inserted first) AND a room; the opening must anchor to the room.
+    from construct import game
+    from construct.adapter import frame_facts
+
+    w = World(tmp_path / "opf.world", world_id="w:opf",
+              model=StubModel(fallback=lambda p, s: {"items": []}),
+              stance="fiction", title="Earliest Fallback")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:porto", "attribute": "kind", "value": "city", "timeless": True},
+        {"entity": "place:parlor", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "place:parlor", "attribute": "in", "value": "place:porto",
+         "value_type": "entity"},
+        {"entity": "person:ana", "attribute": "kind", "value": "person", "timeless": True},
+        # CITY first, ROOM second — at the earliest source layer
+        {"entity": "person:ana", "attribute": "in", "value": "place:porto",
+         "value_type": "entity"},
+        {"entity": "person:ana", "attribute": "in", "value": "place:parlor",
+         "value_type": "entity"},
+    ])
+    earliest = min(r.valid_from for r in
+                   frame_facts(w, "canon", entity="person:ana", attribute="in"))
+    # an opening horizon BELOW the first `in` row → horizon locate() is empty →
+    # earliest-fallback branch is exercised
+    opening_as_of = earliest - 1.0
+    assert not w.porcelain.locate("person:ana", as_of=opening_as_of)
+    assert game._opening_scene_place(w, "person:ana", opening_as_of) == "place:parlor"
+    w.close()
+
+
 def test_opening_scene_place_single_candidate_is_unchanged(tmp_path):
     # #109 backward-compat: with a single `in` candidate the backstop returns locate()'s
     # pick unchanged (no coarser/never-worse rule; non-domestic worlds are untouched).
