@@ -203,10 +203,13 @@ def _log_player_evidence(world, turn, w) -> None:
     in this turn's window so a silent Probe 1 is diagnosable — a valid spine-touch
     trial (row present, mint expected) vs extraction variance (no row committed)."""
     from construct.adapter import frame_facts
-    lo, hi = turn_time(turn) - 0.5, turn_time(turn) + 0.5
-    rows = [r for r in frame_facts(world, "canon")
-            if r.valid_from is not None and lo < r.valid_from < hi
-            and ("brennah" in str(r.entity).lower() or "brennah" in str(r.value).lower())]
+    # Scan by ASSERTION recency, not valid_from — player commits land at the engine
+    # cursor, not turn_time (the same stamping truth the salience fix honors), so a
+    # timestamp window under-reports. The last ~40 assertions cover one turn's commits.
+    all_rows = frame_facts(world, "canon")
+    recent = all_rows[-40:]
+    rows = [r for r in recent
+            if "brennah" in str(r.entity).lower() or "brennah" in str(r.value).lower()]
     w(f"> _player-commit evidence (turn {turn}): "
       f"{[(r.entity, r.attribute, str(r.value)[:30]) for r in rows] or 'NO Brennah-touching rows committed'}_")
     w()
