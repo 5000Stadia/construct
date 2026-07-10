@@ -5021,24 +5021,50 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # synthetic names commit only WITH a stub, never onto bound entities.
                 from construct.resolve import reconstruct_names
                 _raw = list(_raw) + reconstruct_names(list(_raw), prose)
+                # FRAME PARTITION (live probe 2026-07-09 + Cx 546 correction) — runs
+                # BEFORE the resolver so a dropped row can never mint a first-mention
+                # stub for its entity. The extractor stamps items with their own
+                # `frame` key, and PB's `ingest_structured(frame=...)` override applies
+                # ONLY to items WITHOUT one (PB 543: per-item frames must win — the
+                # telling-scene mixed batch) — so frame-carrying items BYPASSED the
+                # quarantine staging and landed straight in canon (the gate never ran
+                # on live narrator output). Policy, per item (the staging destination
+                # is the HOST's decision, never the model's):
+                # - canon/unframed → STRIP the redundant key; resolve + stage in
+                #   proposed:main (the existing canon promote gate).
+                # - any OTHER frame (knows:<npc> telling-scene rows) → FAIL-CLOSED DROP
+                #   with telemetry: the canon gate's contradiction/licensing/mirror
+                #   machinery is canon policy and would corrupt a knowledge copy toward
+                #   canon + the PLAYER's frame (Cx 546's demonstrated breach). Narrator-
+                #   told NPC knowledge waits for the knowledge-promotion gate
+                #   (NPC-learning RFC-002); until then the world just stays quieter.
+                _canon_items: list[dict] = []
+                _dropped_framed: list[str] = []
+                for _row in _raw:
+                    _fr = _row.get("frame") if isinstance(_row, dict) else None
+                    if _fr in (None, "", "canon"):
+                        _canon_items.append(
+                            {k: v for k, v in _row.items() if k != "frame"}
+                            if isinstance(_row, dict) else _row)
+                    else:
+                        _dropped_framed.append(
+                            f"{_row.get('entity')}/{_row.get('attribute')}→{_fr}")
+                if _dropped_framed:
+                    logger.info(
+                        "narrator settle: dropped %d non-canon-framed row(s) "
+                        "(knowledge-promotion gate not yet built): %s",
+                        len(_dropped_framed), _dropped_framed[:5])
+                    trace.dropped_cohorts.append(
+                        f"settle_noncanon_frames ({len(_dropped_framed)})")
                 # #98 (Cx 415 #2): the NARRATION channel — person leaves the free mint set;
                 # place/person enter ONLY through the proper-name stub gate (minimal rows,
                 # non-present). Player-input and NPC-action channels are untouched.
                 _resolved, _receipts = resolve_rows(
-                    _raw, scene=_resolve_cands, protagonist=arc.protagonist,
+                    _canon_items, scene=_resolve_cands, protagonist=arc.protagonist,
                     name_of=_resolve_name_of, allow_mint=True,
                     mint_kinds=_NARRATION_MINT_KINDS,
                     stub_kinds=_NARRATION_STUB_KINDS)
                 trace.resolver = (trace.resolver or []) + _receipts
-                # STRIP the extractor's own `frame` key (live probe 2026-07-09): the
-                # extraction prompt/schema stamp every item `frame: "canon"`, and PB's
-                # `ingest_structured(frame=...)` override applies ONLY to items WITHOUT
-                # a frame key — so frame-carrying items BYPASSED the quarantine staging
-                # and landed straight in canon (proposed:main empty all game, the promote
-                # gate never ran on narrator output, and the P2b handoff batch was always
-                # []). The staging destination is the HOST's decision, never the model's.
-                _resolved = [{k: v for k, v in row.items() if k != "frame"}
-                             for row in _resolved]
                 staged = _receipt_rows(p.ingest_structured(
                     _resolved, frame=_PROPOSED, classify="defer"))
         except Exception as exc:  # noqa: BLE001

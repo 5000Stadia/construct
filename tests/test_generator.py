@@ -2108,6 +2108,60 @@ def test_failed_promote_stores_empty_and_stale_row_cannot_wake(tmp_path):
     w2.close()
 
 
+def test_settle_drops_noncanon_framed_rows_fail_closed(tmp_path):
+    # Cx 546 correction: the extractor may legitimately emit knows:<person> rows
+    # (a telling scene). The narrator-settle channel's promote gate is CANON policy —
+    # a blanket frame-strip corrupted a knowledge copy toward canon + the PLAYER's
+    # frame (Cx's demonstrated breach). Until the knowledge-promotion gate exists
+    # (NPC-learning RFC-002), non-canon-framed rows are FAIL-CLOSED dropped with
+    # telemetry. This pins all four negatives + the drop telemetry, live-shaped.
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn, _PROPOSED
+
+    w = _world(tmp_path / "knows_drop.world", attribute_default=attr_default)
+
+    def _extract_telling(text, **kwargs):
+        # The live extractor shape for "the clerk was told the secret":
+        # a knowledge copy targeted at the CLERK's frame, no canon row.
+        # Returned ONLY for the narrator-prose settle extraction — the player-INPUT
+        # extraction (same porcelain.extract, different text) is a separate channel
+        # outside this pin's scope (flagged to Cx as an adjacent seam).
+        if "tell the clerk" in str(text).lower():
+            return []  # the player-input extraction call
+        return [{"entity": "fact:whisper", "attribute": "told", "value": "yes",
+                 "frame": f"knows:{CLERK}"}]
+
+    w.porcelain.extract = _extract_telling  # type: ignore[method-assign]
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    provider = _TurnProvider(fail_on_gen=False)
+    result = run_turn(w, by_id["arc:main"], provider, "I tell the clerk the secret.",
+                      turn=1, scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[], generate=False)
+    assert result.settle is not None
+    result.settle()
+
+    p = w.porcelain
+    # (1) NOT written into the NPC's knowledge frame via this ungated path.
+    assert not [f for f in p.facts(f"knows:{CLERK}", entity="fact:whisper")], (
+        "a narrator-told knowledge row must NOT reach the NPC frame through the "
+        "ungated settle channel (waits for the knowledge-promotion gate)")
+    # (2) NOT canonized (neither staged-promoted nor direct).
+    assert not [f for f in p.facts("canon", entity="fact:whisper")], (
+        "a knowledge copy must never become canon")
+    # (3) NOT mirrored into the player's knowledge frame.
+    assert not [f for f in p.facts(f"knows:{PLAYER}", entity="fact:whisper")], (
+        "a knowledge copy must never leak into the PLAYER's frame")
+    # (4) NOT in the narrator handoff batch (no generator fuel from a dropped row).
+    raw = _read_narrator_promote(w, turn=1)
+    assert prior_promote_batch(raw) == [], (
+        "a dropped knowledge row must not enter the P2b handoff batch")
+    # (5) Telemetry: the drop is visible on the trace.
+    assert any("settle_noncanon_frames" in d for d in (result.trace.dropped_cohorts or [])), (
+        "the fail-closed drop must be visible telemetry, never silent")
+    w.close()
+
+
 def test_settle_persisted_batch_salient_next_turn(tmp_path):
     # FIX 3a — the live Probe-1 blind case (HD 520) via the REAL settle seam.
     # A narrator prose extraction that touches a spined NPC must land in the handoff row
