@@ -198,18 +198,18 @@ def author_world(path: Path) -> None:
 # World interventions (deterministic between-turn writes)
 # --------------------------------------------------------------------------- #
 
-def keeper_confronts_brennah(world) -> None:
-    """Simulate the player materially touching Brennah about the debt:
-    commit a canon row touching person:brennah's debt status. This row will
-    land inside the turn window and qualify as a spine-touch (Brennah is spined)."""
-    p = world.porcelain
-    p.ingest_structured([
-        {"entity": FACT_DEBT, "attribute": "acknowledged", "value": "yes",
-         "valid_from": turn_time(2)},
-        # A direct row on Brennah so the entity appears in window fact_rows.
-        {"entity": BRENNAH, "attribute": "debt_discussed", "value": "yes",
-         "valid_from": turn_time(2)},
-    ])
+def _log_player_evidence(world, turn, w) -> None:
+    """Acceptance evidence (Cx amendment): log the Brennah-touching rows committed
+    in this turn's window so a silent Probe 1 is diagnosable — a valid spine-touch
+    trial (row present, mint expected) vs extraction variance (no row committed)."""
+    from construct.adapter import frame_facts
+    lo, hi = turn_time(turn) - 0.5, turn_time(turn) + 0.5
+    rows = [r for r in frame_facts(world, "canon")
+            if r.valid_from is not None and lo < r.valid_from < hi
+            and ("brennah" in str(r.entity).lower() or "brennah" in str(r.value).lower())]
+    w(f"> _player-commit evidence (turn {turn}): "
+      f"{[(r.entity, r.attribute, str(r.value)[:30]) for r in rows] or 'NO Brennah-touching rows committed'}_")
+    w()
 
 
 def force_main_arc_to_crisis(world) -> None:
@@ -450,12 +450,20 @@ def main() -> None:
         w()
         play(1, "I take stock of the stores before anyone arrives.",
              note="An ordinary first turn — no NPC touch yet.")
-        keeper_confronts_brennah(s._world)
-        play(2, "I call Brennah over to the counter and open the ledger to her account.",
-             note="Keeper confronts Brennah about the debt — the committed rows touch "
-                  "person:brennah (a spined NPC). The opportunistic DM should wake.")
-        play(3, "I wait for Brennah's reply and watch her face.",
-             note="Second turn after the spine-touch — within GEN_COOLDOWN window.")
+        play(2, "I take Brennah's folded tally out of her hands, spread it flat "
+                "on the counter between us, and press my finger to her first line "
+                "of credit.",
+             note="A PHYSICAL player action with Brennah as the acted-on participant "
+                  "(Cx acceptance amendment): the player-action extraction should "
+                  "commit a Brennah-touching row in the CONFIRMED player batch — the "
+                  "only fact source the final salience gate consumes. No direct world "
+                  "writes; the trial stands or falls on the real channel.")
+        _log_player_evidence(s._world, 2, w)
+        play(3, "I put the flour ledger into Brennah's hands and close her fingers "
+                "around it.",
+             note="Second physical Brennah-touch — within the GEN_COOLDOWN window; a "
+                  "second independent trial in case turn 2's extraction missed.")
+        _log_player_evidence(s._world, 3, w)
         play(4, "I close the ledger and pour two cups of coffee.")
 
         # ---- Probe 2: Contemplation — 5 quiet turns -------------------------
