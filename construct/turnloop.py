@@ -69,7 +69,6 @@ from construct.arc.generator import (
     generate_from_fallout,
     generate_opportunistic,
     main_at_peak,
-    prior_promote_batch,
     salient_moments,
     window_events,
 )
@@ -4100,23 +4099,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # session-zero/harness worlds (cursor < TURN_EPOCH), PERMANENTLY SALIENT
                     # in ingested worlds (cursor > every turn_time). See HD 520 + Cx 525.
                     _turn_floor = turn_time(turn - 1)
-                    # (a) Previous turn's narrator delta: read the settle-persisted
-                    # receipt-confirmed batch for turn n-1. The handoff row is keyed
-                    # per-turn (event:turn_{n-1}/narrator_promote in session:main) so a
-                    # missing or failed settle yields [] — never a stale replay (Cx 525 §2).
-                    # NOTE: live_reads.state() with frame=SESSION does not resolve
-                    # `event:` prefixed entities (PB routes by entity kind; event: entities
-                    # with canon rows are not folded in session state reads). Use frame_facts
-                    # to read the literal row value directly from the session buffer.
-                    _prior_batch_rows = frame_facts(
-                        world, SESSION,
-                        entity=f"event:turn_{turn - 1}",
-                        attribute="narrator_promote")
-                    _prior_batch_raw = next(
-                        (str(r.value) for r in _prior_batch_rows if r.value is not None),
-                        None)
-                    _prior_fact_rows: list[dict] = prior_promote_batch(_prior_batch_raw)
-                    # (b) Current turn's player-action delta: receipt-confirmed under the
+                    # Fact-source v3 amended (Cx 567 §2): spine-touch fires on the CURRENT player-action confirmed
+                    # batch ONLY. The prior narrator promote batch (narrator_promote handoff) is NOT a salience
+                    # source — narrator texture about spined NPCs must not wake the opportunistic generator.
+                    # The narrator_promote write in settle remains (see its write site comment).
+                    # Current turn's player-action delta: receipt-confirmed under the
                     # same rule. _player_delta_candidates carries the resolved items with
                     # values (captured before ingest so confirmed_batch() can hydrate the
                     # value-side spine-touch check — PB receipts carry entity/attribute only).
@@ -4124,9 +4111,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # _player_delta_candidates is [] and receipt_rows is [] — no player delta.
                     _player_batch, _ = confirmed_batch(
                         _player_delta_candidates, receipt_rows)
-                    # Merge: prior narrator batch first (the larger, richer source), then
-                    # current player delta. Both are post-gate receipt-confirmed rows (§A).
-                    _fact_rows: list[dict] = _prior_fact_rows + _player_batch
+                    _fact_rows: list[dict] = _player_batch
                     # Event window: PB's `since` is INCLUSIVE; window_events
                     # client-filters to strictly-after to exclude the previous
                     # turn's own events (§A, Cx 498 note). Event rows carry explicit
@@ -5174,11 +5159,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             else:
                 promote.append({"entity": entity, "attribute": attribute,
                                 "value": newv, "source_doc": _NARRATOR_SOURCE})
-        # Fact-source v3 (§A, Cx 525): capture the RECEIPT of the promote ingest to
-        # build the receipt-confirmed narrator batch for the next-turn generator read.
-        # PB receipts carry entity/attribute but NOT value; the confirmed_batch() join
-        # retains candidate values for confirmed (entity, attribute) keys so the
-        # value-side spine-touch check in salient_moments() is satisfied.
+        # The narrator_promote batch is a quarantine-gate audit/receipt surface retained
+        # for future drift-handling readers. Cx 567 §2 retired it as a salience input;
+        # the opportunistic generator does not read it. PB receipts carry entity/attribute
+        # but NOT value, so confirmed_batch() retains candidate values for confirmed keys.
         _promote_receipt_rows: list[dict] = []
         if promote:
             with _phase(trace, "promote"):
@@ -5195,14 +5179,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             logger.info(
                 "narrator_promote batch capped: kept=%d dropped=%d (turn %d)",
                 len(_confirmed), _dropped, turn)
-        # Write the per-turn handoff row EVERY settle, OUTSIDE `if promote:` — an empty
-        # list [] on quiet turns ensures the generator reads exactly turn n-1's row and
-        # returns [] when it is absent or malformed (stale replay is structurally impossible).
+        # Write the per-turn audit row EVERY settle, OUTSIDE `if promote:` — an empty
+        # list [] on quiet turns records that the quarantine gate promoted nothing.
         # Stored as a JSON literal in session:main; classify="rules" guarantees no model
         # call (deterministic write). The entity id carries an "event:" prefix, which PB's
-        # guardrail classifies as EVENT — that is fine because the reader is a raw bounded
-        # frame_facts read (not a folded state read), so EVENT vs STATE durability does not
-        # affect retrieval. valid_from=turn_time(turn) keys it per-turn — Cx 525 amendment 2.
+        # guardrail classifies as EVENT; future audit/drift readers must therefore use a raw
+        # bounded frame_facts read rather than folded state. valid_from=turn_time(turn) keys
+        # it per-turn — Cx 525 amendment 2; salience use retired by Cx 567 §2.
         try:
             p.ingest_structured([
                 {"entity": f"event:turn_{turn}", "attribute": "narrator_promote",
@@ -5212,7 +5195,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                  ]),
                  "value_type": "literal", "valid_from": turn_time(turn)},
             ], frame=SESSION, classify="rules")
-        except Exception:  # noqa: BLE001 — handoff row loss → false negative next turn, never stale
+        except Exception:  # noqa: BLE001 — audit-row loss never breaks settlement
             logger.debug("narrator_promote handoff row write failed (turn %d)", turn, exc_info=True)
         trace.contradictions = sorted(contradictions)
         trace.quarantined = sorted(quarantined)

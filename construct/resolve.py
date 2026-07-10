@@ -21,7 +21,10 @@ from typing import Any, Callable
 
 #: deixis → the protagonist (these DO have a referent; never mint a phantom). Cx 304 / Kernos 084 4c.
 _DEIXIS = {"you", "i", "me", "myself", "self", "yourself",
-           "person:you", "person:i", "person:me", "person:myself", "person:self"}
+           "my", "mine", "our", "ours", "your", "yours",
+           "person:you", "person:i", "person:me", "person:myself", "person:self",
+           "person:my", "person:mine", "person:our", "person:ours",
+           "person:your", "person:yours"}
 #: narration-VOICE tokens → no entity at all (voice is a frame, not a thing). Kernos 084 4b.
 _VOICE_TOKENS = {"narrator", "speaker"}
 #: attributes whose VALUE is an entity (so the resolver must resolve the value position too, Cx 304 #3).

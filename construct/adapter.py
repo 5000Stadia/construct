@@ -42,6 +42,7 @@ class PorcelainWorldReads:
     """WorldReads over a pattern-buffer World's porcelain."""
 
     def __init__(self, world: Any, *, horizon: float | None = None) -> None:
+        self._world = world
         self._p = world.porcelain
         # AS-OF PLAY HORIZON (B' / Cx 253): when set, EVERY read materializes as-of this
         # coordinate — so beat/clock conditions and Located/InFrame/Occurred read the

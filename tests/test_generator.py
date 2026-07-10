@@ -1140,6 +1140,43 @@ def test_opening_scene_place_single_candidate_is_unchanged(tmp_path):
     w.close()
 
 
+# --- entity-authority possessive deixis -----------------------------------
+
+def test_deixis_possessive_extends_set():
+    from construct.resolve import is_deixis
+
+    for token in ("my", "mine", "our", "ours", "your", "yours"):
+        assert is_deixis(token)
+    assert is_deixis("person:my")
+    assert is_deixis("person:mine")
+
+
+def test_resolve_rows_my_hand_does_not_bind_to_brennah():
+    from construct.resolve import resolve_rows
+
+    rows = [{"entity": "person:my", "attribute": "held_by", "value": "obj:counter"}]
+    resolved, receipts = resolve_rows(
+        rows, protagonist="person:keeper",
+        scene=["person:brennah", "obj:counter"], name_of=lambda _entity: "")
+    assert resolved[0]["entity"] == "person:keeper"
+    assert resolved[0]["entity"] != "person:brennah"
+    assert ("person:keeper", "held_by", "deixis_bound") in receipts
+
+
+def test_residual_prebound_brennah_reported():
+    """PB-side residual: once extraction pre-binds “my hand” to Brennah, the
+    original deictic token is gone; Construct preserves that established id and
+    cannot recover the speaker from this row alone (letter 126 already sent)."""
+    from construct.resolve import resolve_rows
+
+    rows = [{"entity": "person:brennah", "attribute": "held_by",
+             "value": "obj:counter"}]
+    resolved, _receipts = resolve_rows(
+        rows, protagonist="person:keeper",
+        scene=["person:brennah", "obj:counter"], name_of=lambda _entity: "")
+    assert resolved[0]["entity"] == "person:brennah"
+
+
 # ==========================================================================
 # P2b (opportunistic) + P2c (ambient) tests
 # ==========================================================================
@@ -2257,18 +2294,8 @@ def test_settle_drops_noncanon_framed_rows_fail_closed(tmp_path):
     w.close()
 
 
-def test_settle_persisted_batch_salient_next_turn(tmp_path):
-    # FIX 3a — the live Probe-1 blind case (HD 520) via the REAL settle seam.
-    # A narrator prose extraction that touches a spined NPC must land in the handoff row
-    # through the production settle path (extract → resolve → stage → promote → receipt →
-    # confirmed_batch → handoff write). On the NEXT turn, the production run_turn reads
-    # the handoff row and dispatches the gen cohort.
-    #
-    # Injection mechanism: monkeypatch world.porcelain.extract to return a CLERK-touching
-    # row (CLERK already has drive=drive:duty in canon — same-value restatement, no
-    # contradiction, goes to promote). The real _settle path runs through extract,
-    # resolve_rows, stage in _PROPOSED, proposed_vals diff, promote ingest, receipt
-    # capture, confirmed_batch, and handoff write. No manual row write.
+def test_settle_handoff_write_mechanics(tmp_path):
+    """The narrator handoff remains a durable quarantine-gate audit surface."""
     from construct.semantics import attribute_default as attr_default
     from construct.turnloop import run_turn
 
@@ -2298,11 +2325,10 @@ def test_settle_persisted_batch_salient_next_turn(tmp_path):
     assert raw_t1 is not None, "handoff row must be written after settle"
     stored_batch = prior_promote_batch(raw_t1)
     assert stored_batch, (
-        "settle must persist a nonempty batch when extract returns a CLERK-touching row "
-        "(receipt-confirmed, value-hydrated — the Probe-1 seam)")
-    # The stored batch must contain CLERK (entity-side spine touch) with the value hydrated.
+        "settle must persist a nonempty receipt-confirmed, value-hydrated audit batch")
+    # The stored audit batch must contain CLERK with the value hydrated.
     clerk_rows = [r for r in stored_batch if r.get("entity") == CLERK]
-    assert clerk_rows, "CLERK must appear in the stored batch (entity-side spine touch)"
+    assert clerk_rows, "CLERK must appear in the stored audit batch"
     assert clerk_rows[0].get("value") == "drive:duty", (
         "value must be hydrated from the candidate, not derived from the receipt")
 
@@ -2320,8 +2346,25 @@ def test_settle_persisted_batch_salient_next_turn(tmp_path):
                model=_SM(fallback=_fb), title="Gen Test World",
                attribute_default=attr_default)
 
-    # Turn 2: build a provider that returns a valid gen proposal; pacing is clear.
-    class _Probe1Provider(_TurnProvider):
+    reopened_batch = prior_promote_batch(_read_narrator_promote(w2, turn=1))
+    assert reopened_batch
+    assert any(r.get("entity") == CLERK for r in reopened_batch)
+    w2.close()
+
+
+def test_player_batch_spine_touch_wakes_opportunistic(tmp_path):
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "player-touch.world", attribute_default=attr_default)
+
+    def _extract_clerk_touch(text, **kwargs):
+        return [{"entity": CLERK, "attribute": "drive", "value": "drive:duty",
+                 "frame": "canon"}]
+
+    w.porcelain.extract = _extract_clerk_touch  # type: ignore[method-assign]
+
+    class _PlayerTouchProvider(_TurnProvider):
         async def complete(self, prompt, schema, *, tier="main", deliberate=False):
             self.calls.append((prompt, schema, tier))
             if task_of(prompt) == "gen":
@@ -2343,18 +2386,106 @@ def test_settle_persisted_batch_salient_next_turn(tmp_path):
                         "line_hint": ""}
             return {"items": []}
 
-    by_id2 = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w2))}
-    provider2 = _Probe1Provider(fail_on_gen=False)
-    run_turn(w2, by_id2["arc:main"], provider2, "I confront the clerk.", turn=2,
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    provider = _PlayerTouchProvider(fail_on_gen=False)
+    result = run_turn(w, by_id["arc:main"], provider, "I confront the clerk.", turn=1,
+                      scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[], generate=True)
+
+    assert any(task_of(p) == "gen" for p, _s, _t in provider.calls)
+    assert "arc:gen_1" in result.trace.generated
+    assert w.porcelain.state(
+        "arc:gen_1", "generated_from", frame=PLOT)["fact"]["value"] == "player_delta:1"
+    w.close()
+
+
+def test_narrator_batch_not_salient_without_player_touch(tmp_path):
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "narrator-quiet.world", attribute_default=attr_default)
+
+    def _extract_by_source(text, **kwargs):
+        if str(text) == "The office is still.":
+            return [{"entity": CLERK, "attribute": "drive", "value": "drive:duty",
+                     "frame": "canon"}]
+        return []
+
+    w.porcelain.extract = _extract_by_source  # type: ignore[method-assign]
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    first = run_turn(w, by_id["arc:main"], _TurnProvider(), "I wait.", turn=1,
+                     scope=[CLERK, PLAYER, "place:office"],
+                     scenario_mode="endless", side_arcs=[], generate=False)
+    assert first.settle is not None
+    first.settle()
+    assert any(r.get("entity") == CLERK for r in
+               prior_promote_batch(_read_narrator_promote(w, turn=1)))
+
+    provider = _TurnProvider(fail_on_gen=True)
+    run_turn(w, by_id["arc:main"], provider, "I keep waiting.", turn=2,
              scope=[CLERK, PLAYER, "place:office"],
              scenario_mode="endless", side_arcs=[], generate=True)
+    assert not any(task_of(p) == "gen" for p, _s, _t in provider.calls)
+    assert not PorcelainWorldReads(w).events(kind="generation_attempt", frame=SESSION)
+    w.close()
 
-    # The gen cohort must have been dispatched (entity-side spine-touch from the stored batch).
-    gen_calls = [p for p, _s, _t in provider2.calls if task_of(p) == "gen"]
-    assert gen_calls, (
-        "generate_arc cohort must be called when the prior turn's settled batch touched a "
-        "spined NPC — the Probe-1 blind case closed by real settle seam (FIX 3a)")
-    w2.close()
+
+def test_ambient_wins_when_narrator_batch_present_but_quiet(tmp_path):
+    from construct.clock import commit_elapsed
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "narrator-ambient.world", attribute_default=attr_default)
+    commit_elapsed(w, 100)
+
+    def _extract_by_source(text, **kwargs):
+        if str(text) == "The office is still.":
+            return [{"entity": CLERK, "attribute": "drive", "value": "drive:duty",
+                     "frame": "canon"}]
+        return []
+
+    w.porcelain.extract = _extract_by_source  # type: ignore[method-assign]
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    first = run_turn(w, by_id["arc:main"], _TurnProvider(), "I wait.", turn=1,
+                     scope=[CLERK, PLAYER, "place:office"],
+                     scenario_mode="endless", side_arcs=[], generate=True)
+    assert first.settle is not None
+    first.settle()
+    assert any(r.get("entity") == CLERK for r in
+               prior_promote_batch(_read_narrator_promote(w, turn=1)))
+    commit_elapsed(w, AMBIENT_QUIET_MIN + 10)
+
+    class _AmbientWinsProvider(_TurnProvider):
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if task_of(prompt) == "gen":
+                return dict(VALID_PROPOSAL)
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if prompt.startswith("Extract world-state"):
+                return {"items": []}
+            if prompt.startswith("Resolve an unestablished aspect"):
+                return {"items": [{"value": "The office is quiet."}]}
+            if task_of(prompt) == "cls":
+                return {"kind": "action", "moves_to": "", "requires": []}
+            if task_of(prompt) == "ndg":
+                return {"thread": "", "directive": ""}
+            if task_of(prompt) == "nar":
+                return {"prose": "The office is still."}
+            if task_of(prompt) == "npt":
+                return {"acts": False, "action": "", "speaks": False, "intent": "",
+                        "line_hint": ""}
+            return {"items": []}
+
+    provider = _AmbientWinsProvider()
+    result = run_turn(w, by_id["arc:main"], provider, "I keep waiting.", turn=2,
+                      scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[], generate=True)
+    assert "arc:gen_2" in result.trace.generated
+    generated_from = w.porcelain.state(
+        "arc:gen_2", "generated_from", frame=PLOT)["fact"]["value"]
+    assert generated_from == "ambient:2"
+    w.close()
 
 
 def test_missing_prior_turn_row_reads_empty(tmp_path):

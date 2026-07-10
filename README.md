@@ -74,6 +74,7 @@ The substrate (permanence, frames, time) is pattern-buffer's. What the Construct
 | **Episodic continuation with settled history** | A concluded story offers the next chapter over the same evolved world: consequences of your ending ride forward as canon events with causal receipts, answered questions become closed history that is *never re-opened as mystery*, and personal promises are extracted as first-class fuel the next chapter must honor or consciously pay off. |
 | **Diegetic time as the only clock** | Turns are free; only in-world time can pressure a story, and only when a deadline genuinely belongs to it (the bomb, the King's dinner). Numeric stakes (oxygen, fuel) are gauges folded from signed per-turn deltas — surfaced as mounting pressure, never a HUD. |
 | **A living world** | Off-screen characters move on their own schedule (committed through the same gated doorway, discovered rather than narrated), companions interject unprompted, and presence *holds* — a character who is here stays engageable rather than evaporating between turns. |
+| **The regenerative arc engine** | The answer to "the case is solved — then what?": a portfolio of arcs, not one. Side stories live and die on their own lifecycle; a failed arc **acknowledges its death diegetically and emits fallout as true canon consequence** — fuel, not error. A paced, fail-open DM then mints fresh side arcs through the same hidden-arc grammar from three triggers: a dead thread's fallout, the player's own committed changes (a deterministic salience read decides when the DM even wakes — it notices, it never polls), and genuine in-world quiet (measured on the story clock, never turn count — thirty turns of contemplation summon nothing). Guarded against quest-soup by caps, cooldowns, situation fingerprints, depth limits, a mint-time coherence preflight, and dramatic right-of-way: nothing generates while the main story is at its peak. |
 
 ---
 
@@ -171,6 +172,7 @@ The project is **design-first**: 60 design documents, each recording a decision,
 | Entity Authority + first-mention permanence | Live | Channel-scoped minting; prose-casing evidence, fail-closed |
 | Build-seal fidelity repair (coreference / typing) | Live | Tiered safest-first pass; arc-vouched merge only for load-bearing ids; fail-open |
 | Shape-aware place granularity | Live | Intimate/domestic shapes ground the interior at room scale; the opening anchors to the most specific place, not the enclosing city |
+| Living-World Generator (multi-arc portfolio + the opportunistic DM) | Live | Arc lifecycle with fallout-as-canon; regenerative/opportunistic/ambient triggers; one mint per turn behind six guards + dramatic right-of-way |
 | Gauges, diegetic time, world-tick, companions | Live | — |
 | World laws (authored constitution, register-gated, disclosure axis) | Live | The narrator briefs it every turn on a reserved lane; adjudication enforces it |
 | Scene imagery (per-location AI illustration) | Live | Oil-painting style; regenerates only when the scene truly changes |

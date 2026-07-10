@@ -152,6 +152,35 @@ def test_portfolio_roundtrip(tmp_path):
     w.close()
 
 
+def test_multi_mint_reopen_three_arcs(tmp_path):
+    path = tmp_path / "multi-mint.world"
+
+    def _open():
+        return World(path, world_id="w:multi-mint",
+                     model=StubModel(fallback=rule_classifier_fallback),
+                     stance="fiction", title="Multi-Mint Portfolio World")
+
+    w = _open()
+    w.porcelain.ingest_structured(
+        arc_io.portfolio_items(["arc:main"], main_arc_id="arc:main"),
+        frame="plot:main")
+    for arc_id in ("arc:gen_2", "arc:gen_4", "arc:gen_8"):
+        w.porcelain.ingest_structured(
+            arc_io.portfolio_member_items(arc_id), frame="plot:main")
+    w.close()
+
+    reopened = _open()
+    reads = PorcelainWorldReads(reopened)
+    assert arc_io.arc_ids_from_frame(reads) == [
+        "arc:main", "arc:gen_2", "arc:gen_4", "arc:gen_8"]
+    for arc_id in ("arc:gen_2", "arc:gen_4", "arc:gen_8"):
+        attribute = f"member_{arc_id.replace(':', '_')}"
+        assert reads.state("arc:portfolio", attribute, frame="plot:main") == arc_id
+        assert reopened.porcelain.state(
+            "arc:portfolio", attribute, frame="plot:main")["status"] == "known"
+    reopened.close()
+
+
 def test_continuation_portfolio_survives_reopen_under_constitutive(tmp_path):
     # Cx 167 regression — the REAL EP2-insta-terminate failure (the prior valid_from test was a
     # FALSE GREEN: its stub classified the portfolio rows STATE, where valid_from supersedes; the

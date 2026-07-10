@@ -43,6 +43,7 @@ _JSON_BLOB_ATTRS = frozenset({
 logger = logging.getLogger(__name__)
 
 _PORTFOLIO = "arc:portfolio"
+_MEMBERSHIP_ATTR_PREFIX = "member_"
 
 
 def _with_frame_and_types(items: list[dict], frame: str) -> list[dict]:
@@ -598,16 +599,21 @@ def portfolio_items(arc_ids: list[str], main_arc_id: str = "arc:main",
     ], frame)
 
 
+def portfolio_member_items(arc_id: str, frame: str = "plot:main",
+                           valid_from: float | None = None) -> list[dict]:
+    """One idempotent, monotonic portfolio-membership assertion for ``arc_id``."""
+    meta = {"valid_from": valid_from} if valid_from is not None else {"timeless": True}
+    return _with_frame_and_types([
+        {"entity": _PORTFOLIO,
+         "attribute": f"{_MEMBERSHIP_ATTR_PREFIX}{arc_id.replace(':', '_')}",
+         "value": arc_id, **meta},
+    ], frame)
+
+
 def portfolio_add_items(reads, arc_id: str, frame: str = "plot:main",
                         valid_from: float | None = None) -> list[dict]:
-    """Items that add `arc_id` to the live portfolio (idempotent), preserving the
-    current main arc. The caller ingests them; with `valid_from` the updated list
-    supersedes the sealed one (the P2 generator's mid-play registration)."""
-    ids = arc_ids_from_frame(reads, frame=frame)
-    if arc_id not in ids:
-        ids = ids + [arc_id]
-    return portfolio_items(ids, main_arc_id=main_arc_from_frame(reads, frame=frame),
-                           frame=frame, valid_from=valid_from)
+    """Items that register ``arc_id`` through its monotonic membership key."""
+    return portfolio_member_items(arc_id, frame=frame, valid_from=valid_from)
 
 
 def replan_main_arc(world, new_arc, *, turn: int, frame: str = "plot:main") -> str:
@@ -641,19 +647,28 @@ def replan_main_arc(world, new_arc, *, turn: int, frame: str = "plot:main") -> s
 
 
 def arc_ids_from_frame(reads, frame: str = "plot:main") -> list[str]:
-    """The active `arc:*` ids. Fail-open to `["arc:main"]` when no portfolio
-    manifest exists — a pre-portfolio (single-arc) world plays unchanged."""
+    """The ordered active ids from the legacy seed plus monotonic memberships."""
     raw = reads.state(_PORTFOLIO, "arc_ids", frame=frame)
+    ids: list[str]
     if not raw:
-        return ["arc:main"]
-    try:
-        ids = json.loads(raw)
-        return list(ids) if ids else ["arc:main"]
-    except (ValueError, TypeError):
-        import logging
-        logging.getLogger(__name__).error(
-            "arc:portfolio.arc_ids is unreadable (%r) — defaulting to single arc", raw)
-        return ["arc:main"]
+        ids = ["arc:main"]
+    else:
+        try:
+            parsed = json.loads(raw)
+            ids = list(parsed) if parsed else ["arc:main"]
+        except (ValueError, TypeError):
+            import logging
+            logging.getLogger(__name__).error(
+                "arc:portfolio.arc_ids is unreadable (%r) — defaulting to single arc", raw)
+            ids = ["arc:main"]
+
+    world = getattr(reads, "_world", None)
+    if world is not None:
+        from construct.adapter import frame_facts
+        for row in frame_facts(world, frame, entity=_PORTFOLIO):
+            if row.attribute.startswith(_MEMBERSHIP_ATTR_PREFIX) and isinstance(row.value, str):
+                ids.append(row.value)
+    return list(dict.fromkeys(ids))
 
 
 def main_arc_from_frame(reads, frame: str = "plot:main") -> str:

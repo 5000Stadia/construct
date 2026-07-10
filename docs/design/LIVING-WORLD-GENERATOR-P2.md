@@ -159,15 +159,18 @@ delta, and the cohort wakes ONLY when it finds a qualifying moment:
      (permanently salient). A time-window over unstamped rows is the wrong
      predicate in both directions.
   3. **CURRENT — the explicit committed batch** (what Cx 496 amendment 1
-     offered first; precision per Cx 525): the turn loop passes the actual
-     commit lists, no time-window read at all —
-     - *previous turn's narrator delta:* the settle tail persists its
+     offered first; precision per Cx 525): salience receives the actual current
+     player-action commit list, no time-window read at all —
+     - *previous turn's narrator delta — RETIRED from the salience path by Cx
+       567:* the settle tail still persists its
        **RECEIPT-CONFIRMED** promotions — never the candidate `promote` list
        (fail-open ingest converts a failed commit into an empty receipt, and a
-       candidate that didn't land must not wake the generator as truth). PB
+       candidate that didn't land must not appear in the audit as truth). PB
        receipts carry entity/attribute but NOT value, so the settle retains the
        resolved candidate VALUES for receipt-confirmed keys locally (a small
-       hydration join; PB's frozen porcelain is not widened).
+       hydration join; PB's frozen porcelain is not widened). This handoff is a
+       quarantine-gate audit/receipt surface retained for future drift-handling
+       readers; it is NOT a salience source.
      - *the handoff row is per-turn KEYED, not a singleton:* an append-only
        `event:turn_<n>` / `narrator_promote` JSON literal in `session:main`,
        `valid_from=turn_time(turn)`, `classify="rules"` (deterministic, no
@@ -177,23 +180,22 @@ delta, and the cohort wakes ONLY when it finds a qualifying moment:
        so durability classification does not affect retrieval. Written EVERY
        settle, OUTSIDE `if promote:` — an empty list on quiet turns.
        Deterministic cap (~60) with BOTH kept and dropped counts recorded. The
-       reader at turn n reads EXACTLY turn n-1's row and returns `[]` when it
-       is absent or malformed — a missing/failed settle yields a false negative,
-       never a stale replay (structural, not dependent on the next settle
-       succeeding).
-     - *current turn's player-action delta:* the adjudication/input-extraction
+       future audit/drift reader can address a specific turn and gets `[]` when
+       it is absent or malformed, never a stale replay.
+     - *current turn's player-action delta — the ONLY fact source for salience:*
+       the adjudication/input-extraction
        commits, receipt-confirmed under the SAME rule (values hydrated locally
        for confirmed keys — the raw `receipt_rows` alone lacks values for the
        spine-touch value-side check).
-     Both are post-gate, receipt-confirmed committed rows — guard #6 (never
-     prose) holds, and the batch is membrane-clean precisely BECAUSE it records
-     successful commits rather than intended candidates.
+     The current player batch is post-gate and receipt-confirmed — guard #6
+     (never prose) holds. Narrator texture about spined NPCs cannot wake the
+     opportunistic generator.
   - event rows (unchanged, they carry explicit stamps):
     `reads.events(since=int(turn_time(turn-1)), frame="canon")` client-filtered
     via `window_events` to `e.at > turn_time(turn-1)`.
   - Never prose.
 - **Qualifying signals (the initial set — small, tunable in live-test):**
-  1. **Spine-touch:** a window fact row whose `entity` or `value` is a person id
+  1. **Spine-touch:** a current-player-batch fact row whose `entity` or `value` is a person id
      in the SPINED set — the present NPCs whose `drive`/`fear` the turn loop
      already read into `canon_table` (the P2a `present_characters` source). The
      player touched someone who *wants* something.
@@ -217,8 +219,8 @@ delta, and the cohort wakes ONLY when it finds a qualifying moment:
   receipt, no trigger-side bookkeeping, no cost** (a non-salient turn is not an
   attempt; pacing must not see it — Cx 496 ruled this sound: `_last_try_turn`
   reads only attempt/decline receipts). The neutral per-turn batch-handoff
-  receipt (`narrator_promote`) is written regardless — it is settle-side world
-  bookkeeping, not trigger bookkeeping (Cx 525 amendment 3 reconciliation).
+  receipt (`narrator_promote`) is written regardless — it is a settle-side
+  quarantine audit surface, not trigger bookkeeping or a salience input (Cx 567).
   A salient turn → the existing pacing guard (`_pacing_ok`: cooldown + active
   cap) still applies, then the cohort fires with the salient rows phrased as
   `fuel` lines.
@@ -239,9 +241,9 @@ def salient_moments(fact_rows: list[dict], events: list,      # EventRow
 ```
 
 returning human-phrased fuel lines (empty = not salient). The turn loop
-assembles the four inputs (snapshot-since facts, events-since window,
-`prior_kinds` = the kinds already seen before the window, `spined` = present
-NPC ids with a canon `drive`/`fear`). Separate from the generator because the
+assembles the four inputs (the receipt-confirmed CURRENT player-action batch,
+events-since window, `prior_kinds` = the kinds already seen before the window,
+`spined` = present NPC ids with a canon `drive`/`fear`). Separate from the generator because the
 founder's captured drift-handling designs (relocate-the-beat,
 absence-consequence) will need the SAME "what just changed + who is positioned
 to care" read. One reader, several consumers; don't fuse it into the DM.
@@ -366,8 +368,8 @@ there would punish exactly the play the ruling protects. So:
   fail-open wrapper, same hook briefing):
   1. `main_at_peak(...)` → skip everything, SILENTLY (no receipt).
   2. Regenerative exactly as today (fallouts non-empty).
-  3. Else opportunistic: assemble the §A inputs (snapshot-since over `scope`,
-     events-since, prior_kinds, spined-present set from `canon_table`) → if
+  3. Else opportunistic: assemble the §A inputs (receipt-confirmed current
+     player-action batch, events-since, prior_kinds, spined-present set from `canon_table`) → if
      `salient_moments(...)` non-empty and `_pacing_ok`, mint.
   4. Else ambient: `scenario_mode == "endless"` and the §C diegetic test and
      `_pacing_ok`, mint from standing threads + spines.
@@ -384,8 +386,13 @@ there would punish exactly the play the ruling protects. So:
   `player_protagonist`, no mint); depth-0 roots (`gen_depth == 0` on a P2b
   mint; a P2b arc's later death regenerates at depth 1).
 - **Fact-source v3 test bar (HD 520 + Cx 525):**
-  - a settle-persisted promote batch touching a spined NPC → salient NEXT turn
-    (the live Probe-1 blind case, closed);
+  - `test_settle_handoff_write_mechanics` pins the persisted handoff write and
+    reopen mechanics without making a salience claim; the prior positive test
+    that woke on settled narrator texture is retired by Cx 567;
+  - a receipt-confirmed CURRENT player-action batch touching a spined NPC wakes
+    opportunistic generation on that same turn;
+  - a prior narrator batch plus an empty current player batch is non-salient,
+    and at the ambient threshold it cannot steal arbitration from ambient;
   - a quiet settle writes `[]` and an OLDER batch cannot re-trigger; a
     MISSING/failed settle (no turn n-1 row) reads `[]` — never replays an older
     source turn;

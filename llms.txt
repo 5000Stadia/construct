@@ -44,6 +44,12 @@ narrator's briefing; free-text writes pass one Entity Authority seam.
   shape-aware place granularity — intimate/domestic shapes author the
   interior at room scale and the opening anchors to the most specific
   co-asserted place, not the enclosing city.
+- [docs/design/LIVING-WORLD-GENERATOR.md](docs/design/LIVING-WORLD-GENERATOR.md)
+  + [docs/design/LIVING-WORLD-GENERATOR-P2.md](docs/design/LIVING-WORLD-GENERATOR-P2.md):
+  the regenerative arc engine — a portfolio of arcs with lifecycle and
+  fallout-as-canon, and the opportunistic DM that mints side arcs from
+  fallout, the player's committed delta (salience-gated), or diegetic
+  quiet, behind six guards + dramatic right-of-way.
 - [docs/design/REMEMBRANCER.md](docs/design/REMEMBRANCER.md): the player's
   own memory as a turn participant + player-authored retcon with
   contradiction quarantine.
