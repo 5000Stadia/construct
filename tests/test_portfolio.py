@@ -152,32 +152,228 @@ def test_portfolio_roundtrip(tmp_path):
     w.close()
 
 
+def test_horizon_safe_membership_scan(tmp_path):
+    """Cx 603 ITEM 1 regression: a membership row written at turn_time(5) must NOT
+    appear to a reads bounded at turn_time(1), but MUST appear at/after turn_time(5).
+    ``portfolio_from_frame()`` inherits the same bounded result.
+
+    This proves that ``arc_ids_from_frame`` uses ``reads.frame_rows()`` (the
+    horizon-safe adapter method) rather than a bare head scan via ``_world``.
+    """
+    w = _world(tmp_path / "hs.world")
+    # Write an additional side-arc membership row TIMESTAMPED at turn 5.
+    w.porcelain.ingest_structured(
+        arc_io.portfolio_member_items("arc:gen_5", frame=PLOT, valid_from=turn_time(5)),
+        frame=PLOT)
+
+    # --- Bounded at turn_time(1): the future arc must be INVISIBLE ---
+    reads_t1 = PorcelainWorldReads(w, horizon=turn_time(1))
+    ids_t1 = arc_io.arc_ids_from_frame(reads_t1, frame=PLOT)
+    assert "arc:gen_5" not in ids_t1, (
+        f"future arc leaked before its timestamp: {ids_t1}")
+    # portfolio_from_frame must also exclude the future arc.
+    arcs_t1 = [a.arc_id for a in arc_io.portfolio_from_frame(reads_t1, frame=PLOT)]
+    assert "arc:gen_5" not in arcs_t1, (
+        f"portfolio_from_frame leaked future arc: {arcs_t1}")
+
+    # --- Bounded at turn_time(5): the arc IS now visible ---
+    reads_t5 = PorcelainWorldReads(w, horizon=turn_time(5))
+    ids_t5 = arc_io.arc_ids_from_frame(reads_t5, frame=PLOT)
+    assert "arc:gen_5" in ids_t5, (
+        f"arc:gen_5 missing at its own timestamp: {ids_t5}")
+
+    # --- Head scan (no horizon): also visible ---
+    reads_head = PorcelainWorldReads(w)
+    ids_head = arc_io.arc_ids_from_frame(reads_head, frame=PLOT)
+    assert "arc:gen_5" in ids_head
+
+    w.close()
+
+
 def test_multi_mint_reopen_three_arcs(tmp_path):
+    """Three production-path mints (generate_opportunistic), close, reopen.
+
+    Cx 603 requirement: drive the shared mint writer three times in one open
+    world, writing real arc definitions + indexes + membership rows; then close
+    and reopen and prove the complete ordered set through BOTH
+    ``arc_ids_from_frame()`` AND ``portfolio_from_frame()``, with every
+    membership key ``status == "known"``, not ``"conflicted"``.
+    """
+    from construct.arc.generator import GEN_ACTIVE_CAP, GEN_COOLDOWN, generate_opportunistic
+    from construct.arc.grammar import Phase, Rung, Weight
+    from construct.arc.conditions import StateIs, TurnsQuiet
+
+    assert GEN_COOLDOWN == 2     # shape the turn spacing below
+    assert GEN_ACTIVE_CAP == 3   # three concurrent mints are allowed
+
+    # Three distinct proposals — different tension + beat entity so the
+    # fingerprint (situation-keyed on sorted tension + beat entities) differs
+    # across mints, avoiding the dedupe guard.
+    CLERK = "person:clerk"
+    proposals = [
+        {
+            "protagonist": CLERK,
+            "delta_type": "desire_at_cost",
+            "tension": [CLERK, "drive:duty", "drive:fear"],
+            "beats": [{"id": "beat:moves", "phase": "climax", "weight": "required",
+                       "kind": "event_occurs", "entity": "clerk_confrontation",
+                       "attribute": "", "value": ""}],
+            "hook": "The clerk starts your way.",
+        },
+        {
+            "protagonist": CLERK,
+            "delta_type": "desire_at_cost",
+            "tension": [CLERK, "drive:ambition", "drive:loyalty"],
+            "beats": [{"id": "beat:scheme", "phase": "climax", "weight": "required",
+                       "kind": "event_occurs", "entity": "clerk_scheme",
+                       "attribute": "", "value": ""}],
+            "hook": "The clerk leans back, calculating.",
+        },
+        {
+            "protagonist": CLERK,
+            "delta_type": "desire_at_cost",
+            "tension": [CLERK, "drive:revenge", "drive:guilt"],
+            "beats": [{"id": "beat:standoff", "phase": "climax", "weight": "required",
+                       "kind": "event_occurs", "entity": "clerk_standoff",
+                       "attribute": "", "value": ""}],
+            "hook": "The clerk does not step aside.",
+        },
+    ]
+
+    class _SeqProvider(StubProvider):
+        """Cycles through ``proposals`` on each 'gen' task call."""
+        def __init__(self):
+            super().__init__([])
+            self._idx = 0
+
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if task_of(prompt) == "gen":
+                p = proposals[self._idx % len(proposals)]
+                self._idx += 1
+                return dict(p)
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            return {"items": []}
+
     path = tmp_path / "multi-mint.world"
 
     def _open():
+        rule = rule_classifier_fallback()
+        def fb(prompt, schema):
+            if prompt.startswith("Classify the lifetime"):
+                return rule(prompt, schema)
+            return {"items": []}
         return World(path, world_id="w:multi-mint",
-                     model=StubModel(fallback=rule_classifier_fallback),
+                     model=StubModel(fallback=fb),
                      stance="fiction", title="Multi-Mint Portfolio World")
 
+    # --- WRITE PHASE: open world, mint three arcs, close ---
     w = _open()
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:office", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": "person:player", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:player", "attribute": "in", "value": "place:office"},
+        {"entity": CLERK, "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": CLERK, "attribute": "in", "value": "place:office"},
+        {"entity": CLERK, "attribute": "drive", "value": "drive:duty"},
+        {"entity": "fact:secret", "attribute": "kind", "value": "proposition", "timeless": True},
+    ])
+
+    # Seed the main arc + portfolio manifest into plot:main.
+    from construct.arc.conditions import InFrame
+    from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
+    beat_main = Beat("beat:discover", Phase.CLIMAX, Weight.REQUIRED,
+                     achievable_via=InFrame(f"knows:person:player", "fact:secret", "x", "y"))
+    refusal_main = Clock("clock:refusal", TurnsQuiet(15),
+                         effects=({"entity": "event:world_concludes", "attribute": "kind",
+                                   "value": "refusal_conclusion"},),
+                         bound_to="arc:main", rung=Rung.REFUSAL)
+    shape_main = ConclusionShape("shape:main", "drive_inverted",
+                                 ("person:player", "drive:a", "drive:b"),
+                                 world_condition=InFrame(f"knows:person:player",
+                                                        "fact:secret", "x", "y"),
+                                 premise=StateIs("person:player", "kind", "person"),
+                                 refusal_variant_id="shape:refused")
+    main_arc = Arc("arc:main", "person:player", shape_main, (beat_main,), (),
+                   refusal_main, 1, ("beat:discover",),
+                   {Phase.SETUP: 5, Phase.RISING: 6, Phase.CRISIS: 3,
+                    Phase.CLIMAX: 2, Phase.FALLING: 2})
     w.porcelain.ingest_structured(
-        arc_io.portfolio_items(["arc:main"], main_arc_id="arc:main"),
-        frame="plot:main")
-    for arc_id in ("arc:gen_2", "arc:gen_4", "arc:gen_8"):
-        w.porcelain.ingest_structured(
-            arc_io.portfolio_member_items(arc_id), frame="plot:main")
+        arc_io.arc_to_items(main_arc) + arc_io.index_items(main_arc)
+        + arc_io.portfolio_items(["arc:main"], main_arc_id="arc:main"),
+        frame=PLOT)
+    from construct.arc.executor import SESSION
+    w.porcelain.ingest_structured(
+        [{"entity": "event:turn_0", "attribute": "kind", "value": "turn",
+          "valid_from": turn_time(0)}], frame=SESSION)
+
+    # Mint 1 at turn 1.  side_arcs=[] → active=0, last_try=-∞, pacing ok.
+    reads1 = PorcelainWorldReads(w)
+    prov = _SeqProvider()
+    result1 = generate_opportunistic(
+        w, reads1, prov,
+        moments=["the player touched the clerk (spine-touch)"],
+        side_arcs=[],
+        ctx={"style": "noir", "available_ids": ["person:player", CLERK, "fact:secret"],
+             "present_characters": f"{CLERK}: drive=drive:duty fear=None"},
+        turn=1, main_protagonist="person:player")
+    assert result1 is not None, "mint 1 failed"
+    arc1, _ = result1
+    assert arc1.arc_id == "arc:gen_1"
+
+    # Mint 2 at turn 3.  gap=2 >= GEN_COOLDOWN; active=1 < GEN_ACTIVE_CAP.
+    reads2 = PorcelainWorldReads(w)
+    result2 = generate_opportunistic(
+        w, reads2, prov,
+        moments=["the clerk moved (spine-touch)"],
+        side_arcs=[arc1],
+        ctx={"style": "noir", "available_ids": ["person:player", CLERK, "fact:secret"],
+             "present_characters": f"{CLERK}: drive=drive:ambition fear=None"},
+        turn=3, main_protagonist="person:player")
+    assert result2 is not None, "mint 2 failed"
+    arc2, _ = result2
+    assert arc2.arc_id == "arc:gen_3"
+
+    # Mint 3 at turn 5.  gap=2 >= GEN_COOLDOWN; active=2 < GEN_ACTIVE_CAP.
+    reads3 = PorcelainWorldReads(w)
+    result3 = generate_opportunistic(
+        w, reads3, prov,
+        moments=["the clerk turned (causal ripple)"],
+        side_arcs=[arc1, arc2],
+        ctx={"style": "noir", "available_ids": ["person:player", CLERK, "fact:secret"],
+             "present_characters": f"{CLERK}: drive=drive:revenge fear=None"},
+        turn=5, main_protagonist="person:player")
+    assert result3 is not None, "mint 3 failed"
+    arc3, _ = result3
+    assert arc3.arc_id == "arc:gen_5"
+
     w.close()
 
+    # --- REOPEN PHASE: prove the complete ordered set via both reads ---
     reopened = _open()
-    reads = PorcelainWorldReads(reopened)
-    assert arc_io.arc_ids_from_frame(reads) == [
-        "arc:main", "arc:gen_2", "arc:gen_4", "arc:gen_8"]
-    for arc_id in ("arc:gen_2", "arc:gen_4", "arc:gen_8"):
+    reads_reopen = PorcelainWorldReads(reopened)
+
+    # arc_ids_from_frame must return all four arcs in assertion order.
+    ids = arc_io.arc_ids_from_frame(reads_reopen, frame=PLOT)
+    assert ids == ["arc:main", "arc:gen_1", "arc:gen_3", "arc:gen_5"], (
+        f"expected ordered [arc:main, arc:gen_1, arc:gen_3, arc:gen_5]; got {ids}")
+
+    # portfolio_from_frame reconstructs all four arcs (incl. main).
+    reloaded = arc_io.portfolio_from_frame(reads_reopen, frame=PLOT)
+    reloaded_ids = {a.arc_id for a in reloaded}
+    assert reloaded_ids == {"arc:main", "arc:gen_1", "arc:gen_3", "arc:gen_5"}, (
+        f"portfolio_from_frame returned {reloaded_ids}")
+
+    # Every membership row is "known", not "conflicted".
+    for arc_id in ("arc:gen_1", "arc:gen_3", "arc:gen_5"):
         attribute = f"member_{arc_id.replace(':', '_')}"
-        assert reads.state("arc:portfolio", attribute, frame="plot:main") == arc_id
-        assert reopened.porcelain.state(
-            "arc:portfolio", attribute, frame="plot:main")["status"] == "known"
+        st = reopened.porcelain.state("arc:portfolio", attribute, frame=PLOT)
+        assert st["status"] == "known", (
+            f"membership key {attribute!r} is {st['status']!r}, expected 'known'")
+        assert st["fact"]["value"] == arc_id
+
     reopened.close()
 
 

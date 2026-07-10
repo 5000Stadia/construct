@@ -647,7 +647,15 @@ def replan_main_arc(world, new_arc, *, turn: int, frame: str = "plot:main") -> s
 
 
 def arc_ids_from_frame(reads, frame: str = "plot:main") -> list[str]:
-    """The ordered active ids from the legacy seed plus monotonic memberships."""
+    """The ordered active ids from the legacy seed plus monotonic memberships.
+
+    The membership row scan is horizon-safe: we prefer the audited
+    ``reads.frame_rows(frame, entity=_PORTFOLIO)`` method (added on
+    ``PorcelainWorldReads`` in Cx 603) so the adapter's play-horizon ceiling
+    is respected.  If the reads object predates that method (legacy-seed-only
+    path or a test stub that lacks it) we fall back to the bare
+    ``_world``-reach, which is a head scan — acceptable only for those
+    legacy callers where no horizon is set."""
     raw = reads.state(_PORTFOLIO, "arc_ids", frame=frame)
     ids: list[str]
     if not raw:
@@ -662,12 +670,20 @@ def arc_ids_from_frame(reads, frame: str = "plot:main") -> list[str]:
                 "arc:portfolio.arc_ids is unreadable (%r) — defaulting to single arc", raw)
             ids = ["arc:main"]
 
-    world = getattr(reads, "_world", None)
-    if world is not None:
+    # Prefer the horizon-safe adapter method; fall back to the legacy world reach.
+    frame_rows_fn = getattr(reads, "frame_rows", None)
+    if frame_rows_fn is not None:
+        membership_rows = frame_rows_fn(frame, entity=_PORTFOLIO)
+    else:
+        world = getattr(reads, "_world", None)
+        if world is None:
+            return list(dict.fromkeys(ids))
         from construct.adapter import frame_facts
-        for row in frame_facts(world, frame, entity=_PORTFOLIO):
-            if row.attribute.startswith(_MEMBERSHIP_ATTR_PREFIX) and isinstance(row.value, str):
-                ids.append(row.value)
+        membership_rows = frame_facts(world, frame, entity=_PORTFOLIO)
+
+    for row in membership_rows:
+        if row.attribute.startswith(_MEMBERSHIP_ATTR_PREFIX) and isinstance(row.value, str):
+            ids.append(row.value)
     return list(dict.fromkeys(ids))
 
 

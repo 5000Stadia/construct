@@ -482,8 +482,9 @@ def _mint_side_arc(world: Any, reads: Any, provider: Provider,
         _record_decline(world, turn, reason)
         return None
 
-    # Commit: the arc into the hidden plot frame + the portfolio registration
-    # (superseding the sealed list) + the provenance/receipts.
+    # Commit: the arc into the hidden plot frame + the monotonic membership
+    # registration (one idempotent per-arc row appended to arc:portfolio —
+    # never a rewrite of the sealed arc_ids list) + the provenance/receipts.
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc, frame=PLOT) + arc_io.index_items(arc, frame=PLOT),
         frame=PLOT)

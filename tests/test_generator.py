@@ -1164,7 +1164,7 @@ def test_resolve_rows_my_hand_does_not_bind_to_brennah():
 
 
 def test_residual_prebound_brennah_reported():
-    """PB-side residual: once extraction pre-binds “my hand” to Brennah, the
+    """PB-side residual: once extraction pre-binds "my hand" to Brennah, the
     original deictic token is gone; Construct preserves that established id and
     cannot recover the speaker from this row alone (letter 126 already sent)."""
     from construct.resolve import resolve_rows
@@ -1175,6 +1175,154 @@ def test_residual_prebound_brennah_reported():
         rows, protagonist="person:keeper",
         scene=["person:brennah", "obj:counter"], name_of=lambda _entity: "")
     assert resolved[0]["entity"] == "person:brennah"
+
+
+def test_deixis_full_plural_family():
+    """Cx 603 ITEM 2: we/us/ourselves/yourselves and their person: forms are now
+    in _DEIXIS (plural first/second-person completion)."""
+    from construct.resolve import is_deixis
+    for token in ("we", "us", "ourselves", "yourselves",
+                  "person:we", "person:us",
+                  "person:ourselves", "person:yourselves"):
+        assert is_deixis(token), f"expected {token!r} to be deixis"
+
+
+def test_person_my_production_seam_run_turn(tmp_path):
+    """Cx 603 ITEM 2 production pin: a run_turn whose player-input extraction
+    returns a person:my-class row binds it to the protagonist -- not the
+    present spined bystander (CLERK) -- and never wakes the DM generator.
+
+    Assertions:
+      (a) A deixis_bound receipt appears in trace.resolver for the
+          protagonist id (the row landed on the protagonist, not the bystander).
+      (b) No resolved row in the turn canon write carries CLERK as the entity
+          from a deictic binding.
+      (c) No gen cohort call in provider.calls.
+      (d) No generation_attempt receipt in session:.
+    """
+    from construct.arc.executor import SESSION
+    from construct.turnloop import run_turn
+
+    # The StubModel fallback intercepts PB's extraction call and returns a
+    # person:my row so we exercise the production resolver path.  The world
+    # has CLERK as a spined bystander (drive row exists) so that any incorrect
+    # binding to the bystander would be detectable.
+    rule = rule_classifier_fallback()
+
+    def fb(prompt, schema):
+        if prompt.startswith("Classify the lifetime"):
+            return rule(prompt, schema)
+        if prompt.startswith("Extract world-state"):
+            return {"items": [
+                {"entity": "person:my", "attribute": "touches",
+                 "value": "obj:counter"},
+            ]}
+        return {"items": []}
+
+    # Build the world directly with the custom fallback.
+    w = World(tmp_path / "dxprod.world", world_id="w:dxprod",
+              model=StubModel(fallback=fb), stance="fiction",
+              title="Deixis Production World")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:office", "attribute": "kind", "value": "room", "timeless": True},
+        {"entity": PLAYER, "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": PLAYER, "attribute": "in", "value": "place:office"},
+        {"entity": CLERK, "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": CLERK, "attribute": "in", "value": "place:office"},
+        {"entity": CLERK, "attribute": "drive", "value": "drive:duty"},
+        {"entity": "fact:secret", "attribute": "kind", "value": "proposition",
+         "timeless": True},
+        {"entity": "obj:counter", "attribute": "kind", "value": "obj", "timeless": True},
+    ])
+    # Seed the main arc + portfolio manifest.
+    from construct.arc.conditions import InFrame, StateIs
+    from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
+    _pf = "knows:" + PLAYER
+    _beat = Beat("beat:discover", Phase.CLIMAX, Weight.REQUIRED,
+                 achievable_via=InFrame(_pf, "fact:secret", "x", "y"))
+    _refusal = Clock("clock:refusal", TurnsQuiet(15),
+                     effects=({"entity": "event:world_concludes",
+                               "attribute": "kind",
+                               "value": "refusal_conclusion"},),
+                     bound_to="arc:main", rung=Rung.REFUSAL)
+    _shape = ConclusionShape(
+        "shape:main", "drive_inverted", (PLAYER, "a", "b"),
+        world_condition=InFrame(_pf, "fact:secret", "x", "y"),
+        premise=StateIs(PLAYER, "kind", "person"),
+        refusal_variant_id="shape:refused")
+    _main = Arc("arc:main", PLAYER, _shape, (_beat,), (), _refusal, 1,
+                ("beat:discover",),
+                {Phase.SETUP: 5, Phase.RISING: 6, Phase.CRISIS: 3,
+                 Phase.CLIMAX: 2, Phase.FALLING: 2})
+    w.porcelain.ingest_structured(
+        arc_io.arc_to_items(_main) + arc_io.index_items(_main)
+        + arc_io.portfolio_items(["arc:main"], main_arc_id="arc:main"))
+    w.porcelain.ingest_structured(
+        [{"entity": "event:turn_0", "attribute": "kind", "value": "turn",
+          "valid_from": turn_time(0)}], frame=SESSION)
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+
+    class _DxProvider(StubProvider):
+        def __init__(self):
+            super().__init__([])
+
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if task_of(prompt) == "gen":
+                raise AssertionError("gen must not be called on a deixis turn")
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if prompt.startswith("Extract world-state"):
+                return {"items": []}
+            if task_of(prompt) == "cls":
+                return {"kind": "action", "moves_to": "", "requires": []}
+            if task_of(prompt) == "ndg":
+                return {"thread": "", "directive": ""}
+            if task_of(prompt) == "nar":
+                return {"prose": "You run your hand along the counter."}
+            if task_of(prompt) == "npt":
+                return {"acts": False, "action": "", "speaks": False,
+                        "intent": "", "line_hint": ""}
+            return {"items": []}
+
+    provider = _DxProvider()
+    scope = [PLAYER, CLERK, "place:office", "obj:counter"]
+    result = run_turn(
+        w, by_id["arc:main"], provider,
+        "I run my hand along the counter.",
+        turn=1, scope=scope,
+        scenario_mode="win_loss", side_arcs=[], generate=False,
+    )
+
+    # (a) A deixis_bound receipt must appear for PLAYER, not CLERK.
+    receipts = result.trace.resolver or []
+    deixis_receipts = [(eid, attr, reason) for eid, attr, reason in receipts
+                       if reason == "deixis_bound"]
+    assert any(eid == PLAYER for eid, _a, _r in deixis_receipts), (
+        "expected a deixis_bound receipt for PLAYER; resolver trace: "
+        + str(receipts[:10]))
+    assert not any(eid == CLERK for eid, _a, _r in deixis_receipts), (
+        "CLERK must not appear as a deixis_bound entity; got: "
+        + str(deixis_receipts))
+
+    # (b) CLERK not among the kept (bound/minted/deixis) rows.
+    kept_ids = {eid for eid, _a, reason in receipts
+                if reason in ("bound", "minted", "deixis_bound", "stub_minted")}
+    assert CLERK not in kept_ids, (
+        "CLERK must not be bound by the deictic row; kept_ids=" + str(kept_ids))
+
+    # (c) No gen cohort call.
+    gen_calls = [p for p, _s, _t in provider.calls if task_of(p) == "gen"]
+    assert gen_calls == [], (
+        "gen cohort must not be called; got " + str(len(gen_calls)) + " call(s)")
+
+    # (d) No generation_attempt receipt.
+    reads_check = PorcelainWorldReads(w)
+    assert not reads_check.events(kind="generation_attempt", frame=SESSION), (
+        "no generation_attempt may be recorded on this turn")
+    w.close()
 
 
 # ==========================================================================

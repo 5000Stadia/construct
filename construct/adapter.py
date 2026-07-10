@@ -86,6 +86,26 @@ class PorcelainWorldReads:
         st = self._p.state(entity, attribute, frame=frame, as_of=self._horizon)
         return st["status"] in ("known", "conflicted") and st["fact"]["value"] == value
 
+    def frame_rows(self, frame: str, *, entity: str | None = None,
+                  attribute: str | None = None, prefix: str | None = None,
+                  include_meta: bool = False) -> list:
+        """HORIZON-SAFE bounded frame scan (ITEM 1 / Cx 603).
+
+        Calls the module-level ``frame_facts`` with this adapter's own
+        ``self._horizon`` as the ``as_of`` ceiling, so callers never see
+        assertions whose ``valid_from`` is in the player's future.  Pass
+        ``entity``/``attribute``/``prefix`` to narrow the scan.
+
+        Use this instead of reaching for ``self._world`` + a bare
+        ``frame_facts`` call, which is a head scan and violates the adapter's
+        load-bearing promise that every read materialises at the play horizon.
+        """
+        return frame_facts(
+            self._world, frame,
+            entity=entity, attribute=attribute, prefix=prefix,
+            as_of=self._horizon, include_meta=include_meta,
+        )
+
     def events(
         self,
         *,

@@ -72,8 +72,9 @@ canon; is it the host's own plan/audit? → fine"). NONE is canon world-truth.
    (the existing arc linter). Fail → DECLINE, not a broken arc. (PB gives the
    atoms — `frame_diff`, folds, `route`/`path`, `confidence`, situation; the
    coherence *policy* is ours.)
-6. **Committed-delta read** — already in §3; the opportunistic trigger keys off
-   the `since`-scoped post-ingest read, never prose.
+6. **Committed-delta read** — already in §3; the opportunistic trigger sources
+   from the receipt-confirmed current-player-batch, never a since-scoped read
+   and never prose.
 
 Plus the always-on P1 invariants: generator output is authored into `plot:<id>`
 (structurally absent from canon + `knows:player` — the concealment is the
@@ -91,10 +92,12 @@ a generator miss never breaks the turn (fail-open — the world just stays quiet
    parametrizes arc_id, mints per-arc refusal/beat ids → no collision).
 3. **Preflight** — guard #5 (`lint_arc` + referents + premise reachability +
    fingerprint dedupe + depth/active caps). Any fail → DECLINE + receipt.
-4. **Commit** — `arc_to_items(arc) + index_items(arc)` into `plot:main`; append the
-   id to `arc:portfolio.arc_ids` (a new `io.add_arc_to_portfolio(world, arc_id)`);
-   write `generated_from`/`gen_depth` provenance + the `generation_attempt` receipt
-   + the fingerprint. A short clock so the arc can also conclude on its own.
+4. **Commit** — `arc_to_items(arc) + index_items(arc)` into `plot:main`; write a
+   monotonic per-arc membership row via `io.portfolio_add_items(reads, arc_id,
+   valid_from=…)` (one idempotent `arc:portfolio` / `member_<slug>` assertion —
+   never a rewrite of `arc_ids`); write `generated_from`/`gen_depth` provenance +
+   the `generation_attempt` receipt + the fingerprint. A short clock so the arc
+   can also conclude on its own.
 5. **Surface** — the new arc's `hook` becomes a briefing directive on THIS turn
    (or the next), like the P1 fallout/reveal directives — diegetic, no system leak.
 

@@ -20,9 +20,18 @@ import re
 from typing import Any, Callable
 
 #: deixis → the protagonist (these DO have a referent; never mint a phantom). Cx 304 / Kernos 084 4c.
+#: Cx 603 completes the first/second-person family with the plural pronouns (we/us/ourselves/
+#: yourselves) and their person:-prefixed extractor forms.  "our"/"ours" project CONSERVATIVELY
+#: to the protagonist as the one known included participant — never as exclusive ownership and
+#: never guessing other group members.  The plural-reflexives (ourselves, yourselves) bind the
+#: same way: the protagonist is the safe host-side anchor; inclusive-plural semantics require PB's
+#: pov/scoped-plural fix (letter 570) and will be refined there, not here.
 _DEIXIS = {"you", "i", "me", "myself", "self", "yourself",
+           "we", "us", "ourselves", "yourselves",
            "my", "mine", "our", "ours", "your", "yours",
            "person:you", "person:i", "person:me", "person:myself", "person:self",
+           "person:yourself", "person:we", "person:us",
+           "person:ourselves", "person:yourselves",
            "person:my", "person:mine", "person:our", "person:ours",
            "person:your", "person:yours"}
 #: narration-VOICE tokens → no entity at all (voice is a frame, not a thing). Kernos 084 4b.
