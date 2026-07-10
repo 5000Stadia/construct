@@ -5030,6 +5030,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     mint_kinds=_NARRATION_MINT_KINDS,
                     stub_kinds=_NARRATION_STUB_KINDS)
                 trace.resolver = (trace.resolver or []) + _receipts
+                # STRIP the extractor's own `frame` key (live probe 2026-07-09): the
+                # extraction prompt/schema stamp every item `frame: "canon"`, and PB's
+                # `ingest_structured(frame=...)` override applies ONLY to items WITHOUT
+                # a frame key — so frame-carrying items BYPASSED the quarantine staging
+                # and landed straight in canon (proposed:main empty all game, the promote
+                # gate never ran on narrator output, and the P2b handoff batch was always
+                # []). The staging destination is the HOST's decision, never the model's.
+                _resolved = [{k: v for k, v in row.items() if k != "frame"}
+                             for row in _resolved]
                 staged = _receipt_rows(p.ingest_structured(
                     _resolved, frame=_PROPOSED, classify="defer"))
         except Exception as exc:  # noqa: BLE001

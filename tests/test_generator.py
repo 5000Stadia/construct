@@ -2048,7 +2048,10 @@ def test_failed_promote_stores_empty_and_stale_row_cannot_wake(tmp_path):
 
     def _extract_with_clerk(text, **kwargs):
         # Return a row that would promote CLERK's drive (same-value, no contradiction).
-        return [{"entity": CLERK, "attribute": "drive", "value": "drive:duty"}]
+        # frame:"canon" = the LIVE extractor shape (its prompt stamps every item) — the
+        # settle must strip it or the row bypasses staging (the 2026-07-09 live defect).
+        return [{"entity": CLERK, "attribute": "drive", "value": "drive:duty",
+                 "frame": "canon"}]
 
     w.porcelain.extract = _extract_with_clerk  # type: ignore[method-assign]
 
@@ -2125,7 +2128,10 @@ def test_settle_persisted_batch_salient_next_turn(tmp_path):
     # Stub extract to return a CLERK-touching row.
     # CLERK/drive/drive:duty: same-value restatement → no contradiction → goes to promote.
     def _extract_clerk_touch(text, **kwargs):
-        return [{"entity": CLERK, "attribute": "drive", "value": "drive:duty"}]
+        # frame:"canon" = the LIVE extractor shape — without the settle's strip, this
+        # row bypasses the quarantine staging entirely and the handoff batch is [].
+        return [{"entity": CLERK, "attribute": "drive", "value": "drive:duty",
+                 "frame": "canon"}]
 
     w.porcelain.extract = _extract_clerk_touch  # type: ignore[method-assign]
 
@@ -2330,7 +2336,8 @@ def test_settle_batch_cap_real_seam(tmp_path, caplog):
     # attributes that don't exist in canon — no contradiction, all go to promote.
     _N = 70
     _extract_rows = [
-        {"entity": CLERK, "attribute": f"cap_attr_{i}", "value": f"val_{i}"}
+        {"entity": CLERK, "attribute": f"cap_attr_{i}", "value": f"val_{i}",
+         "frame": "canon"}  # the LIVE extractor shape (see the strip in _settle)
         for i in range(_N)
     ]
 
