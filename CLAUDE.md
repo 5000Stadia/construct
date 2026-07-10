@@ -16,15 +16,16 @@ An interactive-fiction engine where a persistent world (ingested from a book, or
 - **You never reimplement engine concepts.** If you want object permanence, frames, or as-of queries, they come from the engine. If the engine lacks something you need, that is a **[DECISION] letter to Kernos CC** (see channel below), not a local workaround.
 - The arc/destination layer is the new intellectual surface — it is the project's contribution and where the real design work lives.
 
-## Communication channel (the mesh)
+## Communication channel — AgentPost (the sole actionable channel)
 
-You are the third node in a coordination mesh. The other two: **Kernos CC** (`/home/k/Kernos` — instructor, holds pattern-buffer adoption knowledge and the Kernos architectural patterns) and **PB** (`/home/k/pattern-buffer` — builds the engine; you coordinate with PB only through Kernos CC for now).
+You are agent **c** in a coordination mesh with **Kernos CC** (k), **PB** (pb, the engine), and **Cx** (cx, the reviewer). All actionable inter-agent communication — specs, decisions, code reviews, questions, replies — flows through **AgentPost**:
 
-- **Your inbox:** `/home/k/Newproject/dev_inbox/` — Kernos CC writes here.
-- **To reach Kernos CC:** write `NNN-from-hd-<topic>.md` into `/home/k/Kernos/dev_inbox/`.
-- **Watch your inbox** for new `from-kernos` letters (a persistent file-watch; poll-loop shape since no inotifywait on this box — mirror pattern in the debrief). Re-arm on session start; record in memory.
-- Tag letters: **[STATUS]** / **[DECISION]** / **[BLOCKED]** / **[MILESTONE]**. Blockers and deliberation are letters, never silent waits. Bound every external call (~10 min) and report if it stalls.
-- The founder is in the loop on all exchanges. Surface genuine forks to him via Kernos CC; obvious calls you make and record.
+- Identity: `agentpost identify --cwd "$PWD"` resolves you (c). Route with `agentpost identities` / `agentpost resolve LABEL` / `agentpost agents-find QUERY`; send with the high-level `agentpost message` / `question` / `reply` (low-level `send`/`ask` remain compatible).
+- Claim exact Message-IDs (`agentpost read` then `agentpost next`) only when starting the work they request. Reading is non-destructive; only an explicit claim moves mail.
+- Use `--notify idle` routinely; `immediate` only for active blockers. Blockers and deliberation are messages, never silent waits. Bound every external call (~10 min) and report if it stalls.
+- Tag subjects: **[STATUS]** / **[DECISION]** / **[BLOCKED]** / **[MILESTONE]**. The founder is in the loop on all exchanges (Audience). Surface genuine forks to him; obvious calls you make and record.
+- The AgentPost plugin's native persistent monitor is the wake mechanism — no hand-rolled inbox polling.
+- **Legacy channels are RETIRED:** `/home/k/Newproject/dev_inbox/` and `/home/k/codex-inbox/` are read-only history/recovery. Never create new actionable files there, and never mirror one request across channels. After a proven notification failure only, a legacy control note may point to the existing AgentPost Message-ID (never copy its body).
 
 ## Process conventions
 
