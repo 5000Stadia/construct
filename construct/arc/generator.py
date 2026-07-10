@@ -147,6 +147,64 @@ def _lineage_exhausted(reads: Any, source: str) -> bool:
                        frame=SESSION) == "exhausted_for_generation"
 
 
+# --- fact-source v3 helpers (P2b, §A, Cx 525) --------------------------
+
+_PROMOTE_BATCH_CAP = 60  # deterministic cap on the per-turn narrator-promote handoff
+
+
+def confirmed_batch(candidates: list[dict], receipt_rows: list[dict],
+                    cap: int = _PROMOTE_BATCH_CAP) -> tuple[list[dict], int]:
+    """Filter `candidates` to those whose (entity, attribute) appear in `receipt_rows`.
+
+    PB receipts carry entity/attribute but NOT value; values are preserved from
+    `candidates` (the local hydration join — PB's frozen porcelain is not widened).
+    Order is deterministic (candidate list order, stable across calls). Capped at
+    `cap` rows; returns (kept, dropped_count). A candidate whose receipt was not
+    confirmed (e.g. _FailOpenIngest returned an empty receipt) is never included.
+
+    Pure function — no side-effects, fully unit-testable without a world."""
+    confirmed_keys: set[tuple] = {
+        (str(r.get("entity", "")), str(r.get("attribute", "")))
+        for r in receipt_rows
+    }
+    kept: list[dict] = []
+    for cand in candidates:
+        key = (str(cand.get("entity", "")), str(cand.get("attribute", "")))
+        if key in confirmed_keys:
+            kept.append(cand)
+    dropped = max(0, len(kept) - cap)
+    if dropped:
+        kept = kept[:cap]
+    return kept, dropped
+
+
+def prior_promote_batch(raw: object) -> list[dict]:
+    """Parse the stored JSON of a per-turn narrator-promote handoff row.
+
+    Returns the list of {entity, attribute, value} dicts on success, or [] on
+    None / malformed / not-a-list input. Defensive: a missing or crashed settle
+    yields [] (a false negative), never a stale replay.
+
+    Pure function — no side-effects, fully unit-testable without a world."""
+    if raw is None:
+        return []
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        if not isinstance(parsed, list):
+            return []
+        result: list[dict] = []
+        for item in parsed:
+            if isinstance(item, dict):
+                result.append({
+                    "entity": str(item.get("entity", "")),
+                    "attribute": str(item.get("attribute", "")),
+                    "value": item.get("value", ""),
+                })
+        return result
+    except Exception:  # noqa: BLE001 — malformed JSON → safe empty
+        return []
+
+
 # --- salience pre-filter (P2b, §A) -------------------------------------
 
 def window_events(events: list, floor: float) -> list:

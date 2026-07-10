@@ -15,7 +15,7 @@ import json
 from patternbuffer import World
 from patternbuffer.testing import StubModel, rule_classifier_fallback
 
-from construct.adapter import PorcelainWorldReads
+from construct.adapter import PorcelainWorldReads, frame_facts
 from construct.arc import generator as gen
 from construct.arc import io as arc_io
 from construct.arc.conditions import EventRow, InFrame, StateIs, TurnsQuiet
@@ -25,10 +25,12 @@ from construct.arc.generator import (
     ROUTINE_EVENT_KINDS,
     _last_development_min,
     _mark_development,
+    confirmed_batch,
     generate_ambient,
     generate_from_fallout,
     generate_opportunistic,
     main_at_peak,
+    prior_promote_batch,
     salient_moments,
     window_events,
 )
@@ -1804,3 +1806,334 @@ def _main_arc_from(w) -> Arc:
     """Reconstruct the main arc from a world's portfolio."""
     reads = PorcelainWorldReads(w)
     return next(a for a in arc_io.portfolio_from_frame(reads) if a.arc_id == "arc:main")
+
+
+def _read_narrator_promote(w, turn: int) -> object:
+    """Read the narrator_promote handoff row for a given turn from the session frame.
+
+    Uses frame_facts (not reads.state) because PB's state() does not resolve
+    `event:` prefixed entities written into the session frame when those entities
+    also have rows in the canon frame — the same PB routing constraint that
+    motivated the frame_facts read in the turnloop generator block."""
+    rows = list(frame_facts(w, SESSION, entity=f"event:turn_{turn}",
+                            attribute="narrator_promote"))
+    if not rows:
+        return None
+    return str(rows[0].value) if rows[0].value is not None else None
+
+
+# ==========================================================================
+# Fact-source v3 tests (HD 520 + Cx 525 test bar — §E, LIVING-WORLD-GENERATOR-P2.md)
+# ==========================================================================
+
+# --- pure-unit helpers ---------------------------------------------------
+
+def test_confirmed_batch_filters_to_receipt_keys():
+    # confirmed_batch keeps only candidates confirmed by receipt (entity+attribute match).
+    candidates = [
+        {"entity": "person:clerk", "attribute": "drive", "value": "drive:duty"},
+        {"entity": "person:clerk", "attribute": "fear", "value": "drive:ruin"},
+        {"entity": "fact:x", "attribute": "kind", "value": "proposition"},
+    ]
+    receipt = [
+        {"entity": "person:clerk", "attribute": "drive", "assertion_id": "a1"},
+        # "fact:x/kind" NOT in receipt → must be dropped
+    ]
+    kept, dropped = confirmed_batch(candidates, receipt)
+    assert len(kept) == 1 and kept[0]["entity"] == "person:clerk"
+    assert kept[0]["attribute"] == "drive"
+    assert kept[0]["value"] == "drive:duty"  # value preserved from candidates
+    assert dropped == 0
+
+
+def test_confirmed_batch_empty_receipt_gives_empty_kept():
+    # Test 3 — failed promotion (empty receipt) never appears in the stored batch.
+    candidates = [{"entity": "person:clerk", "attribute": "drive", "value": "drive:duty"}]
+    kept, dropped = confirmed_batch(candidates, [])
+    assert kept == []
+    assert dropped == 0
+
+
+def test_confirmed_batch_value_side_preserved():
+    # Test 4 — value-side spine-touch: the VALUE field of a confirmed candidate is
+    # preserved exactly (not derived from the receipt, which has no value column).
+    receipt = [{"entity": "fact:bond", "attribute": "holder", "assertion_id": "a2"}]
+    candidates = [{"entity": "fact:bond", "attribute": "holder", "value": CLERK}]
+    kept, dropped = confirmed_batch(candidates, receipt)
+    assert len(kept) == 1
+    assert kept[0]["value"] == CLERK  # value survives the join
+
+
+def test_confirmed_batch_cap_truncation_deterministic():
+    # Test 6 — cap/truncation: with 70 candidates and cap=60, kept=60, dropped=10.
+    # Order is deterministic (candidate list order); same call always returns same result.
+    candidates = [
+        {"entity": f"fact:x{i}", "attribute": "kind", "value": "v"}
+        for i in range(70)
+    ]
+    receipt = [
+        {"entity": f"fact:x{i}", "attribute": "kind"}
+        for i in range(70)
+    ]
+    kept, dropped = confirmed_batch(candidates, receipt, cap=60)
+    assert len(kept) == 60
+    assert dropped == 10
+    # Deterministic: the first 60 candidates in order.
+    assert [c["entity"] for c in kept] == [f"fact:x{i}" for i in range(60)]
+    # Second call produces identical result.
+    kept2, dropped2 = confirmed_batch(candidates, receipt, cap=60)
+    assert kept == kept2 and dropped == dropped2
+
+
+def test_prior_promote_batch_returns_list_on_valid_json():
+    raw = json.dumps([
+        {"entity": "person:clerk", "attribute": "drive", "value": "drive:duty"}
+    ])
+    result = prior_promote_batch(raw)
+    assert len(result) == 1
+    assert result[0]["entity"] == "person:clerk"
+    assert result[0]["value"] == "drive:duty"
+
+
+def test_prior_promote_batch_returns_empty_on_none():
+    # Test 2 / Test 5 — missing or failed settle yields [].
+    assert prior_promote_batch(None) == []
+
+
+def test_prior_promote_batch_returns_empty_on_malformed():
+    assert prior_promote_batch("not json {{{") == []
+    assert prior_promote_batch(json.dumps("a string, not a list")) == []
+    assert prior_promote_batch(json.dumps(42)) == []
+
+
+def test_prior_promote_batch_skips_non_dict_items():
+    raw = json.dumps([
+        {"entity": "person:clerk", "attribute": "drive", "value": "duty"},
+        "not a dict",
+        None,
+        42,
+    ])
+    result = prior_promote_batch(raw)
+    # Only the dict item survives.
+    assert len(result) == 1
+    assert result[0]["entity"] == "person:clerk"
+
+
+# --- settle-level handoff row tests -------------------------------------
+
+def test_quiet_settle_writes_empty_batch(tmp_path):
+    # Test 2 — a quiet settle writes [] for the handoff row; no promote → confirmed batch is [].
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "quiet.world", attribute_default=attr_default)
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+
+    provider = _TurnProvider(fail_on_gen=False)
+    result = run_turn(w, by_id["arc:main"], provider, "I wait.", turn=1,
+                      scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[], generate=False)
+    # Call settle synchronously so the handoff row is written before we read.
+    if result.settle:
+        result.settle()
+
+    # Use frame_facts to read the handoff row (event: entities in session frame
+    # are not accessible via reads.state — see _read_narrator_promote helper).
+    raw = _read_narrator_promote(w, turn=1)
+    assert raw is not None, "narrator_promote handoff row must be written on every settle"
+    batch = prior_promote_batch(raw)
+    assert batch == [], f"quiet settle must write [] batch; got {batch}"
+    w.close()
+
+
+def test_failed_promote_never_in_stored_batch(tmp_path):
+    # Test 3 — a failed ingest (empty receipt via _FailOpenIngest) must produce an
+    # empty confirmed batch; the handoff row stores [] not the candidate list.
+    # We exercise this via confirmed_batch() at the unit level (the settle path routes
+    # through the same helper; a real _FailOpenIngest raise in integration would require
+    # forcing a PB error which is not safely injectable here).
+    candidates = [
+        {"entity": CLERK, "attribute": "drive", "value": "drive:ambition"},
+    ]
+    # Empty receipt simulates _FailOpenIngest returning {"rows": []}.
+    kept, dropped = confirmed_batch(candidates, [])
+    assert kept == [], "uncommitted candidates must never enter the stored batch"
+    assert dropped == 0
+
+
+def test_settle_persisted_batch_salient_next_turn(tmp_path):
+    # Test 1 — the live Probe-1 blind case (HD 520): a narrator promote that touches
+    # a spined NPC lands in the handoff row; on the NEXT turn the generator wakes.
+    #
+    # We cannot easily drive a real narrator extraction in a stub-provider world
+    # (the narrator returns short prose with no extractable facts). Instead we write
+    # the handoff row directly as _settle would — this is the spec's "you may drive
+    # _settle for real via result.settle() if the fixture supports it, else write the
+    # row exactly as settle does" path.  The row shape is exactly what _settle writes.
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "probe1.world", attribute_default=attr_default)
+    # Manually write the turn-1 handoff row as _settle would:
+    # CLERK (a spined NPC — has a drive in the fixture) appears as a VALUE in one row.
+    handoff_batch = [
+        {"entity": "fact:bond", "attribute": "holder", "value": CLERK},
+    ]
+    w.porcelain.ingest_structured([
+        {"entity": "event:turn_1", "attribute": "narrator_promote",
+         "value": json.dumps(handoff_batch), "value_type": "literal",
+         "valid_from": turn_time(1)},
+    ], frame=SESSION, classify="rules")
+    # Also write the turn-1 turn receipt so next_turn_number is consistent.
+    w.porcelain.ingest_structured([
+        {"entity": "event:turn_1", "attribute": "kind", "value": "turn",
+         "valid_from": turn_time(1)},
+    ], frame=SESSION)
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+
+    # Turn 2: the prior-batch reader picks up CLERK as a VALUE → spine-touch fires.
+    # The gen provider returns the valid proposal; pacing is clear (turn 2, last try = -inf).
+    class _Probe1Provider(_TurnProvider):
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if task_of(prompt) == "gen":
+                return dict(VALID_PROPOSAL)
+            if prompt.startswith("Classify the lifetime"):
+                return {"durability": "STATE", "confidence": 0.9}
+            if prompt.startswith("Extract world-state"):
+                return {"items": []}
+            if prompt.startswith("Resolve an unestablished aspect"):
+                return {"items": [{"value": "The office is quiet."}]}
+            if task_of(prompt) == "cls":
+                return {"kind": "action", "moves_to": "", "requires": []}
+            if task_of(prompt) == "ndg":
+                return {"thread": "", "directive": ""}
+            if task_of(prompt) == "nar":
+                return {"prose": "The clerk glances at you."}
+            if task_of(prompt) == "npt":
+                return {"acts": False, "action": "", "speaks": False, "intent": "",
+                        "line_hint": ""}
+            return {"items": []}
+
+    provider2 = _Probe1Provider(fail_on_gen=False)
+    run_turn(w, by_id["arc:main"], provider2, "I confront the clerk.", turn=2,
+             scope=[CLERK, PLAYER, "place:office"],
+             scenario_mode="endless", side_arcs=[], generate=True)
+
+    # The gen cohort must have been called (spine-touch from the prior batch).
+    gen_calls = [p for p, _s, _t in provider2.calls if task_of(p) == "gen"]
+    assert gen_calls, (
+        "generate_arc cohort must be called when the prior turn's batch touched a spined NPC "
+        "(the Probe-1 blind case — fact-source v3 closes this)")
+    w.close()
+
+
+def test_missing_prior_turn_row_reads_empty(tmp_path):
+    # Test 2 — a missing turn n-1 row reads []; no stale replay from an even older source turn.
+    # We write a turn_0 handoff row but read turn_{1} (turn-1=0) and then turn_{2} (turn-1=1).
+    # The prior_promote_batch helper is the reader; the absence case returns [].
+    from construct.semantics import attribute_default as attr_default
+
+    w = _world(tmp_path / "missing.world", attribute_default=attr_default)
+    # Write a handoff row for turn 0 only (the "stale" batch that must not reappear).
+    stale_batch = [{"entity": CLERK, "attribute": "drive", "value": "drive:old"}]
+    w.porcelain.ingest_structured([
+        {"entity": "event:turn_0", "attribute": "narrator_promote",
+         "value": json.dumps(stale_batch), "value_type": "literal",
+         "valid_from": turn_time(0)},
+    ], frame=SESSION, classify="rules")
+
+    # Turn 2 reads event:turn_1/narrator_promote — which was never written.
+    raw_missing = _read_narrator_promote(w, turn=1)
+    assert prior_promote_batch(raw_missing) == [], (
+        "a missing turn n-1 row must produce [] — no stale replay from turn 0")
+
+    # The turn-0 row itself is still accessible but must not be read at turn 2
+    # (the per-turn key prevents stale replay structurally).
+    raw_turn0 = _read_narrator_promote(w, turn=0)
+    assert prior_promote_batch(raw_turn0) != [], "turn-0 row still exists but is not consulted"
+    w.close()
+
+
+def test_first_turn_absence_and_reopen(tmp_path):
+    # Test 5 — first-turn absence reads []; clean close/reopen reads the persisted prior-turn row.
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "reopen.world", attribute_default=attr_default)
+
+    # Before any settle: turn 0 handoff row does not exist → reads [].
+    raw_absent = _read_narrator_promote(w, turn=0)
+    assert prior_promote_batch(raw_absent) == [], "first-turn absence must read []"
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    provider = _TurnProvider(fail_on_gen=False)
+    result = run_turn(w, by_id["arc:main"], provider, "I wait.", turn=1,
+                      scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[], generate=False)
+    # Settle synchronously to write the handoff row.
+    if result.settle:
+        result.settle()
+
+    # Verify the row was written (use frame_facts — not reads.state — for event: entities).
+    raw1 = _read_narrator_promote(w, turn=1)
+    assert raw1 is not None, "handoff row must be persisted after settle"
+
+    # Close and reopen: the row must survive.
+    w.close()
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        if prompt.startswith("Classify the lifetime"):
+            return rule(prompt, schema)
+        return {"items": []}
+
+    from construct.semantics import attribute_default as attr_default2
+    w2 = World(tmp_path / "reopen.world", world_id="w:gen", stance="fiction",
+               model=StubModel(fallback=fallback), title="Gen Test World",
+               attribute_default=attr_default2)
+    raw_reopen = _read_narrator_promote(w2, turn=1)
+    assert raw_reopen is not None, "handoff row must survive world close/reopen"
+    # The batch parses correctly ([] on quiet settle is still a valid persisted value).
+    batch = prior_promote_batch(raw_reopen)
+    assert isinstance(batch, list), f"reopen batch must be a list; got {type(batch)}"
+    w2.close()
+
+
+def test_standing_canon_at_high_cursor_not_salient(tmp_path):
+    # Test 7 — standing canon rows at a high cursor (ingested-world shape) do NOT make
+    # turns salient — holds by construction (no fact window exists in v3), pinned.
+    # We ingest rows at a high explicit valid_from, run a quiet turn, assert no gen call.
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "highcursor.world", attribute_default=attr_default)
+
+    # Ingest a CLERK drive row at a high valid_from (simulating an ingested world where
+    # the engine cursor sits above every turn_time, the "permanently salient" failure
+    # direction of the old fact window). The v3 batch approach never reads these.
+    HIGH_VF = 8_000_000.0  # above any turn_time (TURN_EPOCH + turn ~ 1000 + turn)
+    w.porcelain.ingest_structured([
+        {"entity": CLERK, "attribute": "drive", "value": "drive:ambition",
+         "valid_from": HIGH_VF},
+    ])
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    # fail_on_gen=False so we can assert absence after the fact.
+    provider = _TurnProvider(fail_on_gen=False)
+    # generate=True — the opportunistic block runs; the fact window is gone so no spine-touch.
+    run_turn(w, by_id["arc:main"], provider, "I wait.", turn=1,
+             scope=[CLERK, PLAYER, "place:office"],
+             scenario_mode="endless", side_arcs=[], generate=True)
+
+    gen_calls = [p for p, _s, _t in provider.calls if task_of(p) == "gen"]
+    assert gen_calls == [], (
+        "standing canon rows at a high cursor must NOT make the turn salient "
+        "(v3 fact-source holds by construction — no fact window)")
+    reads = PorcelainWorldReads(w)
+    assert not reads.events(kind="generation_attempt", frame=SESSION), (
+        "no generation_attempt on a high-cursor-only turn")
+    w.close()

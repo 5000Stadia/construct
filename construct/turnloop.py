@@ -64,10 +64,12 @@ from construct.arc.generator import (
     _last_development_min,
     _mark_development,
     _pacing_ok as _gen_pacing_ok,
+    confirmed_batch,
     generate_ambient,
     generate_from_fallout,
     generate_opportunistic,
     main_at_peak,
+    prior_promote_batch,
     salient_moments,
     window_events,
 )
@@ -2121,6 +2123,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     except Exception:
         _pre_held = set()
     receipt_rows = []
+    # Resolved player-action candidates (entity/attribute/value dicts) for the
+    # fact-source v3 hydration join: the generator needs values for the value-side
+    # spine-touch check, but PB receipts carry only entity/attribute (no value).
+    # Captured here so confirmed_batch() can hydrate confirmed keys from candidates.
+    _player_delta_candidates: list[dict] = []
     if asserts_or_reveals:
         try:
             with _phase(trace, "player_ingest"):
@@ -2148,6 +2155,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                                 name_of=_pin_name, allow_mint=True,
                                                 mint_kinds=_PLAYER_INPUT_MINT_KINDS)
                 trace.resolver = (trace.resolver or []) + _prec
+                # Capture candidates BEFORE ingest for the value-side hydration join (§A, Cx 525):
+                # receipt_rows below carries entity/attribute only; _player_delta_candidates
+                # preserves values so confirmed_batch() can satisfy the value-side spine-touch check.
+                _player_delta_candidates = [
+                    {"entity": str(r.get("entity", "")),
+                     "attribute": str(r.get("attribute", "")),
+                     "value": r.get("value", "")}
+                    for r in (_resolved if isinstance(_resolved, list) else list(_resolved))
+                ]
                 receipt_rows = _receipt_rows(p.ingest_structured(_resolved, classify="batch"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("player-input extraction failed; continuing: %s", exc)
@@ -4034,25 +4050,44 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     if canon_table.get((n, "drive")) or canon_table.get((n, "fear"))
                 }
                 try:
-                    # Fact-delta source: bounded per-entity indexed scan, horizon-bound
-                    # (§A, Cx 498 BLOCKED). NOT snapshot(..., since=...) — PB applies
-                    # `since` only to the what_happened lens; on current_state it is
-                    # ignored, returning the full standing state (any scene with a
-                    # spined NPC reads salient every turn, defeating the filter).
+                    # Fact-source v3 (§A, Cx 525): the explicit committed batch.
+                    # No time-window fact read — narrator-extracted facts are committed
+                    # UNSTAMPED (they land at the engine cursor, which never moves during
+                    # play), making a valid_from window wrong in both directions: BLIND in
+                    # session-zero/harness worlds (cursor < TURN_EPOCH), PERMANENTLY SALIENT
+                    # in ingested worlds (cursor > every turn_time). See HD 520 + Cx 525.
                     _turn_floor = turn_time(turn - 1)
-                    _fact_rows: list[dict] = []
-                    for _e in sorted(set(scope or [])):
-                        for _r in frame_facts(world, "canon", entity=_e, as_of=_h):
-                            # Keep only rows that canonized IN this turn's window.
-                            if _r.valid_from is not None and _r.valid_from > _turn_floor:
-                                _fact_rows.append({
-                                    "entity": _r.entity,
-                                    "attribute": _r.attribute,
-                                    "value": _r.value,
-                                })
+                    # (a) Previous turn's narrator delta: read the settle-persisted
+                    # receipt-confirmed batch for turn n-1. The handoff row is keyed
+                    # per-turn (event:turn_{n-1}/narrator_promote in session:main) so a
+                    # missing or failed settle yields [] — never a stale replay (Cx 525 §2).
+                    # NOTE: live_reads.state() with frame=SESSION does not resolve
+                    # `event:` prefixed entities (PB routes by entity kind; event: entities
+                    # with canon rows are not folded in session state reads). Use frame_facts
+                    # to read the literal row value directly from the session buffer.
+                    _prior_batch_rows = frame_facts(
+                        world, SESSION,
+                        entity=f"event:turn_{turn - 1}",
+                        attribute="narrator_promote")
+                    _prior_batch_raw = next(
+                        (str(r.value) for r in _prior_batch_rows if r.value is not None),
+                        None)
+                    _prior_fact_rows: list[dict] = prior_promote_batch(_prior_batch_raw)
+                    # (b) Current turn's player-action delta: receipt-confirmed under the
+                    # same rule. _player_delta_candidates carries the resolved items with
+                    # values (captured before ingest so confirmed_batch() can hydrate the
+                    # value-side spine-touch check — PB receipts carry entity/attribute only).
+                    # Value limitation: when extraction was skipped (asserts_or_reveals=False)
+                    # _player_delta_candidates is [] and receipt_rows is [] — no player delta.
+                    _player_batch, _ = confirmed_batch(
+                        _player_delta_candidates, receipt_rows)
+                    # Merge: prior narrator batch first (the larger, richer source), then
+                    # current player delta. Both are post-gate receipt-confirmed rows (§A).
+                    _fact_rows: list[dict] = _prior_fact_rows + _player_batch
                     # Event window: PB's `since` is INCLUSIVE; window_events
                     # client-filters to strictly-after to exclude the previous
-                    # turn's own events (§A, Cx 498 note).
+                    # turn's own events (§A, Cx 498 note). Event rows carry explicit
+                    # turn_time stamps and are unaffected by the cursor issue above.
                     _all_win_events = live_reads.events(
                         since=int(_turn_floor), frame="canon")
                     _win_events = window_events(_all_win_events, _turn_floor)
@@ -5082,11 +5117,43 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             else:
                 promote.append({"entity": entity, "attribute": attribute,
                                 "value": newv, "source_doc": _NARRATOR_SOURCE})
+        # Fact-source v3 (§A, Cx 525): capture the RECEIPT of the promote ingest to
+        # build the receipt-confirmed narrator batch for the next-turn generator read.
+        # PB receipts carry entity/attribute but NOT value; the confirmed_batch() join
+        # retains candidate values for confirmed (entity, attribute) keys so the
+        # value-side spine-touch check in salient_moments() is satisfied.
+        _promote_receipt_rows: list[dict] = []
         if promote:
             with _phase(trace, "promote"):
-                p.ingest_structured(promote, frame="canon", classify="batch")
+                _promote_receipt = p.ingest_structured(promote, frame="canon", classify="batch")
+                _promote_receipt_rows = _receipt_rows(_promote_receipt)
                 canon_table.update(_table(_snap_or_empty(p, snap_scope, as_of=_h)))
                 _mirror_rows(p, promote, player_frame, canon_table, trace, as_of=_h)
+        # Build the receipt-confirmed batch: promote candidates whose (entity, attribute)
+        # appear in the receipt (failed ingests produce an empty receipt via _FailOpenIngest
+        # — those candidates are uncommitted and must never enter the batch). Empty on
+        # _FailOpenIngest or quiet turns. Capped at 60 rows (stable order: as committed).
+        _confirmed, _dropped = confirmed_batch(promote, _promote_receipt_rows)
+        if _dropped:
+            logger.info(
+                "narrator_promote batch capped: kept=%d dropped=%d (turn %d)",
+                len(_confirmed), _dropped, turn)
+        # Write the per-turn handoff row EVERY settle, OUTSIDE `if promote:` — an empty
+        # list [] on quiet turns ensures the generator reads exactly turn n-1's row and
+        # returns [] when it is absent or malformed (stale replay is structurally impossible).
+        # Stored as a JSON literal in session:main; classify="rules" (deterministic STATE,
+        # no model call) — Cx 525 amendment 2; valid_from=turn_time(turn) keys it per-turn.
+        try:
+            p.ingest_structured([
+                {"entity": f"event:turn_{turn}", "attribute": "narrator_promote",
+                 "value": json.dumps([
+                     {"entity": c["entity"], "attribute": c["attribute"], "value": c["value"]}
+                     for c in _confirmed
+                 ]),
+                 "value_type": "literal", "valid_from": turn_time(turn)},
+            ], frame=SESSION, classify="rules")
+        except Exception:  # noqa: BLE001 — handoff row loss → false negative next turn, never stale
+            logger.debug("narrator_promote handoff row write failed (turn %d)", turn, exc_info=True)
         trace.contradictions = sorted(contradictions)
         trace.quarantined = sorted(quarantined)
 
