@@ -743,6 +743,37 @@ def _receipt_rows(receipt: Any) -> list[dict]:
     return receipt.to_dict()["rows"] if hasattr(receipt, "to_dict") else receipt["rows"]
 
 
+def _partition_frames(items: list) -> tuple[list[dict], list[str]]:
+    """FRAME PARTITION for extraction output (Cx 546/552) — the FIRST step after
+    `extract()`, before name reconstruction and the resolver, on BOTH channels
+    (narrator settle + player input). Extraction items MAY carry their own `frame`
+    key (PB's schema makes it optional), and PB's `ingest_structured(frame=...)`
+    default applies only to unframed items (per-item frames win — the sanctioned
+    telling-scene mixed batch, PB 543). The host therefore decides HERE what each
+    channel admits:
+    - frame absent or exactly "canon" → accepted; the redundant key is stripped
+      (the staging/commit destination is the host's, never the model's).
+    - ANY other value — knows:<npc> knowledge copies, malformed empties —
+      → FAIL-CLOSED dropped (returned as labels for channel-specific telemetry).
+      A knowledge copy through an ungated channel corrupts NPC/player knowledge
+      (Cx 546's breach); it waits for the knowledge-promotion gate (RFC-002).
+    Runs BEFORE `reconstruct_names()`/`resolve_rows()` so a dropped row can leave
+    NO derivative — no synthetic name row, no first-mention stub (Cx 552).
+    Returns (accepted_copies, dropped_labels)."""
+    accepted: list[dict] = []
+    dropped: list[str] = []
+    for row in items:
+        if not isinstance(row, dict):
+            accepted.append(row)
+            continue
+        fr = row.get("frame")
+        if fr is None or fr == "canon":
+            accepted.append({k: v for k, v in row.items() if k != "frame"})
+        else:
+            dropped.append(f"{row.get('entity')}/{row.get('attribute')}→{fr!r}")
+    return accepted, dropped
+
+
 def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon",
                    *, as_of: float | None = None) -> dict:
     if not scope:
@@ -2148,6 +2179,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # deixis binds to them; person:you/person:i can never mint.
                 _raw = p.extract(player_input, scene=pre_scene, extract="lean",
                                  pov=arc.protagonist)  # read-only
+                # FRAME PARTITION (Cx 552: the player channel is the SAME structural
+                # bypass — a knows:* extraction row landed directly in the NPC frame,
+                # ungated, no telemetry). First step after extract; policy + rationale:
+                # _partition_frames.
+                _raw, _input_dropped = _partition_frames(list(_raw))
+                if _input_dropped:
+                    logger.info(
+                        "player input: dropped %d non-canon-framed row(s) "
+                        "(knowledge-promotion gate not yet built): %s",
+                        len(_input_dropped), _input_dropped[:5])
+                    trace.dropped_cohorts.append(
+                        f"input_noncanon_frames ({len(_input_dropped)})")
                 # PLAYER channel mint policy (founder 2026-06-30): no person/place by fiat — the
                 # player's "I am Bradford Clemense" must not mint a present NPC; the world introduces
                 # NPCs, the move channel makes places. Objects still mint (improv permanence).
@@ -5016,39 +5059,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             with _phase(trace, "post_extract"):
                 _raw = p.extract(prose, scene=scene, extract="lean",
                                  pov=arc.protagonist)  # READ-ONLY; "you" = the protagonist (PB 4c)
-                # #98 live-probe finding: the lean extractor omits name rows — reconstruct
-                # the cased surface form from the prose (the stub gate's only evidence);
-                # synthetic names commit only WITH a stub, never onto bound entities.
-                from construct.resolve import reconstruct_names
-                _raw = list(_raw) + reconstruct_names(list(_raw), prose)
-                # FRAME PARTITION (live probe 2026-07-09 + Cx 546 correction) — runs
-                # BEFORE the resolver so a dropped row can never mint a first-mention
-                # stub for its entity. The extractor stamps items with their own
-                # `frame` key, and PB's `ingest_structured(frame=...)` override applies
-                # ONLY to items WITHOUT one (PB 543: per-item frames must win — the
-                # telling-scene mixed batch) — so frame-carrying items BYPASSED the
-                # quarantine staging and landed straight in canon (the gate never ran
-                # on live narrator output). Policy, per item (the staging destination
-                # is the HOST's decision, never the model's):
-                # - canon/unframed → STRIP the redundant key; resolve + stage in
-                #   proposed:main (the existing canon promote gate).
-                # - any OTHER frame (knows:<npc> telling-scene rows) → FAIL-CLOSED DROP
-                #   with telemetry: the canon gate's contradiction/licensing/mirror
-                #   machinery is canon policy and would corrupt a knowledge copy toward
-                #   canon + the PLAYER's frame (Cx 546's demonstrated breach). Narrator-
-                #   told NPC knowledge waits for the knowledge-promotion gate
-                #   (NPC-learning RFC-002); until then the world just stays quieter.
-                _canon_items: list[dict] = []
-                _dropped_framed: list[str] = []
-                for _row in _raw:
-                    _fr = _row.get("frame") if isinstance(_row, dict) else None
-                    if _fr in (None, "", "canon"):
-                        _canon_items.append(
-                            {k: v for k, v in _row.items() if k != "frame"}
-                            if isinstance(_row, dict) else _row)
-                    else:
-                        _dropped_framed.append(
-                            f"{_row.get('entity')}/{_row.get('attribute')}→{_fr}")
+                # FRAME PARTITION — the FIRST step after extract (Cx 552: it must
+                # precede reconstruct_names too, else a dropped knows:* row's subject
+                # still spawns an unframed synthetic NAME row that stubs/promotes as
+                # the dropped row's derivative). Policy + rationale: _partition_frames.
+                _canon_items, _dropped_framed = _partition_frames(list(_raw))
                 if _dropped_framed:
                     logger.info(
                         "narrator settle: dropped %d non-canon-framed row(s) "
@@ -5056,9 +5071,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         len(_dropped_framed), _dropped_framed[:5])
                     trace.dropped_cohorts.append(
                         f"settle_noncanon_frames ({len(_dropped_framed)})")
+                # #98 live-probe finding: the lean extractor omits name rows — reconstruct
+                # the cased surface form from the prose (the stub gate's only evidence);
+                # synthetic names commit only WITH a stub, never onto bound entities.
+                # Runs over the ACCEPTED copy only (Cx 552).
+                from construct.resolve import reconstruct_names
+                _canon_items = list(_canon_items) + reconstruct_names(
+                    list(_canon_items), prose)
                 # #98 (Cx 415 #2): the NARRATION channel — person leaves the free mint set;
                 # place/person enter ONLY through the proper-name stub gate (minimal rows,
-                # non-present). Player-input and NPC-action channels are untouched.
+                # non-present).
                 _resolved, _receipts = resolve_rows(
                     _canon_items, scene=_resolve_cands, protagonist=arc.protagonist,
                     name_of=_resolve_name_of, allow_mint=True,

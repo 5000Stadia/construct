@@ -2108,6 +2108,101 @@ def test_failed_promote_stores_empty_and_stale_row_cannot_wake(tmp_path):
     w2.close()
 
 
+def test_settle_dropped_knows_row_leaves_no_name_derivative(tmp_path):
+    # Cx 552 blocker 1: the partition must run BEFORE reconstruct_names — a dropped
+    # knows:* row about a NOVEL proper-named person otherwise spawns an unframed
+    # synthetic NAME row (its derivative), which stubs into canon, mirrors to the
+    # player, and rides the handoff. Cx's exact probe shape: prose "Marla waits by
+    # the desk", sole extraction row person:marla framed knows:<CLERK>.
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn, _PROPOSED
+
+    w = _world(tmp_path / "marla.world", attribute_default=attr_default)
+
+    def _extract_marla(text, **kwargs):
+        if "watch the room" in str(text).lower():
+            return []  # the player-input extraction call
+        return [{"entity": "person:marla", "attribute": "secret", "value": "x",
+                 "frame": f"knows:{CLERK}"}]
+
+    w.porcelain.extract = _extract_marla  # type: ignore[method-assign]
+
+    class _MarlaProvider(_TurnProvider):
+        async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+            self.calls.append((prompt, schema, tier))
+            if task_of(prompt) == "nar":
+                return {"prose": "Marla waits by the desk."}
+            return await super().complete(prompt, schema, tier=tier,
+                                          deliberate=deliberate)
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    result = run_turn(w, by_id["arc:main"], _MarlaProvider(fail_on_gen=False),
+                      "I watch the room.", turn=1,
+                      scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[], generate=False)
+    assert result.settle is not None
+    result.settle()
+
+    p = w.porcelain
+    # NO residue anywhere: proposed staging, canon (incl. name/kind stub), player
+    # frame, NPC frame, handoff batch.
+    assert not [f for f in p.facts(_PROPOSED, entity="person:marla")], (
+        "a dropped knows:* row's subject must not reach the staging frame")
+    assert not [f for f in p.facts("canon", entity="person:marla")], (
+        "no canon residue — neither the row nor a synthetic NAME/kind stub derivative")
+    assert not [f for f in p.facts(f"knows:{PLAYER}", entity="person:marla")], (
+        "no player-frame mirror of a dropped row's derivative")
+    assert not [f for f in p.facts(f"knows:{CLERK}", entity="person:marla")], (
+        "the knowledge copy itself stays out of the NPC frame (ungated channel)")
+    assert all("person:marla" not in str(r) for r in
+               prior_promote_batch(_read_narrator_promote(w, turn=1))), (
+        "no handoff-batch residue from a dropped row's derivative")
+    assert any("settle_noncanon_frames" in d for d in (result.trace.dropped_cohorts or []))
+    w.close()
+
+
+def test_player_input_knows_row_dropped_fail_closed(tmp_path):
+    # Cx 552 blocker 2: the PLAYER-INPUT channel had the same live structural
+    # bypass — a knows:* extraction row landed DIRECTLY in the NPC frame, ungated,
+    # no telemetry. Same partition, channel-specific telemetry.
+    from construct.semantics import attribute_default as attr_default
+    from construct.turnloop import run_turn
+
+    w = _world(tmp_path / "pinput.world", attribute_default=attr_default)
+
+    def _extract_player_telling(text, **kwargs):
+        if "tell the clerk" in str(text).lower():
+            # the player-input extraction: a telling → the extractor emits the
+            # knowledge copy targeted at the clerk's frame
+            return [{"entity": "fact:whisper", "attribute": "told", "value": "yes",
+                     "frame": f"knows:{CLERK}"}]
+        return []  # narrator-prose settle extraction
+
+    w.porcelain.extract = _extract_player_telling  # type: ignore[method-assign]
+
+    by_id = {a.arc_id: a for a in arc_io.portfolio_from_frame(PorcelainWorldReads(w))}
+    provider = _TurnProvider(fail_on_gen=False)
+    result = run_turn(w, by_id["arc:main"], provider, "I tell the clerk the secret.",
+                      turn=1, scope=[CLERK, PLAYER, "place:office"],
+                      scenario_mode="endless", side_arcs=[], generate=False)
+    assert result.settle is not None
+    result.settle()
+
+    p = w.porcelain
+    assert not [f for f in p.facts(f"knows:{CLERK}", entity="fact:whisper")], (
+        "a player-channel knows:* row must NOT land in the NPC frame ungated "
+        "(Cx 552's reproduced direct write)")
+    assert not [f for f in p.facts("canon", entity="fact:whisper")], "no canon residue"
+    assert not [f for f in p.facts(f"knows:{PLAYER}", entity="fact:whisper")], (
+        "no player-frame leak")
+    assert all("fact:whisper" not in str(r) for r in
+               prior_promote_batch(_read_narrator_promote(w, turn=1))), (
+        "no handoff residue")
+    assert any("input_noncanon_frames" in d for d in (result.trace.dropped_cohorts or [])), (
+        "the player-channel drop must be visible, channel-specific telemetry")
+    w.close()
+
+
 def test_settle_drops_noncanon_framed_rows_fail_closed(tmp_path):
     # Cx 546 correction: the extractor may legitimately emit knows:<person> rows
     # (a telling scene). The narrator-settle channel's promote gate is CANON policy —
