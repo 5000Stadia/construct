@@ -360,11 +360,13 @@ def test_multi_mint_reopen_three_arcs(tmp_path):
     assert ids == ["arc:main", "arc:gen_1", "arc:gen_3", "arc:gen_5"], (
         f"expected ordered [arc:main, arc:gen_1, arc:gen_3, arc:gen_5]; got {ids}")
 
-    # portfolio_from_frame reconstructs all four arcs (incl. main).
+    # portfolio_from_frame reconstructs all four arcs (incl. main) in ORDER —
+    # the complete ordered set through BOTH reads (Cx 603/answer <1de63579…>:
+    # a set comparison under-proved the ordering claim).
     reloaded = arc_io.portfolio_from_frame(reads_reopen, frame=PLOT)
-    reloaded_ids = {a.arc_id for a in reloaded}
-    assert reloaded_ids == {"arc:main", "arc:gen_1", "arc:gen_3", "arc:gen_5"}, (
-        f"portfolio_from_frame returned {reloaded_ids}")
+    assert [a.arc_id for a in reloaded] == [
+        "arc:main", "arc:gen_1", "arc:gen_3", "arc:gen_5"], (
+        f"portfolio_from_frame returned {[a.arc_id for a in reloaded]}")
 
     # Every membership row is "known", not "conflicted".
     for arc_id in ("arc:gen_1", "arc:gen_3", "arc:gen_5"):

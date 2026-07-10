@@ -1289,11 +1289,15 @@ def test_person_my_production_seam_run_turn(tmp_path):
 
     provider = _DxProvider()
     scope = [PLAYER, CLERK, "place:office", "obj:counter"]
+    # generate=True (Cx answer <1de63579…>): with generation disabled the
+    # zero-gen-call/zero-attempt assertions below are vacuous — the generator
+    # block must RUN and stay silent because the deixis binding removed the
+    # bystander touch, not because it was switched off.
     result = run_turn(
         w, by_id["arc:main"], provider,
         "I run my hand along the counter.",
         turn=1, scope=scope,
-        scenario_mode="win_loss", side_arcs=[], generate=False,
+        scenario_mode="win_loss", side_arcs=[], generate=True,
     )
 
     # (a) A deixis_bound receipt must appear for PLAYER, not CLERK.
