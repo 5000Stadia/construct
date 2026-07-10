@@ -5141,8 +5141,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # Write the per-turn handoff row EVERY settle, OUTSIDE `if promote:` — an empty
         # list [] on quiet turns ensures the generator reads exactly turn n-1's row and
         # returns [] when it is absent or malformed (stale replay is structurally impossible).
-        # Stored as a JSON literal in session:main; classify="rules" (deterministic STATE,
-        # no model call) — Cx 525 amendment 2; valid_from=turn_time(turn) keys it per-turn.
+        # Stored as a JSON literal in session:main; classify="rules" guarantees no model
+        # call (deterministic write). The entity id carries an "event:" prefix, which PB's
+        # guardrail classifies as EVENT — that is fine because the reader is a raw bounded
+        # frame_facts read (not a folded state read), so EVENT vs STATE durability does not
+        # affect retrieval. valid_from=turn_time(turn) keys it per-turn — Cx 525 amendment 2.
         try:
             p.ingest_structured([
                 {"entity": f"event:turn_{turn}", "attribute": "narrator_promote",

@@ -170,13 +170,17 @@ delta, and the cohort wakes ONLY when it finds a qualifying moment:
        hydration join; PB's frozen porcelain is not widened).
      - *the handoff row is per-turn KEYED, not a singleton:* an append-only
        `event:turn_<n>` / `narrator_promote` JSON literal in `session:main`,
-       `valid_from=turn_time(turn)`, `classify="rules"` (deterministic STATE,
-       no model call). Written EVERY settle, OUTSIDE `if promote:` — an empty
-       list on quiet turns. Deterministic cap (~60) with BOTH kept and dropped
-       counts recorded. The reader at turn n reads EXACTLY turn n-1's row and
-       returns `[]` when it is absent or malformed — a missing/failed settle
-       yields a false negative, never a stale replay (structural, not
-       dependent on the next settle succeeding).
+       `valid_from=turn_time(turn)`, `classify="rules"` (deterministic, no
+       model call). The entity carries an `event:` prefix; PB's guardrail
+       classifies it as EVENT rather than STATE — that is fine because the
+       reader uses a raw bounded `frame_facts` read (not a folded state read),
+       so durability classification does not affect retrieval. Written EVERY
+       settle, OUTSIDE `if promote:` — an empty list on quiet turns.
+       Deterministic cap (~60) with BOTH kept and dropped counts recorded. The
+       reader at turn n reads EXACTLY turn n-1's row and returns `[]` when it
+       is absent or malformed — a missing/failed settle yields a false negative,
+       never a stale replay (structural, not dependent on the next settle
+       succeeding).
      - *current turn's player-action delta:* the adjudication/input-extraction
        commits, receipt-confirmed under the SAME rule (values hydrated locally
        for confirmed keys — the raw `receipt_rows` alone lacks values for the

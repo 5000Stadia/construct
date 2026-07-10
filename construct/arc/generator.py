@@ -154,7 +154,7 @@ _PROMOTE_BATCH_CAP = 60  # deterministic cap on the per-turn narrator-promote ha
 
 def confirmed_batch(candidates: list[dict], receipt_rows: list[dict],
                     cap: int = _PROMOTE_BATCH_CAP) -> tuple[list[dict], int]:
-    """Filter `candidates` to those whose (entity, attribute) appear in `receipt_rows`.
+    """Filter `candidates` to those FULLY accounted for by `receipt_rows`, fail closed.
 
     PB receipts carry entity/attribute but NOT value; values are preserved from
     `candidates` (the local hydration join — PB's frozen porcelain is not widened).
@@ -162,10 +162,29 @@ def confirmed_batch(candidates: list[dict], receipt_rows: list[dict],
     `cap` rows; returns (kept, dropped_count). A candidate whose receipt was not
     confirmed (e.g. _FailOpenIngest returned an empty receipt) is never included.
 
+    Fail-closed duplicate-key rule: candidate keys are counted (multiset). A key is
+    confirmed only when its candidate count EXACTLY matches its receipt count —
+    fewer receipts (PB skipped one of N same-key candidates) AND more receipts
+    (an ambiguous double-report that could mask a skip behind a sibling's extra
+    row) both drop the ENTIRE key. This prevents a mixed PB receipt (structural
+    per-row skip) from promoting a skipped candidate into generator fuel. Set
+    membership alone is not sufficient when candidate lists are not deduplicated
+    (e.g. the player _resolved list after adjudication).
+
     Pure function — no side-effects, fully unit-testable without a world."""
-    confirmed_keys: set[tuple] = {
+    from collections import Counter
+    cand_counts: Counter = Counter(
+        (str(c.get("entity", "")), str(c.get("attribute", "")))
+        for c in candidates
+    )
+    receipt_counts: Counter = Counter(
         (str(r.get("entity", "")), str(r.get("attribute", "")))
         for r in receipt_rows
+    )
+    # EXACT count match per key — fail closed in BOTH directions (see docstring).
+    confirmed_keys: set[tuple] = {
+        key for key, count in cand_counts.items()
+        if receipt_counts[key] == count
     }
     kept: list[dict] = []
     for cand in candidates:
@@ -185,6 +204,12 @@ def prior_promote_batch(raw: object) -> list[dict]:
     None / malformed / not-a-list input. Defensive: a missing or crashed settle
     yields [] (a false negative), never a stale replay.
 
+    All-or-empty contract: if ANY member of the parsed list is malformed (not a
+    dict, or missing/non-string entity or attribute, or missing value key) the
+    ENTIRE batch returns []. No partial salvage. A partially corrupt handoff row
+    must not feed salient_moments with unchecked items — the false-negative
+    failure mode ([] on corruption) is safer than a partial-truth list.
+
     Pure function — no side-effects, fully unit-testable without a world."""
     if raw is None:
         return []
@@ -194,12 +219,19 @@ def prior_promote_batch(raw: object) -> list[dict]:
             return []
         result: list[dict] = []
         for item in parsed:
-            if isinstance(item, dict):
-                result.append({
-                    "entity": str(item.get("entity", "")),
-                    "attribute": str(item.get("attribute", "")),
-                    "value": item.get("value", ""),
-                })
+            if not isinstance(item, dict):
+                return []
+            entity = item.get("entity")
+            attribute = item.get("attribute")
+            if not isinstance(entity, str) or not isinstance(attribute, str):
+                return []
+            if "value" not in item:
+                return []
+            result.append({
+                "entity": entity,
+                "attribute": attribute,
+                "value": item["value"],
+            })
         return result
     except Exception:  # noqa: BLE001 — malformed JSON → safe empty
         return []
