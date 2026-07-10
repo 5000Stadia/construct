@@ -408,8 +408,8 @@ class TestFullTurn:
                                   "value": "intact"}])
         world._extractions.append({"items": []})                      # player input
         world._extractions.append({"items": [                         # narrator prose
-            {"entity": "obj:ledger", "attribute": "seal", "value": "broken"},  # contradiction
-            {"entity": "obj:candle", "attribute": "kind", "value": "object"},  # new → promote
+            {"entity": "obj:ledger", "attribute": "seal", "value": "broken", "frame": "canon"},  # contradiction
+            {"entity": "obj:candle", "attribute": "kind", "value": "object", "frame": "canon"},  # new → promote
         ]})
         provider = StubProvider([
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
@@ -657,8 +657,8 @@ class TestFullTurn:
                                  {"entity": "obj:pencil", "attribute": "in", "value": PLAYER}])
         world._extractions.append({"items": []})                       # player input
         world._extractions.append({"items": [                          # narrator prose extraction
-            {"entity": "obj:pencil", "attribute": "in", "value": "obj:desk", "value_type": "entity"},
-            {"entity": "obj:token", "attribute": "in", "value": "person:unknown_narrator", "value_type": "entity"},
+            {"entity": "obj:pencil", "attribute": "in", "value": "obj:desk", "value_type": "entity", "frame": "canon"},
+            {"entity": "obj:token", "attribute": "in", "value": "person:unknown_narrator", "value_type": "entity", "frame": "canon"},
         ]})
         world.ingest_structured([{"entity": "obj:token", "attribute": "kind", "value": "token"},
                                  {"entity": "obj:token", "attribute": "name", "value": "token"},
@@ -690,8 +690,8 @@ class TestFullTurn:
         seed_arc(world, arc)
         world._extractions.append({"items": []})                      # player input
         world._extractions.append({"items": [                         # narrator prose
-            {"entity": "fact:motive", "attribute": "reason", "value": "greed"},  # arc key → quarantine
-            {"entity": "obj:lamp", "attribute": "kind", "value": "object"},      # ordinary → promote
+            {"entity": "fact:motive", "attribute": "reason", "value": "greed", "frame": "canon"},  # arc key → quarantine
+            {"entity": "obj:lamp", "attribute": "kind", "value": "object", "frame": "canon"},      # ordinary → promote
         ]})
         provider = StubProvider([
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
@@ -716,7 +716,7 @@ class TestFullTurn:
         seed_arc(world, arc)
         world._extractions.append({"items": []})                      # player input
         world._extractions.append({"items": [                         # narrator prose
-            {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+            {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival", "frame": "canon"},
         ]})
         provider = StubProvider([
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
@@ -744,7 +744,7 @@ class TestFullTurn:
         ], frame=PLAYER_FRAME)
         world._extractions.append({"items": []})
         world._extractions.append({"items": [
-            {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"},
+            {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival", "frame": "canon"},
         ]})
         provider = StubProvider([
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
@@ -828,9 +828,9 @@ class TestFullTurn:
         seed_arc(world, arc)
         world._extractions.append({"items": []})                      # player input
         world._extractions.append({"items": [                         # render prose
-            {"entity": "person:narrator", "attribute": "kind", "value": "person"},
-            {"entity": "obj:ledger", "attribute": "in", "value": "person:narrator"},
-            {"entity": "obj:lamp", "attribute": "kind", "value": "object"},  # ordinary
+            {"entity": "person:narrator", "attribute": "kind", "value": "person", "frame": "canon"},
+            {"entity": "obj:ledger", "attribute": "in", "value": "person:narrator", "frame": "canon"},
+            {"entity": "obj:lamp", "attribute": "kind", "value": "object", "frame": "canon"},  # ordinary
         ]})
         provider = StubProvider([
             {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
@@ -4141,7 +4141,7 @@ def test_epilogue_prose_mints_no_canon_aliases(world):
         frame=PLAYER_FRAME)   # ready → the accusation will conclude
     world._extractions.append({"items": []})                       # player-input extraction
     world._extractions.append({"items": [                          # post-render epilogue extraction
-        {"entity": "person:rival", "attribute": "alias", "value": "with his name cleared"}]})
+        {"entity": "person:rival", "attribute": "alias", "value": "with his name cleared", "frame": "canon"}]})
     provider = StubProvider([
         {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
