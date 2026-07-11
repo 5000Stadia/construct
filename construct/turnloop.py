@@ -2891,6 +2891,12 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                             "stays absent; there is nothing here for anyone "
                             "to perform")
                     continue  # positive Occurred: the act line above, once
+                # POLARITY threads through EVERY line (cr: a negated leaf
+                # must never receive its positive phrasing — the cohort's
+                # only source for the negation is this context, and a
+                # positive line invites a hook OPPOSITE to the sealed
+                # mechanic). Positive/negative strings stay distinct so
+                # dedupe preserves both polarities of the same class.
                 _ent = getattr(_a, "entity", None)
                 if _ent:
                     try:
@@ -2898,19 +2904,33 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                                   or _ent.split(":", 1)[-1].replace("_", " "))
                     except Exception:  # noqa: BLE001
                         _en = _ent.split(":", 1)[-1].replace("_", " ")
+                    _attr = getattr(_a, 'attribute', 'its state')
                     threads.append(
                         f"the road turns on the standing state of {_en} "
-                        f"({getattr(_a, 'attribute', 'its state')}) — the "
-                        f"world itself can still move it")
+                        f"({_attr}) — the world itself can still move it"
+                        if _pos else
+                        f"the road turns on the standing state of {_en} "
+                        f"({_attr}) remaining OTHERWISE — the authored "
+                        f"condition holds only while that state stays "
+                        f"unestablished")
                 elif isinstance(_a, _BeatAch):
-                    threads.append("the road turns on another thread of the "
-                                   "story reaching its mark first")
+                    threads.append(
+                        "the road turns on another thread of the story "
+                        "reaching its mark first" if _pos else
+                        "the road turns on another thread of the story "
+                        "remaining SHORT of its mark — it must not land")
                 elif isinstance(_a, _ClockF):
-                    threads.append("the road turns on the story's own clock "
-                                   "— a pressure already set in motion")
+                    threads.append(
+                        "the road turns on the story's own clock — a "
+                        "pressure already set in motion" if _pos else
+                        "the road turns on the story's own clock remaining "
+                        "UNFIRED — the pressure must not land")
                 else:  # pacing/counter and any future leaf: truthful, generic
-                    threads.append("the road turns on the standing world "
-                                   "itself, as it now lies")
+                    threads.append(
+                        "the road turns on the standing world itself, as it "
+                        "now lies" if _pos else
+                        "the road turns on a structural condition remaining "
+                        "UNFULFILLED in the standing world")
             threads = list(dict.fromkeys(threads))  # dedupe repeated shapes
             for _h in live_holders:
                 try:

@@ -3270,3 +3270,77 @@ def test_repair_threads_mixed_shape_carries_both_contexts(world):
     pr_c = [pr for pr, _sc, _t in prov_c.calls if "FORECLOSED" in pr][0]
     assert "player's own act" in pr_c            # the positive Occurred half
     assert "presently at" in pr_c                # the live carrier half
+
+
+def test_repair_threads_respect_polarity_on_every_class(world):
+    # cr polarity round: negated non-Occurred leaves must receive NEGATIVE
+    # phrasing — a positive line invites a hook opposite to the sealed
+    # mechanic. Pins: Not(BeatAchieved); a negated StateIs; and a mixed
+    # positive+negative same-class shape retaining BOTH contexts.
+    from construct.arc.conditions import AllOf as _AllOf, Not as _Not
+
+    def _rpr(prov):
+        return [p_ for p_, _sc, _t in prov.calls if "FORECLOSED" in p_][0]
+
+    # (a) Not(BeatAchieved): the mark must remain unreached
+    arc = _dhard_arc()
+    nb = replace(arc.beats[0],
+                 achievable_via=_Not(BeatAchieved("beat:prior")))
+    arc_a = replace(arc, beats=(nb,))
+    seed_arc(world, arc_a)
+    reads = _close_dhard(world, arc_a)
+    prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=prov, turn=5, arc=arc_a, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    pr = _rpr(prov)
+    assert "remaining SHORT of its mark" in pr
+    assert "reaching its mark first" not in pr
+
+    # (b) negated StateIs: the state must stay unestablished
+    ns = replace(arc.beats[0], beat_id="beat:neg",
+                 achievable_via=_Not(StateIs("person:rival", "verdict",
+                                             "condemned")))
+    arc_b = replace(arc, beats=(ns,), climax_ready_beats=("beat:neg",))
+    world.porcelain.ingest_structured(beat_to_items(ns, "arc:main"), frame=PLOT)
+    _a2, closed, _r2 = beat_pass(world, arc_b, reads, turn=6)
+    assert closed == ["beat:neg"]
+    prov_b = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace_b = TurnTrace(turn=7)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace_b,
+               provider=prov_b, turn=7, arc=arc_b, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace_b.repairs == [("beat:neg", "beat:neg_r1", "replace")]
+    pr_b = _rpr(prov_b)
+    assert "remaining OTHERWISE" in pr_b
+    assert "can still move it" not in pr_b
+    assert "condemned" not in pr_b                     # no-value discipline holds
+
+
+def test_repair_threads_mixed_polarity_same_class_keeps_both(world):
+    # cr polarity round pin 3: AllOf(BeatAchieved(a), Not(BeatAchieved(b)))
+    # retains BOTH the positive and the negative structural contexts —
+    # dedupe collapses duplicates, never polarities.
+    from construct.arc.conditions import AllOf as _AllOf, Not as _Not
+    arc = _dhard_arc()
+    mixed = replace(arc.beats[0],
+                    achievable_via=_AllOf((
+                        BeatAchieved("beat:first"),
+                        _Not(BeatAchieved("beat:second")))))
+    arc_m = replace(arc, beats=(mixed,))
+    seed_arc(world, arc_m)
+    reads = _close_dhard(world, arc_m)
+    prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=prov, turn=5, arc=arc_m, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    pr = [p_ for p_, _sc, _t in prov.calls if "FORECLOSED" in p_][0]
+    assert "reaching its mark first" in pr
+    assert "remaining SHORT of its mark" in pr
