@@ -534,27 +534,32 @@ REPAIR_BUDGET: int = 2
 
 
 def repair_spent(reads: Any, arc_id: str, *, on_error: int = 0) -> int:
-    """Committed repairs charged against `arc_id`. cr D3 blocker 5: the spend
-    truth is DURABLE-BY-EXISTENCE — one `repair_charge_<n>` PLOT row per
-    committed repair, written in the SAME receipt-confirmed batch as the
-    replacement rows (no repair without its charge, no charge without its
-    repair; restart-safe by construction). Bounded scan, n = 1..BUDGET.
+    """Committed repairs charged against `arc_id`. cr D3 re-review blocker 1:
+    a batch + a complete-receipt check is NOT a transaction — rows can land
+    partially — so the spend truth is derived from the COHERENT PERSISTED
+    REPAIR GRAPH, never from a separate charge artifact. A repair is spent
+    iff its supersession pointer (`beat_superseded_<slug>` on the arc) has a
+    MATERIALIZABLE replacement (`beat_from_reads` succeeds): an orphan
+    replacement beat without its pointer is harmless and free; a pointer
+    without a materializable replacement is a torn commit — retryable, free;
+    an ACTIVE supersession (pointer + replacement both live) can never be
+    free. Latest-wins per pointer key (a re-asserted retry counts once).
 
     `on_error` is the caller's safety bias: the budget GATE passes
     REPAIR_BUDGET (an unreadable ledger grants no free repairs); the
     incompletable rule passes 0 (a read glitch never flips an arc terminal)."""
     try:
-        return sum(1 for n in range(1, REPAIR_BUDGET + 1)
-                   if reads.state(arc_id, f"repair_charge_{n}", frame=PLOT))
+        from construct.arc.io import beat_from_reads
+        pointers: dict[str, str] = {}
+        for r in reads.frame_rows(PLOT, entity=arc_id):
+            attr = str(getattr(r, "attribute", ""))
+            if attr.startswith("beat_superseded_"):
+                pointers[attr] = str(getattr(r, "value", ""))
+        return sum(1 for target in pointers.values()
+                   if target and beat_from_reads(reads, target, frame=PLOT)
+                   is not None)
     except Exception:  # noqa: BLE001 — each consumer chooses its safe side
         return on_error
-
-
-def repair_charge_row(arc_id: str, n: int, new_beat_id: str, turn: int) -> dict:
-    """The n-th charge row (blocker 5) — committed IN the repair's own batch,
-    never as a separate write. Its existence IS the spend."""
-    return {"entity": arc_id, "attribute": f"repair_charge_{n}",
-            "value": new_beat_id, "valid_from": turn_time(turn), "frame": PLOT}
 
 
 def mark_repair(world: Any, arc_id: str, beat_id: str, new_beat_id: str,

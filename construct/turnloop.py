@@ -61,7 +61,6 @@ from construct.arc.executor import (
     turn_time,
 )
 from construct.arc.executor import _human as _human_entity
-from construct.arc.executor import _repair_exhausted
 from construct.arc.generator import (
     AMBIENT_QUIET_MIN,
     _last_development_min,
@@ -2246,11 +2245,12 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         # response ONCE. Classification does not need the D-SOFT gates (rung /
         # quiet) — the closure already happened; the gates license PRESSURE,
         # not the reading of an accomplished fact. cr D3 blocker 1: closures
-        # process EVEN ON A DEVELOPING TURN — a beat a clock closed THIS turn
-        # must reach repair before the lifecycle read, or a terminal escapes.
-        # The development suppression (cr D1 finding 2) defers the R3 SCENE
-        # (the consequence lands as its own quiet-turn beat, never stacked on
-        # a firing turn) and D-SOFT pressure — never the closure ledger.
+        # process EVEN ON A DEVELOPING TURN — the ledger is never suppressed,
+        # and a refusal-UNFIRED closure with budget remaining can never
+        # terminalize anyway (`incompletable` requires repair-exhausted), so
+        # the closure/lifecycle race is closed by construction. What defers on
+        # a developing turn: the R3 SCENE (the consequence lands as its own
+        # quiet-turn beat) and D-SOFT pressure — never the classification.
         for b in active_beats(live_reads, arc):
             if b.weight is not Weight.REQUIRED:
                 continue
@@ -2260,21 +2260,24 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             cls = drift.classify_closure(witness)
             trace.drift.append((b.beat_id, cls))
             if cls == "D-MISSED" and not drift.moment_receipt(live_reads, b.beat_id):
-                if not developing:
-                    # R3 first (§3: the consequence lands before the road adapts).
-                    if _absence_beat(world, p, live_reads=live_reads, trace=trace,
-                                     provider=provider, turn=turn, arc=arc, cast=cast,
-                                     scene=scene, npcs=npcs, horizon=horizon,
-                                     minutes_now=minutes_now, beat=b,
-                                     witness=witness or {}, spines=spines or {}):
-                        return  # one drift response per turn (§3)
-                    continue  # R3 declined — retry it before any repair of this beat
-                # Developing turn: R3 defers — but repair may NOT wait when the
-                # arc would go terminal THIS turn (the refusal fired alongside
-                # the closure). Rescue outranks consequence-first; the missed
-                # moment's consequence is forfeit for a beat rescued this way.
-                if not _repair_exhausted(live_reads, arc):
-                    continue
+                if developing:
+                    continue  # R3 defers — the consequence lands as its own quiet-turn beat
+                # R3 first (§3: the consequence lands before the road adapts).
+                if _absence_beat(world, p, live_reads=live_reads, trace=trace,
+                                 provider=provider, turn=turn, arc=arc, cast=cast,
+                                 scene=scene, npcs=npcs, horizon=horizon,
+                                 minutes_now=minutes_now, beat=b,
+                                 witness=witness or {}, spines=spines or {}):
+                    return  # one drift response per turn (§3)
+                continue  # R3 declined — retry it before any repair of this beat
+            # THE VERDICT DOCTRINE (cr D3 re-review round 2): once the arc's
+            # OWN refusal clock has fired, the story is concluding — repair
+            # cannot outrank the verdict (`arc_outcome` returns "lost" on a
+            # fired refusal REGARDLESS of any repair), so a rescue here would
+            # spend budget to relabel one terminal as another. Classification
+            # stands (the ledger is honest); repair steps aside.
+            if _refusal_fired(live_reads, arc):
+                continue
             # D-HARD, or D-MISSED whose consequence already landed → R4 (§3):
             # re-open when the mechanic can travel, else a replacement route.
             if _repair_beat(world, p, live_reads=live_reads, trace=trace,
@@ -2306,13 +2309,27 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         # Classification is recorded for EVERY classified beat, before response
         # selection — trace.drift means "classified", never "responded" (finding 4).
         trace.drift.extend((d.beat_id, d.cls) for d in drifts)
-        targets = {t["beat_id"]: t
-                   for t in beat_delivery_targets(active_beats(live_reads, arc))}
+        _live = active_beats(live_reads, arc)
+        targets = {t["beat_id"]: t for t in beat_delivery_targets(_live)}
+        _by_id = {b.beat_id: b for b in _live}
         for d in drifts:
             if d.cls != "D-SOFT":
                 continue  # closures were handled above; drift_state emits D-SOFT only
             if drift.relocation_receipt(live_reads, d.beat_id) is not None:
-                continue  # one relocation per beat (§3 R2 step 4) — try the next drifted beat
+                # one relocation per beat (§3 R2 step 4) — a beat STILL
+                # drifting after its relocation ESCALATES to R4 (cr D3
+                # re-review blocker 3: the old `continue` stalled forever).
+                # The escalated re-mint keeps the live trigger, requires the
+                # same walkability, spends budget, and its fresh id re-arms
+                # the relocation allowance.
+                _b = _by_id.get(d.beat_id)
+                if _b is not None and _repair_beat(
+                        world, p, live_reads=live_reads, trace=trace,
+                        provider=provider, turn=turn, arc=arc, cast=cast,
+                        scene=scene, npcs=npcs, horizon=horizon,
+                        minutes_now=minutes_now, beat=_b, cls="D-SOFT"):
+                    return  # one drift response per turn (§3)
+                continue
             target = targets.get(d.beat_id)
             if target is None:
                 continue  # not an InFrame beat — R2 has no delivery target to relocate
@@ -2701,56 +2718,91 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     return True
 
 
+def _refusal_fired(reads: Any, arc: Arc) -> bool:
+    """Has this arc's OWN refusal clock fired? The verdict doctrine's single
+    read — repair, rescue-holds, and side-deferral all gate on it."""
+    from construct.arc.conditions import ClockFired, Truth as _Truth, evaluate as _ev
+    try:
+        return _ev(ClockFired(arc.refusal_clock.clock_id), reads) is _Truth.TRUE
+    except Exception:  # noqa: BLE001 — unreadable → not proven fired
+        return False
+
+
 def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                  provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
                  npcs: list[str], horizon: float | None, minutes_now: float | None,
                  beat: Any, cls: str) -> bool:
     """DRIFT-HANDLING.md §3 R4: the alternative path. Budget-gated
-    (REPAIR_BUDGET per arc; a committed repair — replace OR re-open — spends
-    one; at zero this declines `budget_exhausted` and `_repair_exhausted`
-    completes the incompletable rule).
+    (REPAIR_BUDGET per arc; a committed repair spends one; at zero this
+    declines `budget_exhausted` and `_repair_exhausted` completes the
+    incompletable rule). All modes are one machinery: the HOST RE-MINTS the
+    dead/stalled beat's OWN mechanic — the route died, never the destination
+    — as a fresh `_rN` beat carrying the SAME `achievable_via` verbatim,
+    superseding the old id. No model ever authors, relabels, or repoints a
+    condition.
 
-    BOTH modes are one machinery (cr D3 blockers 2 + 4, structural): the HOST
-    RE-MINTS the dead beat's OWN mechanic — the route died, never the
-    destination — as a fresh `_rN` beat carrying the SAME `achievable_via`
-    verbatim and NO foreclosure trigger (`unreachable_if=None`, so the next
-    `beat_pass` cannot re-close it), superseding the dead id. No model ever
-    authors, relabels, or repoints a condition; where the surviving mechanic
-    no longer lints (its referents died with the world's turn), the repair
-    declines honestly and the budget survives toward `incompletable`.
+    WALKABILITY (cr D3 re-review blocker 2 — an unwalkable re-mint is an
+    IMMORTAL PENDING beat no machinery can ever close): an InFrame delivery
+    beat re-mints ONLY when a live delivery channel exists — some cast
+    member holds the clue — because the authorized delivery write travels
+    through carriers; the route IS the carrier, so a surviving holder is a
+    genuine alternative road even when the dead beat's world-state trigger
+    named another. Without a holder this DECLINES (`no_delivery_channel`);
+    the refusal clock remains the designed backstop for a story that cannot
+    move — never a zombie mint. `Occurred` beats stay walkable by the player
+    act itself.
 
-    RE-OPEN (D-MISSED whose consequence landed, when the mechanic can still
-    travel — a licensed carrier holds the fact): the re-mint commits silently
-    and the ordinary D-SOFT machinery re-stages it on later turns.
+    THE TRIGGER RULE: a CLOSED beat's re-mint strips `unreachable_if` (the
+    trigger fired — copying a still-true trigger re-closes instantly); a
+    PENDING beat escalated from repeated D-SOFT (cls="D-SOFT") KEEPS its
+    trigger — the deadline is live and must stay honest. The escalated
+    re-mint's fresh id re-arms the one-relocation-per-beat allowance, which
+    is the material change (a new road, a new staging chance).
 
-    REPLACE (D-HARD, or an untravelable D-MISSED): the `repair_arc` cohort's
-    whole authority is the HOOK — one diegetic line for how the new road
-    opens — which becomes the render directive.
+    RE-OPEN (D-MISSED whose consequence landed): the re-mint commits
+    silently; the D-SOFT machinery re-stages it. REPLACE (D-HARD or
+    escalation): the `repair_arc` cohort's whole authority is the HOOK — one
+    diegetic line for how the new road opens — the render directive.
 
-    The commit is ONE receipt-confirmed batch: `beat_to_items` + the
-    supersession pointer + the `repair_charge_<n>` row (blocker 5 — the
-    charge is atomic with the repair; its durable existence IS the spend).
+    The commit is ONE batch: `beat_to_items` + the supersession pointer. The
+    SPEND TRUTH is the persisted repair graph itself (`repair_spent`: a
+    pointer with a materializable replacement), so a torn batch either
+    leaves a harmless free orphan or a retryable free pointer — never a
+    spent-without-repair or live-without-spend state (cr blocker 1).
     Declines are telemetry, never a lock."""
     beat_id = beat.beat_id
+    if _refusal_fired(live_reads, arc):
+        # the verdict doctrine (belt to the loop gate): never burn budget on
+        # an arc the world has already concluded by refusal.
+        drift.record_repair_declined(world, turn, beat_id, "refusal_concluded")
+        return False
     spent = drift.repair_spent(live_reads, arc.arc_id,
                                on_error=drift.REPAIR_BUDGET)
     if spent >= drift.REPAIR_BUDGET:
         drift.record_repair_declined(world, turn, beat_id, "budget_exhausted")
         return False
+    # ---- WALKABILITY: an InFrame beat needs a live delivery channel — some
+    # cast member holds the clue. No holder → decline; never a zombie mint.
+    from construct.arc.conditions import InFrame as _InFrame
+    _atoms = [beat.achievable_via] if isinstance(beat.achievable_via, _InFrame) \
+        else []
+    if not _atoms:
+        from construct.arc.conditions import atoms_of as _atoms_of
+        _atoms = [a for a in _atoms_of(beat.achievable_via)
+                  if isinstance(a, _InFrame)]
+    walkable = True
+    if _atoms:
+        _citer = (cast.items() if hasattr(cast, "items")
+                  else [(n.node_id, n) for n in cast]) if cast else []
+        held = {c.surface_fact for _nid, n in _citer
+                for c in (getattr(n, "holds_clues", ()) or ())}
+        walkable = all((a.entity, a.attribute, a.value) in held for a in _atoms)
+    if not walkable:
+        drift.record_repair_declined(world, turn, beat_id, "no_delivery_channel")
+        return False
     # ---- mode: travelable D-MISSED re-opens (silent; relocation re-stages);
     # everything else replaces (the hook narrates the new road).
-    mode = "replace"
-    if cls == "D-MISSED":
-        targets = {t["beat_id"]: t
-                   for t in beat_delivery_targets(active_beats(live_reads, arc))}
-        target = targets.get(beat_id)
-        if target is not None and cast:
-            _citer = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
-            fact_key = (target.get("entity"), target.get("attribute"), target.get("value"))
-            if any(c.surface_fact == fact_key
-                   for _nid, n in _citer
-                   for c in (getattr(n, "holds_clues", ()) or ())):
-                mode = "reopen"
+    mode = "reopen" if cls == "D-MISSED" else "replace"
     hook = ""
     if mode == "replace":
         try:
@@ -2776,27 +2828,21 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         if not hook:
             drift.record_repair_declined(world, turn, beat_id, "nothing_grounded")
             return False
-    # ---- the re-mint: same mechanic, trigger stripped, fresh collision-free id.
-    # TWO independent ordinals (never conflate them): the CHARGE SLOT is the
-    # first UNSET `repair_charge_<n>` on the arc (writing an occupied slot
-    # would overwrite a prior spend — a budget leak), while the BEAT id takes
-    # the first per-slug ordinal with no persisted `part_of` (a stranded beat
-    # from a torn batch must never collide a retry).
-    slot = next((i for i in range(1, drift.REPAIR_BUDGET + 1)
-                 if not live_reads.state(arc.arc_id, f"repair_charge_{i}",
-                                         frame=PLOT)), None)
-    if slot is None:  # every slot durable-spent (belt to the gate above)
-        drift.record_repair_declined(world, turn, beat_id, "budget_exhausted")
-        return False
+    # ---- the re-mint: same mechanic, fresh collision-free id (the ordinal
+    # probe skips any persisted `part_of` — a stranded orphan beat from a
+    # torn batch must never collide a retry).
     slug = beat_id.split(":", 1)[-1]
     m = 1
     while (m <= drift.REPAIR_BUDGET * 2
            and live_reads.state(f"beat:{slug}_r{m}", "part_of", frame=PLOT)):
         m += 1
     new_id = f"beat:{slug}_r{m}"
+    # THE TRIGGER RULE (docstring): closed → strip; escalated-pending → keep.
+    _trigger = beat.unreachable_if if cls == "D-SOFT" else None
     from construct.arc.grammar import Beat as _Beat
     replacement = _Beat(new_id, beat.phase, beat.weight,
-                        achievable_via=beat.achievable_via)
+                        achievable_via=beat.achievable_via,
+                        unreachable_if=_trigger)
     from construct.arc.lint import lint_post_repair
     findings = lint_post_repair([replacement], live_reads)
     if findings:
@@ -2807,7 +2853,6 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     rows = beat_to_items(replacement, arc.arc_id) + [
         {"entity": arc.arc_id, "attribute": f"beat_superseded_{slug}",
          "value": new_id, "valid_from": turn_time(turn), "frame": PLOT},
-        drift.repair_charge_row(arc.arc_id, slot, new_id, turn),
     ]
     try:
         receipt = world.porcelain.ingest_structured(rows)
@@ -2827,7 +2872,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             f"world's own voice, never as an announcement): {hook}")
     try:
         drift.mark_repair(world, arc.arc_id, beat_id, new_id, mode, turn)
-    except Exception:  # noqa: BLE001 — telemetry only; the charge row is the spend
+    except Exception:  # noqa: BLE001 — telemetry only; the graph is the spend
         logger.warning("mark_repair failed (repair stands)", exc_info=True)
         trace.dropped_cohorts.append("mark_repair failed")
     if minutes_now is not None:
@@ -4967,17 +5012,42 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     def _drift_responded() -> bool:
         return bool(trace.relocations or trace.absence_consequences
                     or trace.repairs)
-    if side_arcs and not main_at_peak(live_reads, arc):
-        for _sa in side_arcs:
-            if _drift_responded():
-                break
-            if stored_lifecycle(live_reads, _sa) in LIFECYCLE_TERMINALS:
-                continue
-            _drift_pass(world, p, live_reads=live_reads, trace=trace,
-                        provider=provider, turn=turn, arc=_sa, cast=cast,
-                        scene=scene, npcs=npcs, horizon=_h,
-                        minutes_now=_drift_minutes, rung=_drift_rung,
-                        fuel=_salient_fuel, spines=_npc_spines)
+
+    def _rescuable_closure(sa: Arc) -> bool:
+        """A REQUIRED beat closed-unrepaired while repair budget remains AND
+        the arc's refusal has NOT fired — exactly what a skipped drift pass
+        could still rescue later. A refusal-fired arc is CONCLUDING (the
+        verdict doctrine): its terminal proceeds; nothing is deferred."""
+        try:
+            if _refusal_fired(live_reads, sa):
+                return False
+            if drift.repair_spent(live_reads, sa.arc_id) >= drift.REPAIR_BUDGET:
+                return False
+            return any(b.weight is Weight.REQUIRED
+                       and live_reads.state(b.beat_id, "status",
+                                            frame=PLOT) == "closed"
+                       for b in active_beats(live_reads, sa))
+        except Exception:  # noqa: BLE001 — unreadable → don't hold the lifecycle
+            return False
+
+    _side_drift_deferred: set[str] = set()
+    for _sa in side_arcs or []:
+        if stored_lifecycle(live_reads, _sa) in LIFECYCLE_TERMINALS:
+            continue
+        if main_at_peak(live_reads, arc) or _drift_responded():
+            # RIGHT-OF-WAY / the one-response quota: the pass doesn't run —
+            # SILENTLY (no receipts). cr D3 re-review blocker 4: a skipped
+            # pass must not let the side lifecycle terminalize a closure the
+            # pass would have rescued — remember it and hold that transition
+            # this turn too (deferred, not lost).
+            if _rescuable_closure(_sa):
+                _side_drift_deferred.add(_sa.arc_id)
+            continue
+        _drift_pass(world, p, live_reads=live_reads, trace=trace,
+                    provider=provider, turn=turn, arc=_sa, cast=cast,
+                    scene=scene, npcs=npcs, horizon=_h,
+                    minutes_now=_drift_minutes, rung=_drift_rung,
+                    fuel=_salient_fuel, spines=_npc_spines)
 
     # ---- PINNED AWARENESS (PINNED-AWARENESS spec; reviews 060/062/063) ---
     # One awareness coordinate for the WHOLE assembly (Kernos 060 #2 / Cx #2):
@@ -5415,6 +5485,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             continue
         life = arc_lifecycle(live_reads, sa)
         if life == "active":
+            continue
+        if sa.arc_id in _side_drift_deferred and life != "won":
+            # drift was deferred (peak/quota) or declined-retryable while a
+            # rescuable closure stands — the terminal waits for the repair's
+            # honest chance (cr D3 re-review blocker 4). Silent, no receipt;
+            # a win is never held.
             continue
         set_lifecycle(world, sa, life, turn)
         trace.arc_fallout.append(sa.arc_id)

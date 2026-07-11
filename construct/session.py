@@ -114,6 +114,18 @@ class Session:
                 self._scope = json.loads(_slot_scope) if isinstance(_slot_scope, str) else _slot_scope
         except Exception:
             logger.exception("episode scope read failed; falling back to scenario meta")
+        # DRIFT D3 (cr re-review blocker 5): the beat-DERIVED subset of scope,
+        # tracked separately so a committed repair can SUBTRACT superseded-only
+        # referents (never independently-played scope) before adding the live
+        # set. Baselined against the live beat overlay at open.
+        self._beat_scope: set[str] = set()
+        try:
+            from construct.arc.executor import arc_entities as _ae
+            _reads0 = PorcelainWorldReads(self._world, horizon=self._horizon())
+            for _a in [self._arc] + list(self._side_arcs or []):
+                self._beat_scope |= _ae(_a, _reads0)
+        except Exception:
+            logger.exception("beat-scope baseline failed; removal disabled until refresh")
         self._mode = meta.get("mode", "pure")
         # The PLAYER's chosen experience (session-zero interview) overrides the
         # scenario's authored default. Three states:
@@ -1246,19 +1258,22 @@ class Session:
         return getattr(self, "_last_image", None)
 
     def _refresh_beat_scope(self) -> None:
-        """DRIFT D3 (cr blocker 3): a committed repair re-minted a beat this
-        turn; refresh the beat-derived session scope NOW so the live beat
-        set's referents enter next-turn scene scope without waiting for a
-        full replan. Additive (entities already in play stay visible — the
-        beat-DERIVED set itself drops superseded-only referents via
-        `arc_entities(arc, reads)`); best-effort."""
+        """DRIFT D3 (cr blockers 3 + re-review 5): a committed repair changed
+        the live beat set; refresh the beat-derived session scope so the
+        replacement's referents enter scene scope AND superseded-only
+        referents stop driving it. The tracked `_beat_scope` subset is
+        subtracted (never independently-played scope — an entity the story
+        put in play through scenes/canon stays visible) and the fresh live
+        set added, at the play horizon. Best-effort."""
         try:
             from construct.arc.executor import arc_entities
-            reads = PorcelainWorldReads(self._world)
-            scope = set(self._scope or [])
+            reads = PorcelainWorldReads(self._world, horizon=self._horizon())
+            live: set[str] = set()
             for _a in [self._arc] + list(self._side_arcs or []):
-                scope |= arc_entities(_a, reads)
+                live |= arc_entities(_a, reads)
+            scope = (set(self._scope or []) - self._beat_scope) | live
             self._scope = sorted(e for e in scope if reads.has_entity(e))
+            self._beat_scope = live
         except Exception:
             logger.exception("scope refresh after repair failed; keeping current scope")
 
@@ -1277,6 +1292,9 @@ class Session:
             self._side_arcs = [a for a in portfolio if a.arc_id != main_id]
             scope = set(arc_entities(self._arc, reads)) | set(extra_scope or [])
             self._scope = sorted(e for e in scope if reads.has_entity(e))
+            self._beat_scope = set(arc_entities(self._arc, reads))
+            for _sa in self._side_arcs or []:
+                self._beat_scope |= arc_entities(_sa, reads)
             logger.info("session arc reloaded after replan: main=%s (+%d reshape entities)",
                         self._arc.arc_id, len(extra_scope or []))
         except Exception:
