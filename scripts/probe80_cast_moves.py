@@ -185,12 +185,14 @@ def main() -> None:
 
     all_moves: list = []
     all_drops: list = []
-    # The four agreed bar-11 probes (cr <f8409447…>/<9b9d5c06…>): T1 = clean arrival
-    # via the origin-restatement tie-break; T2 = stay-by-hearth negative (present cast
-    # texture must mint NO departure); T3 = rule-5 engaged-dismissal drop; T4 = the
-    # lone-passive departure (two other NPCs present, Edda unengaged) — a bound exit to
-    # the canon well house tracks, a wholly novel destination is the ACCEPTED false
-    # negative (telemetry, no event).
+    # The CLOSING bar-11 staging (cr <b270e1ee…>; run 1783745562 = the lane-owned
+    # closure): T1 = arrival invited (Garrick correctly REMOTE while still outside);
+    # T2 = the player addresses NAN, giving unengaged Edda her diegetic reason to go —
+    # the lane-owned narrator-authored departure commits here; T3 = passive (Garrick's
+    # arrival lands; Edda's well-house restatement drops REMOTE = off-scene tracking);
+    # T4 = persistence check. The stay-by-hearth negative and rule-5 drop probes were
+    # proven in the EARLIER logged runs (1783744578 / 1783742284) — the log set
+    # together is the four-probe evidence.
     for i, (move, label) in enumerate([
         ("I call toward the yard door: 'Come in out of the cold, man!'",
          "T1: invite the arrival (tie-break probe)"),
