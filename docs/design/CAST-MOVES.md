@@ -1,14 +1,13 @@
 # Cast Moves — the narration-seam movement lane (spec)
 
-**Status:** SPEC r3. PB comment round FOLDED (`<e1ca7951…>`) + Cx r1 RED
-FOLDED (`<a85c6ade…>`) + Cx r2 focused RED FOLDED (`<9891be53…>`: gaps
-1/4/5 closed there; the two remaining folded here — `engaged_this_turn`
-keyed on the interview ADDRESSING predicate, never `asks_targets` topic
-ids; the unbound-exit path made row-correlated via an extended host
-resolver receipt + scene-restatement guard). Cx ruled r3 "GREEN-able
-without another broad review" once these two land — now with **cr** for
-that confirmation. Task #80 (OPTIMAL-IF-EXPERIENCE.md §narration-seam);
-gate opened by PB letter 125.
+**Status:** SPEC r4. PB comment round FOLDED (`<e1ca7951…>`) + Cx r1 RED
+FOLDED (`<a85c6ade…>`) + Cx r2 focused RED FOLDED (`<9891be53…>`) + cr r3
+focused RED FOLDED (`<787848dc…>`: amendment 1 GREEN with the learned-list
+restriction noted; amendment 2's correlation contract made real — the
+out-of-band per-input `ResolutionOutcome` record with per-SIDE outcomes,
+legacy receipt triples and output rows untouched, five new correlation
+oracles). Awaiting cr r4 confirmation; build delegates on GREEN. Task #80
+(OPTIMAL-IF-EXPERIENCE.md §narration-seam); gate opened by PB letter 125.
 
 ## Problem
 
@@ -53,26 +52,39 @@ Then partition the resolved narrator rows once more — two candidate shapes:
 - **BOUND MOVE:** a canonical `in` row whose ENTITY is a canon **person**
   (folded kind) and whose destination RESOLVED to a bound id. Leaves the
   ordinary promote flow, enters the full policy gate (§2).
-- **UNBOUND EXIT (Cx r1 gap 2 — "the maid slips out"; data path made
-  row-correlated in r2):** detection is NEVER inferred from the resolver's
-  global `(failed_value, attribute, reason)` receipt tuple — with several
-  same-attribute rows that tuple cannot say WHICH person moved. Instead:
-  1. The lane SNAPSHOTS its containment candidates on the accepted raw rows
-     (post-canonicalization, pre-resolve): `(row_index, raw_subject,
-     raw_destination)`.
-  2. The HOST resolver receipt contract is extended (resolve.py is host
-     code, no engine touch): receipts gain the source row's index —
-     `(row_index, entity, attribute, failed_value, reason)` — so the exact
-     dropped row is recoverable.
-  3. Post-resolve, the lane joins snapshot ↔ resolved rows ↔ receipts by
-     `row_index`. An UNBOUND-EXIT candidate = a snapshot row whose SUBJECT
-     resolved to a canon person AND whose destination outcome is a drop (or
-     bound non-place). A row whose subject itself dropped is nothing.
-  4. **Scene-restatement guard:** if the raw destination text names the
-     CURRENT scene (token match against the scene's canon name — the
-     `_names_entity` discipline), the row is an ambiguous restatement of
-     where X already is, NOT an exit — dropped with reason
-     `ambiguous_scene_restatement`, no event.
+- **UNBOUND EXIT (Cx r1 gap 2 — "the maid slips out"; data path
+  row-correlated in r2; correlation contract made real in r4 per cr's
+  focused RED `<787848dc…>`):** detection is NEVER inferred from the
+  resolver's global `(failed_value, attribute, reason)` receipt tuple — with
+  several same-attribute rows that tuple cannot say WHICH person moved, nor
+  which SIDE of a row failed. The correlation surface is an **out-of-band
+  per-input `ResolutionOutcome` record**, chosen precisely so that the
+  THREE existing contracts stay untouched:
+  1. `resolve_rows` gains an optional collector param; for each ACCEPTED
+     input row (post-canonicalization) it appends
+     `ResolutionOutcome(row_index, raw_entity, raw_value,
+     resolved_entity, resolved_value, subject_outcome, value_outcome,
+     reason)` where `subject_outcome`/`value_outcome` ∈
+     `{bound, minted, dropped, bound_non_place, not_entity_valued}` — each
+     SIDE reported separately (one input row can emit several legacy
+     receipts; the outcome record is the per-row truth).
+  2. **No contract breaks (cr sub-gap 3):** the legacy `(id, attribute,
+     reason)` receipt triples — `trace.resolver`, ~30 destructuring call
+     sites, existing oracles — are emitted EXACTLY as today; the resolved
+     OUTPUT rows are unchanged and carry NO private metadata, so nothing
+     needs stripping before `ingest_structured` (the outcome records are
+     out-of-band and never enter the ingest path — pinned by an oracle).
+  3. The lane consumes ONLY the outcome records. UNBOUND-EXIT candidate =
+     `subject_outcome == bound` AND the resolved subject folds (as-of `_h`)
+     to a canon **person** AND `value_outcome ∈ {dropped, bound_non_place}`
+     on a containment attribute. A row whose SUBJECT dropped is nothing. A
+     row with both sides bound is a BOUND MOVE (above) — same records, one
+     partition.
+  4. **Scene-restatement guard:** if `raw_value` names the CURRENT scene
+     (token match against the scene's canon name — the `_names_entity`
+     discipline), the row is an ambiguous restatement of where X already
+     is, NOT an exit — dropped with reason `ambiguous_scene_restatement`,
+     no event.
   A surviving candidate enters the reduced gate (§2 rules 1, 2, 5) and, if
   licensed, takes the EVENT-ONLY departure path (§4): a `departed_scene`
   event and nothing else — negative scene presence without a canon location
@@ -132,8 +144,10 @@ A candidate move `person:X in place:D` is LICENSED only if ALL hold:
      engaged. **`asks_targets` is excluded from this union** (Cx r2: it
      holds opaque `ask_N` TOPIC ids, not people — it may choose the topic,
      never the person);
-   - learned interview holders this turn (the delivery path's source NPC —
-     confirmation only, always a subset of the addressed set);
+   - learned INTERVIEW-source NPCs this turn (confirmation only, always a
+     subset of the addressed set). **Never the whole `learned` list** (cr
+     build note: `learned` later also carries EXAMINE object holders — an
+     object's holder is not a conversation partner);
    - autonomous speaker intent — every NPC whose `npc_turn_results[npc]
      ["speaks"]` is truthy.
    **Stated limitation:** dialogue the narrator improvises in prose BEYOND
@@ -230,12 +244,18 @@ the deferral to STATE deterministically).
    `departed_scene`; no `in` row, no place mint; X gone from presence next
    turn; her canon location is unchanged (stale by design, world-tick's to
    move later).
-2c. **Row-correlation oracles (Cx r2):** with MULTIPLE same-attribute
-   containment rows in one settle (two people, one dropped destination),
-   exactly the RIGHT person gets the event — proven via the row_index join,
-   never a global tuple; and an ambiguous restatement of the CURRENT scene
-   ("she's in the room", unresolvable) emits NO `departed_scene`
-   (`ambiguous_scene_restatement` drop).
+2c. **Row-correlation oracles (Cx r2, expanded per cr r3):** a multi-row
+   same-attribute batch distinguishing (a) SUBJECT drop vs DESTINATION drop
+   (subject-drop rows are nothing), (b) exactly one destination drop → the
+   RIGHTFUL person alone gets the event, (c) multiple simultaneous drops —
+   each resolved per its own outcome record, (d) a destination bound to a
+   NON-place → unbound-exit path, not a bound move, (e) NO private
+   correlation metadata reaches `ingest_structured` (outcome records are
+   out-of-band; committed rows are byte-identical to today's), and (f) an
+   ambiguous restatement of the CURRENT scene ("she's in the room",
+   unresolvable) emits NO `departed_scene` (`ambiguous_scene_restatement`
+   drop). Plus: the legacy receipt-triple surface (`trace.resolver` and
+   its destructuring consumers) is byte-for-byte unchanged.
 3. **Protagonist move** in prose → dropped, telemetry, player unmoved.
 4. **Companion move** (ACCOMPANYING X) → dropped, telemetry, bond intact.
 5. **Remote move** (neither endpoint is the scene) → dropped, telemetry.
@@ -270,6 +290,6 @@ the deferral to STATE deterministically).
 
 PB comment round — DONE (`<e1ca7951…>`) → Cx r1 RED — FOLDED (`<a85c6ade…>`,
 five gaps) → Cx r2 focused RED — FOLDED (`<9891be53…>`, two gaps; 1/4/5
-confirmed closed) → **cr** r3 confirmation (per the routing change
-`<4273cf75…>`: all further Construct reviews go to cr) → build (delegate)
-→ cr code review → live acceptance → docs/push.
+confirmed closed) → cr r3 focused RED — FOLDED (`<787848dc…>`, the
+ResolutionOutcome correlation contract) → cr r4 confirmation → build
+(delegate) → cr code review → live acceptance → docs/push.
