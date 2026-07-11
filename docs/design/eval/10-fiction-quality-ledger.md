@@ -80,6 +80,39 @@ Felt off:
    over-delivering; noted for D2's callback directives, which will be
    subtler.
 
+## 2026-07-11 — DRIFT D2 live acceptance (The Wet Mill, absence-consequence)
+Logs: `logs/probe_d2-1783759452.md` / `-1783760991.md` (two runs; the first
+caught a live-only schema defect — see notes)
+
+**Grade: A−**
+
+What read well: the mechanism is INVISIBLE as machinery and visible as
+consequence — exactly R3's intent. T5, before any touch, Sef answers a
+weather question "glad of a subject with no names attached": the world
+feeling the hanging lapse without stating it. T6, the touch: "Aldous stands
+by the locked account chest with his cap in both hands" — the authored
+outcome (accounts sealed for the magistrate, unread) rendered as STAGING,
+not announcement; the cap-in-hands beat carries the reproach wordlessly.
+The suppression turn (T3) read as pure atmosphere; the narrator again
+corrected the player's mistaken time-of-day ("it is still night") rather
+than following the error.
+
+Felt off:
+1. The Sef idle-beat habit persists mildly (mug/cloth business recurring
+   across runs) — the known narrator repetition pattern; the describe-once
+   clause (queued next) is aimed squarely at it.
+2. Watch item: T6's prose had Aldous "under the lintel" in run 1 and "by
+   the locked account chest" in run 2 — both good, but the first run's
+   staging read as if he expected the player; the second's is better
+   (belongs to his own day). Nothing actionable; noted for the D3 entry.
+
+Mechanism notes (for the record): run 1 exposed a LIVE-ONLY defect — the
+absence cohort's schema lacked `items` on its array and the real API 400'd
+where the test stub validated happily (stub-fidelity follow-up filed);
+fixed in one line, full arc green on run 2. The probe itself also
+mis-framed the on_expiry license in run 1 (probe bug, canon vs plot) —
+worth remembering that acceptance probes are code too.
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from

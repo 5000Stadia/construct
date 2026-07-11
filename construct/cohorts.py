@@ -3074,6 +3074,7 @@ ABSENCE_SCHEMA = {
     "type": "object",
     "properties": {
         "subjects": {"type": "array", "maxItems": 2,
+                     "items": {"type": "string"},
                      "description": "1-2 ids FROM THE LIST GIVEN of who noticed / "
                                     "carries the lapse — the HOST writes the facts "
                                     "AND the callback directive; you only choose "
