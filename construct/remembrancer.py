@@ -43,7 +43,8 @@ def build_sheet(world: Any, protagonist: str, arc: Any,
     from construct.arc.executor import (
         arc_protected_keys, concealed_tokens, turn_time, value_leaks,
     )
-    protected = arc_protected_keys(arc)
+    from construct.adapter import PorcelainWorldReads as _PWR
+    protected = arc_protected_keys(arc, _PWR(world, horizon=horizon))
     concealed = concealed_tokens(protected)
     stamp = turn_time(0)
     latest: dict[tuple[str, str], Any] = {}
@@ -108,7 +109,8 @@ def commit_declared_memory(world: Any, provider: Any, player_input: str,
         arc_protected_keys, concealed_tokens, turn_time, value_leaks,
     )
     frame = f"knows:{protagonist}"
-    protected = arc_protected_keys(arc)
+    from construct.adapter import PorcelainWorldReads as _PWR
+    protected = arc_protected_keys(arc, _PWR(world))
     concealed = concealed_tokens(protected)
     tensions: list[str] = []
     receipts: list[tuple] = []

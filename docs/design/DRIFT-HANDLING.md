@@ -331,16 +331,23 @@ becomes literally true:
 
 1. **Trigger:** a D-HARD closure of a REQUIRED beat; or a D-MISSED closure
    where `relocate_pick` declined (the mechanic cannot travel).
-2. **Repair = a replacement route, authored, not patched.** Beats are frozen;
-   statuses are rows. The repair generator proposes a REPLACEMENT beat —
-   same phase, same weight, same narrative destination, NEW beat_id and a new
-   `achievable_via` grounded in surviving entities — via a `repair_arc`
-   cohort in the `generate_arc` mold (known_ids allowlist, compact proposal).
-   The existing `lint_post_repair` (lint.py:188 — the §7 novelty check,
-   shipped and waiting for exactly this) gates it: the new route must be
-   genuinely walkable and not a re-skin of the dead one. Full generator-style
-   preflight: referents exist, premise reachable, `lint_arc` on the amended
-   arc.
+2. **Repair = the HOST RE-MINTS the dead beat's own mechanic (cr D3 code
+   round, blockers 2+4 — supersedes the earlier model-authored-replacement
+   shape).** Beats are frozen; statuses are rows. The route died, never the
+   destination: the replacement beat carries the dead beat's `achievable_via`
+   VERBATIM — same phase, same weight, fresh `_rN` beat_id — with the
+   foreclosure trigger stripped (`unreachable_if=None`, so a still-true
+   trigger cannot re-close it next `beat_pass`). No model authors, relabels,
+   or repoints any part of the condition; the `repair_arc` cohort's whole
+   authority is the HOOK (one diegetic line for how the new road opens) plus
+   a confidence — its schema has no condition fields at all (the same
+   structural-authority discipline as R3's subjects-only schema). The
+   same-destination invariant is therefore enforced by construction, and
+   `lint_post_repair` (lint.py:188 — the §7 novelty check) still gates the
+   re-mint: where the surviving mechanic's referents died with the world's
+   turn, the repair declines honestly and the budget survives toward
+   `incompletable` — a genuinely-new-route authoring pass is deliberately
+   NOT attempted (it would reopen the model-authored-condition surface).
 3. **Commit — the append-safe beat-membership model (cx r1 finding 3; made
    a COMPLETE graph-membership contract per cr r2 blockers 1-2).** The
    monotonic-membership shape that fixed the portfolio (#111) applied to
@@ -409,17 +416,30 @@ becomes literally true:
      resolver. The restart oracle exercises BOTH load paths (frame
      reconstruction and legacy meta `arc_cache`). Horizon-safe: a
      future-stamped supersession row is invisible at `_h`.
-   - **Re-open (the D-MISSED relocate pairing)** is the degenerate case of
-     the same model: the closed beat's `status` row is superseded back to
-     `pending` (`valid_from`-stamped, latest-wins), with the relocation
-     receipt as provenance; no replacement beat, no index touch.
+   - **Re-open (the D-MISSED relocate pairing)** is the SAME re-mint (cr D3
+     code round, blocker 2 — a bare status-flip back to `pending` dies at
+     the very next `beat_pass`, because the fired clock's `unreachable_if`
+     is still TRUE): the mechanic-travels case commits the identical
+     replacement shape (same condition, trigger stripped, `_rN` id,
+     supersession row), silently — no hook directive; the ordinary D-SOFT
+     relocation machinery re-stages it on later turns. `mode="reopen"` in
+     the receipt is telemetry, not a second commit path.
    A briefing directive seeds the new route diegetically (sanitized hook).
-4. **`repair_budget`:** a per-arc `session:` counter, default
-   `REPAIR_BUDGET = 2`, decremented per committed repair (relocations of
-   closed beats charge it too — R2 step 5). `_repair_exhausted` becomes:
-   *refusal clock fired OR (a required beat is closed AND the budget is
-   spent AND no repair is in flight)* — the incompletable rule finally has
-   its active half.
+4. **`repair_budget`:** default `REPAIR_BUDGET = 2` per arc, and the spend
+   truth is DURABLE-BY-EXISTENCE (cr D3 code round, blocker 5 — a separate
+   fail-open telemetry write can undercount and let the budget be
+   exceeded): one `repair_charge_<n>` row on `arc:<id>` in `plot:`,
+   committed IN the repair's own receipt-confirmed batch — no repair
+   without its charge, no charge without its repair; restart-safe by
+   construction; `_rN` ids probe past any stranded charge so a torn batch
+   can never collide a retry. `repair_spent` is a bounded scan of the
+   charge rows with a caller-chosen error bias: the budget GATE fails
+   closed (an unreadable ledger grants no free repairs) while the
+   incompletable rule fails open (a read glitch never flips an arc
+   terminal). The `repair_committed` session event remains as telemetry
+   only. `_repair_exhausted` becomes: *refusal clock fired OR the charge
+   count reaches the budget* — the incompletable rule finally has its
+   active half.
 5. **Right-of-way:** repair of the MAIN arc's own beat is allowed at peak
    (it serves the peak — same logic as the convergence relocate directive);
    repair of a SIDE arc defers while `main_at_peak` (silent, no receipt —
@@ -448,8 +468,23 @@ the adjacent generator step:
 1. `drift_state(...)` — pure classifier, no model calls.
 2. Right-of-way check (R3/R4-side, per §3 rules).
 3. Response selection: the lightest applicable response not already
-   receipted; at most one per turn. Order on a D-MISSED beat across turns:
-   R3 (consequence) → R2 (relocate+re-open) or R4 (replace).
+   receipted; at most one per turn (across the WHOLE portfolio — main
+   drift responding forecloses side responses that turn). Order on a
+   D-MISSED beat across turns: R3 (consequence) → R2 (relocate+re-open)
+   or R4 (replace).
+3b. **The developing-turn refinement (cr D3 code round, blocker 1):** the
+   development suppression (D1 finding 2) defers PRESSURE, never the
+   closure ledger. On a turn that already developed (clocks fired / beats
+   achieved / reveals), closures of REQUIRED beats still classify and can
+   still repair — a beat a clock closed THIS turn must reach repair before
+   the lifecycle read, or a terminal escapes. What defers on a developing
+   turn: the R3 consequence SCENE (it lands as its own quiet-turn beat)
+   and all D-SOFT pressure. The rescue rule: an unreceipted D-MISSED on a
+   developing turn defers its repair too (consequence-first), UNLESS the
+   arc would go terminal this very turn (`_repair_exhausted` already true
+   — the refusal fired alongside the closure); then repair runs
+   immediately and the missed moment's consequence is forfeit for that
+   beat.
 4. All model-calling steps fail-open: a cohort miss logs, receipts a decline,
    and leaves the world quiet — never breaks the turn.
 

@@ -304,7 +304,8 @@ class Session:
         # or the promote gate — so it is EARNED by construction and shows as-is (learned
         # pillar clues sit on protected keys on purpose; screening those would hide the
         # notebook's core content). Build-stamped rows get the full key + token screen.
-        _protected = arc_protected_keys(self._arc)
+        _protected = arc_protected_keys(
+            self._arc, PorcelainWorldReads(self._world, horizon=h))
         _ctoks = concealed_tokens(_protected)
         _stamp = turn_time(0)
 
@@ -785,7 +786,8 @@ class Session:
         p = self._world.porcelain
         try:
             from construct.arc.executor import arc_protected_keys
-            protected = arc_protected_keys(self._arc)
+            protected = arc_protected_keys(
+                self._arc, PorcelainWorldReads(self._world, horizon=_h))
         except Exception:
             protected = set()
         try:
@@ -883,7 +885,8 @@ class Session:
         # away the whole solution, then play said "you can't say for certain").
         try:
             from construct.arc.executor import arc_protected_keys
-            protected = arc_protected_keys(self._arc)
+            protected = arc_protected_keys(
+                self._arc, PorcelainWorldReads(self._world, horizon=self._horizon()))
         except Exception:
             protected = set()
         lines = [f"{disp(f['entity'])} · {f['attribute']} · {disp(f['value'])}"
@@ -944,7 +947,8 @@ class Session:
         (Cx 337). Fail-open to empty on any arc read error."""
         try:
             from construct.arc.executor import arc_protected_keys, concealed_tokens
-            return concealed_tokens(arc_protected_keys(self._arc))
+            return concealed_tokens(arc_protected_keys(
+                self._arc, PorcelainWorldReads(self._world, horizon=self._horizon())))
         except Exception:
             return set()
 
@@ -1036,6 +1040,8 @@ class Session:
         if result.trace and getattr(result.trace, "replanned", ""):
             self._reload_arc_portfolio(
                 extra_scope=getattr(result.trace, "reshape_entities", None))
+        elif result.trace and getattr(result.trace, "repairs", None):
+            self._refresh_beat_scope()
         # Post-turn safety net: the mid-turn `on_scene` hook already started the
         # render for the common move-to-a-new-room case; re-checking here (idempotent
         # via the in-flight guard) also catches a description that CHANGED in place
@@ -1239,6 +1245,23 @@ class Session:
         """The most recently planned SceneImage (fresh/cached), or None."""
         return getattr(self, "_last_image", None)
 
+    def _refresh_beat_scope(self) -> None:
+        """DRIFT D3 (cr blocker 3): a committed repair re-minted a beat this
+        turn; refresh the beat-derived session scope NOW so the live beat
+        set's referents enter next-turn scene scope without waiting for a
+        full replan. Additive (entities already in play stay visible — the
+        beat-DERIVED set itself drops superseded-only referents via
+        `arc_entities(arc, reads)`); best-effort."""
+        try:
+            from construct.arc.executor import arc_entities
+            reads = PorcelainWorldReads(self._world)
+            scope = set(self._scope or [])
+            for _a in [self._arc] + list(self._side_arcs or []):
+                scope |= arc_entities(_a, reads)
+            self._scope = sorted(e for e in scope if reads.has_entity(e))
+        except Exception:
+            logger.exception("scope refresh after repair failed; keeping current scope")
+
     def _reload_arc_portfolio(self, extra_scope: list | None = None) -> None:
         """Refresh the live arc portfolio from PB after a mid-story re-plan, so subsequent
         turns run the new main arc. `extra_scope` carries the visible reshaped/restaged
@@ -1252,7 +1275,7 @@ class Session:
             portfolio = arc_io.portfolio_from_frame(reads)
             self._arc = next((a for a in portfolio if a.arc_id == main_id), self._arc)
             self._side_arcs = [a for a in portfolio if a.arc_id != main_id]
-            scope = set(arc_entities(self._arc)) | set(extra_scope or [])
+            scope = set(arc_entities(self._arc, reads)) | set(extra_scope or [])
             self._scope = sorted(e for e in scope if reads.has_entity(e))
             logger.info("session arc reloaded after replan: main=%s (+%d reshape entities)",
                         self._arc.arc_id, len(extra_scope or []))

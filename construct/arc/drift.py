@@ -533,15 +533,28 @@ def record_relocate_declined(world: Any, turn: int, beat_id: str, reason: str) -
 REPAIR_BUDGET: int = 2
 
 
-def repair_spent(reads: Any, arc_id: str) -> int:
-    """Committed repairs charged against `arc_id` — counted off the
-    `repair_committed` SESSION events (the generator receipt discipline; an
-    event count is append-only truth, never a mutable counter row)."""
+def repair_spent(reads: Any, arc_id: str, *, on_error: int = 0) -> int:
+    """Committed repairs charged against `arc_id`. cr D3 blocker 5: the spend
+    truth is DURABLE-BY-EXISTENCE — one `repair_charge_<n>` PLOT row per
+    committed repair, written in the SAME receipt-confirmed batch as the
+    replacement rows (no repair without its charge, no charge without its
+    repair; restart-safe by construction). Bounded scan, n = 1..BUDGET.
+
+    `on_error` is the caller's safety bias: the budget GATE passes
+    REPAIR_BUDGET (an unreadable ledger grants no free repairs); the
+    incompletable rule passes 0 (a read glitch never flips an arc terminal)."""
     try:
-        return sum(1 for e in reads.events(kind="repair_committed", frame=SESSION)
-                   if arc_id in e.agents)
-    except Exception:  # noqa: BLE001 — an unreadable ledger spends nothing
-        return 0
+        return sum(1 for n in range(1, REPAIR_BUDGET + 1)
+                   if reads.state(arc_id, f"repair_charge_{n}", frame=PLOT))
+    except Exception:  # noqa: BLE001 — each consumer chooses its safe side
+        return on_error
+
+
+def repair_charge_row(arc_id: str, n: int, new_beat_id: str, turn: int) -> dict:
+    """The n-th charge row (blocker 5) — committed IN the repair's own batch,
+    never as a separate write. Its existence IS the spend."""
+    return {"entity": arc_id, "attribute": f"repair_charge_{n}",
+            "value": new_beat_id, "valid_from": turn_time(turn), "frame": PLOT}
 
 
 def mark_repair(world: Any, arc_id: str, beat_id: str, new_beat_id: str,

@@ -61,6 +61,7 @@ from construct.arc.executor import (
     turn_time,
 )
 from construct.arc.executor import _human as _human_entity
+from construct.arc.executor import _repair_exhausted
 from construct.arc.generator import (
     AMBIENT_QUIET_MIN,
     _last_development_min,
@@ -92,7 +93,7 @@ def _destination_facts(arc: Arc, reads: Any) -> str:
     protected (entity,attribute) → canon value set), or '' if the arc conceals nothing.
     Shared by the foreshadowing card and the commitment judge."""
     facts: list[str] = []
-    for (e, a) in sorted(arc_protected_keys(arc)):
+    for (e, a) in sorted(arc_protected_keys(arc, reads)):
         try:
             v = reads.state(e, a)
         except Exception:
@@ -149,7 +150,7 @@ def _secret_tokens(arc: Arc, reads: Any, public: set[str]) -> set[str]:
     directly for the solution (Cx 022 blocking #2) so the narrator deflects rather
     than improvises an answer that could brush the secret."""
     toks: set[str] = set()
-    for (e, a) in arc_protected_keys(arc):
+    for (e, a) in arc_protected_keys(arc, reads):
         try:
             v = reads.state(e, a)
         except Exception:
@@ -184,7 +185,7 @@ def _take_touches_secret(takes: str, arc: Arc, reads: Any) -> bool:
     # `_secret_tokens` splitter kept it one token and "red map" slipped). `_secret_tokens` is
     # left untouched for its question-deflection caller (which subtracts public names).
     secret: set[str] = set()
-    for (e, a) in arc_protected_keys(arc):
+    for (e, a) in arc_protected_keys(arc, reads):
         secret |= _secret_word_set(a)
         secret |= _secret_word_set(e.split(":")[-1])
         for attr in (a, "name", "alias", "aliases", "title"):
@@ -211,7 +212,7 @@ def _move_touches_secret(moves_to: str, arc: Arc, reads: Any) -> bool:
     distinctive slug/name tokens ONLY, never on descriptive prose. Reaching an EXISTING hidden
     place stays the entitlement gate's job (`_names_undiscovered_dest`)."""
     secret: set[str] = set()
-    for (e, a) in arc_protected_keys(arc):
+    for (e, a) in arc_protected_keys(arc, reads):
         try:
             val = reads.state(e, a)
         except Exception:
@@ -1989,7 +1990,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         from construct.arc.executor import (
             arc_protected_keys, concealed_tokens, value_leaks,
         )
-        _pkeys = arc_protected_keys(arc)
+        _pkeys = arc_protected_keys(arc, live_reads)
         _ctoks = concealed_tokens(_pkeys)
         # protected condition VALUES (Cx 395: token screen alone can miss a sensitive
         # value) — any protected atom's literal value is banned vocabulary for `detail`.
@@ -2224,8 +2225,9 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 npcs: list[str], horizon: float | None, minutes_now: float | None,
                 rung: Rung | None, fuel: list[str] | None = None,
                 spines: dict[str, str] | None = None) -> None:
-    """DRIFT-HANDLING.md §4: the drift step, MAIN arc only (side arcs are
-    D3's). Placed after `beat_pass` (this turn's closures are known) and
+    """DRIFT-HANDLING.md §4: the drift step, per ARC — run_turn invokes it
+    for the main arc and then (right-of-way permitting) each live side arc.
+    Placed after `beat_pass` (this turn's closures are known) and
     BEFORE the main-arc lifecycle read (a same-turn closure must get its
     response before a terminal/fallout escapes). At most ONE drift response
     per turn. D1 = R2 relocate for D-SOFT; D2 adds CLOSURE classification
@@ -2238,18 +2240,17 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     success only. Fail-open: any error logs and leaves the world quiet — a
     drift pass never breaks a turn."""
     try:
-        if trace.clocks_fired or trace.beats_achieved or trace.reveals:
-            # This turn ALREADY developed (cr D1 finding 2): the development-
-            # ledger write for beats/clocks lands AFTER this pass, so the stale
-            # baseline would misread a developing turn as quiet. Suppression
-            # precedes CLASSIFICATION (cr-accepted semantics) — a clock firing
-            # this turn classifies on the NEXT quiet turn, not this one.
-            return
+        developing = bool(trace.clocks_fired or trace.beats_achieved or trace.reveals)
         # ---- D2 (§2 + §3 R3): closed REQUIRED beats classify by their witness;
         # a D-MISSED closure (clock-caused, proven) gets the absence-consequence
         # response ONCE. Classification does not need the D-SOFT gates (rung /
         # quiet) — the closure already happened; the gates license PRESSURE,
-        # not the reading of an accomplished fact.
+        # not the reading of an accomplished fact. cr D3 blocker 1: closures
+        # process EVEN ON A DEVELOPING TURN — a beat a clock closed THIS turn
+        # must reach repair before the lifecycle read, or a terminal escapes.
+        # The development suppression (cr D1 finding 2) defers the R3 SCENE
+        # (the consequence lands as its own quiet-turn beat, never stacked on
+        # a firing turn) and D-SOFT pressure — never the closure ledger.
         for b in active_beats(live_reads, arc):
             if b.weight is not Weight.REQUIRED:
                 continue
@@ -2259,14 +2260,21 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             cls = drift.classify_closure(witness)
             trace.drift.append((b.beat_id, cls))
             if cls == "D-MISSED" and not drift.moment_receipt(live_reads, b.beat_id):
-                # R3 first (§3: the consequence lands before the road adapts).
-                if _absence_beat(world, p, live_reads=live_reads, trace=trace,
-                                 provider=provider, turn=turn, arc=arc, cast=cast,
-                                 scene=scene, npcs=npcs, horizon=horizon,
-                                 minutes_now=minutes_now, beat=b,
-                                 witness=witness or {}, spines=spines or {}):
-                    return  # one drift response per turn (§3)
-                continue  # R3 declined — retry it before any repair of this beat
+                if not developing:
+                    # R3 first (§3: the consequence lands before the road adapts).
+                    if _absence_beat(world, p, live_reads=live_reads, trace=trace,
+                                     provider=provider, turn=turn, arc=arc, cast=cast,
+                                     scene=scene, npcs=npcs, horizon=horizon,
+                                     minutes_now=minutes_now, beat=b,
+                                     witness=witness or {}, spines=spines or {}):
+                        return  # one drift response per turn (§3)
+                    continue  # R3 declined — retry it before any repair of this beat
+                # Developing turn: R3 defers — but repair may NOT wait when the
+                # arc would go terminal THIS turn (the refusal fired alongside
+                # the closure). Rescue outranks consequence-first; the missed
+                # moment's consequence is forfeit for a beat rescued this way.
+                if not _repair_exhausted(live_reads, arc):
+                    continue
             # D-HARD, or D-MISSED whose consequence already landed → R4 (§3):
             # re-open when the mechanic can travel, else a replacement route.
             if _repair_beat(world, p, live_reads=live_reads, trace=trace,
@@ -2274,6 +2282,12 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                             scene=scene, npcs=npcs, horizon=horizon,
                             minutes_now=minutes_now, beat=b, cls=cls):
                 return  # one drift response per turn (§3)
+        if developing:
+            # This turn ALREADY developed (cr D1 finding 2): the development-
+            # ledger write for beats/clocks lands AFTER this pass, so the stale
+            # baseline would misread a developing turn as quiet. D-SOFT pressure
+            # waits for the next quiet turn.
+            return
         # ---- D1 (§3 R2): D-SOFT relocation, gated on rung + diegetic quiet.
         if not cast:
             return  # R2's carrier concept needs a cast blob — no cast, no relocation target
@@ -2694,119 +2708,106 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     """DRIFT-HANDLING.md §3 R4: the alternative path. Budget-gated
     (REPAIR_BUDGET per arc; a committed repair — replace OR re-open — spends
     one; at zero this declines `budget_exhausted` and `_repair_exhausted`
-    completes the incompletable rule). Two modes:
+    completes the incompletable rule).
+
+    BOTH modes are one machinery (cr D3 blockers 2 + 4, structural): the HOST
+    RE-MINTS the dead beat's OWN mechanic — the route died, never the
+    destination — as a fresh `_rN` beat carrying the SAME `achievable_via`
+    verbatim and NO foreclosure trigger (`unreachable_if=None`, so the next
+    `beat_pass` cannot re-close it), superseding the dead id. No model ever
+    authors, relabels, or repoints a condition; where the surviving mechanic
+    no longer lints (its referents died with the world's turn), the repair
+    declines honestly and the budget survives toward `incompletable`.
 
     RE-OPEN (D-MISSED whose consequence landed, when the mechanic can still
-    travel — it has a delivery target with a licensed carrier): the closed
-    `status` row is superseded back to `pending` (receipt-CONFIRMED — the
-    re-open IS the repair), charged, and the ordinary D-SOFT machinery
-    re-stages it on later turns (one machinery, composed — never a second
-    relocation path here).
+    travel — a licensed carrier holds the fact): the re-mint commits silently
+    and the ordinary D-SOFT machinery re-stages it on later turns.
 
-    REPLACE (D-HARD, or an untravelable D-MISSED): the `repair_arc` cohort
-    proposes ONE compact route in the generate_arc beat mold; the HOST builds
-    the Beat (the dead beat's phase + weight inherited, a fresh `_rN` id, the
-    condition from `_beat_expr`'s exact shapes), hard-gates it (player_learns
-    referents allowlisted; `lint_post_repair`'s novelty check against live
-    canon), commits `beat_to_items` + the supersession pointer as ONE
-    receipt-CONFIRMED batch, and only then sets the trace/directive and
-    charges the budget. Declines are telemetry, never a lock."""
+    REPLACE (D-HARD, or an untravelable D-MISSED): the `repair_arc` cohort's
+    whole authority is the HOOK — one diegetic line for how the new road
+    opens — which becomes the render directive.
+
+    The commit is ONE receipt-confirmed batch: `beat_to_items` + the
+    supersession pointer + the `repair_charge_<n>` row (blocker 5 — the
+    charge is atomic with the repair; its durable existence IS the spend).
+    Declines are telemetry, never a lock."""
     beat_id = beat.beat_id
-    spent = drift.repair_spent(live_reads, arc.arc_id)
+    spent = drift.repair_spent(live_reads, arc.arc_id,
+                               on_error=drift.REPAIR_BUDGET)
     if spent >= drift.REPAIR_BUDGET:
         drift.record_repair_declined(world, turn, beat_id, "budget_exhausted")
         return False
-    # ---- RE-OPEN: the D-MISSED pairing (§3 R2 step 5 / R4).
+    # ---- mode: travelable D-MISSED re-opens (silent; relocation re-stages);
+    # everything else replaces (the hook narrates the new road).
+    mode = "replace"
     if cls == "D-MISSED":
         targets = {t["beat_id"]: t
                    for t in beat_delivery_targets(active_beats(live_reads, arc))}
         target = targets.get(beat_id)
-        holders: list = []
         if target is not None and cast:
             _citer = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
             fact_key = (target.get("entity"), target.get("attribute"), target.get("value"))
-            holders = [n for _nid, n in _citer
-                       for c in (getattr(n, "holds_clues", ()) or ())
-                       if c.surface_fact == fact_key]
-        if holders:
-            reopen_row = [{"entity": beat_id, "attribute": "status",
-                           "value": "pending", "valid_from": turn_time(turn)}]
-            try:
-                receipt = world.porcelain.ingest_structured(reopen_row, frame=PLOT)
-                ok = bool(confirmed_batch(reopen_row, _receipt_rows(receipt), cap=1)[0])
-            except Exception:  # noqa: BLE001
-                ok = False
-            if not ok:
-                drift.record_repair_declined(world, turn, beat_id, "reopen_unconfirmed")
-                return False
-            trace.repairs.append((beat_id, beat_id, "reopen"))
-            try:
-                drift.mark_repair(world, arc.arc_id, beat_id, beat_id, "reopen", turn)
-            except Exception:  # noqa: BLE001 — the re-open stands; budget may undercount
-                logger.warning("mark_repair (reopen) failed", exc_info=True)
-                trace.dropped_cohorts.append("mark_repair (reopen) failed")
-            if minutes_now is not None:
-                try:
-                    _mark_development(world, minutes_now, turn)
-                except Exception:  # noqa: BLE001
-                    trace.dropped_cohorts.append("_mark_development (repair) failed")
-            return True
-        # no travelable mechanic — fall through to REPLACE.
-    # ---- REPLACE: a new route to the same destination.
-    dest_desc = (f"{getattr(beat.achievable_via, 'entity', beat_id)} · "
-                 f"{getattr(beat.achievable_via, 'attribute', 'delivery')}")
-    known = sorted(({scene} if scene else set()) | set(npcs)
-                   | {n.node_id for n in
-                      (cast.values() if hasattr(cast, 'values') else cast or [])}
-                   | ({getattr(beat.achievable_via, 'entity', None)} - {None}))
-    try:
-        threads = []  # live threads are optional enrichment; keep the call lean in D3
-        pick = cohorts.repair_arc(provider, beat_id, dest_desc, known, threads,
-                                  arc.protagonist)
-        trace.cohort_calls.append("repair_arc:cheap")
-    except ProviderError as exc:
-        trace.dropped_cohorts.append(f"repair_arc ({exc})")
-        drift.record_repair_declined(world, turn, beat_id, "cohort_error")
-        return False
-    try:
-        confidence = float(pick.get("confidence", 0.0))
-    except (TypeError, ValueError):
-        confidence = 0.0
-    if confidence < _RELOCATE_CONFIDENCE_MIN:
-        drift.record_repair_declined(world, turn, beat_id, "low_confidence")
-        return False
-    from construct.arc.generator import _sanitize_hook
-    hook = _sanitize_hook(str(pick.get("hook") or ""))
-    kind = str(pick.get("kind") or "")
-    entity = str(pick.get("entity") or "")
-    if not hook or not entity or kind not in ("player_learns", "event_occurs"):
-        drift.record_repair_declined(world, turn, beat_id, "nothing_grounded")
-        return False
-    if kind == "player_learns":
-        if entity not in known:
-            drift.record_repair_declined(world, turn, beat_id, "unlicensed_referent")
+            if any(c.surface_fact == fact_key
+                   for _nid, n in _citer
+                   for c in (getattr(n, "holds_clues", ()) or ())):
+                mode = "reopen"
+    hook = ""
+    if mode == "replace":
+        try:
+            threads = []  # live threads are optional enrichment; keep the call lean in D3
+            dest_desc = (f"{getattr(beat.achievable_via, 'entity', beat_id)} · "
+                         f"{getattr(beat.achievable_via, 'attribute', 'delivery')}")
+            pick = cohorts.repair_arc(provider, beat_id, dest_desc, threads,
+                                      arc.protagonist)
+            trace.cohort_calls.append("repair_arc:cheap")
+        except ProviderError as exc:
+            trace.dropped_cohorts.append(f"repair_arc ({exc})")
+            drift.record_repair_declined(world, turn, beat_id, "cohort_error")
             return False
-        from construct.arc.conditions import InFrame
-        cond = InFrame(f"knows:{arc.protagonist}",
-                       entity, str(pick.get("attribute") or ""),
-                       str(pick.get("value") or ""))
-    else:
-        from construct.arc.conditions import Occurred
-        cond = Occurred(re.sub(r"[^a-z0-9_]+", "_", entity.lower()).strip("_") or "x")
+        try:
+            confidence = float(pick.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if confidence < _RELOCATE_CONFIDENCE_MIN:
+            drift.record_repair_declined(world, turn, beat_id, "low_confidence")
+            return False
+        from construct.arc.generator import _sanitize_hook
+        hook = _sanitize_hook(str(pick.get("hook") or ""))
+        if not hook:
+            drift.record_repair_declined(world, turn, beat_id, "nothing_grounded")
+            return False
+    # ---- the re-mint: same mechanic, trigger stripped, fresh collision-free id.
+    # TWO independent ordinals (never conflate them): the CHARGE SLOT is the
+    # first UNSET `repair_charge_<n>` on the arc (writing an occupied slot
+    # would overwrite a prior spend — a budget leak), while the BEAT id takes
+    # the first per-slug ordinal with no persisted `part_of` (a stranded beat
+    # from a torn batch must never collide a retry).
+    slot = next((i for i in range(1, drift.REPAIR_BUDGET + 1)
+                 if not live_reads.state(arc.arc_id, f"repair_charge_{i}",
+                                         frame=PLOT)), None)
+    if slot is None:  # every slot durable-spent (belt to the gate above)
+        drift.record_repair_declined(world, turn, beat_id, "budget_exhausted")
+        return False
     slug = beat_id.split(":", 1)[-1]
-    new_id = f"beat:{slug}_r{spent + 1}"
+    m = 1
+    while (m <= drift.REPAIR_BUDGET * 2
+           and live_reads.state(f"beat:{slug}_r{m}", "part_of", frame=PLOT)):
+        m += 1
+    new_id = f"beat:{slug}_r{m}"
     from construct.arc.grammar import Beat as _Beat
-    replacement = _Beat(new_id, beat.phase, beat.weight, achievable_via=cond)
+    replacement = _Beat(new_id, beat.phase, beat.weight,
+                        achievable_via=beat.achievable_via)
     from construct.arc.lint import lint_post_repair
     findings = lint_post_repair([replacement], live_reads)
     if findings:
         drift.record_repair_declined(
-            world, turn, beat_id, f"lint:{findings[0].rule}")
+            world, turn, beat_id, f"lint:{findings[0].check}")
         return False
     from construct.arc.io import beat_to_items
     rows = beat_to_items(replacement, arc.arc_id) + [
         {"entity": arc.arc_id, "attribute": f"beat_superseded_{slug}",
          "value": new_id, "valid_from": turn_time(turn), "frame": PLOT},
+        drift.repair_charge_row(arc.arc_id, slot, new_id, turn),
     ]
     try:
         receipt = world.porcelain.ingest_structured(rows)
@@ -2819,13 +2820,14 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         return False
     # the CONFIRMED replacement licenses the response (the D1 discipline):
     # trace + directive first, then individually fail-open bookkeeping.
-    trace.repairs.append((beat_id, new_id, "replace"))
-    trace.repair_directive = (
-        f"A NEW ROAD OPENS (render diegetically — the route arrives in the "
-        f"world's own voice, never as an announcement): {hook}")
+    trace.repairs.append((beat_id, new_id, mode))
+    if mode == "replace":
+        trace.repair_directive = (
+            f"A NEW ROAD OPENS (render diegetically — the route arrives in the "
+            f"world's own voice, never as an announcement): {hook}")
     try:
-        drift.mark_repair(world, arc.arc_id, beat_id, new_id, "replace", turn)
-    except Exception:  # noqa: BLE001
+        drift.mark_repair(world, arc.arc_id, beat_id, new_id, mode, turn)
+    except Exception:  # noqa: BLE001 — telemetry only; the charge row is the spend
         logger.warning("mark_repair failed (repair stands)", exc_info=True)
         trace.dropped_cohorts.append("mark_repair failed")
     if minutes_now is not None:
@@ -3804,7 +3806,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 if not _deictic:
                     try:
                         from construct.arc.executor import concealed_tokens, value_leaks
-                        _ctoks = concealed_tokens(arc_protected_keys(arc))
+                        _rpk = arc_protected_keys(arc, live_reads)
+                        _ctoks = concealed_tokens(_rpk)
                         _excl = {n.location for n in (_cbi or {}).values()
                                  if _undiscovered_offscene(n) and n.location} if cast else set()
                         _cand_places = set(scope or []) | ({pre_scene} if pre_scene else set()) \
@@ -3825,7 +3828,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                 continue
                             _bits = []
                             for _a in ("name", "kind"):
-                                if (_pid, _a) in arc_protected_keys(arc):
+                                if (_pid, _a) in _rpk:
                                     continue
                                 _v = live_reads.state(_pid, _a)
                                 if _v and not value_leaks(str(_v), _ctoks):
@@ -4196,8 +4199,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         logger.exception("clock read failed")
         _clock = None
     if scope is None:
-        scope = sorted(e for e in arc_entities(arc) if live_reads.has_entity(e))
-        trace.point_reads += len(arc_entities(arc))
+        _arc_ents = arc_entities(arc, live_reads)
+        scope = sorted(e for e in _arc_ents if live_reads.has_entity(e))
+        trace.point_reads += len(_arc_ents)
     # The scene's structural FEATURES — its `part_of`-children (PLACE-FEATURE-
     # ABSTRACTION-V1, PB 070): a place's sub-features (a hatch in the dome, the
     # desk in the office) are pulled into scope so their facts (incl. `feel`)
@@ -4214,7 +4218,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
 
     _mirror_rows(p, receipt_rows, player_frame, canon_table, trace, as_of=_h)
     touched = {row["entity"] for row in receipt_rows}
-    if touched & arc_entities(arc):
+    if touched & arc_entities(arc, live_reads):
         p.ingest_structured([
             {"entity": f"event:arc_touch_{turn}", "attribute": "kind",
              "value": "arc_touch", "valid_from": turn_time(turn)},
@@ -4893,7 +4897,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # a fresh PB read only carries rows whose entities are in the requested scope.
                     _reshaped_ents = [r["entity"] for r in _rr.canon_rows
                                       if r["entity"] != _rr.event_id and live_reads.has_entity(r["entity"])]
-                    _new_scope = sorted(set(e for e in arc_entities(arc) if live_reads.has_entity(e))
+                    _new_scope = sorted(set(e for e in arc_entities(arc, live_reads) if live_reads.has_entity(e))
                                         | set(_reshaped_ents))
                     snap_scope = _new_scope + ([scene] if scene else []) + scene_features
                     canon_snap = _snap_or_empty(p, snap_scope, as_of=_h)
@@ -4927,7 +4931,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # ---- DRIFT-HANDLING D1 (§4): AFTER beat_pass (this turn's closures known),
     # BEFORE the main-arc lifecycle read below — a same-turn closure of a
     # required beat must get its response before a terminal/fallout escapes.
-    # Side arcs are OUT OF SCOPE this slice (D1 §7 note above `_drift_pass`).
+    # Side arcs get the same pass (D3, below) before THEIR lifecycle block.
     # `rung` here is a SEPARATE sustained-quiet read (`drift.rung_from_counters`)
     # from the turn's own pacing `rung` (computed later, after `diff` exists,
     # itself after the lifecycle read this step must precede) — see
@@ -4954,6 +4958,26 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                turn=turn, arc=arc, cast=cast, scene=scene, npcs=npcs,
                horizon=_h, minutes_now=_drift_minutes, rung=_drift_rung,
                fuel=_salient_fuel, spines=_npc_spines)
+    # ---- side-arc drift (cr D3 blocker 1b): each side arc's closures reach
+    # repair BEFORE the side lifecycle/fallout block below — same machinery,
+    # per arc. RIGHT-OF-WAY: while the MAIN arc is at its peak, side drift
+    # defers SILENTLY (no decline receipts — the pass simply doesn't run; the
+    # side beat is not lost, only later). One drift response per TURN holds
+    # across the whole portfolio.
+    def _drift_responded() -> bool:
+        return bool(trace.relocations or trace.absence_consequences
+                    or trace.repairs)
+    if side_arcs and not main_at_peak(live_reads, arc):
+        for _sa in side_arcs:
+            if _drift_responded():
+                break
+            if stored_lifecycle(live_reads, _sa) in LIFECYCLE_TERMINALS:
+                continue
+            _drift_pass(world, p, live_reads=live_reads, trace=trace,
+                        provider=provider, turn=turn, arc=_sa, cast=cast,
+                        scene=scene, npcs=npcs, horizon=_h,
+                        minutes_now=_drift_minutes, rung=_drift_rung,
+                        fuel=_salient_fuel, spines=_npc_spines)
 
     # ---- PINNED AWARENESS (PINNED-AWARENESS spec; reviews 060/062/063) ---
     # One awareness coordinate for the WHOLE assembly (Kernos 060 #2 / Cx #2):
@@ -5820,8 +5844,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # owns the terminal render — a THIRD branch selected BEFORE the reckoning/
         # settling ternary is ever consulted. Honest, staged, never a gotcha or a score.
         _dcast = sorted({arc.protagonist}
-                        | {e for e in arc_entities(arc) if e.startswith("person:")})
-        _dscope = [e for e in (set(arc_entities(arc)) | set(scope or []))
+                        | {e for e in arc_entities(arc, live_reads) if e.startswith("person:")})
+        _dscope = [e for e in (set(arc_entities(arc, live_reads)) | set(scope or []))
                    if e.startswith(("person:", "place:", "obj:", "fact:"))
                    and live_reads.has_entity(e)]
         _dreveal = [f"{f['entity']} · {f['attribute']} · {f['value']}"
@@ -5878,8 +5902,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # The movie epilogue: name the cast for fates, lift concealment, and HAVE FUN
         # revealing the interesting bits the player never uncovered (the dessert course).
         cast = sorted({arc.protagonist}
-                      | {e for e in arc_entities(arc) if e.startswith("person:")})
-        reveal_scope = [e for e in (set(arc_entities(arc)) | set(scope or []))
+                      | {e for e in arc_entities(arc, live_reads) if e.startswith("person:")})
+        reveal_scope = [e for e in (set(arc_entities(arc, live_reads)) | set(scope or []))
                         if e.startswith(("person:", "place:", "obj:", "fact:"))
                         and live_reads.has_entity(e)]
         reveal = [f"{f['entity']} · {f['attribute']} · {f['value']}"
@@ -6522,7 +6546,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         if trace.terminal or (trace.concluded and not endless):
             proposed_vals = {}
 
-        protected_keys = arc_protected_keys(arc)  # the arc's load-bearing (hidden) facts
+        protected_keys = arc_protected_keys(arc, live_reads)  # the arc's load-bearing (hidden) facts
         # The objects the protagonist HOLDS at the play horizon (after this turn's deterministic
         # take/drop). Possession is HOST-owned: the narrator's prose extraction must never relocate
         # the player's inventory into furniture or a "pocket" pseudo-container (founder live cohesion

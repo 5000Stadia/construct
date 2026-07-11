@@ -611,7 +611,8 @@ def _repair_exhausted(reads: Any, arc: Arc) -> bool:
     """Is repair exhausted? DRIFT-HANDLING D3 completes the P1 reservation:
     exhausted == the universal refusal backstop has fired, OR the arc's
     repair BUDGET is spent (committed replace/re-open repairs counted off the
-    `repair_committed` session events). A freshly-closed required beat with
+    durable `repair_charge_<n>` plot rows — atomic with each repair's own
+    batch, cr D3 blocker 5). A freshly-closed required beat with
     budget remaining and the refusal armed is NOT incompletable — the hard
     rule (PB letter 072 §5): incompletable is repair-EXHAUSTED, never
     first-unreachable. Note `_required_unreachable` (above) already sees only
