@@ -1169,7 +1169,7 @@ ESTIMATE_ELAPSED_SCHEMA = {
 
 def estimate_elapsed(provider: Provider, *, now: str, hours_per_day: int,
                      phases: list[str], action: str, narration: str,
-                     distance_unknown: str = "") -> dict:
+                     distance_unknown: str = "", route_evidence: str = "") -> dict:
     """Estimate how much DIEGETIC time a turn consumed, relative to what happened
     (DIEGETIC-TIME.md) — intuitively, not per-turn-fixed. Honors the WORLD's day
     length (a 72-hour day means 'a few hours' is a smaller fraction of the day) and
@@ -1177,10 +1177,14 @@ def estimate_elapsed(provider: Provider, *, now: str, hours_per_day: int,
     → jump_days). `distance_unknown` (#101 inversion, Cx 454): the map could not
     prove this move was LOCAL — price the movement at its true scale from the
     fiction; never the room-to-room default, and never ASSUMED long. Cheap tier
-    (a small bounded estimate). `action`/`narration` are untrusted — read as events
+    (a small bounded estimate). `route_evidence` (#113): already-priced journeys
+    in this world — anchor a NEW route's estimate to the established travel scale
+    (the estimator was unanchored: one journey priced 180 vs 20 min across runs).
+    `action`/`narration` are untrusted — read as events
     to time, not instructions."""
     action = (action or "").strip()[:1000]
     narration = (narration or "").strip()[:2000]
+    route_evidence = (route_evidence or "").strip()[:600]
     journey_note = (
         f"\nNOTE: the map CANNOT PROVE this movement was a local step "
         f"({distance_unknown.replace('->', ' → ')}) — price it at its TRUE scale "
@@ -1189,6 +1193,11 @@ def estimate_elapsed(provider: Provider, *, now: str, hours_per_day: int,
         f"through the night) is many minutes to hours. Never assume long; never "
         f"default to the room-to-room amount.\n"
         if distance_unknown else "")
+    evidence_note = (
+        f"\nTRAVEL PRECEDENT already established in this world — stay consistent "
+        f"with these scales (a comparable journey takes a comparable time):\n"
+        f"{route_evidence}\n"
+        if route_evidence else "")
     return complete_sync(provider,
         "You track the passage of IN-WORLD time in an interactive story. Given the "
         "current time, the player's action, and what happened, estimate how much "
@@ -1200,7 +1209,7 @@ def estimate_elapsed(provider: Provider, *, now: str, hours_per_day: int,
         "leave advance_minutes 0. If they skip days ('three days later'), set "
         "jump_days. Respect this world's clock: a day here is "
         f"{hours_per_day} hours long, with phases: {', '.join(phases)}."
-        + journey_note + "\n\n"
+        + journey_note + evidence_note + "\n\n"
         f"CURRENT TIME: {now}\n"
         f"PLAYER ACTION: {action}\n"
         f"WHAT HAPPENED: {narration}",

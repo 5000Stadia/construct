@@ -851,6 +851,62 @@ def _journey_accept_key(origin: str | None, dest_key: str, threshold: float) -> 
     return "jacc_" + hashlib.sha1(raw.encode()).hexdigest()[:20]
 
 
+def _route_price_key(a: str | None, b: str) -> str:
+    """#113 route-price key: an UNORDERED pair digest — A→B and B→A are the same
+    road, so the first priced crossing anchors every later one either way."""
+    import hashlib
+    pair = "|".join(sorted((a or "", b)))
+    return "jprice_" + hashlib.sha1(pair.encode()).hexdigest()[:20]
+
+
+def _stored_route_price(world: Any, a: str | None, b: str) -> int:
+    """The travel price (diegetic minutes) this world already established for the
+    a↔b journey, or -1. #113 (probe A finding): the estimator is UNANCHORED
+    without diegetic distance evidence — the same journey priced 180 vs 20 min
+    across runs. The first estimate becomes the route's canon precedent; later
+    crossings reuse it deterministically (zero model calls)."""
+    try:
+        rows = frame_facts(world, SESSION, entity="session:journey_price",
+                           attribute=_route_price_key(a, b))
+        for r in reversed(rows):
+            return max(0, int(json.loads(str(r.value)).get("est", 0)))
+    except Exception:  # noqa: BLE001 — anchoring is best-effort
+        logger.debug("route-price read failed", exc_info=True)
+    return -1
+
+
+def _store_route_price(world: Any, a: str | None, b: str, minutes: int, turn: int) -> None:
+    """Persist the a↔b price as this world's travel precedent (#113)."""
+    try:
+        world.porcelain.ingest_structured([{
+            "entity": "session:journey_price", "attribute": _route_price_key(a, b),
+            "value": json.dumps({"o": a or "", "d": b, "est": int(minutes),
+                                 "turn": turn}),
+            "value_type": "literal", "valid_from": turn_time(turn),
+        }], frame=SESSION, classify="batch")
+    except Exception:  # noqa: BLE001 — anchoring is best-effort
+        logger.debug("route-price store failed", exc_info=True)
+
+
+def _route_price_evidence(world: Any, limit: int = 5) -> str:
+    """Already-priced journeys as precedent lines for the estimator, so a FIRST
+    estimate on a new route lands on the same scale as the world's established
+    travel (#113); empty when nothing is priced yet."""
+    try:
+        rows = frame_facts(world, SESSION, entity="session:journey_price")
+    except Exception:  # noqa: BLE001
+        return ""
+    lines = []
+    for r in rows[-limit:]:
+        try:
+            d = json.loads(str(r.value))
+            lines.append(f"{d.get('o', '?')} to {d.get('d', '?')}: "
+                         f"about {int(d.get('est', 0))} minutes")
+        except Exception:  # noqa: BLE001
+            continue
+    return "\n".join(lines)
+
+
 def _deadline_remaining(arc: Any, world: Any) -> tuple[float, float] | None:
     """#102 (Cx 457): the live diegetic time-deadline's remaining budget —
     (remaining_minutes, threshold) from the arc's `failure_when` Quantity over the
@@ -1811,9 +1867,15 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                 est = {"advance_minutes": 1}
             elif trace.distance_unknown:
                 # a pre-commit estimate (deliberation gate, #102) is REUSED — the same
-                # movement is never priced twice in one story beat.
-                est = ({"advance_minutes": trace.journey_est}
-                       if trace.journey_est >= 0 else None)
+                # movement is never priced twice in one story beat; failing that, the
+                # route's stored canon precedent (#113) — the same journey is never
+                # re-priced across the story either.
+                if trace.journey_est >= 0:
+                    est = {"advance_minutes": trace.journey_est}
+                else:
+                    _o, _, _d = trace.distance_unknown.partition("->")
+                    _p_min = _stored_route_price(world, _o, _d)
+                    est = {"advance_minutes": _p_min} if _p_min >= 0 else None
             else:
                 est = deterministic_elapsed(player_input, moved=_moved)
             if est is None:
@@ -1822,8 +1884,18 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                     hours_per_day=clock.calendar.hours_per_day,
                     phases=clock.calendar.phase_names,
                     action=player_input, narration=narration,
-                    distance_unknown=trace.distance_unknown)
+                    distance_unknown=trace.distance_unknown,
+                    route_evidence=(_route_price_evidence(world)
+                                    if trace.distance_unknown else ""))
                 trace.cohort_calls.append("estimate_elapsed")
+                # first pricing = the route's precedent (#113); a wait/jump estimate
+                # (phase jump, day skip, zero minutes) is NOT a travel price.
+                _mins = int(est.get("advance_minutes") or 0)
+                if (trace.distance_unknown and _mins > 0
+                        and not est.get("jump_to_phase")
+                        and not est.get("jump_days")):
+                    _o, _, _d = trace.distance_unknown.partition("->")
+                    _store_route_price(world, _o, _d, _mins, trace.turn)
             else:
                 trace.cohort_calls.append("time_estimate:deterministic")
         trace.time_advanced = delta_from_estimate(clock, est)
@@ -2284,19 +2356,28 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 return False
         except Exception:  # noqa: BLE001
             pass
-        try:  # the SAME cheap estimator, pre-commit — the crossing authority
-            from construct.clock import read_clock as _rc
-            _clk = _rc(world)
-            _est = cohorts.estimate_elapsed(
-                provider, now=_clk.render(),
-                hours_per_day=_clk.calendar.hours_per_day,
-                phases=_clk.calendar.phase_names,
-                action=player_input, narration="",
-                distance_unknown=f"{pre_scene}->{_dest_key}")
-            _est_min = max(0, int(_est.get("advance_minutes") or 0))
-            trace.cohort_calls.append("estimate_elapsed:precommit")
-        except Exception:  # noqa: BLE001 — estimation failure never blocks movement
-            return False
+        # #113: an already-priced route reuses its canon precedent — the same
+        # journey never prices twice ACROSS story beats (180-vs-20 drift fix).
+        _est_min = _stored_route_price(world, pre_scene, _dest_key)
+        if _est_min >= 0:
+            trace.cohort_calls.append("time_estimate:route_price")
+        else:
+            try:  # the SAME cheap estimator, pre-commit — the crossing authority
+                from construct.clock import read_clock as _rc
+                _clk = _rc(world)
+                _est = cohorts.estimate_elapsed(
+                    provider, now=_clk.render(),
+                    hours_per_day=_clk.calendar.hours_per_day,
+                    phases=_clk.calendar.phase_names,
+                    action=player_input, narration="",
+                    distance_unknown=f"{pre_scene}->{_dest_key}",
+                    route_evidence=_route_price_evidence(world))
+                _est_min = max(0, int(_est.get("advance_minutes") or 0))
+                trace.cohort_calls.append("estimate_elapsed:precommit")
+            except Exception:  # noqa: BLE001 — estimation failure never blocks movement
+                return False
+            if _est_min > 0 and not _est.get("jump_to_phase") and not _est.get("jump_days"):
+                _store_route_price(world, pre_scene, _dest_key, _est_min, turn)
         if _est_min < _delib_deadline[0]:
             trace.journey_est = _est_min  # fits the budget — commit, reuse the price
             return False

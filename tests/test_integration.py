@@ -6488,6 +6488,52 @@ def test_journey_accept_key_is_a_fixed_digest():
 
 
 # ---------------------------------------------------------------------------
+# #113 ROUTE-PRICE ANCHORING (probe A finding: 180 vs 20 min for one journey)
+# ---------------------------------------------------------------------------
+
+def test_route_price_key_is_symmetric_fixed_digest():
+    # A→B and B→A are the same road: one precedent anchors both directions.
+    from construct.turnloop import _route_price_key as k
+    assert k("place:parlor", "place:mill") == k("place:mill", "place:parlor")
+    assert k(None, "place:mill") == k("", "place:mill")       # origin may be absent
+    a = k("place:" + "long_" * 20, "another_" * 10)
+    assert a.startswith("jprice_") and len(a) == len("jprice_") + 20
+
+
+def test_route_price_reused_across_turns_and_directions(world):
+    # #113: the first pricing of a route becomes its canon precedent; the RETURN
+    # trip prices deterministically from the stored row — zero model calls (the
+    # provider carries NO second estimate stub, so a re-price would fail loudly).
+    arc = make_arc()
+    seed_arc(world, arc)
+    _hall_world(world)
+    world._extractions.extend([{"items": []}, {"items": []},
+                               {"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the consulting room in the village",
+         "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+         "commitment": ""},
+        {"verdict": "new", "match": ""},                      # dst bind: genuinely new
+        {"prose": "The storm walks you down the long dark lane to the village."},
+        {"advance_minutes": 75, "jump_to_phase": "", "jump_days": 0,
+         "reason": "a night walk to the village"},            # the FIRST pricing
+        # ---- the return trip: deliberately NO estimate stub ----
+        {"kind": "action", "moves_to": "the parlor", "requires": [],
+         "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You walk the lane back up to the hall."},
+    ])
+    r1 = run_turn(world, arc, provider, "I go to the consulting room in the village.",
+                  turn=2, scope=[PLAYER, "place:parlor"])
+    assert r1.trace.time_advanced == 75                       # model-priced once
+    r2 = run_turn(world, arc, provider, "I walk back to the parlor.", turn=3,
+                  scope=[PLAYER, "place:consulting_room", "place:parlor"])
+    assert world.porcelain.locate(PLAYER)[0] == "place:parlor"
+    assert r2.trace.distance_unknown == "place:consulting_room->place:parlor"
+    assert r2.trace.time_advanced == 75                       # the precedent held
+    assert "estimate_elapsed" not in r2.trace.cohort_calls    # zero model calls
+
+
+# ---------------------------------------------------------------------------
 # WORLD LAWS (#105, WORLD-LAWS.md, Cx 470) — the reserved briefing lane + the
 # shared adjudication block at play time.
 # ---------------------------------------------------------------------------

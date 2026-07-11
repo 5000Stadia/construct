@@ -134,6 +134,27 @@ def test_estimate_elapsed_cohort_shape():
     assert out["jump_to_phase"] == "dusk"
 
 
+def test_estimate_elapsed_carries_route_evidence():
+    # #113: travel precedent lines reach the prompt so a FIRST estimate on a new
+    # route anchors to the world's established scale; absent evidence, no note.
+    from construct import cohorts
+    from construct.provider import StubProvider
+    p = StubProvider([{"advance_minutes": 60, "jump_to_phase": "",
+                       "jump_days": 0, "reason": "a ride"}])
+    cohorts.estimate_elapsed(p, now="Day 1, morning", hours_per_day=24,
+                             phases=["dawn", "noon"], action="I ride to the mill",
+                             narration="", distance_unknown="place:a->place:b",
+                             route_evidence="place:a to place:c: about 90 minutes")
+    prompt = p.calls[0][0]
+    assert "TRAVEL PRECEDENT" in prompt and "about 90 minutes" in prompt
+    p2 = StubProvider([{"advance_minutes": 60, "jump_to_phase": "",
+                        "jump_days": 0, "reason": "a ride"}])
+    cohorts.estimate_elapsed(p2, now="Day 1, morning", hours_per_day=24,
+                             phases=["dawn", "noon"], action="I ride to the mill",
+                             narration="", distance_unknown="place:a->place:b")
+    assert "TRAVEL PRECEDENT" not in p2.calls[0][0]
+
+
 def test_deterministic_elapsed_skips_model_for_ordinary_turns():
     # TURN-LATENCY Lever C (Cx 077): ordinary turns get a deterministic minute delta (no model
     # call); explicit temporal language returns None → the caller falls back to the model.
