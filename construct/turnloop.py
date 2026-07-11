@@ -2283,7 +2283,8 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             if _repair_beat(world, p, live_reads=live_reads, trace=trace,
                             provider=provider, turn=turn, arc=arc, cast=cast,
                             scene=scene, npcs=npcs, horizon=horizon,
-                            minutes_now=minutes_now, beat=b, cls=cls):
+                            minutes_now=minutes_now, beat=b, cls=cls,
+                            witness=witness):
                 return  # one drift response per turn (§3)
         if developing:
             # This turn ALREADY developed (cr D1 finding 2): the development-
@@ -2731,7 +2732,7 @@ def _refusal_fired(reads: Any, arc: Arc) -> bool:
 def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                  provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
                  npcs: list[str], horizon: float | None, minutes_now: float | None,
-                 beat: Any, cls: str) -> bool:
+                 beat: Any, cls: str, witness: dict | None = None) -> bool:
     """DRIFT-HANDLING.md §3 R4: the alternative path. Budget-gated
     (REPAIR_BUDGET per arc; a committed repair spends one; at zero this
     declines `budget_exhausted` and `_repair_exhausted` completes the
@@ -2781,25 +2782,47 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     if spent >= drift.REPAIR_BUDGET:
         drift.record_repair_declined(world, turn, beat_id, "budget_exhausted")
         return False
-    # ---- WALKABILITY: an InFrame beat needs a live delivery channel — some
-    # cast member holds the clue. No holder → decline; never a zombie mint.
-    from construct.arc.conditions import InFrame as _InFrame
-    _atoms = [beat.achievable_via] if isinstance(beat.achievable_via, _InFrame) \
-        else []
-    if not _atoms:
-        from construct.arc.conditions import atoms_of as _atoms_of
-        _atoms = [a for a in _atoms_of(beat.achievable_via)
-                  if isinstance(a, _InFrame)]
-    walkable = True
+    # ---- WALKABILITY, as a LIVE channel predicate (cr round-3 blocker 2 —
+    # static clue ownership is authored solvability, not a live road): an
+    # InFrame beat re-mints only when some cast holder of the exact clue
+    # (a) still EXISTS in live canon, (b) is LOCATABLE (a containment chain
+    # resolves — the runtime half), and (c) is NOT an entity a TRUE leaf of
+    # the closure witness named (the world-state that killed the road cannot
+    # itself prove the alternative road — the dead rival can't carry the
+    # clue past his own death). No live channel → decline; never a zombie
+    # mint. `Occurred` beats stay walkable by the player act itself.
+    from construct.arc.conditions import InFrame as _InFrame, atoms_of as _atoms_of
+    _atoms = [a for a in _atoms_of(beat.achievable_via)
+              if isinstance(a, _InFrame)]
     if _atoms:
+        _invalidated = {l.get("entity")
+                        for l in (witness or {}).get("true_leaves", [])
+                        if l.get("entity")}
+
+        def _live_channel(nid: str) -> bool:
+            if nid in _invalidated:
+                return False
+            try:
+                if not live_reads.has_entity(nid):
+                    return False
+                return bool(p.locate(nid, as_of=horizon))
+            except Exception:  # noqa: BLE001 — unprovable ≠ live
+                return False
+
         _citer = (cast.items() if hasattr(cast, "items")
                   else [(n.node_id, n) for n in cast]) if cast else []
-        held = {c.surface_fact for _nid, n in _citer
-                for c in (getattr(n, "holds_clues", ()) or ())}
-        walkable = all((a.entity, a.attribute, a.value) in held for a in _atoms)
-    if not walkable:
-        drift.record_repair_declined(world, turn, beat_id, "no_delivery_channel")
-        return False
+        holders: dict[tuple, list[str]] = {}
+        for _nid, n in _citer:
+            for c in (getattr(n, "holds_clues", ()) or ()):
+                holders.setdefault(c.surface_fact, []).append(_nid)
+        walkable = all(
+            any(_live_channel(h)
+                for h in holders.get((a.entity, a.attribute, a.value), []))
+            for a in _atoms)
+        if not walkable:
+            drift.record_repair_declined(world, turn, beat_id,
+                                         "no_delivery_channel")
+            return False
     # ---- mode: travelable D-MISSED re-opens (silent; relocation re-stages);
     # everything else replaces (the hook narrates the new road).
     mode = "reopen" if cls == "D-MISSED" else "replace"
@@ -5013,36 +5036,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         return bool(trace.relocations or trace.absence_consequences
                     or trace.repairs)
 
-    def _rescuable_closure(sa: Arc) -> bool:
-        """A REQUIRED beat closed-unrepaired while repair budget remains AND
-        the arc's refusal has NOT fired — exactly what a skipped drift pass
-        could still rescue later. A refusal-fired arc is CONCLUDING (the
-        verdict doctrine): its terminal proceeds; nothing is deferred."""
-        try:
-            if _refusal_fired(live_reads, sa):
-                return False
-            if drift.repair_spent(live_reads, sa.arc_id) >= drift.REPAIR_BUDGET:
-                return False
-            return any(b.weight is Weight.REQUIRED
-                       and live_reads.state(b.beat_id, "status",
-                                            frame=PLOT) == "closed"
-                       for b in active_beats(live_reads, sa))
-        except Exception:  # noqa: BLE001 — unreadable → don't hold the lifecycle
-            return False
-
-    _side_drift_deferred: set[str] = set()
+    # No lifecycle hold accompanies the skip (cr round-3 blocker 3): under
+    # the verdict doctrine the hold is provably unnecessary — a rescuable
+    # closure (refusal unfired, budget remaining) reads `active` by the
+    # lifecycle equations (`incompletable` requires repair-exhausted), so no
+    # closure-caused terminal exists for a skipped pass to race; and every
+    # OTHER terminal (won, cancelled, refusal-lost, independent
+    # `failure_when`) is one repair could never prevent — holding those
+    # would suppress an independent verdict.
     for _sa in side_arcs or []:
         if stored_lifecycle(live_reads, _sa) in LIFECYCLE_TERMINALS:
             continue
         if main_at_peak(live_reads, arc) or _drift_responded():
-            # RIGHT-OF-WAY / the one-response quota: the pass doesn't run —
-            # SILENTLY (no receipts). cr D3 re-review blocker 4: a skipped
-            # pass must not let the side lifecycle terminalize a closure the
-            # pass would have rescued — remember it and hold that transition
-            # this turn too (deferred, not lost).
-            if _rescuable_closure(_sa):
-                _side_drift_deferred.add(_sa.arc_id)
-            continue
+            continue  # right-of-way / the one-response quota — silent skip
         _drift_pass(world, p, live_reads=live_reads, trace=trace,
                     provider=provider, turn=turn, arc=_sa, cast=cast,
                     scene=scene, npcs=npcs, horizon=_h,
@@ -5485,12 +5491,6 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             continue
         life = arc_lifecycle(live_reads, sa)
         if life == "active":
-            continue
-        if sa.arc_id in _side_drift_deferred and life != "won":
-            # drift was deferred (peak/quota) or declined-retryable while a
-            # rescuable closure stands — the terminal waits for the repair's
-            # honest chance (cr D3 re-review blocker 4). Silent, no receipt;
-            # a win is never held.
             continue
         set_lifecycle(world, sa, life, turn)
         trace.arc_fallout.append(sa.arc_id)

@@ -284,6 +284,10 @@ def _true_leaves(expr: Expr, reads: Any, out_true: list, out_unknown: list,
     # an atom leaf: evaluate it once and remember where it landed.
     verdict = evaluate(expr, reads)
     leaf: dict = {"kind": type(expr).__name__, "key": _leaf_key(expr)}
+    if getattr(expr, "entity", None):
+        # the addressed entity, machine-readable (cr round-3 blocker 2: a
+        # holder named by a TRUE D-HARD leaf cannot prove an alternative road)
+        leaf["entity"] = expr.entity
     if verdict is Truth.TRUE:
         if isinstance(expr, ClockFired):
             leaf["clock_id"] = expr.clock_id
@@ -550,14 +554,30 @@ def repair_spent(reads: Any, arc_id: str, *, on_error: int = 0) -> int:
     incompletable rule passes 0 (a read glitch never flips an arc terminal)."""
     try:
         from construct.arc.io import beat_from_reads
-        pointers: dict[str, str] = {}
+        pointers: dict[str, str] = {}  # old slug -> replacement id (latest-wins)
         for r in reads.frame_rows(PLOT, entity=arc_id):
             attr = str(getattr(r, "attribute", ""))
             if attr.startswith("beat_superseded_"):
-                pointers[attr] = str(getattr(r, "value", ""))
-        return sum(1 for target in pointers.values()
-                   if target and beat_from_reads(reads, target, frame=PLOT)
-                   is not None)
+                pointers[attr[len("beat_superseded_"):]] = str(
+                    getattr(r, "value", ""))
+        # Walk each chain from its ROOT with the SAME strict-hop rule as the
+        # canonical resolver (cr round-3 blocker 1: spend and active set must
+        # read the same graph): a hop counts only when its target FULLY
+        # materializes under THIS arc; a torn hop stops the chain — links
+        # behind it are unreachable and free, exactly as the walker sees.
+        target_slugs = {t.split(":", 1)[-1] for t in pointers.values() if t}
+        count = 0
+        for root in [slug for slug in pointers if slug not in target_slugs]:
+            cur, seen = root, set()
+            while cur in pointers and cur not in seen:
+                seen.add(cur)
+                target = pointers[cur]
+                if not target or beat_from_reads(
+                        reads, target, frame=PLOT, arc_id=arc_id) is None:
+                    break
+                count += 1
+                cur = target.split(":", 1)[-1]
+        return count
     except Exception:  # noqa: BLE001 — each consumer chooses its safe side
         return on_error
 

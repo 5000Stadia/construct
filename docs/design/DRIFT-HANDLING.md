@@ -348,15 +348,20 @@ becomes literally true:
    turn, the repair declines honestly and the budget survives toward
    `incompletable` — a genuinely-new-route authoring pass is deliberately
    NOT attempted (it would reopen the model-authored-condition surface).
-   **WALKABILITY (cr re-review blocker 2):** an InFrame delivery beat
-   re-mints ONLY when a live delivery channel exists — some cast member
-   holds the clue (the authorized delivery write travels through carriers;
-   the route IS the carrier, so a surviving holder is a genuine alternative
-   road even when the dead trigger named another). No holder →
-   `no_delivery_channel` decline; the refusal clock is the designed
-   backstop for a story that cannot move — an unwalkable re-mint would be
-   an IMMORTAL PENDING beat no machinery could ever close, so it is never
-   minted. `Occurred` beats stay walkable by the player act itself.
+   **WALKABILITY (cr re-review blocker 2; hardened to a LIVE predicate in
+   round 3):** an InFrame delivery beat re-mints ONLY when a live delivery
+   channel exists — some cast holder of the exact clue that (a) still
+   EXISTS in live canon, (b) is LOCATABLE (a containment chain resolves —
+   the runtime half; the static cast blob supplies only the authored
+   half), and (c) is NOT an entity named by a TRUE leaf of the closure
+   witness (the world-state that killed the road cannot itself prove the
+   alternative road — a dead holder cannot carry the clue past his own
+   death; witness leaves persist the atom's `entity` for exactly this
+   read). No live channel → `no_delivery_channel` decline; the refusal
+   clock is the designed backstop for a story that cannot move — an
+   unwalkable re-mint would be an IMMORTAL PENDING beat no machinery could
+   ever close, so it is never minted. `Occurred` beats stay walkable by
+   the player act itself.
    **THE TRIGGER RULE:** a CLOSED beat's re-mint strips `unreachable_if`
    (the trigger fired; copying a still-true trigger re-closes instantly); a
    PENDING beat escalated from repeated D-SOFT keeps its trigger — the
@@ -416,12 +421,16 @@ becomes literally true:
      * authoring-only (sealed reads stay): build/seal-time serialization
        and lint over the authored arc.
      **Live `Session` scope refreshes after a committed repair** (shape
-     settled in the cr re-review, blocker 5): the Session tracks its
-     beat-DERIVED scope subset separately; on a repaired turn it subtracts
-     that subset, adds the live beat set (at the play horizon), and keeps
-     independently-played scope untouched — so replacement-only referents
-     ENTER and superseded-only referents LEAVE persistent scope, while an
-     entity the story put in play through scenes/canon stays visible.
+     settled across cr re-review rounds 2-3): the Session tracks NON-BEAT
+     scope PROVENANCE explicitly — `_independent_scope` = the open scope
+     beyond the beat baseline ∪ the cast roster ∪ the protagonist, grown
+     by reshape/hook `extra_scope` — and on a repaired turn rebuilds scope
+     as `independent ∪ live-beat` (at the play horizon), never by
+     subtracting one set from a merged set. Replacement-only referents
+     ENTER, superseded-only referents LEAVE, and an entity owned by BOTH
+     an old beat and an independent source (a cast member) SURVIVES that
+     beat's supersession — provenance decides, pinned by an overlap
+     oracle.
      Within the repairing turn itself, protection/concealment surfaces are
      already live (every reader threads reads), and the re-mint carries
      the dead beat's own condition, so the in-turn render needs no scope
@@ -454,12 +463,21 @@ becomes literally true:
    batch plus a complete-receipt check is not a transaction; rows can land
    partially, so any separate charge artifact can tear from the repair it
    charges): a repair is spent iff its supersession pointer has a
-   MATERIALIZABLE replacement (`beat_from_reads` succeeds). An orphan
-   replacement beat without its pointer is harmless and free; a pointer
-   without a materializable replacement is a torn commit — retryable,
-   free; an ACTIVE supersession can never be free. Latest-wins per pointer
-   key, restart-safe by construction; `_rN` ids probe past any stranded
-   orphan beat so a torn batch can never collide a retry. `repair_spent`
+   MATERIALIZABLE replacement — where materializable is STRICT and
+   arc-aware (cr round 3: `kind == beat`, `part_of == this arc`, VALID
+   stored phase and weight with no defaulting, parseable `achievable_via`;
+   a replacement missing any of these is invisible). The strict rule lives
+   in ONE place — `beat_from_reads` — and the canonical supersession
+   walker only advances onto a strictly-materializable hop, so the active
+   set, `BeatAchieved`, and the spend count read the SAME chain: a torn
+   link stops the walk at the last good beat, and every link behind it is
+   unreachable and FREE until the tear heals (then all become visible at
+   once, coherently). An orphan replacement beat without its pointer is
+   harmless and free; a pointer without a strictly-materializable
+   replacement is a torn commit — retryable, free; an ACTIVE traversed
+   supersession can never be free. Latest-wins per pointer key,
+   restart-safe by construction; `_rN` ids probe past any stranded orphan
+   beat so a torn batch can never collide a retry. `repair_spent`
    carries a caller-chosen error bias: the budget GATE fails closed (an
    unreadable ledger grants no free repairs) while the incompletable rule
    fails open (a read glitch never flips an arc terminal). The
@@ -470,15 +488,15 @@ becomes literally true:
    (it serves the peak — same logic as the convergence relocate directive);
    repair of a SIDE arc defers while `main_at_peak` OR while the turn's one
    drift response is already spent (silent, no receipt — the right-of-way
-   contract). **Deferred means DEFERRED (cr re-review blocker 4):** a side
-   arc whose drift pass was skipped for peak/quota while it still holds a
-   RESCUABLE closure (a closed REQUIRED beat, budget remaining, refusal
-   NOT fired) has its lifecycle/fallout transition HELD that same turn —
-   silently — so the skip can never race the closure to a terminal the
-   deferred repair would have prevented. A win is never held; a
-   refusal-fired side arc is never held (the verdict doctrine — its
-   conclusion proceeds); a pass that RAN and declined releases the hold
-   (the decline was the honest attempt).
+   contract). **No lifecycle hold accompanies the skip (settled in cr
+   round 3):** under the verdict doctrine the hold is provably unnecessary
+   — a rescuable closure (refusal unfired, budget remaining) reads
+   `active` by the lifecycle equations themselves (`incompletable`
+   requires repair-exhausted), so no closure-caused terminal exists for a
+   skipped pass to race; and every OTHER terminal (won, cancelled,
+   refusal-lost, an independent `failure_when`) is one repair could never
+   prevent — holding those would suppress an independent verdict. Pinned
+   by cancelled + `failure_when` negative controls.
 
 ## 4. Where it runs (ordering corrected — cx r1 finding 2)
 

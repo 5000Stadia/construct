@@ -187,6 +187,18 @@ class Session:
                 self._cast = {n.node_id: n for n in _nodes}
             except Exception:  # a bad cast blob must never break the session
                 self._cast = {}
+        # DRIFT D3 (cr round-3 blocker 4): NON-BEAT scope provenance, tracked
+        # explicitly — never inferred by subtracting one set from a merged
+        # set. At open: everything in the persisted scope beyond the beat
+        # baseline, PLUS the origins we positively know are independent (the
+        # cast roster, the protagonist). Reshape/hook additions join via
+        # `_reload_arc_portfolio`'s extra_scope. `_refresh_beat_scope`
+        # rebuilds scope as independent ∪ live-beat, so an entity owned by
+        # BOTH an old beat and the cast survives that beat's supersession.
+        self._independent_scope: set[str] = (
+            (set(self._scope or []) - self._beat_scope)
+            | set(self._cast or {})
+            | {self._arc.protagonist})
         # The scenario entry epoch (obs #3 half 3): the live-play time origin, ABOVE every
         # pre-play valid_from. Re-established on the executor contextvar at every turn so
         # turn_time (staging supersession + pacing fold) sits on the entry axis. Absent →
@@ -1258,20 +1270,20 @@ class Session:
         return getattr(self, "_last_image", None)
 
     def _refresh_beat_scope(self) -> None:
-        """DRIFT D3 (cr blockers 3 + re-review 5): a committed repair changed
-        the live beat set; refresh the beat-derived session scope so the
-        replacement's referents enter scene scope AND superseded-only
-        referents stop driving it. The tracked `_beat_scope` subset is
-        subtracted (never independently-played scope — an entity the story
-        put in play through scenes/canon stays visible) and the fresh live
-        set added, at the play horizon. Best-effort."""
+        """DRIFT D3 (cr blockers 3 / 5 / round-3 4): a committed repair
+        changed the live beat set; rebuild the session scope from tracked
+        PROVENANCE — `_independent_scope` (cast, protagonist, non-beat open
+        scope, reshape/hook additions) ∪ the live beat set, at the play
+        horizon. Replacement referents enter; superseded-ONLY referents
+        leave; an entity owned by both an old beat and an independent
+        source (a cast member) survives. Best-effort."""
         try:
             from construct.arc.executor import arc_entities
             reads = PorcelainWorldReads(self._world, horizon=self._horizon())
             live: set[str] = set()
             for _a in [self._arc] + list(self._side_arcs or []):
                 live |= arc_entities(_a, reads)
-            scope = (set(self._scope or []) - self._beat_scope) | live
+            scope = set(getattr(self, "_independent_scope", set())) | live
             self._scope = sorted(e for e in scope if reads.has_entity(e))
             self._beat_scope = live
         except Exception:
@@ -1290,11 +1302,14 @@ class Session:
             portfolio = arc_io.portfolio_from_frame(reads)
             self._arc = next((a for a in portfolio if a.arc_id == main_id), self._arc)
             self._side_arcs = [a for a in portfolio if a.arc_id != main_id]
-            scope = set(arc_entities(self._arc, reads)) | set(extra_scope or [])
-            self._scope = sorted(e for e in scope if reads.has_entity(e))
             self._beat_scope = set(arc_entities(self._arc, reads))
             for _sa in self._side_arcs or []:
                 self._beat_scope |= arc_entities(_sa, reads)
+            self._independent_scope = (
+                set(getattr(self, "_independent_scope", set()))
+                | set(extra_scope or []))
+            scope = self._independent_scope | self._beat_scope
+            self._scope = sorted(e for e in scope if reads.has_entity(e))
             logger.info("session arc reloaded after replan: main=%s (+%d reshape entities)",
                         self._arc.arc_id, len(extra_scope or []))
         except Exception:

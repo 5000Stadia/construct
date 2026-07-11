@@ -468,7 +468,7 @@ def active_beats(reads: Any, arc: Arc) -> tuple:
             out.append(b)
             continue
         from construct.arc.io import beat_from_reads
-        rb = beat_from_reads(reads, rid, frame=PLOT)
+        rb = beat_from_reads(reads, rid, frame=PLOT, arc_id=arc.arc_id)
         out.append(rb if rb is not None else b)
     return tuple(out)
 
@@ -627,10 +627,20 @@ def _repair_exhausted(reads: Any, arc: Arc) -> bool:
 def _cancelled(reads: Any, arc: Arc) -> bool:
     """Was this arc explicitly cancelled (a host-written `event:arc_cancelled_<id>`
     in the session frame)? Reserved authoring escape hatch — no P1 path emits it
-    automatically."""
+    automatically. Read via `events()` (a D3 round-3 oracle exposed the
+    latent defect here: an `event:`-classified row never folds through
+    `state()` — the `_last_try_turn` lesson — so the old state() read could
+    never see a naturally-written cancellation); the state() fallback keeps
+    any legacy non-event-classified row honored."""
     slug = arc.arc_id.split(":", 1)[1]
-    return reads.state(f"event:arc_cancelled_{slug}", "kind",
-                       frame=SESSION) == "arc_cancelled"
+    eid = f"event:arc_cancelled_{slug}"
+    try:
+        if any(e.event_id == eid
+               for e in reads.events(kind="arc_cancelled", frame=SESSION)):
+            return True
+    except Exception:  # noqa: BLE001 — fall through to the legacy read
+        pass
+    return reads.state(eid, "kind", frame=SESSION) == "arc_cancelled"
 
 
 def arc_lifecycle(reads: Any, arc: Arc) -> str:

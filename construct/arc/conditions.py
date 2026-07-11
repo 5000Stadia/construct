@@ -267,6 +267,15 @@ def resolve_superseded_beat(world: WorldReads, beat_id: str,
             return cur
         if str(nxt) in seen:  # cycle — fail safe to the original (log-free pure layer)
             return beat_id
+        # STRICT hop (cr D3 round-3 blocker 1): the chain only advances onto
+        # a COMPLETELY materializable replacement (kind/part_of==this arc/
+        # phase/weight/condition all present and valid) — a torn or partial
+        # target stops the walk at the last good beat, so every consumer
+        # (active_beats, BeatAchieved, repair_spent) sees the same chain.
+        from construct.arc.io import beat_from_reads
+        if beat_from_reads(world, str(nxt), plot_frame,
+                           arc_id=str(arc_id)) is None:
+            return cur
         cur = str(nxt)
         seen.add(cur)
 

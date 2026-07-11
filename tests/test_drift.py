@@ -1026,6 +1026,16 @@ def _absence_arc():
     return replace(arc, beats=(beat,))
 
 
+def _stage_aldous(world) -> None:
+    """The live-channel rows for aldous (cr round 3): exists + locatable."""
+    world.porcelain.ingest_structured([
+        {"entity": "person:aldous", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:aldous", "attribute": "in", "value": "place:flat",
+         "value_type": "entity", "valid_from": turn_time(1)},
+    ])
+
+
 def _absence_cast() -> dict:
     return {
         "person:aldous": CastNode(
@@ -1041,6 +1051,7 @@ def test_absence_beat_commits_event_consequences_and_callback(world):
     arc = _absence_arc()
     seed_arc(world, arc)
     reads = _closed_with_witness(world, arc)
+    _stage_aldous(world)
     trace = TurnTrace(turn=5)
     provider = StubProvider([
         {"subjects": ["person:aldous"], "confidence": 0.9},
@@ -1923,6 +1934,33 @@ def _dhard_arc():
     return replace(arc, beats=(beat,))
 
 
+def _dhard_cast() -> dict:
+    """The D-HARD repair cast: the witness-named dead rival PLUS a live
+    second holder of the same clue (the alternative road — cr round 3:
+    walkability is a LIVE channel, so the surviving holder must exist in
+    canon and be locatable; `_stage_clerk` writes those rows)."""
+    cast = dict(_rival_cast())
+    cast["person:clerk"] = CastNode(
+        node_id="person:clerk",
+        holds_clues=(Clue(clue_id="clue:culprit2", pillar_id="pillar:main",
+                          surface_fact=("fact:secret", "culprit",
+                                        "person:rival")),),
+        location="place:flat",
+    )
+    return cast
+
+
+def _stage_clerk(world) -> None:
+    world.porcelain.ingest_structured([
+        {"entity": "place:flat", "attribute": "kind", "value": "place",
+         "timeless": True},
+        {"entity": "person:clerk", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:clerk", "attribute": "in", "value": "place:flat",
+         "value_type": "entity", "valid_from": turn_time(1)},
+    ])
+
+
 def _close_dhard(world, arc):
     world.porcelain.ingest_structured([
         {"entity": "person:rival", "attribute": "role", "value": "dead"},
@@ -1936,6 +1974,7 @@ def _close_dhard(world, arc):
 def test_repair_replace_commits_supersession_and_directive(world):
     arc = _dhard_arc()
     seed_arc(world, arc)
+    _stage_clerk(world)
     reads = _close_dhard(world, arc)
     trace = TurnTrace(turn=5)
     provider = StubProvider([
@@ -1943,7 +1982,7 @@ def test_repair_replace_commits_supersession_and_directive(world):
          "confidence": 0.9},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
-               provider=provider, turn=5, arc=arc, cast=_rival_cast(),
+               provider=provider, turn=5, arc=arc, cast=_dhard_cast(),
                scene=SCENE, npcs=[], horizon=None, minutes_now=None,
                rung=None, fuel=[], spines={})
     assert ("beat:discover", "D-HARD") in trace.drift
@@ -1985,12 +2024,13 @@ def test_repair_schema_grants_no_condition_authority():
 def test_repair_low_confidence_and_dead_referent_lint_decline(world):
     arc = _dhard_arc()
     seed_arc(world, arc)
+    _stage_clerk(world)
     reads = _close_dhard(world, arc)
     # low confidence declines before any commit
     trace = TurnTrace(turn=5)
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=StubProvider([{"hook": "a road", "confidence": 0.1}]),
-               turn=5, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+               turn=5, arc=arc, cast=_dhard_cast(), scene=SCENE, npcs=[],
                horizon=None, minutes_now=None, rung=None, fuel=[], spines={})
     assert trace.repairs == []
     assert drift.repair_spent(reads, "arc:main") == 0
@@ -2011,8 +2051,8 @@ def test_repair_low_confidence_and_dead_referent_lint_decline(world):
     assert closed == ["beat:ghostly"]
     # a carrier HOLDS the ghost fact (walkability passes) — the lint gate is
     # what must catch the never-established referent
-    ghost_cast = {"person:rival": CastNode(
-        node_id="person:rival", location="place:flat",
+    ghost_cast = {"person:clerk": CastNode(
+        node_id="person:clerk", location=SCENE,
         holds_clues=(Clue(clue_id="clue:g", pillar_id="pillar:main",
                           surface_fact=("fact:never_made", "culprit",
                                         "person:rival")),))}
@@ -2067,6 +2107,7 @@ def test_repair_spend_truth_is_the_coherent_graph(world, monkeypatch):
     # failure never uncharges a committed repair.
     arc = _dhard_arc()
     seed_arc(world, arc)
+    _stage_clerk(world)
     reads = _close_dhard(world, arc)
     # (a) pointer only — no beat rows behind it
     _supersede(world, "arc:main", "ghost", "beat:ghost_r1")
@@ -2087,7 +2128,7 @@ def test_repair_spend_truth_is_the_coherent_graph(world, monkeypatch):
     trace = TurnTrace(turn=6)
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=StubProvider([{"hook": "a road", "confidence": 0.9}]),
-               turn=6, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+               turn=6, arc=arc, cast=_dhard_cast(), scene=SCENE, npcs=[],
                horizon=None, minutes_now=None, rung=None, fuel=[], spines={})
     assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
     assert drift.repair_spent(reads, "arc:main") == 2
@@ -2136,6 +2177,7 @@ def test_repeated_dsoft_escalates_to_repair(world):
     arc = _absence_arc()          # pending beat with a live ClockFired trigger
     seed_arc(world, arc)
     reads = PorcelainWorldReads(world)
+    _stage_aldous(world)
     _mark_development(world, 0.0, 0)                      # quiet accrues from 0
     drift.mark_relocation(world, "beat:discover", None, "place:flat", 3)  # relocated once
     trace = TurnTrace(turn=6)
@@ -2159,6 +2201,7 @@ def test_repair_id_skips_a_stranded_orphan_beat(world):
     # batch) must never cause an `_rN` id collision on retry.
     arc = _dhard_arc()
     seed_arc(world, arc)
+    _stage_clerk(world)
     reads = _close_dhard(world, arc)
     world.porcelain.ingest_structured(
         beat_to_items(replace(arc.beats[0], beat_id="beat:discover_r1",
@@ -2166,7 +2209,7 @@ def test_repair_id_skips_a_stranded_orphan_beat(world):
     trace = TurnTrace(turn=5)
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=StubProvider([{"hook": "a road", "confidence": 0.9}]),
-               turn=5, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+               turn=5, arc=arc, cast=_dhard_cast(), scene=SCENE, npcs=[],
                horizon=None, minutes_now=None, rung=None, fuel=[], spines={})
     assert trace.repairs == [("beat:discover", "beat:discover_r2", "replace")]
 
@@ -2261,7 +2304,9 @@ def _seed_side(world, side: Arc) -> None:
          "timeless": True},
         {"entity": "person:aldous", "attribute": "kind", "value": "person",
          "timeless": True},
-    ])  # the mechanic's referents exist — the repair lint gate must pass
+        {"entity": "person:aldous", "attribute": "in", "value": "place:flat",
+         "value_type": "entity", "valid_from": turn_time(1)},
+    ])  # referents exist AND the holder is live+locatable (round-3 walkability)
 
 
 def test_same_turn_closure_ledger_and_the_verdict_doctrine(world):
@@ -2458,12 +2503,24 @@ def test_session_scope_refresh_picks_up_live_beat_referents(world):
     _supersede(world, "arc:main", "discover", "beat:discover_r1")
     from construct.arc.executor import arc_entities as _ae
     pre = set(_ae(arc))                              # the sealed beat-derived set
-    dummy = SimpleNamespace(_world=world, _arc=arc, _side_arcs=[],
-                            _scope=sorted({"place:study"} | pre),
-                            _beat_scope=pre, _horizon=lambda: None)
+    # person:cast_only: referenced by the OLD beat *and* independently owned
+    # (a cast member) — cr round-3 blocker 4's overlap case. It must survive
+    # the beat's supersession because provenance, not subtraction, decides.
+    world.porcelain.ingest_structured([
+        {"entity": "person:cast_only", "attribute": "kind", "value": "person",
+         "timeless": True},
+    ])
+    pre_with_cast = pre | {"person:cast_only"}
+    dummy = SimpleNamespace(
+        _world=world, _arc=arc, _side_arcs=[],
+        _scope=sorted({"place:study", "person:cast_only"} | pre_with_cast),
+        _beat_scope=pre_with_cast,                   # the old beat named it too
+        _independent_scope={"place:study", "person:cast_only"},
+        _horizon=lambda: None)
     Session._refresh_beat_scope(dummy)
     assert "fact:hidden_route" in dummy._scope       # replacement referent IN
     assert "place:study" in dummy._scope             # independently-played scope kept
+    assert "person:cast_only" in dummy._scope        # overlap: cast provenance wins
     assert dummy._beat_scope == set(_ae(arc, PorcelainWorldReads(world)))
     # cr re-review blocker 5: a superseded-ONLY referent LEAVES scope — the
     # old beat's fact entity was in play only through the beat (the shape's
@@ -2550,6 +2607,7 @@ def test_side_deferral_holds_when_main_response_consumed_the_quota(world):
     # HELD this turn rather than racing to fallout unrepaired.
     arc = _dhard_arc()
     seed_arc(world, arc)
+    _stage_clerk(world)                # the main repair's live channel
     side = _side_arc()
     _seed_side(world, side)
     world.porcelain.ingest_structured([
@@ -2562,12 +2620,141 @@ def test_side_deferral_holds_when_main_response_consumed_the_quota(world):
         {"hook": "A clerk from the assizes arrives.", "confidence": 0.9},
         {"prose": "The evening holds."},
     ])
-    r = run_turn(world, arc, provider, "I wait.", turn=2, cast=_side_cast(),
+    cast = {**_side_cast(), **_dhard_cast()}
+    r = run_turn(world, arc, provider, "I wait.", turn=2, cast=cast,
                  side_arcs=[side])
     reads = PorcelainWorldReads(world)
     # the MAIN beat took the turn's one response…
     assert r.trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
-    # …and the side closure was deferred, its terminal held, nothing lost
+    # …and the side closure was deferred with NO terminal to race: a
+    # rescuable closure (refusal unfired, budget remaining) reads `active`
+    # by the lifecycle equations themselves (cr round-3 blocker 3 — the
+    # explicit hold was removed as unnecessary under the verdict doctrine)
     assert "beat:sidegoal" in r.trace.beats_closed
     assert r.trace.arc_fallout == []
     assert stored_lifecycle(reads, side) == "active"
+    assert drift.repair_spent(reads, "arc:side") == 0     # deferred, not spent
+
+
+def test_torn_subset_replacement_is_invisible_and_free(world):
+    # cr round-3 blocker 1: "materializable" = the COMPLETE membership row
+    # set. A replacement missing only `part_of` is invisible to the walker,
+    # free to the budget, and the active set fails open to the prior beat —
+    # and a COMPLETE second link behind the torn first link stays invisible
+    # too (spend and active set read the same graph, never tear apart).
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    # r1: all rows EXCEPT part_of
+    r1 = Beat("beat:discover_r1", Phase.CLIMAX, Weight.REQUIRED,
+              achievable_via=arc.beats[0].achievable_via)
+    rows = [r for r in beat_to_items(r1, "arc:main")
+            if r["attribute"] != "part_of"]
+    world.porcelain.ingest_structured(rows, frame=PLOT)
+    _supersede(world, "arc:main", "discover", "beat:discover_r1")
+    assert drift.repair_spent(reads, "arc:main") == 0      # torn = free
+    assert [b.beat_id for b in active_beats(reads, arc)] == ["beat:discover"]
+    # a COMPLETE r2 chained behind the torn r1: still unreachable, still free
+    r2 = Beat("beat:discover_r2", Phase.CLIMAX, Weight.REQUIRED,
+              achievable_via=arc.beats[0].achievable_via)
+    world.porcelain.ingest_structured(beat_to_items(r2, "arc:main"), frame=PLOT)
+    _supersede(world, "arc:main", "discover_r1", "beat:discover_r2")
+    assert drift.repair_spent(reads, "arc:main") == 0
+    assert [b.beat_id for b in active_beats(reads, arc)] == ["beat:discover"]
+    # healing the torn link makes BOTH links visible at once, coherently
+    world.porcelain.ingest_structured([
+        {"entity": "beat:discover_r1", "attribute": "part_of",
+         "value": "arc:main", "timeless": True}], frame=PLOT)
+    assert drift.repair_spent(reads, "arc:main") == 2
+    assert [b.beat_id for b in active_beats(reads, arc)] == ["beat:discover_r2"]
+
+
+def test_witness_named_holder_cannot_license_repair(world):
+    # cr round-3 blocker 2, the dead-holder regression: the rival EXISTS in
+    # canon and is LOCATABLE, and the static cast blob still lists him as
+    # the clue holder — but the TRUE D-HARD witness names him, so he cannot
+    # prove the alternative road. Decline, not a re-mint delivered by the
+    # world-state that killed the route.
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:flat", "attribute": "kind", "value": "place",
+         "timeless": True},
+        {"entity": "person:rival", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:rival", "attribute": "in", "value": "place:flat",
+         "value_type": "entity", "valid_from": turn_time(1)},
+    ])
+    reads = _close_dhard(world, arc)
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=StubProvider([]), turn=5, arc=arc,
+               cast=_rival_cast(), scene=SCENE, npcs=[], horizon=None,
+               minutes_now=None, rung=None, fuel=[], spines={})
+    assert trace.repairs == []
+    assert drift.repair_spent(reads, "arc:main") == 0
+    reasons = {r.value for e in reads.events(kind="repair_declined",
+                                             frame=SESSION)
+               for r in reads.frame_rows(SESSION, entity=e.event_id)
+               if r.attribute == "reason"}
+    assert "no_delivery_channel" in reasons
+
+
+def test_side_cancelled_verdict_is_never_held(world, monkeypatch):
+    # cr round-3 blocker 3, negative control: an explicit CANCELLED verdict
+    # is independent of any closure — at main peak, with a rescuable-looking
+    # closure standing, the cancellation still transitions and reports.
+    import construct.turnloop as tl
+    monkeypatch.setattr(tl, "main_at_peak", lambda *a, **k: True)
+    arc = make_arc()
+    seed_arc(world, arc)
+    side = _side_arc()
+    _seed_side(world, side)
+    world.porcelain.ingest_structured([
+        {"entity": "person:rival", "attribute": "role", "value": "dead"},
+    ])
+    world.porcelain.ingest_structured([
+        {"entity": "event:arc_cancelled_side", "attribute": "kind",
+         "value": "arc_cancelled", "valid_from": turn_time(1)},
+    ], frame="session:main")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The evening holds."},
+    ])
+    r = run_turn(world, arc, provider, "I wait.", turn=2, cast=_side_cast(),
+                 side_arcs=[side], generate=False)
+    reads = PorcelainWorldReads(world)
+    assert "beat:sidegoal" in r.trace.beats_closed          # a closure stood…
+    assert "arc:side" in r.trace.arc_fallout                # …the verdict fired anyway
+    assert stored_lifecycle(reads, side) == "cancelled"
+
+
+def test_side_failure_when_verdict_is_never_held(world, monkeypatch):
+    # cr round-3 blocker 3, second negative control: an independent
+    # `failure_when` loss transitions at main peak despite a standing
+    # closure — repair could never change it, so nothing holds it.
+    import construct.turnloop as tl
+    monkeypatch.setattr(tl, "main_at_peak", lambda *a, **k: True)
+    arc = make_arc()
+    seed_arc(world, arc)
+    side = replace(_side_arc(),
+                   failure_when=StateIs("fact:sidenote", "burned", "true"))
+    _seed_side(world, side)
+    world.porcelain.ingest_structured([
+        {"entity": "person:rival", "attribute": "role", "value": "dead"},
+        {"entity": "fact:sidenote", "attribute": "burned", "value": "true"},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The evening holds."},
+    ])
+    r = run_turn(world, arc, provider, "I wait.", turn=2, cast=_side_cast(),
+                 side_arcs=[side], generate=False)
+    reads = PorcelainWorldReads(world)
+    assert "beat:sidegoal" in r.trace.beats_closed
+    assert "arc:side" in r.trace.arc_fallout
+    assert stored_lifecycle(reads, side) == "lost"

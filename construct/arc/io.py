@@ -188,26 +188,40 @@ def beat_to_items(beat: Beat, arc_id: str, frame: str = "plot:main") -> list[dic
     return _with_frame_and_types(_beat_rows(beat, arc_id), frame)
 
 
-def beat_from_reads(reads, beat_id: str, frame: str = "plot:main") -> Beat | None:
+def beat_from_reads(reads, beat_id: str, frame: str = "plot:main",
+                    arc_id: str | None = None) -> Beat | None:
     """Materialize ONE beat from its plot rows (the replacement-discovery
-    read `active_beats` uses on BOTH load paths — frame reconstruction and
-    the legacy `arc_cache`, which never bakes supersessions in). Returns
-    None when the rows are absent/incomplete — the caller fails open to the
-    sealed beat (a repair that cannot be read is a repair that never
-    happened, never a crash)."""
+    read `active_beats`, the supersession walker, and `repair_spent` all
+    share). STRICT (cr D3 round-3 blocker 1 — a partially-landed
+    replacement must fail open to the prior beat and stay budget-free, and
+    "materializable" must mean the COMPLETE membership row set, or the
+    walker and the spend count tear apart): requires `kind == "beat"`,
+    `part_of` present (and == `arc_id` when the caller supplies one), a
+    VALID stored phase and weight (no `_safe_*` defaulting here — those
+    tolerances are for sealed-arc loads, never for repair discovery), and a
+    parseable `achievable_via`. Returns None on any miss — the caller fails
+    open to the sealed/prior beat (a repair that cannot be fully read is a
+    repair that never happened, never a crash)."""
     def get(attribute):
         return reads.state(beat_id, attribute, frame=frame)
 
+    if get("kind") != "beat":
+        return None
+    stored_arc = get("part_of")
+    if not stored_arc or (arc_id is not None and str(stored_arc) != arc_id):
+        return None
     achievable = get("achievable_via")
     if not achievable:
         return None
     try:
+        phase = Phase(get("beat_phase"))
+        weight = Weight(get("weight"))
         unreachable = get("unreachable_if")
         correlates = get("correlates")
         return Beat(
             beat_id=beat_id,
-            phase=_safe_phase(get("beat_phase"), beat_id),
-            weight=_safe_weight(get("weight"), beat_id),
+            phase=phase,
+            weight=weight,
             achievable_via=expr_from_obj(json.loads(achievable)),
             unreachable_if=(expr_from_obj(json.loads(unreachable))
                             if unreachable else None),
