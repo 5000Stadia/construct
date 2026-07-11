@@ -1428,6 +1428,18 @@ class TestFullTurn:
         assert "already seen and engaged" in cohorts.RENDER_STYLE.lower() or \
                "ALREADY seen and engaged" in cohorts.RENDER_STYLE
         assert "ANSWER WHAT THEY ASKED" in cohorts.RENDER_STYLE
+        # DESCRIBED-ONCE PERMANENCE (founder ruling 2026-07-11), both halves:
+        # within a stay, established things persist silently (re-mention only
+        # on status change / interaction / spatial relevance); on RE-ENTRY the
+        # description legitimately kicks back in (main strokes, and a second
+        # look may deepen) — the clause must never fight the GROUND-on-entry
+        # rule it sits beside.
+        assert "DESCRIBED ONCE, IT STAYS" in cohorts.RENDER_STYLE
+        assert "status changes, someone interacts with it" in cohorts.RENDER_STYLE
+        assert "unchanged scene earns no fresh inventory" in cohorts.RENDER_STYLE
+        assert "ON RE-ENTRY" in cohorts.RENDER_STYLE
+        assert "second look MAY go deeper" in cohorts.RENDER_STYLE
+        assert "GROUND" in cohorts.RENDER_STYLE       # the sibling rule intact
 
     def test_destination_directive_carries_foreshadow_restraint(self, world):
         # FOUNDER live (the "poltergeist fibers everywhere / NPCs acting weird" fixation, mechanical):
