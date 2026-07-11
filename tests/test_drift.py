@@ -3344,3 +3344,67 @@ def test_repair_threads_mixed_polarity_same_class_keeps_both(world):
     pr = [p_ for p_, _sc, _t in prov.calls if "FORECLOSED" in p_][0]
     assert "reaching its mark first" in pr
     assert "remaining SHORT of its mark" in pr
+
+
+def test_not_inframe_mechanic_needs_no_carrier_and_gets_absence_context(world):
+    # cr InFrame-polarity round: Not(InFrame) is the ABSENCE of player
+    # knowledge (STORY-SHAPE-GAMBIT uses it) — no delivery channel required,
+    # no no_delivery_channel decline, a distinct value-free absence line.
+    from construct.arc.conditions import Not as _Not
+    arc = _dhard_arc()
+    ni = replace(arc.beats[0],
+                 achievable_via=_Not(InFrame(f"knows:{PLAYER}", "fact:hidden",
+                                             "known", "true")))
+    arc_a = replace(arc, beats=(ni,))
+    seed_arc(world, arc_a)
+    world.porcelain.ingest_structured([
+        {"entity": "fact:hidden", "attribute": "kind", "value": "fact",
+         "timeless": True}])
+    reads = _close_dhard(world, arc_a)
+    prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=prov, turn=5, arc=arc_a, cast={},  # EMPTY cast
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    reasons = {r.value for e in reads.events(kind="repair_declined",
+                                             frame=SESSION)
+               for r in reads.frame_rows(SESSION, entity=e.event_id)
+               if r.attribute == "reason"}
+    assert "no_delivery_channel" not in reasons
+    pr = [p_ for p_, _sc, _t in prov.calls if "FORECLOSED" in p_][0]
+    assert "remaining UNLEARNED" in pr
+    assert "presently at" not in pr                    # no carrier lines
+    assert "true" not in pr.split("UNLEARNED", 1)[1].split("\n")[0]
+
+
+def test_mixed_inframe_polarity_gates_only_the_positive_fact(world):
+    # cr pin 2: AllOf(positive InFrame, Not(InFrame)) — only the positive
+    # fact requires a live holder; the prompt retains BOTH the carrier line
+    # and the negative frame-absence line.
+    from construct.arc.conditions import AllOf as _AllOf, Not as _Not
+    arc = _dhard_arc()
+    mixed = replace(arc.beats[0],
+                    achievable_via=_AllOf((
+                        InFrame(f"knows:{PLAYER}", "fact:secret", "culprit",
+                                "person:rival"),
+                        _Not(InFrame(f"knows:{PLAYER}", "fact:hidden",
+                                     "known", "true")))))
+    arc_m = replace(arc, beats=(mixed,))
+    seed_arc(world, arc_m)
+    world.porcelain.ingest_structured([
+        {"entity": "fact:hidden", "attribute": "kind", "value": "fact",
+         "timeless": True}])
+    _stage_clerk(world)                    # the positive fact's live holder
+    reads = _close_dhard(world, arc_m)
+    prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=prov, turn=5, arc=arc_m, cast=_dhard_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    pr = [p_ for p_, _sc, _t in prov.calls if "FORECLOSED" in p_][0]
+    assert "presently at" in pr                        # the positive carrier
+    assert "remaining UNLEARNED" in pr                 # the negative absence

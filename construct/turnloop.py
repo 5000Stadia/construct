@@ -2811,7 +2811,11 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     # walkable by the player act itself.
     from construct.arc.conditions import InFrame as _InFrame, Occurred as _Occurred
     _pairs = list(_polar_atoms(beat.achievable_via))
-    _atoms = [a for a, _pos in _pairs if isinstance(a, _InFrame)]
+    # POSITIVE-polarity InFrame leaves only (cr: a Not(InFrame) mechanic is
+    # the ABSENCE of player knowledge — it needs no delivery channel, and
+    # delivering the fact would falsify it; requiring a holder there blocked
+    # a valid repair before the cohort was ever called).
+    _atoms = [a for a, _pos in _pairs if isinstance(a, _InFrame) and _pos]
     live_holders: list[str] = []  # empty for non-carrier mechanics
     if _atoms:
         _invalidated = set((witness or {}).get("driving_entities") or [])
@@ -2882,7 +2886,12 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                                "stands")
             for _a, _pos in _pairs:
                 if isinstance(_a, _InFrame):
-                    continue  # the live carrier lines below carry these
+                    if not _pos:
+                        threads.append(
+                            "the route depends on certain knowledge "
+                            "remaining UNLEARNED — nothing is here to "
+                            "deliver, and delivering it would close the road")
+                    continue  # positive: the live carrier lines carry these
                 if isinstance(_a, _Occurred):
                     if not _pos:
                         threads.append(
