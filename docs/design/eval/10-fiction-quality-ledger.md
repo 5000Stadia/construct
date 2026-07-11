@@ -113,6 +113,53 @@ fixed in one line, full arc green on run 2. The probe itself also
 mis-framed the on_expiry license in run 1 (probe bug, canon vs plot) —
 worth remembering that acceptance probes are code too.
 
+## 2026-07-11 — DRIFT D3 live acceptance (The Wet Mill, alternative-path repair)
+Logs: `logs/probe_d3-1783774728.md` / `-1783776248.md` (runs 1 and 3; run 2
+intermediate — see mechanism notes)
+
+**Grade: A−**
+
+What read well: the REPAIR ITSELF is seamless — the whole point of D3, and
+the strongest seam-invisibility result of the program. T2's re-mint directive
+("Brann's soaked boots and the mill tally pinned to the beam still match the
+missing sacks no wagon ever hauled") arrived woven INTO the player's own
+tally-work — the new road reads as something the assessor's method uncovered,
+not as the world announcing a repair. T4's no-road turn is quietly excellent:
+"the hand behind part of it stays unnamed... The unease sits there like damp
+in cloth" — a structural DECLINE rendered as honest investigative dead air.
+T5's close ("The case shuts with a dull click") lands the refusal with
+proportion. Texture varied across quiet turns; no idle repetition this run —
+the Sef habit finally absent.
+
+Felt off:
+1. **The dead man kept talking** — the headline finding. The probe killed
+   Brann OFF-SCREEN with a bare canon `alive=false` row (no narrated death,
+   no body staging), and the MACHINERY held perfectly: no clue delivered,
+   no npc_turn cohort fired, no receipt written. But the NARRATOR — whose
+   scene brief still listed Brann present — improvised his dialogue at T3
+   and had him produce a tally board at T5. Authority never leaked; the
+   FICTION contradicted canon. Partly a probe-shaped artifact (organic
+   deaths arrive narrated), but the class is real: the narrator's scene
+   brief does not surface person liveness, while the imagery path already
+   renders "the body of X". Filed as the narrator-liveness follow-up
+   (task #8).
+2. Watch item: T5's Brann beat was also doing DM-work the drift machinery
+   had honestly declined (proffering new evidence after no_delivery_channel)
+   — the narrator compensating for a world that had gone quiet. Consistent
+   with the improv leash holding at the FACT layer (nothing promoted onto
+   protected keys); noted for the critic campaign.
+
+Mechanism notes (for the record): run 1 exposed a LIVE-ONLY tuning defect —
+the repair cohort was fed `threads=[]` ("keep the call lean"), so the real
+model was told "(none live)" and honestly declined low_confidence where the
+stub's canned 0.9 sailed through; fixed by feeding the live channel itself
+(host-built holder/role/location lines) as the threads. Run 2 exposed a
+PROBE defect of the D2 class (probes are code too): the hand-authored
+fact entity lacked its `kind` row, failed `has_entity`, and the lint gate
+honestly declined the re-mint as impossible. Both declines were the
+machinery telling the truth about bad inputs — the failure modes read as
+DESIGNED. Run 3: 16/16.
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from

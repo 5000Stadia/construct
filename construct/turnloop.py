@@ -2821,10 +2821,15 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         for _nid, n in _citer:
             for c in (getattr(n, "holds_clues", ()) or ()):
                 holders.setdefault(c.surface_fact, []).append(_nid)
-        walkable = all(
-            any(_live_channel(h)
-                for h in holders.get((a.entity, a.attribute, a.value), []))
-            for a in _atoms)
+        live_holders: list[str] = []
+        walkable = True
+        for a in _atoms:
+            _live = [h for h in holders.get((a.entity, a.attribute, a.value), [])
+                     if _live_channel(h)]
+            if not _live:
+                walkable = False
+                break
+            live_holders.extend(h for h in _live if h not in live_holders)
         if not walkable:
             drift.record_repair_declined(world, turn, beat_id,
                                          "no_delivery_channel")
@@ -2835,7 +2840,24 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     hook = ""
     if mode == "replace":
         try:
-            threads = []  # live threads are optional enrichment; keep the call lean in D3
+            # LIVE THREADS = the surviving channel itself, host-built from
+            # canon (D3 live acceptance finding, probe_d3 run 1: with
+            # threads=[] the real model was TOLD "(none live)" and honestly
+            # declined low_confidence — the walkable road must be described
+            # to the cohort that narrates it opening).
+            threads = []
+            for _h in live_holders:
+                try:
+                    _hn = str(live_reads.state(_h, "name")
+                              or _h.split(":", 1)[-1].replace("_", " "))
+                    _hr = str(live_reads.state(_h, "role") or "")
+                    _hl = (p.locate(_h, as_of=horizon) or [None])[0]
+                    _hln = (str(live_reads.state(_hl, "name") or _hl)
+                            if _hl else "")
+                    threads.append(", ".join(x for x in (
+                        _hn, _hr, f"presently at {_hln}" if _hln else "") if x))
+                except Exception:  # noqa: BLE001 — one thread line, best-effort
+                    threads.append(_h.split(":", 1)[-1].replace("_", " "))
             dest_desc = (f"{getattr(beat.achievable_via, 'entity', beat_id)} · "
                          f"{getattr(beat.achievable_via, 'attribute', 'delivery')}")
             pick = cohorts.repair_arc(provider, beat_id, dest_desc, threads,
