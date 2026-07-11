@@ -18,9 +18,10 @@ An interactive-fiction engine where a persistent world (ingested from a book, or
 
 ## Communication channel — AgentPost (the sole actionable channel)
 
-You are agent **c** in a coordination mesh with **Kernos CC** (k), **PB** (pb, the engine), and **Cx** (cx, the reviewer). All actionable inter-agent communication — specs, decisions, code reviews, questions, replies — flows through **AgentPost**:
+You are agent **c** in a coordination mesh with **Kernos CC** (k), **PB** (pb, the engine), **Construct Review** (cr, the dedicated Codex reviewer), and **Cx** (cx, the AgentPost owner). Route Construct specification, code, and test-plan reviews to **cr**. Route AgentPost architecture and implementation work to **cx**. All actionable inter-agent communication — specs, decisions, code reviews, questions, replies — flows through **AgentPost**:
 
 - Identity: `agentpost identify --cwd "$PWD"` resolves you (c). Route with `agentpost identities` / `agentpost resolve LABEL` / `agentpost agents-find QUERY`; send with the high-level `agentpost message` / `question` / `reply` (low-level `send`/`ask` remain compatible).
+- Review routing: address new Construct review requests to `cr`, not `cx`. The reviewer launches from this repository with `agentpost codex --agent cr`; the explicit mailbox keeps its context separate from both the Construct owner and AgentPost development.
 - Claim exact Message-IDs (`agentpost read` then `agentpost next`) only when starting the work they request. Reading is non-destructive; only an explicit claim moves mail.
 - Use `--notify idle` routinely; `immediate` only for active blockers. Blockers and deliberation are messages, never silent waits. Bound every external call (~10 min) and report if it stalls.
 - Tag subjects: **[STATUS]** / **[DECISION]** / **[BLOCKED]** / **[MILESTONE]**. The founder is in the loop on all exchanges (Audience). Surface genuine forks to him; obvious calls you make and record.
