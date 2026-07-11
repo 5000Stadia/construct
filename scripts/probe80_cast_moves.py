@@ -133,7 +133,9 @@ def _author() -> None:
         "style": ("Rural nocturne, plain prose. The household MOVES: Edda the housemaid "
                   "is just gathering her shawl to go out to the well house; Garrick the "
                   "groundskeeper is due in from the yard any moment, stamping the cold off. "
-                  "Let comings and goings happen naturally in the narration."),
+                  "Let comings and goings happen naturally in the narration — and when a "
+                  "task calls someone away, they GO, decisively, the narration naming "
+                  "where (the well house, the yard), never lingering at thresholds."),
         "intro": ("You are Vale, a surveyor lodging the night at Harrow Grange. You sit "
                   "by the range fire in the back kitchen with Nan the cook, who is mending "
                   "by the lamp. Edda the housemaid is gathering her shawl to fetch water "
@@ -192,13 +194,12 @@ def main() -> None:
     for i, (move, label) in enumerate([
         ("I call toward the yard door: 'Come in out of the cold, man!'",
          "T1: invite the arrival (tie-break probe)"),
+        ("I ask Nan whether the morning water is drawn yet.",
+         "T2: engage NAN — Edda (unengaged) has her reason to go"),
         ("I sit back and watch the fire a while.",
-         "T2: stay-by-hearth negative (no false departures)"),
-        ("I bid Edda goodnight: 'Go on to the well house before the frost thickens — "
-         "I'll manage the fire.'",
-         "T3: firm send-off (engaged — same-turn exit must drop)"),
-        ("I turn my chair to the fire and let the household get on with its night.",
-         "T4: fully passive — Edda's exit may now license"),
+         "T3: fully passive — the exit may land here if not at T2"),
+        ("I look about the kitchen and note who is still with me.",
+         "T4: presence check — the departed stay departed"),
     ], start=1):
         r = _turn(s, move, label)
         all_moves.extend(getattr(r.trace, "cast_moves", []) or [])
@@ -209,8 +210,11 @@ def main() -> None:
     s.close()
 
     _log("\n  VERDICT:")
-    out_moves = [m for m in all_moves if m[1] == "person:edda"]
-    in_moves = [m for m in all_moves if m[1] == "person:garrick"]
+    out_moves = [m for m in all_moves if m[1] == "person:edda"
+                 and (m[0] == "unbound_exit"
+                      or (m[0] == "bound_move" and m[2] not in ("", "place:kitchen")))]
+    in_moves = [m for m in all_moves if m[1] == "person:garrick"
+                and m[0] == "bound_move" and m[2] == "place:kitchen"]
     rule5 = [d for d in all_drops if d[0] == "person:edda" and d[2] == "engaged_this_turn"]
     if rule5:
         _log("  RULE 5 LIVE — Edda's same-turn narrated exit while engaged was DROPPED"
@@ -223,7 +227,11 @@ def main() -> None:
         if in_moves and garrick_final == "place:kitchen":
             _log("  ARRIVAL TRACKED — Garrick's narrated entry is canon presence truth.")
         if out_moves:
-            _log("  DEPARTURE TRACKED — Edda's narrated exit committed (bound or event-only).")
+            _log("  DEPARTURE TRACKED (LANE-OWNED) — a committed transition out of the "
+                 f"scene: {out_moves}")
+        else:
+            _log("  DEPARTURE NOT OBSERVED through the lane this run (same-scene "
+                 "restatements and the dismissal channel do NOT count).")
     else:
         _log("  LANE QUIET — the narrator authored no extractable movement this run;")
         _log("  inspect the prose + drops above (drops show gate reasons if candidates arose).")
