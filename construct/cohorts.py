@@ -3073,57 +3073,40 @@ def relocate_pick(provider: Provider, target: dict, holder: str, scene: str,
 ABSENCE_SCHEMA = {
     "type": "object",
     "properties": {
-        "rows": {"type": "array", "maxItems": 2,
-                 "description": "1-2 concrete world-facts — entity/attribute/value, "
-                                "entities ONLY from the ids given (never invent an "
-                                "id), each DECLARED lapse or occurrence",
-                 "items": {"type": "object",
-                           "properties": {"entity": {"type": "string"},
-                                          "attribute": {"type": "string"},
-                                          "value": {"type": "string"},
-                                          "claim": {"type": "string",
-                                                    "enum": ["lapse", "occurrence"],
-                                                    "description": "lapse = the chance "
-                                                    "passed / the absence was noted; "
-                                                    "occurrence = asserts the staged "
-                                                    "moment HAPPENED (permitted ONLY "
-                                                    "when an AUTHORED OUTCOME is given "
-                                                    "above — the host discards "
-                                                    "unlicensed occurrence rows)"}},
-                           "required": ["entity", "attribute", "value", "claim"]}},
+        "subjects": {"type": "array", "maxItems": 2,
+                     "description": "1-2 ids FROM THE LIST GIVEN of who noticed / "
+                                    "carries the lapse — the HOST writes the facts; "
+                                    "you only choose who they attach to"},
         "callback_line": {"type": "string",
                           "description": "ONE line for the narrator to weave in when "
                                          "the player next touches the affected people "
                                          "or places — a felt consequence, never an "
                                          "announcement"},
         "confidence": {"type": "number",
-                       "description": "0.0-1.0 — how grounded these consequences are; "
-                                      "LOW if the lapse establishes nothing concrete"},
+                       "description": "0.0-1.0 — how grounded this lapse is; LOW if "
+                                      "nobody here plausibly registers it"},
     },
-    "required": ["rows", "callback_line", "confidence"],
+    "required": ["subjects", "callback_line", "confidence"],
 }
 
 
 def absence_consequence(provider: Provider, target: dict, staged_scene: str,
-                        known_ids: list[str], spines: list[str],
+                        candidates: list[str], spines: list[str],
                         on_expiry: str, protagonist: str) -> dict:
-    """DRIFT-HANDLING.md §3 R3 + §2's occurrence rule: the missed moment's
-    consequences. `target` carries only the mechanic's entity/attribute (never
-    the hidden value — concealment). THE OCCURRENCE RULE IS BINDING: a fired
-    deadline proves only that the WINDOW closed. Without an authored
-    `on_expiry` note (empty string here), the rows must be LAPSE-facts — the
-    opportunity passing, the absence being noticed — never a claim that the
-    staged moment itself HAPPENED. The caller referent-checks every returned
-    row against canon (this prompt informs, it never licenses)."""
+    """DRIFT-HANDLING.md §3 R3 + §2's occurrence rule, cr-hardened: the model
+    NEVER authors fact semantics here — the host constructs every canon row
+    from closed lapse predicates (and, when licensed, commits the authored
+    `on_expiry` note VERBATIM as the only occurrence value). A relabeling
+    attack is structurally impossible: this cohort only picks WHICH allowed
+    subjects the lapse attaches to and phrases the deferred callback line.
+    `target` carries only the mechanic's entity/attribute (concealment)."""
     _spines = "\n".join(f"- {s}" for s in spines) or "(no one of note)"
-    _ids = ", ".join(known_ids)
-    _occ = (f"\nAUTHORED OUTCOME (this, and only this, may be asserted as having "
-            f"HAPPENED — such rows are declared claim=occurrence): {on_expiry}\n"
-            if on_expiry else
-            "\nNO authored outcome exists: the moment's window closed, nothing "
-            "more is known — EVERY row must be declared claim=lapse (the chance "
-            "passed, the absence was noted), NEVER a claim about what happened "
-            "instead; the host DISCARDS occurrence rows outright here.\n")
+    _cands = ", ".join(candidates)
+    _occ = (f"\nAUTHORED OUTCOME (the host records this verbatim; nothing else "
+            f"about what happened may be implied): {on_expiry}\n" if on_expiry else
+            "\nNO authored outcome exists — the window closed, nothing more is "
+            "known; the callback line must speak only of the LAPSE (the chance "
+            "passed, the absence noted), never of what happened instead.\n")
     return complete_sync(provider,
         f"A story moment the player never attended has EXPIRED — its window closed "
         f"while they were elsewhere. THE MECHANIC that was staged there (only WHAT "
@@ -3132,13 +3115,13 @@ def absence_consequence(provider: Provider, target: dict, staged_scene: str,
         f"WHERE IT WAS STAGED: {staged_scene}\n"
         f"WHO WAS POSITIONED TO CARE:\n{_spines}\n"
         f"{_occ}\n"
-        f"ENTITIES YOU MAY REFERENCE (rows using ANY other id are discarded): {_ids}\n\n"
+        f"WHO MAY CARRY THE LAPSE (choose 1-2 of exactly these ids): {_cands}\n\n"
         f"{player_constraint(protagonist)}\n\n"
-        f"Give 1-2 CAMERA-FACTS — concrete, minor is fine, FELT is the point ('the "
-        f"seat was noted empty', 'the window closed unanswered') — and ONE callback "
-        f"line for when the player next crosses the affected people or places. If "
-        f"the lapse establishes nothing concrete, say so with LOW confidence.",
-        ABSENCE_SCHEMA, tier="cheap", task="abs")
+        f"Choose WHO registers the lapse, and give ONE callback line for when the "
+        f"player next crosses the affected people or places — minor is fine, FELT "
+        f"is the point. If nobody here plausibly registers it, say so with LOW "
+        f"confidence."
+        , ABSENCE_SCHEMA, tier="cheap", task="abs")
 
 
 def weave_pick(provider: Provider, scene: str, cards: list[str], floor_debt: list[str],

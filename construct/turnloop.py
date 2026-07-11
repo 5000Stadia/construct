@@ -2177,18 +2177,6 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         trace.dropped_cohorts.append("world_tick")
 
 
-#: DRIFT-HANDLING D2 (§3 R3, cr finding 1): consequence rows may NEVER carry
-#: structural/presence/identity vocabulary — the movement lane, world-tick,
-#: and Entity Authority own those writes; a "consequence" that relocates a
-#: person or rewires containment is an authority breach, not a lapse-fact.
-_ABSENCE_FORBIDDEN_ATTRS = frozenset({
-    "in", "inside", "located_in", "at", "holds", "contains", "within", "near",
-    "on", "accompanying", "connects_to", "same_as", "kind", "status",
-})
-
-#: entity-shaped values (kind-prefixed ids) — the value-side conjuring check.
-_ENTITY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*:")
-
 #: DRIFT-HANDLING D1 (§3 R2 step 2): decline `relocate_pick` below this confidence
 #: — relocation must feel inevitable, not conjured. The spec leaves the number
 #: unpinned ("decline on low confidence"); tune with live-test data (§7 D1 note).
@@ -2381,15 +2369,15 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     if causal_leaf and causal_leaf.get("clock_id"):
         on_expiry = drift.read_on_expiry(
             live_reads, str(causal_leaf["clock_id"])) or ""
-    # THE STAGED CAST (cr D2 finding 4): every authored cast member whose
-    # place (canon locate head, else authored location) IS the staged scene —
-    # the affected set is the scene plus its people, not clue holders alone.
-    staged_cast: list[str] = list(holder_ids)
+    # THE STAGED CAST (cr D2 findings 4 + r3 blocker 2): every authored cast
+    # member whose place (canon locate head, else authored location) IS the
+    # staged scene — built PURELY from the location match. A secondary holder
+    # staged ELSEWHERE was never positioned to witness this moment and must
+    # not target-match; the staged scene's own holder passes naturally.
+    staged_cast: list[str] = []
     try:
         _citer2 = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
         for _nid, n in _citer2:
-            if n.node_id in staged_cast:
-                continue
             _loc = ""
             try:
                 _ch = p.locate(n.node_id, as_of=horizon)
@@ -2398,7 +2386,7 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 _loc = ""
             if (_loc or str(getattr(n, "location", "") or "")) == staged_scene:
                 staged_cast.append(n.node_id)
-    except Exception:  # noqa: BLE001 — holders alone still target-match
+    except Exception:  # noqa: BLE001 — an empty staged cast still lapse-notes the scene
         pass
     # The cohort: informed, never licensing — every returned row is
     # authority-checked against this explicit allowlist (no conjuring), and
@@ -2431,42 +2419,37 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         return False
     from construct.arc.generator import _sanitize_hook
     callback_line = _sanitize_hook(str(pick.get("callback_line") or ""))
-    rows_in = [r for r in (pick.get("rows") or []) if isinstance(r, dict)]
-    kept_rows: list[dict] = []
-    for r in rows_in:
-        subj = str(r.get("entity") or "")
-        attr = str(r.get("attribute") or "")
-        val = r.get("value")
-        claim = str(r.get("claim") or "lapse")
-        # AUTHORITY (cr D2 finding 1, all three reproduced shapes closed):
-        # (a) the subject must be allowlisted and NEVER the protagonist;
-        if subj not in allowed_ids or subj == arc.protagonist:
-            continue
-        # (b) structural/presence vocabulary is never a consequence — the
-        # movement/identity authorities own those writes outright;
-        if not attr or attr in _ABSENCE_FORBIDDEN_ATTRS:
-            continue
-        if val is None:
-            continue
-        # (c) an entity-shaped VALUE must itself be allowlisted (a relation
-        # pointed at an invented id is conjuring through the value side);
-        if _ENTITY_ID_RE.match(str(val)) and str(val) not in allowed_ids:
-            continue
-        # (d) the §2 occurrence rule, HOST-checked: an occurrence claim
-        # without the authored license is discarded outright.
-        if claim == "occurrence" and not on_expiry:
-            continue
-        kept_rows.append({"entity": subj, "attribute": attr, "value": str(val)})
-        if len(kept_rows) == 2:
-            break
-    dropped = len(rows_in) - len(kept_rows)
-    if dropped > 0:
-        trace.dropped_cohorts.append(f"absence rows ({dropped} unauthorized)")
-    # COMPLETENESS (cr D2 finding 3): the R3 response is facts AND the durable
-    # callback — either alone is not the spec'd response; decline whole.
-    if not kept_rows or not callback_line:
+    # HOST-CONSTRUCTED facts ONLY (cr r3 blocker 1 — a schema label is model
+    # self-classification and can be relabeled; the authority boundary must be
+    # structural): the cohort chose SUBJECTS from the allowlist; the host
+    # writes every canon row itself from closed lapse predicates. Without an
+    # authored `on_expiry`, NO model text ever becomes a fact — the only
+    # occurrence value that can exist is the authored note, VERBATIM.
+    subj_in = [str(x) for x in (pick.get("subjects") or [])]
+    subjects = [x for x in subj_in
+                if x in allowed_ids and x != arc.protagonist][:2]
+    if len(subj_in) > len(subjects):
+        trace.dropped_cohorts.append(
+            f"absence subjects ({len(subj_in) - len(subjects)} unauthorized)")
+    # COMPLETENESS (cr finding 3): subjects AND the callback, or decline whole.
+    if not subjects or not callback_line:
         drift.record_absence_declined(world, turn, beat_id, "nothing_grounded")
         return False
+    try:
+        _sname = str(live_reads.state(staged_scene, "name") or "")
+    except Exception:  # noqa: BLE001
+        _sname = ""
+    _swhere = _sname or staged_scene.split(":", 1)[-1].replace("_", " ")
+    kept_rows = [
+        {"entity": subj, "attribute": "noted_absence",
+         "value": f"the appointed moment at {_swhere} passed unmet (turn {turn})"}
+        for subj in subjects]
+    if on_expiry:
+        # the ONE licensed occurrence row: the authored note, verbatim, on the
+        # staged scene — never model-authored semantics (§2, host-enforced).
+        kept_rows = kept_rows[:1] + [
+            {"entity": staged_scene, "attribute": "missed_moment_outcome",
+             "value": on_expiry}]
     # ---- COMMIT 1: the moment event — receipt-CONFIRMED before anything
     # depends on it (the caused_by anchor for lens + consequence rows).
     moment_id = f"event:moment_missed_{slug}"

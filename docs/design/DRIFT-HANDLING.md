@@ -270,16 +270,21 @@ contradictory and promised a salience path that does not exist):
    ROW** pointing at the arc's fired clock event when one exists (item-level
    `caused_by` metadata is NOT surfaced by `events().caused_by` — the
    explicit-row rule, Cx 117, same as `_fire_event_occurs`).
-2. **Consequence rows:** 1-2 concrete world-facts — LAPSE-facts by default,
-   occurrence-facts only under an authored `on_expiry` annotation (§2, the
-   occurrence rule) — proposed by a cheap-tier cohort
-   (`absence_consequence`) from the beat's staging context + present-cast
-   spines, constrained to the `known_ids` allowlist, validated like the
-   generator preflight (referents must exist), committed via
+2. **Consequence rows — HOST-CONSTRUCTED closed predicates (cr D2 review:
+   a schema label is model self-classification and can be relabeled; the
+   authority boundary must be structural).** The `absence_consequence`
+   cohort chooses only SUBJECTS (1-2 ids from an explicit allowlist — the
+   staged cast + present NPCs, protagonist excluded) and phrases the
+   deferred callback line; the HOST writes every canon row itself: per
+   subject a closed lapse predicate (`noted_absence` = "the appointed
+   moment at <staged place> passed unmet (turn N)"), plus — ONLY under an
+   authored `on_expiry` annotation (§2) — exactly one occurrence row whose
+   value is the authored note VERBATIM (`missed_moment_outcome` on the
+   staged scene). Model text can never become a fact; without the license
+   no occurrence-shaped attribute exists at all. Committed via
    `ingest_structured` to canon **with item-level `caused_by` =
    `event:moment_missed_<slug>`** — the situation-lens linkage PB verified
-   for the CAST-MOVES departure lever. NEVER a derived notion ("tension
-   rose") — only facts a camera at the staged scene could have recorded.
+   for the CAST-MOVES departure lever.
 3. **Surfacing, two channels, both real:** (a) re-entry/standing briefings —
    the item-level `caused_by` lights the consequence in
    `snapshot(lens="situation")` while it is served truth; (b) the
