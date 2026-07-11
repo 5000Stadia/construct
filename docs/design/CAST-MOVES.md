@@ -1,12 +1,14 @@
 # Cast Moves — the narration-seam movement lane (spec)
 
-**Status:** SPEC, PB comment round FOLDED (letter `<e1ca7951…>`: two catches
-fixed, four answers integrated, caused_by lever ADOPTED) + Cx RED round r1
-FOLDED (letter `<a85c6ade…>`: canonicalize-before-resolve, the unbound-exit
-path, engaged_this_turn defined, receipt-gated event sequencing,
-horizon-bound reads) — awaiting Cx focused re-review. Task #80 — "the single
-highest-leverage remaining gap" (OPTIMAL-IF-EXPERIENCE.md §narration-seam).
-Gate opened by PB letter 125.
+**Status:** SPEC r3. PB comment round FOLDED (`<e1ca7951…>`) + Cx r1 RED
+FOLDED (`<a85c6ade…>`) + Cx r2 focused RED FOLDED (`<9891be53…>`: gaps
+1/4/5 closed there; the two remaining folded here — `engaged_this_turn`
+keyed on the interview ADDRESSING predicate, never `asks_targets` topic
+ids; the unbound-exit path made row-correlated via an extended host
+resolver receipt + scene-restatement guard). Cx ruled r3 "GREEN-able
+without another broad review" once these two land — now with **cr** for
+that confirmation. Task #80 (OPTIMAL-IF-EXPERIENCE.md §narration-seam);
+gate opened by PB letter 125.
 
 ## Problem
 
@@ -51,14 +53,31 @@ Then partition the resolved narrator rows once more — two candidate shapes:
 - **BOUND MOVE:** a canonical `in` row whose ENTITY is a canon **person**
   (folded kind) and whose destination RESOLVED to a bound id. Leaves the
   ordinary promote flow, enters the full policy gate (§2).
-- **UNBOUND EXIT (Cx r1 gap 2 — "the maid slips out"):** a canonical `in`
-  row for a canon person whose destination FAILED to bind (a resolver drop
-  receipt) or bound to a non-place, with the person's origin == the current
-  scene. No destination exists to commit — the candidate enters a reduced
-  gate (§2 rules 1, 2, 5 only) and, if licensed, takes the EVENT-ONLY
-  departure path (§4): a `departed_scene` event and nothing else — negative
-  scene presence without a canon location claim, the same shape as the
-  shipped player-dismissal mechanism. Never a place mint.
+- **UNBOUND EXIT (Cx r1 gap 2 — "the maid slips out"; data path made
+  row-correlated in r2):** detection is NEVER inferred from the resolver's
+  global `(failed_value, attribute, reason)` receipt tuple — with several
+  same-attribute rows that tuple cannot say WHICH person moved. Instead:
+  1. The lane SNAPSHOTS its containment candidates on the accepted raw rows
+     (post-canonicalization, pre-resolve): `(row_index, raw_subject,
+     raw_destination)`.
+  2. The HOST resolver receipt contract is extended (resolve.py is host
+     code, no engine touch): receipts gain the source row's index —
+     `(row_index, entity, attribute, failed_value, reason)` — so the exact
+     dropped row is recoverable.
+  3. Post-resolve, the lane joins snapshot ↔ resolved rows ↔ receipts by
+     `row_index`. An UNBOUND-EXIT candidate = a snapshot row whose SUBJECT
+     resolved to a canon person AND whose destination outcome is a drop (or
+     bound non-place). A row whose subject itself dropped is nothing.
+  4. **Scene-restatement guard:** if the raw destination text names the
+     CURRENT scene (token match against the scene's canon name — the
+     `_names_entity` discipline), the row is an ambiguous restatement of
+     where X already is, NOT an exit — dropped with reason
+     `ambiguous_scene_restatement`, no event.
+  A surviving candidate enters the reduced gate (§2 rules 1, 2, 5) and, if
+  licensed, takes the EVENT-ONLY departure path (§4): a `departed_scene`
+  event and nothing else — negative scene presence without a canon location
+  claim, the same shape as the shipped player-dismissal mechanism. Never a
+  place mint.
 - **Out of scope, stated honestly:** a narrated exit that produces NO
   containment-shaped extraction row at all ("she slips out" extracted as
   nothing) gives the seam nothing to license. That residual drift stays
@@ -101,12 +120,20 @@ A candidate move `person:X in place:D` is LICENSED only if ALL hold:
 5. **X is not mid-conversation-turn protected.** A same-turn narrated exit of
    an engaged character contradicts presence-holds ("came and went before I
    could talk to them"). **`engaged_this_turn` is constructed explicitly**
-   (Cx r1 gap 3 — no such set exists today; it is assembled pre-render in
-   `run_turn` and passed BY VALUE into the deferred `_settle` closure) as the
-   union of:
-   - the player's explicit target this turn — `asks_targets` + the vocative
-     holder (`_voc_holder`),
-   - learned interview holders this turn (the delivery path's source NPC),
+   (Cx r1 gap 3, identity domain corrected in r2 — it is assembled pre-render
+   in `run_turn` and passed BY VALUE into the deferred `_settle` closure) as
+   the union of:
+   - the **ADDRESSED set** — every present NPC satisfying the SHIPPED
+     interview addressing predicate against the player input
+     (turnloop.py:3240-3242): `only_one` (sole present NPC, vocative not
+     absent) OR `npc == _voc_holder` OR `_names_entity(npc, input, name,
+     role)` — captured at the interview site BEFORE eligibility/delivery
+     filtering, so a questioned NPC with NO eligible or fresh clue is still
+     engaged. **`asks_targets` is excluded from this union** (Cx r2: it
+     holds opaque `ask_N` TOPIC ids, not people — it may choose the topic,
+     never the person);
+   - learned interview holders this turn (the delivery path's source NPC —
+     confirmation only, always a subset of the addressed set);
    - autonomous speaker intent — every NPC whose `npc_turn_results[npc]
      ["speaks"]` is truthy.
    **Stated limitation:** dialogue the narrator improvises in prose BEYOND
@@ -203,6 +230,12 @@ the deferral to STATE deterministically).
    `departed_scene`; no `in` row, no place mint; X gone from presence next
    turn; her canon location is unchanged (stale by design, world-tick's to
    move later).
+2c. **Row-correlation oracles (Cx r2):** with MULTIPLE same-attribute
+   containment rows in one settle (two people, one dropped destination),
+   exactly the RIGHT person gets the event — proven via the row_index join,
+   never a global tuple; and an ambiguous restatement of the CURRENT scene
+   ("she's in the room", unresolvable) emits NO `departed_scene`
+   (`ambiguous_scene_restatement` drop).
 3. **Protagonist move** in prose → dropped, telemetry, player unmoved.
 4. **Companion move** (ACCOMPANYING X) → dropped, telemetry, bond intact.
 5. **Remote move** (neither endpoint is the scene) → dropped, telemetry.
@@ -210,9 +243,12 @@ the deferral to STATE deterministically).
    re-verify; never minted; telemetry.
 7. **Engaged-this-turn departure** → dropped (presence-holds); the same exit
    next turn (unengaged) licenses. Separate cases per `engaged_this_turn`
-   source: (a) player-addressed/vocative, (b) learned-interview holder,
-   (c) autonomous speaker intent (`speaks` truthy) — each protects; an
-   unengaged present NPC does not.
+   source: (a) player-addressed via the interview predicate (only_one /
+   vocative / named), (b) learned-interview holder, (c) autonomous speaker
+   intent (`speaks` truthy) — each protects; an unengaged present NPC does
+   not. **Plus the r2 oracle:** a NAMED, questioned NPC with NO eligible or
+   fresh clue is still protected — addressing engages, delivery does not
+   define it.
 8. **Structural skip:** a move the engine refuses (e.g. cycle-forming) →
    typed skip receipt surfaced in telemetry; turn survives; AND a skipped
    departure writes **NO `departed_scene` event and no negative-presence
@@ -232,10 +268,8 @@ the deferral to STATE deterministically).
 
 ## Sequencing
 
-PB comment round — DONE 2026-07-10 (letter `<e1ca7951…>`: two catches folded;
-direct-to-canon doorway, no-retract, and the kind re-verify shape all
-PB-confirmed) → Cx spec review r1 — RED 2026-07-10 (letter `<a85c6ade…>`:
-five contract gaps, all folded above — canonicalize-before-resolve, the
-unbound-exit path, `engaged_this_turn` construction, receipt-gated event
-sequencing, horizon-bound rule 3/4 reads) → Cx focused re-review → build
-(delegate) → Cx code review → live acceptance → docs/push.
+PB comment round — DONE (`<e1ca7951…>`) → Cx r1 RED — FOLDED (`<a85c6ade…>`,
+five gaps) → Cx r2 focused RED — FOLDED (`<9891be53…>`, two gaps; 1/4/5
+confirmed closed) → **cr** r3 confirmation (per the routing change
+`<4273cf75…>`: all further Construct reviews go to cr) → build (delegate)
+→ cr code review → live acceptance → docs/push.
