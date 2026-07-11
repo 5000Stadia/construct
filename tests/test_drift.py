@@ -15,27 +15,29 @@ the sibling #80 lane:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 
 from construct.adapter import PorcelainWorldReads
 from construct.arc import drift
-from construct.arc.conditions import PacingCounters
+from construct.arc.conditions import Occurred, PacingCounters
 from construct.arc.generator import _mark_development
-from construct.arc.grammar import Rung
+from construct.arc.grammar import Beat, Phase, Rung, Weight
 from construct.cast import CastNode, Clue
 from construct.provider import StubProvider
 from construct.turnloop import (
     CarrierMovePolicy,
     TurnTrace,
     _drift_pass,
-    _relocate_beat,
+    _world_tick,
     commit_carrier_move,
+    confirm_carrier_moves,
+    prepare_carrier_move,
     validate_carrier_move,
 )
 
-from tests.test_integration import PLAYER, make_arc, seed_arc, world  # noqa: F401
+from tests.test_integration import PLAYER, make_arc, run_turn, seed_arc, world  # noqa: F401
 
 PROTAGONIST = "person:player"
 SCENE = "place:study"
@@ -345,6 +347,9 @@ def test_relocate_declines_on_low_confidence_no_directive_no_receipt(world):
     _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
                turn=1, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
                horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+    # trace.drift means CLASSIFICATION (cr finding 4): the beat was classified
+    # D-SOFT even though the response declined; relocations stays success-only.
+    assert trace.drift == [("beat:discover", "D-SOFT")]
     assert trace.relocations == []
     assert trace.relocate_directive == ""
     assert drift.relocation_receipt(live_reads, "beat:discover") is None
@@ -387,6 +392,7 @@ def test_relocate_declines_without_a_clue_holder_for_the_target(world):
     _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
                turn=1, arc=arc, cast=empty_cast, scene=SCENE, npcs=[],
                horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+    assert trace.drift == [("beat:discover", "D-SOFT")]  # classified (finding 4)
     assert trace.relocations == []
     assert provider.calls == []
     assert drift.relocation_receipt(live_reads, "beat:discover") is None
@@ -415,6 +421,7 @@ def test_one_relocation_per_beat_blocks_a_second_attempt(world):
     _drift_pass(world, p, live_reads=live_reads, trace=trace2, provider=provider2,
                turn=2, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
                horizon=None, minutes_now=600.0, rung=Rung.CONFRONT)
+    assert trace2.drift == [("beat:discover", "D-SOFT")]  # still CLASSIFIED (finding 4)
     assert trace2.relocations == []
     assert provider2.calls == []
 
@@ -431,5 +438,368 @@ def test_relocate_pick_cohort_failure_is_fail_open(world):
     _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
                turn=1, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
                horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+    assert trace.drift == [("beat:discover", "D-SOFT")]  # classified (finding 4)
     assert trace.relocations == []
     assert trace.relocate_directive == ""
+
+
+# ============================================================================
+# 4. cr RED round fixes (findings 1-5)
+# ============================================================================
+
+SESSION = "session:main"
+
+
+def _two_node_cast() -> dict:
+    """The rival (off-screen original holder) + a present witness equivalent."""
+    cast = _rival_cast()
+    cast["person:witness"] = CastNode(node_id="person:witness",
+                                      surface_role="the gossiping porter")
+    return cast
+
+
+# ---- finding 1: the conjured-carrier guard + the informed prompt --------------------
+
+def test_relocate_rejects_a_conjured_carrier_whole(world):
+    # cr finding 1 (reproduced): a model-returned carrier OUTSIDE the licensed set
+    # (matched holders + present cast equivalents) must never reach canon — no
+    # ingest, no directive, no relocation receipt; only the decline telemetry.
+    arc = make_arc()
+    seed_arc(world, arc)
+    live_reads = PorcelainWorldReads(world)
+    p = world.porcelain
+    _mark_development(world, 0.0, 0)
+    trace = TurnTrace(turn=1)
+    provider = StubProvider([
+        {"carrier": "person:invented", "staging_line": "A stranger arrives.",
+         "confidence": 0.95},
+    ])
+    _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
+               turn=1, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+               horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+    assert trace.drift == [("beat:discover", "D-SOFT")]  # classified, declined
+    assert trace.relocations == []
+    assert trace.relocate_directive == ""
+    assert drift.relocation_receipt(live_reads, "beat:discover") is None
+    assert not PorcelainWorldReads(world).has_entity("person:invented")  # never minted/moved
+    assert "relocate_pick (unlicensed carrier)" in trace.dropped_cohorts
+    # The decline telemetry landed (event-entity rows read via events()/frame_rows,
+    # the `_last_try_turn` pattern — event: ids don't fold through state()).
+    assert [e.event_id for e in live_reads.events(kind="relocate_declined",
+                                                  frame=SESSION)] \
+        == ["event:relocate_declined_discover_1"]
+    assert any(r.attribute == "reason" and r.value == "unlicensed_carrier"
+               for r in live_reads.frame_rows(
+                   SESSION, entity="event:relocate_declined_discover_1"))
+
+
+def test_relocate_prompt_names_offscreen_holder_spines_and_fuel(world):
+    # cr finding 1 (prompt half) + 1b: the cohort is INFORMED — the off-screen
+    # original holder is named (id + handle + whereabouts), present cast carry
+    # their spines, and the turn's real salience fuel rides along.
+    arc = make_arc()
+    seed_arc(world, arc)
+    live_reads = PorcelainWorldReads(world)
+    p = world.porcelain
+    _mark_development(world, 0.0, 0)
+    trace = TurnTrace(turn=1)
+    provider = StubProvider([
+        # Re-home onto the PRESENT witness — licensed, no move needed.
+        {"carrier": "person:witness", "staging_line": "The porter leans in with it.",
+         "confidence": 0.9},
+    ])
+    fuel = ["the player's action touched 'person:witness', who has a standing drive"]
+    _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
+               turn=1, arc=arc, cast=_two_node_cast(), scene=SCENE,
+               npcs=["person:witness"], horizon=None, minutes_now=300.0,
+               rung=Rung.CONFRONT, fuel=fuel,
+               spines={"person:witness": "drive: gossip; fear: irrelevance"})
+    prompt = provider.calls[0][0]
+    assert "person:rival" in prompt                      # the original holder, NAMED
+    assert "OFF-SCREEN" in prompt                        # ...and marked off-screen
+    assert "place:flat" in prompt                        # ...with whereabouts
+    assert "drive: gossip; fear: irrelevance" in prompt  # present spines
+    assert fuel[0] in prompt                             # real salience fuel
+    # The re-home committed: directive + receipt, and the holder never traveled.
+    assert trace.relocations == [("beat:discover", SCENE)]
+    assert "The porter leans in with it." in trace.relocate_directive
+    assert drift.relocation_receipt(live_reads, "beat:discover") is not None
+    assert p.locate("person:rival")[0] == "place:flat"
+
+
+# ---- finding 2: a turn that just developed is never drift ---------------------------
+
+def test_drift_pass_suppressed_when_turn_already_developed(world):
+    # cr finding 2 (reproduced): the ledger write for this turn's clock/beat
+    # developments lands AFTER drift — the trace is the honest same-turn signal.
+    arc = make_arc()
+    seed_arc(world, arc)
+    live_reads = PorcelainWorldReads(world)
+    p = world.porcelain
+    _mark_development(world, 0.0, 0)
+    provider = StubProvider([])  # must never be called
+    for field_name, value in (("clocks_fired", ["clock:escalate"]),
+                              ("beats_achieved", ["beat:other"]),
+                              ("reveals", [("a", "b")])):
+        trace = TurnTrace(turn=1)
+        setattr(trace, field_name, value)
+        _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
+                   turn=1, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+                   horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+        assert trace.drift == []          # suppressed BEFORE classification
+        assert trace.relocations == []
+        assert provider.calls == []
+
+
+def test_run_turn_clock_firing_suppresses_same_turn_drift(world):
+    # cr finding 2 oracle: a REAL turn where a clock fires while a required
+    # delivery beat is pending and every other drift condition is favorable
+    # (rung CONFRONT, 300 quiet diegetic minutes) → no D-SOFT response.
+    from construct.arc.executor import turn_time
+    from construct.clock import commit_elapsed
+    arc = make_arc()
+    seed_arc(world, arc)
+    # 10 quiet turns: turns_quiet >= 9 (drift rung CONFRONT) AND TurnsQuiet(4)
+    # makes clock:escalate fire THIS turn.
+    world.porcelain.ingest_structured([
+        {"entity": f"event:turn_{i}", "attribute": "kind", "value": "turn",
+         "valid_from": turn_time(i)} for i in range(1, 11)
+    ], frame=SESSION)
+    commit_elapsed(world, 300)          # diegetic quiet gate WOULD be open...
+    _mark_development(world, 0.0, 0)    # ...against the old baseline
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The pressure builds; nothing else moves."},
+    ])
+    result = run_turn(world, arc, provider, "I wait and think.", turn=11,
+                      cast=_rival_cast())
+    assert "clock:escalate" in result.trace.clocks_fired   # the development happened
+    assert result.trace.drift == []                        # ...and suppressed drift
+    assert result.trace.relocations == []
+    assert world.porcelain.locate("person:rival")[0] == "place:flat"
+
+
+# ---- finding 3: confirmed move → directive unconditional; bookkeeping fail-open -----
+
+def test_mark_relocation_failure_never_suppresses_the_directive(world, monkeypatch):
+    # cr finding 3 (reproduced): a bookkeeping failure AFTER the confirmed canon
+    # move must not erase the licensed directive (the carrier has already moved —
+    # a silent arrival is the unacceptable state; a missing receipt is the
+    # acceptable one).
+    arc = make_arc()
+    seed_arc(world, arc)
+    live_reads = PorcelainWorldReads(world)
+    p = world.porcelain
+    _mark_development(world, 0.0, 0)
+    trace = TurnTrace(turn=1)
+    provider = StubProvider([
+        {"carrier": "person:rival", "staging_line": "Rival turns up, edgy.",
+         "confidence": 0.9},
+    ])
+    def _boom(*_a, **_kw):
+        raise RuntimeError("session write lost")
+    monkeypatch.setattr(drift, "mark_relocation", _boom)
+    _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
+               turn=1, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+               horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+    assert p.locate("person:rival")[0] == SCENE            # the move stands
+    assert "Rival turns up, edgy." in trace.relocate_directive  # the directive SURVIVES
+    assert trace.relocations == [("beat:discover", SCENE)]
+    assert "mark_relocation failed" in trace.dropped_cohorts
+    # The honest partial state: no receipt (a rare re-relocation is acceptable).
+    assert drift.relocation_receipt(live_reads, "beat:discover") is None
+
+
+def test_mark_development_failure_never_suppresses_the_directive(world, monkeypatch):
+    import construct.turnloop as turnloop_mod
+    arc = make_arc()
+    seed_arc(world, arc)
+    live_reads = PorcelainWorldReads(world)
+    p = world.porcelain
+    _mark_development(world, 0.0, 0)
+    trace = TurnTrace(turn=1)
+    provider = StubProvider([
+        {"carrier": "person:rival", "staging_line": "Rival turns up, edgy.",
+         "confidence": 0.9},
+    ])
+    def _boom(*_a, **_kw):
+        raise RuntimeError("ledger write lost")
+    monkeypatch.setattr(turnloop_mod, "_mark_development", _boom)
+    _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
+               turn=1, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+               horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+    assert "Rival turns up, edgy." in trace.relocate_directive  # the directive SURVIVES
+    assert trace.relocations == [("beat:discover", SCENE)]
+    # Here the receipt DID land (mark_relocation ran before the ledger failure).
+    assert drift.relocation_receipt(live_reads, "beat:discover") is not None
+    assert "_mark_development (relocation) failed" in trace.dropped_cohorts
+
+
+def test_mark_nudge_failure_never_sinks_the_turn(world, monkeypatch):
+    # cr finding 3 (R1 half): the nudge's session bookkeeping write is fail-open —
+    # its failure costs only next-turn cadence/exclusion, never this turn.
+    from construct.arc.executor import turn_time
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": f"event:turn_{i}", "attribute": "kind", "value": "turn",
+         "valid_from": turn_time(i)} for i in range(1, 6)
+    ], frame=SESSION)  # quiet >= 3 → a rung; the canon/player diff supplies threads
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"thread": "fact:secret · culprit · person:rival",
+         "directive": "A runner arrives with word from the archive."},
+        {"prose": "A runner slips through the door with a sealed note."},
+    ])
+    def _boom(*_a, **_kw):
+        raise RuntimeError("session write lost")
+    monkeypatch.setattr(drift, "mark_nudge", _boom)
+    result = run_turn(world, arc, provider, "I keep to my desk.", turn=6)
+    assert result.prose                                     # the turn SURVIVED
+    assert result.trace.nudge == "A runner arrives with word from the archive."
+    assert "mark_nudge failed" in result.trace.dropped_cohorts
+
+
+# ---- finding 4: trace.drift means classification --------------------------------
+
+def test_non_inframe_pending_beat_classified_but_never_relocated(world):
+    # A pending REQUIRED beat with no delivery target (Occurred, not InFrame) is
+    # CLASSIFIED — trace.drift records it — but R2 has nothing to relocate: no
+    # cohort call, no relocation, no receipt.
+    occ = Beat("beat:confront", Phase.CLIMAX, Weight.REQUIRED,
+               achievable_via=Occurred("event:confront"))
+    arc = replace(make_arc(), beats=(occ,), climax_ready_beats=("beat:confront",))
+    seed_arc(world, arc)
+    live_reads = PorcelainWorldReads(world)
+    p = world.porcelain
+    _mark_development(world, 0.0, 0)
+    trace = TurnTrace(turn=1)
+    provider = StubProvider([])  # must never be called
+    _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
+               turn=1, arc=arc, cast=_rival_cast(), scene=SCENE, npcs=[],
+               horizon=None, minutes_now=300.0, rung=Rung.CONFRONT)
+    assert trace.drift == [("beat:confront", "D-SOFT")]
+    assert trace.relocations == []
+    assert provider.calls == []
+
+
+# ---- finding 5: world-tick consumes BOTH layers, one batch ----------------------
+
+def test_prepare_carrier_move_returns_row_or_rejection():
+    reads = _FakePorcelain()
+    row, verdict = prepare_carrier_move(reads, "person:rival", SCENE, 3,
+                                        _policy("relocate"))
+    assert verdict.ok is True
+    assert row == {"entity": "person:rival", "attribute": "in", "value": SCENE,
+                   "value_type": "entity", "valid_from": row["valid_from"]}
+    row2, verdict2 = prepare_carrier_move(
+        reads, "person:rival", SCENE, 3,
+        _policy("relocate", anchored=frozenset({"person:rival"})))
+    assert row2 is None and verdict2.reason == "anchored"
+
+
+def test_confirm_carrier_moves_per_person_over_a_mixed_receipt():
+    rows = [{"entity": "person:maud", "attribute": "in", "value": "place:market"},
+            {"entity": "person:cray", "attribute": "in", "value": "place:market"}]
+    receipt = [
+        {"entity": "person:maud", "attribute": "in"},
+        # cray's move skipped by the engine — absent from the receipt
+        {"entity": "event:tick_x_3", "attribute": "kind"},   # other-batch rows never interfere
+        {"entity": "event:tick_x_3", "attribute": "agent"},
+    ]
+    assert confirm_carrier_moves(rows, receipt) == frozenset({"person:maud"})
+    assert confirm_carrier_moves([], receipt) == frozenset()
+
+
+class _TickProxy:
+    """Wraps a real porcelain for `_world_tick`'s `p` argument: counts
+    `ingest_structured` calls and optionally doctors the returned receipt."""
+
+    def __init__(self, inner, doctor=None):
+        self._inner = inner
+        self._doctor = doctor
+        self.ingests = 0
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def ingest_structured(self, rows, **kw):
+        self.ingests += 1
+        receipt = self._inner.ingest_structured(rows, **kw)
+        return self._doctor(receipt) if self._doctor else receipt
+
+
+def _tick_world(world) -> dict:
+    """The world-tick fixture shape (mirrors test_integration's `_tick_setup`)."""
+    from construct.arc.executor import turn_time
+    world.porcelain.ingest_structured([
+        {"entity": "place:market", "attribute": "kind", "value": "market", "timeless": True},
+        {"entity": "place:lane", "attribute": "kind", "value": "lane", "timeless": True},
+        {"entity": "person:maud", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:maud", "attribute": "in", "value": "place:lane"},
+        {"entity": "person:cray", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:cray", "attribute": "in", "value": "place:lane"},
+    ])
+    world.porcelain.ingest_structured([
+        {"entity": "person:maud", "attribute": "last_seen_min", "value": 100.0,
+         "valid_from": turn_time(1)},
+        {"entity": "person:cray", "attribute": "last_seen_min", "value": 100.0,
+         "valid_from": turn_time(1)},
+    ], frame=SESSION)
+    return {
+        "person:maud": CastNode("person:maud", surface_role="coster"),
+        "person:cray": CastNode("person:cray", surface_role="foreman"),
+    }
+
+
+_TICKS = [{"ticks": [
+    {"member": "person:maud", "kind": "moved",
+     "detail": "wheeled her barrow across to the market", "moves_to": "place:market",
+     "with_member": ""},
+    {"member": "person:cray", "kind": "sent_word",
+     "detail": "sent a boy round with a note", "moves_to": "", "with_member": ""},
+]}]
+
+
+def test_world_tick_one_ingest_and_confirmed_move_reported(world):
+    # cr finding 5 oracle 1: the mixed batch (a move + an event) stays ONE ingest
+    # call; the confirmed move is reported through the shared confirm layer.
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _tick_world(world)
+    trace = TurnTrace(turn=3)
+    trace.movement_status = "clear"
+    proxy = _TickProxy(world.porcelain)
+    _world_tick(world, proxy, arc, trace, StubProvider(list(_TICKS)), 3, cast=cast,
+                npcs=[], entry_scene="place:lane", scene="place:study",
+                live_reads=PorcelainWorldReads(world), minutes_now=200.0)
+    assert proxy.ingests == 1                              # never split (finding 5)
+    assert trace.world_tick == ["person:maud:moved", "person:cray:sent_word"]
+    assert world.porcelain.locate("person:maud")[0] == "place:market"
+
+
+def test_world_tick_skipped_move_row_not_reported_as_moved(world):
+    # cr finding 5 oracle 2: a move row the engine skipped (absent from the
+    # receipt) is NOT reported as moved; the batch's other ticks still report.
+    from construct.turnloop import _receipt_rows
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _tick_world(world)
+    trace = TurnTrace(turn=3)
+    trace.movement_status = "clear"
+    def _drop_move(receipt):
+        rows = [r for r in _receipt_rows(receipt)
+                if not (r.get("entity") == "person:maud" and r.get("attribute") == "in")]
+        return {"rows": rows}
+    proxy = _TickProxy(world.porcelain, doctor=_drop_move)
+    _world_tick(world, proxy, arc, trace, StubProvider(list(_TICKS)), 3, cast=cast,
+                npcs=[], entry_scene="place:lane", scene="place:study",
+                live_reads=PorcelainWorldReads(world), minutes_now=200.0)
+    assert "person:maud:moved" not in trace.world_tick     # unconfirmed → not reported
+    assert trace.world_tick == ["person:cray:sent_word"]

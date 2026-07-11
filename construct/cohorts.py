@@ -3028,16 +3028,21 @@ RELOCATE_SCHEMA = {
 }
 
 
-def relocate_pick(provider: Provider, target: dict, scene: str, present: list[str],
-                  fuel: list[str], protagonist: str) -> dict:
+def relocate_pick(provider: Provider, target: dict, holder: str, scene: str,
+                  present: list[str], fuel: list[str], protagonist: str) -> dict:
     """DRIFT-HANDLING.md §3 R2 step 2: a beat IS its plot mechanic, decoupled from
     its staging (founder principle) — this proposes WHERE/HOW the beat's delivery
     target arrives at the player's CURRENT scene. `target` carries only the fact's
     entity/attribute (the mechanic's SHAPE), never its value (the hidden answer —
     concealment guard: the carrier may only ever say what interviewing would
-    reveal, never handed the answer directly here). `fuel` is the turn's
-    `salient_moments` read ('what just changed + who is positioned to care' — the
-    exact read the LWG P2 spec reserved for this consumer)."""
+    reveal, never handed the answer directly here). `holder` NAMES the original
+    holder — id, human handle, whereabouts — even when off-screen (cr finding 1:
+    "moved, or a present equivalent" is only a real choice when the mover
+    candidate is on the table); `present` entries carry each present cast
+    member's spine (drive/fear); `fuel` is the turn's `salient_moments` read
+    ('what just changed + who is positioned to care' — the exact read the LWG
+    P2 spec reserved for this consumer). The caller HARD-CHECKS the returned
+    carrier against its licensed set — this prompt informs, it never licenses."""
     _fuel = "\n".join(f"- {f}" for f in fuel) or "(nothing notably salient this turn)"
     _present = "\n".join(f"- {p}" for p in present) or "(no one of note present)"
     return complete_sync(provider,
@@ -3045,15 +3050,19 @@ def relocate_pick(provider: Provider, target: dict, scene: str, present: list[st
         f"needs to happen. THE MECHANIC (what must land here — this names only WHAT "
         f"kind of fact, never the answer; do not invent or reveal a value for it):\n"
         f"  {target.get('entity', '')} · {target.get('attribute', '')}\n\n"
+        f"THE ORIGINAL HOLDER (they can travel here if the fiction licenses it):\n"
+        f"  {holder}\n\n"
         f"THE PLAYER'S CURRENT SCENE: {scene}\n\n"
-        f"PRESENT (who could plausibly carry this here):\n{_present}\n\n"
+        f"PRESENT (who could plausibly carry this here instead — their standing "
+        f"drives/fears decide who is positioned to care):\n{_present}\n\n"
         f"WHAT JUST HAPPENED (fuel for why NOW, not before):\n{_fuel}\n\n"
         f"{player_constraint(protagonist)}\n\n"
-        f"Propose the CARRIER — a present person if the fiction plausibly puts them "
-        f"here, else the original holder (who will need to travel) — and ONE staging "
-        f"line for how the mechanic arrives HERE, inevitable rather than conjured "
-        f"(the moment, never the answer). If nothing here plausibly carries it, say so "
-        f"with a LOW confidence rather than forcing it.",
+        f"Propose the CARRIER — a present person above if the fiction plausibly puts "
+        f"the mechanic in their mouth, else the original holder (who will travel) — "
+        f"NEVER anyone else; and ONE staging line for how the mechanic arrives HERE, "
+        f"inevitable rather than conjured (the moment, never the answer). If nothing "
+        f"here plausibly carries it, say so with a LOW confidence rather than "
+        f"forcing it.",
         RELOCATE_SCHEMA, tier="cheap", task="rlc")
 
 

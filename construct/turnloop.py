@@ -1904,31 +1904,54 @@ def validate_carrier_move(reads: Any, person: str, dest: str,
     return CarrierMoveResult(ok=True)
 
 
+def prepare_carrier_move(reads: Any, person: str, dest: str, turn: int,
+                         policy: CarrierMovePolicy) -> tuple[dict | None, CarrierMoveResult]:
+    """Layer 1 of the shared commit surface (§3 R2 step 3, prepare/confirm
+    semantics — cr review): validate, and on acceptance return the canonical
+    `in` ROW for the caller to batch into ITS OWN single ingest (world-tick's
+    whole mixed batch stays one call — the extraction must not split it).
+    Returns `(row, verdict)` — `(None, rejection)` when a guard refuses."""
+    verdict = validate_carrier_move(reads, person, dest, policy)
+    if not verdict.ok:
+        return None, verdict
+    return ({"entity": person, "attribute": "in", "value": dest,
+             "value_type": "entity", "valid_from": turn_time(turn)}, verdict)
+
+
+def confirm_carrier_moves(move_rows: list[dict], receipt_rows: list[dict]) -> frozenset:
+    """Layer 2: per-person receipt CONFIRMATION under the `confirmed_batch`
+    discipline (§3 R2 step 3) — a move is confirmed ONLY when its exact
+    (entity, attribute) key appears in the ingest receipt, never merely
+    because `ingest_structured` returned (fail-open ingest turns a failed
+    commit into an empty receipt). The receipt may carry OTHER rows from the
+    same batch (world-tick's event rows) — different keys never interfere
+    with the per-key exact-count rule. Returns the confirmed person ids."""
+    if not move_rows:
+        return frozenset()
+    confirmed, _ = confirmed_batch(move_rows, receipt_rows, cap=len(move_rows))
+    return frozenset(str(r["entity"]) for r in confirmed)
+
+
 def commit_carrier_move(world: Any, person: str, dest: str, turn: int,
                         policy: CarrierMovePolicy) -> CarrierMoveResult:
-    """Validate, then the canon `in`-row commit, then receipt CONFIRMATION
-    under the `confirmed_batch` discipline (§3 R2 step 3): the move is
-    confirmed ONLY when its exact (entity, attribute) key appears in the
-    ingest receipt — never merely because `ingest_structured` returned. Self-
-    contained fail-open (mirrors, but does not depend on, the turn's own
+    """The single-move convenience over the same two layers (prepare →
+    one-row ingest → confirm) — R2's `_relocate_beat` path. Self-contained
+    fail-open (mirrors, but does not depend on, the turn's own
     `_FailOpenIngest` wrapper — this surface is meant to be callable outside
     a live turn too): an ingest raise is logged and reported `confirmed=False`,
     never propagated. Callers MUST treat `confirmed=False` as a WHOLE decline
     — no briefing directive, no relocation receipt (§3 R2 step 3)."""
-    verdict = validate_carrier_move(world.porcelain, person, dest, policy)
-    if not verdict.ok:
+    row, verdict = prepare_carrier_move(world.porcelain, person, dest, turn, policy)
+    if row is None:
         return verdict
-    row = {"entity": person, "attribute": "in", "value": dest,
-          "value_type": "entity", "valid_from": turn_time(turn)}
     try:
         receipt = world.porcelain.ingest_structured([row], classify="rules")
     except Exception:  # noqa: BLE001 — fail-open, the #89 climax-shield discipline
         logger.error("carrier move commit failed (%s -> %s)", person, dest, exc_info=True)
         return CarrierMoveResult(ok=True, confirmed=False, reason="ingest_failed")
-    confirmed, _ = confirmed_batch([row], _receipt_rows(receipt), cap=1)
-    if not confirmed:
-        return CarrierMoveResult(ok=True, confirmed=False, reason="unconfirmed")
-    return CarrierMoveResult(ok=True, confirmed=True)
+    if person in confirm_carrier_moves([row], _receipt_rows(receipt)):
+        return CarrierMoveResult(ok=True, confirmed=True)
+    return CarrierMoveResult(ok=True, confirmed=False, reason="unconfirmed")
 
 
 def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: int, *,
@@ -2058,8 +2081,13 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         _valid_places = {q for q, _ in _places}
         _member_ids = {m for m, _w, _s in members}
         _done: set[str] = set()
-        rows: list[dict] = []
-        # DRIFT-HANDLING D1 (§3 R2 step 3): the shared carrier-move guard surface.
+        move_rows: list[dict] = []       # prepared carrier moves (shared layer 1)
+        rows: list[dict] = []            # event rows (non-move ticks)
+        tick_report: list[tuple[str, str]] = []  # (member, kind) in verdict order
+        # DRIFT-HANDLING D1 (§3 R2 step 3): the shared carrier-move surface, BOTH
+        # layers — moves are PREPARED here (guards), batched into the ONE mixed
+        # ingest below (never split), and their receipt half routes through
+        # `confirm_carrier_moves` (previously ignored for moves — cr finding 5).
         # `companions=frozenset()` preserves existing behavior — a standing
         # companion is always physically WITH the player and therefore already
         # excluded from `members` above (the `nid in (npcs or [])` present-cast
@@ -2082,12 +2110,13 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                 if dest not in _valid_places:
                     logger.info("world tick move for %s dropped (bad destination)", mid)
                     continue
-                _verdict = validate_carrier_move(world.porcelain, mid, dest, _tick_policy)
-                if not _verdict.ok:
+                _row, _verdict = prepare_carrier_move(world.porcelain, mid, dest,
+                                                      turn, _tick_policy)
+                if _row is None:
                     logger.info("world tick move for %s dropped (%s)", mid, _verdict.reason)
                     continue
-                rows.append({"entity": mid, "attribute": "in", "value": dest,
-                             "value_type": "entity", "valid_from": turn_time(turn)})
+                move_rows.append(_row)
+                tick_report.append((mid, "moved"))
             else:
                 _with = str(t.get("with_member") or "")
                 if kind == "met_with":
@@ -2126,9 +2155,19 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                 if kind == "met_with":
                     rows.append({"entity": _ev, "attribute": "patient", "value": _with,
                                  "value_type": "entity", "valid_from": turn_time(turn)})
-            trace.world_tick.append(f"{mid}:{kind}")
-        if rows:
-            p.ingest_structured(rows, classify="batch")
+                tick_report.append((mid, kind))
+        if move_rows or rows:
+            # ONE mixed batch, exactly as before the extraction (finding 5: the
+            # shared layer prepares/confirms — it never splits world-tick's ingest).
+            receipt = p.ingest_structured(move_rows + rows, classify="batch")
+            _confirmed = confirm_carrier_moves(move_rows, _receipt_rows(receipt))
+            for mid, kind in tick_report:
+                if kind == "moved" and mid not in _confirmed:
+                    # A structurally-skipped/failed move changed nothing durable —
+                    # never reported as moved (cr finding 5 oracle).
+                    logger.info("world tick move for %s not confirmed (skipped)", mid)
+                    continue
+                trace.world_tick.append(f"{mid}:{kind}")
             logger.info("world tick committed: %s", trace.world_tick)
     except Exception:  # noqa: BLE001 — the tick is opportunistic; never break settle
         logger.warning("world tick skipped", exc_info=True)
@@ -2141,10 +2180,43 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
 _RELOCATE_CONFIDENCE_MIN = 0.5
 
 
+def _turn_salience(live_reads: Any, turn: int, player_delta_candidates: list[dict],
+                   receipt_rows: list[dict], spined: set[str]) -> list[str]:
+    """The turn's `salient_moments` fuel, assembled ONCE per turn and shared by
+    its two consumers — the DM generator's opportunistic trigger and the drift
+    pass's `relocate_pick` (P2 spec §A "one reader, several consumers"; cr
+    finding 1b: the assembly must never be duplicated or handed to one consumer
+    empty while the other computes it).
+
+    Fact-source v3 (§A, Cx 525): the explicit committed batch — no time-window
+    fact read (narrator-extracted facts land UNSTAMPED at the engine cursor,
+    making a valid_from window wrong in both directions; see HD 520 + Cx 525).
+    Spine-touch fires on the CURRENT player-action confirmed batch ONLY (Cx 567
+    §2: narrator texture about spined NPCs must not wake the generator);
+    `player_delta_candidates` carries the resolved items with values, captured
+    before ingest so `confirmed_batch()` can hydrate the value-side check (PB
+    receipts carry entity/attribute only). When extraction was skipped, both
+    inputs are [] — no player delta. Event window: PB's `since` is INCLUSIVE;
+    `window_events` client-filters to strictly-after (§A, Cx 498 note).
+    Fail-open: any read failure → not salient (empty fuel)."""
+    try:
+        _turn_floor = turn_time(turn - 1)
+        _player_batch, _ = confirmed_batch(player_delta_candidates, receipt_rows)
+        _all_win_events = live_reads.events(since=int(_turn_floor), frame="canon")
+        _win_events = window_events(_all_win_events, _turn_floor)
+        _prior_events = live_reads.events(until=int(_turn_floor), frame="canon")
+        _prior_kinds: set[str] = {e.kind for e in _prior_events}
+        return salient_moments(_player_batch, _win_events, _prior_kinds, spined)
+    except Exception:  # noqa: BLE001 — salience read failure → not salient
+        logger.debug("salient_moments read failed", exc_info=True)
+        return []
+
+
 def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
                 npcs: list[str], horizon: float | None, minutes_now: float | None,
-                rung: Rung | None) -> None:
+                rung: Rung | None, fuel: list[str] | None = None,
+                spines: dict[str, str] | None = None) -> None:
     """DRIFT-HANDLING.md D1 (§4): R2 relocate-the-beat for D-SOFT beats on the
     MAIN arc ONLY — side-arc drift responses are OUT OF SCOPE this slice (D2/D3
     extend the classifier and repair machinery; a side arc simply never drifts
@@ -2152,11 +2224,23 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     BEFORE the main-arc lifecycle read — for D1 that only matters
     structurally (no closures/repairs exist yet), but keeps the ordering the
     later slices need. At most ONE drift response per turn (the generator's
-    one-mint-per-turn discipline). Fail-open: any error logs and leaves the
-    world quiet — a drift pass never breaks a turn."""
+    one-mint-per-turn discipline). `fuel` is the turn's precomputed
+    `salient_moments` lines and `spines` the present NPCs' drive/fear texts —
+    both assembled ONCE in `run_turn` and shared with the DM generator (cr
+    finding 1b: never duplicated, never left empty when available).
+    `trace.drift` records CLASSIFICATION (every classified beat, before
+    response selection); `trace.relocations` records success only (cr
+    finding 4). Fail-open: any error logs and leaves the world quiet — a
+    drift pass never breaks a turn."""
     try:
         if not cast:
             return  # R2's carrier concept needs a cast blob — no cast, no relocation target
+        if trace.clocks_fired or trace.beats_achieved or trace.reveals:
+            # This turn ALREADY developed (cr finding 2): the development-ledger
+            # write for beats/clocks lands AFTER this pass (the generator block),
+            # so the stale baseline would misread a developing turn as quiet —
+            # a turn with a fired clock or an achieved beat is never drift.
+            return
         pending_required = [
             b.beat_id for b in arc.beats
             if b.weight is Weight.REQUIRED
@@ -2169,6 +2253,9 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         drifts = drift.drift_state(pending_required, rung, quiet_minutes)
         if not drifts:
             return
+        # Classification is recorded for EVERY classified beat, before response
+        # selection — trace.drift means "classified", never "responded" (finding 4).
+        trace.drift.extend((d.beat_id, d.cls) for d in drifts)
         targets = {t["beat_id"]: t for t in beat_delivery_targets(arc.beats)}
         for d in drifts:
             if d.cls != "D-SOFT":
@@ -2180,7 +2267,8 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 continue  # not an InFrame beat — R2 has no delivery target to relocate
             if _relocate_beat(world, p, live_reads=live_reads, trace=trace, provider=provider,
                               turn=turn, arc=arc, cast=cast, scene=scene, npcs=npcs,
-                              horizon=horizon, minutes_now=minutes_now, target=target):
+                              horizon=horizon, minutes_now=minutes_now, target=target,
+                              fuel=fuel or [], spines=spines or {}):
                 return  # one drift response per turn (§3)
     except Exception:  # noqa: BLE001 — drift is opportunistic; never break the turn
         logger.warning("drift pass skipped", exc_info=True)
@@ -2189,17 +2277,18 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
 def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                    provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
                    npcs: list[str], horizon: float | None, minutes_now: float | None,
-                   target: dict) -> bool:
+                   target: dict, fuel: list[str], spines: dict[str, str]) -> bool:
     """DRIFT-HANDLING.md §3 R2 steps 2-4: pick a staging via `relocate_pick`
     (decline on low confidence), move the carrier through the shared
     carrier-move surface (`mode="relocate"`) IF it must travel, then — ONLY
-    after a confirmed commit (or no move needed at all) — write the
-    relocation receipt and hand back the sanitized briefing directive on
-    `trace.relocate_directive`. An invalid/unconfirmed/declined attempt
-    produces NO directive and NO relocation receipt (only a `relocate_declined`
-    telemetry receipt) — the response declines WHOLE. Returns True iff a
-    relocation was committed (the caller stops there — one drift response
-    per turn)."""
+    after a confirmed commit (or no move needed at all) — set the directive
+    and write the receipts. An invalid/unconfirmed/declined attempt produces
+    NO directive and NO relocation receipt (only a `relocate_declined`
+    telemetry receipt) — the response declines WHOLE. The returned carrier is
+    HARD-CHECKED against the licensed set (the matched holders + present cast
+    equivalents) — a model cannot conjure a carrier into canon (cr finding 1).
+    Returns True iff a relocation was committed (the caller stops there —
+    one drift response per turn)."""
     if not scene:
         return False
     beat_id = target["beat_id"]
@@ -2216,15 +2305,39 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         drift.record_relocate_declined(world, turn, beat_id, "no_carrier")
         return False  # no carrier — the mechanic can't travel (R4's province, D3)
     present_ids = set(npcs)
+    # THE LICENSED-CARRIER SET (cr finding 1): the matched holders, plus present
+    # cast members as re-home equivalents. Anything else the cohort returns is
+    # conjured and HARD-REJECTED below — never committed, never staged.
+    allowed_carriers = ({n.node_id for n in holders}
+                        | ({n.node_id for _nid, n in _nodes} & present_ids))
     carrier_node = next((n for n in holders if n.node_id in present_ids), holders[0])
     try:
         _chain = p.locate(carrier_node.node_id, as_of=horizon)
         old_staging = _chain[0] if _chain else (getattr(carrier_node, "location", "") or "")
     except Exception:  # noqa: BLE001 — a failed locate is not a hazard, just an unknown origin
         old_staging = getattr(carrier_node, "location", "") or ""
-    present_lines = [n.node_id for _nid, n in _nodes if n.node_id in present_ids]
+    # The ORIGINAL HOLDER is always named to the cohort — id + a human handle +
+    # whereabouts — even (especially) when off-screen: "moved, or a present
+    # equivalent" is only a real choice if the mover candidate is on the table.
     try:
-        pick = cohorts.relocate_pick(provider, target, scene, present_lines, [], arc.protagonist)
+        _hname = live_reads.state(carrier_node.node_id, "name") or ""
+    except Exception:  # noqa: BLE001 — an unnamed holder still travels by role/id
+        _hname = ""
+    _hdesc = str(_hname or getattr(carrier_node, "surface_role", "")
+                 or getattr(carrier_node, "shape_role", "")
+                 or carrier_node.node_id.split(":", 1)[-1].replace("_", " "))
+    holder_line = (f"{carrier_node.node_id} ({_hdesc}) — currently at "
+                   f"{old_staging or 'an unknown place'}"
+                   + ("" if carrier_node.node_id in present_ids
+                      else "; OFF-SCREEN, but they can travel here"))
+    # Present cast, each with their spine (drive/fear) so the pick is grounded
+    # in who is positioned to care — not bare ids (cr finding 1).
+    present_lines = [
+        n.node_id + (f" — {spines[n.node_id]}" if spines.get(n.node_id) else "")
+        for _nid, n in _nodes if n.node_id in present_ids]
+    try:
+        pick = cohorts.relocate_pick(provider, target, holder_line, scene,
+                                     present_lines, fuel, arc.protagonist)
         trace.cohort_calls.append("relocate_pick:cheap")
     except ProviderError as exc:
         trace.dropped_cohorts.append(f"relocate_pick ({exc})")
@@ -2245,6 +2358,13 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         drift.record_relocate_declined(world, turn, beat_id, "sanitized_empty")
         return False
     carrier = str(pick.get("carrier") or carrier_node.node_id)
+    if carrier not in allowed_carriers:
+        # THE CONJURED-CARRIER GUARD (cr finding 1, reproduced): the model handed
+        # back an id outside the licensed set — an invented person, the
+        # protagonist, an off-cast bystander. No ingest, no directive, no receipt.
+        trace.dropped_cohorts.append("relocate_pick (unlicensed carrier)")
+        drift.record_relocate_declined(world, turn, beat_id, "unlicensed_carrier")
+        return False
     if carrier not in present_ids:
         # The carrier must travel — commit BEFORE the directive (§3 R2 step 3):
         # presence truth moves first, so the narrated arrival matches canon.
@@ -2258,13 +2378,28 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             trace.dropped_cohorts.append(f"relocate commit ({result.reason})")
             drift.record_relocate_declined(world, turn, beat_id, result.reason or "unconfirmed")
             return False  # invalid/unconfirmed move → NO directive, NO receipt (§3 R2 step 3)
-    trace.drift.append((beat_id, "D-SOFT"))
+    # The CONFIRMED canon move (or no move needed) LICENSES the directive — set
+    # it and the trace fields FIRST, unconditionally (cr finding 3, reproduced:
+    # a bookkeeping failure after the commit must never suppress the directive).
+    # The honest partial-failure contract: a failed receipt write below means
+    # this beat may relocate a second time later — rare and acceptable; the
+    # reverse (a durable receipt with NO directive — a permanently silent
+    # arrival the narrator never stages, blocked from retry) is not.
     trace.relocations.append((beat_id, scene))
-    drift.mark_relocation(world, beat_id, old_staging, scene, turn)
-    _mark_development(world, minutes_now, turn)
     trace.relocate_directive = (
         f"RELOCATION (render diegetically — the mechanic arrives HERE now; never "
         f"announce it as arranged, never reveal more than the moment): {staging_line}")
+    try:
+        drift.mark_relocation(world, beat_id, old_staging, scene, turn)
+    except Exception:  # noqa: BLE001 — fail-open; the directive stands
+        logger.warning("mark_relocation failed (directive stands; the beat may "
+                       "relocate again)", exc_info=True)
+        trace.dropped_cohorts.append("mark_relocation failed")
+    try:
+        _mark_development(world, minutes_now, turn)
+    except Exception:  # noqa: BLE001 — fail-open; the directive stands
+        logger.warning("_mark_development (relocation) failed", exc_info=True)
+        trace.dropped_cohorts.append("_mark_development (relocation) failed")
     return True
 
 
@@ -4364,11 +4499,28 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # from the turn's own pacing `rung` (computed later, after `diff` exists,
     # itself after the lifecycle read this step must precede) — see
     # construct/arc/drift.py's `rung_from_counters` docstring.
+    # The salience fuel + spined set are assembled HERE, once, and shared with
+    # the DM generator block below (cr finding 1b — one assembly, two consumers;
+    # the generator runs after the lifecycle read, so the shared computation
+    # hoists to the earlier consumer).
+    _spined: set[str] = {
+        n for n in npcs
+        if canon_table.get((n, "drive")) or canon_table.get((n, "fear"))
+    }
+    _salient_fuel = _turn_salience(live_reads, turn, _player_delta_candidates,
+                                   receipt_rows, _spined)
+    _npc_spines: dict[str, str] = {}
+    for _n in npcs:
+        _sp = [f"{_a}: {canon_table[(_n, _a)]}" for _a in ("drive", "fear")
+               if canon_table.get((_n, _a))]
+        if _sp:
+            _npc_spines[_n] = "; ".join(_sp)
     _drift_minutes = float(_clock.minutes) if _clock else None
     _drift_rung = drift.rung_from_counters(counters_from_session(live_reads, arc))
     _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
                turn=turn, arc=arc, cast=cast, scene=scene, npcs=npcs,
-               horizon=_h, minutes_now=_drift_minutes, rung=_drift_rung)
+               horizon=_h, minutes_now=_drift_minutes, rung=_drift_rung,
+               fuel=_salient_fuel, spines=_npc_spines)
 
     # ---- PINNED AWARENESS (PINNED-AWARENESS spec; reviews 060/062/063) ---
     # One awareness coordinate for the WHOLE assembly (Kernos 060 #2 / Cx #2):
@@ -4874,48 +5026,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # 3. Opportunistic (P2b): player's committed delta touched something
             #    salient — the DM wakes only when it notices (§A).
             else:
-                _opp_moments: list[str] = []
-                # spined = present NPCs with a canon drive or fear (§A); initialised
-                # here so the ambient branch can read it if the try below fails.
-                _spined: set[str] = {
-                    n for n in npcs
-                    if canon_table.get((n, "drive")) or canon_table.get((n, "fear"))
-                }
-                try:
-                    # Fact-source v3 (§A, Cx 525): the explicit committed batch.
-                    # No time-window fact read — narrator-extracted facts are committed
-                    # UNSTAMPED (they land at the engine cursor, which never moves during
-                    # play), making a valid_from window wrong in both directions: BLIND in
-                    # session-zero/harness worlds (cursor < TURN_EPOCH), PERMANENTLY SALIENT
-                    # in ingested worlds (cursor > every turn_time). See HD 520 + Cx 525.
-                    _turn_floor = turn_time(turn - 1)
-                    # Fact-source v3 amended (Cx 567 §2): spine-touch fires on the CURRENT player-action confirmed
-                    # batch ONLY. The prior narrator promote batch (narrator_promote handoff) is NOT a salience
-                    # source — narrator texture about spined NPCs must not wake the opportunistic generator.
-                    # The narrator_promote write in settle remains (see its write site comment).
-                    # Current turn's player-action delta: receipt-confirmed under the
-                    # same rule. _player_delta_candidates carries the resolved items with
-                    # values (captured before ingest so confirmed_batch() can hydrate the
-                    # value-side spine-touch check — PB receipts carry entity/attribute only).
-                    # Value limitation: when extraction was skipped (asserts_or_reveals=False)
-                    # _player_delta_candidates is [] and receipt_rows is [] — no player delta.
-                    _player_batch, _ = confirmed_batch(
-                        _player_delta_candidates, receipt_rows)
-                    _fact_rows: list[dict] = _player_batch
-                    # Event window: PB's `since` is INCLUSIVE; window_events
-                    # client-filters to strictly-after to exclude the previous
-                    # turn's own events (§A, Cx 498 note). Event rows carry explicit
-                    # turn_time stamps and are unaffected by the cursor issue above.
-                    _all_win_events = live_reads.events(
-                        since=int(_turn_floor), frame="canon")
-                    _win_events = window_events(_all_win_events, _turn_floor)
-                    _prior_events = live_reads.events(
-                        until=int(_turn_floor), frame="canon")
-                    _prior_kinds: set[str] = {e.kind for e in _prior_events}
-                    _opp_moments = salient_moments(
-                        _fact_rows, _win_events, _prior_kinds, _spined)
-                except Exception:  # noqa: BLE001 — salience read failure → not salient
-                    logger.debug("salient_moments read failed", exc_info=True)
+                # The fuel + spined set were assembled ONCE at the drift-pass
+                # placement above (`_turn_salience` — fact-source v3 rules and
+                # all their commentary live on the helper): shared by this
+                # trigger and `relocate_pick` (cr finding 1b, one assembly).
+                _opp_moments: list[str] = _salient_fuel
 
                 # A cohort call requires at least one spined NPC in the scene:
                 # P2b/P2c always mint NPC-protagonist arcs, and without a spine-
@@ -4996,7 +5111,15 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 nudge_directive = pick["directive"]
                 trace.nudge = nudge_directive
                 if _nudge_minutes is not None:
-                    drift.mark_nudge(world, str(pick.get("thread") or ""), _nudge_minutes, turn)
+                    try:
+                        # Fail-open (cr finding 3): a raw session write — its
+                        # failure costs only the next turn's cadence/exclusion
+                        # bookkeeping, never this turn or this nudge.
+                        drift.mark_nudge(world, str(pick.get("thread") or ""),
+                                         _nudge_minutes, turn)
+                    except Exception:  # noqa: BLE001
+                        logger.warning("mark_nudge failed (nudge stands)", exc_info=True)
+                        trace.dropped_cohorts.append("mark_nudge failed")
         except ProviderError as exc:
             trace.dropped_cohorts.append(f"nudge_pick ({exc})")
 
