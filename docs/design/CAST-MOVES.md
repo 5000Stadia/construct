@@ -1,10 +1,12 @@
 # Cast Moves — the narration-seam movement lane (spec)
 
-**Status:** SPEC, PB comment round FOLDED (PB letter
-`<e1ca7951…>`, 2026-07-10: two catches fixed, four answers integrated,
-optional caused_by lever ADOPTED), now for Cx review then build. Task #80 —
-"the single highest-leverage remaining gap" (OPTIMAL-IF-EXPERIENCE.md
-§narration-seam). Gate opened by PB letter 125.
+**Status:** SPEC, PB comment round FOLDED (letter `<e1ca7951…>`: two catches
+fixed, four answers integrated, caused_by lever ADOPTED) + Cx RED round r1
+FOLDED (letter `<a85c6ade…>`: canonicalize-before-resolve, the unbound-exit
+path, engaged_this_turn defined, receipt-gated event sequencing,
+horizon-bound reads) — awaiting Cx focused re-review. Task #80 — "the single
+highest-leverage remaining gap" (OPTIMAL-IF-EXPERIENCE.md §narration-seam).
+Gate opened by PB letter 125.
 
 ## Problem
 
@@ -32,15 +34,37 @@ the host policy this spec defines.
 
 ### 1. Capture (in `_settle`, after the frame partition, before the promote diff)
 
-Partition the resolved narrator rows once more: rows whose attribute is in
-the **containment-synonym set `{in, inside, located_in}`** and whose ENTITY is
-a canon **person** (folded kind) leave the ordinary promote flow and enter the
-cast-moves lane; the lane canonicalizes the attribute to `in` before the policy
-gate. The synonym set matters (PB catch): the gate's canonicalization map
-(`inside → in`, `located_in → in`) runs AT INGEST — i.e. *after* this
-partition — so matching the literal `"in"` alone would let a narrated "she's
-inside the barn" slip past the lane into the ordinary promote flow and
-quarantine as a contradiction, resurrecting exactly the drift this lane closes.
+**Canonicalize BEFORE resolve (Cx r1 gap 1).** The containment-synonym
+canonicalization (`inside → in`, `located_in → in`) runs on the ACCEPTED RAW
+extraction rows **before `resolve_rows`** — not after. The resolver's
+entity-valued vocabulary (`_ENTITY_VALUED_ATTRS`, resolve.py:40) contains
+`in`/`inside` but NOT `located_in`; a `located_in` row reaching the resolver
+un-canonicalized would never have its destination bound, and the gate's own
+canonicalization map runs at ingest, one boundary too late for either the
+resolver or this lane. Canonicalizing at the seam's entry gives every
+downstream step one spelling. (Test bar 9 exercises all three spellings —
+`located_in` especially, since it is the one the resolver would silently
+strand.)
+
+Then partition the resolved narrator rows once more — two candidate shapes:
+
+- **BOUND MOVE:** a canonical `in` row whose ENTITY is a canon **person**
+  (folded kind) and whose destination RESOLVED to a bound id. Leaves the
+  ordinary promote flow, enters the full policy gate (§2).
+- **UNBOUND EXIT (Cx r1 gap 2 — "the maid slips out"):** a canonical `in`
+  row for a canon person whose destination FAILED to bind (a resolver drop
+  receipt) or bound to a non-place, with the person's origin == the current
+  scene. No destination exists to commit — the candidate enters a reduced
+  gate (§2 rules 1, 2, 5 only) and, if licensed, takes the EVENT-ONLY
+  departure path (§4): a `departed_scene` event and nothing else — negative
+  scene presence without a canon location claim, the same shape as the
+  shipped player-dismissal mechanism. Never a place mint.
+- **Out of scope, stated honestly:** a narrated exit that produces NO
+  containment-shaped extraction row at all ("she slips out" extracted as
+  nothing) gives the seam nothing to license. That residual drift stays
+  open; it is bounded by presence-holds prompt discipline and closes only
+  if extraction learns a departure shape (a future, separate decision).
+
 Everything else is untouched (objects keep the held-object guard and ordinary
 promotion; places keep their no-mint channel policy).
 
@@ -55,25 +79,42 @@ A candidate move `person:X in place:D` is LICENSED only if ALL hold:
    founder's live "Reed!? Where are you!?"). Explicit player dismissal already
    has the `departed_scene` path via classify; the narrator does not get to
    dissolve the bond. Drop + telemetry.
-3. **The destination BINDS.** `place:D` must already exist in canon (the
-   narration channel cannot mint places — Entity Authority; PB's rule: an
-   unknown destination is REJECTED, never minted). The resolver enforces most
-   of this upstream; the lane re-verifies the **folded kind on the RESOLVED
-   head** == place (PB: the bound id may be a `same_as` alias — fold in canon).
-   No preflight of the engine's structural reasons (cycle/self-edge): those are
-   graph-state-dependent as-of the edge's `valid_from` and a host preflight
-   would duplicate them imperfectly; commit and audit the receipt instead.
-4. **The move touches the CURRENT scene.** Either origin (X's current `locate`
-   head — the canon current head, no `as_of`) or destination is the scene (an
-   on-screen departure or arrival). A
+3. **The destination BINDS** (bound moves only). `place:D` must already exist
+   in canon (the narration channel cannot mint places — Entity Authority;
+   PB's rule: an unknown destination is REJECTED, never minted). The resolver
+   enforces most of this upstream; the lane re-verifies the **folded kind on
+   the RESOLVED head** == place (PB: the bound id may be a `same_as` alias —
+   fold in canon), read **at the play horizon** (`as_of=_h` — Cx r1 gap 5:
+   every turn read is bound to `_h` per AS-OF-PLAY-HORIZON so future source
+   rows never leak backward; same-turn rows at that coordinate are admitted.
+   PB's "no as_of" note meant *not historical* — the horizon-bound current
+   head satisfies both). No preflight of the engine's structural reasons
+   (cycle/self-edge): those are graph-state-dependent as-of the edge's
+   `valid_from` and a host preflight would duplicate them imperfectly; commit
+   and audit the receipt instead.
+4. **The move touches the CURRENT scene.** Either origin (X's `locate` head
+   at the play horizon — `p.locate(X, as_of=_h)`, same invariant as rule 3)
+   or destination is the scene (an on-screen departure or arrival). A
    REMOTE move — the narrator asserting motion happening elsewhere — is not
    the narrator's to know (its briefing is scene-scoped truth); world-tick
    owns off-screen motion. Drop + telemetry.
-5. **X is not mid-conversation-turn protected** — if X spoke or was engaged
-   THIS turn (present in the turn's npc engagement set), a same-turn narrated
-   exit contradicts presence-holds ("came and went before I could talk to
-   them"). Departures license only for cast the player is NOT actively
-   engaging this turn. Arrivals are always presence-positive and skip this rule.
+5. **X is not mid-conversation-turn protected.** A same-turn narrated exit of
+   an engaged character contradicts presence-holds ("came and went before I
+   could talk to them"). **`engaged_this_turn` is constructed explicitly**
+   (Cx r1 gap 3 — no such set exists today; it is assembled pre-render in
+   `run_turn` and passed BY VALUE into the deferred `_settle` closure) as the
+   union of:
+   - the player's explicit target this turn — `asks_targets` + the vocative
+     holder (`_voc_holder`),
+   - learned interview holders this turn (the delivery path's source NPC),
+   - autonomous speaker intent — every NPC whose `npc_turn_results[npc]
+     ["speaks"]` is truthy.
+   **Stated limitation:** dialogue the narrator improvises in prose BEYOND
+   these pre-render intents is NOT detected in v1 — there is no reliable
+   post-render speech-attribution surface. Accepted: the presence-holds
+   directive still binds the narrator prompt-side, and every pre-render
+   engagement signal is protected. Departures license only for cast NOT in
+   `engaged_this_turn`; arrivals are presence-positive and skip this rule.
 
 ### 3. Commit (the doorway)
 
@@ -107,20 +148,34 @@ the deferral to STATE deterministically).
   whose raw ids resolve to one identity head post-`same_as` — travel-commit
   noise after a place merge, not an authored bug).
 - `locate(X)` is the post-commit verification in tests (PB 125 step 4).
-- A committed DEPARTURE additionally writes the existing `departed_scene`
-  event (agent=X, patient=scene) — negative scene truth for the presence reads,
+- **Receipt-gated sequencing (Cx r1 gap 4).** For a bound departure, the
+  `departed_scene` event is written ONLY after the move's `in` row is
+  RECEIPT-CONFIRMED: commit the moves batch first, confirm the move's
+  entity/attribute key in the ingest receipt under the `confirmed_batch`
+  discipline (exact per-key match — the shipped fact-source v3 rule), then
+  write the event rows in a second batch. A structurally SKIPPED move
+  (cycle/self-edge/malformed) therefore produces NO event and NO negative
+  presence — otherwise `_departed_from` would suppress a person who never
+  moved. Order within the departure pair: event committed second but with a
+  PREDETERMINED id, so the `in` row's item-level `caused_by` (the lever
+  below) can reference it. The UNBOUND-EXIT path has no move row to gate on;
+  its event commits directly (it asserts only "X left the scene," which is
+  exactly what was licensed).
+- A committed DEPARTURE writes the existing `departed_scene` event
+  (agent=X, patient=scene) — negative scene truth for the presence reads,
   reusing the shipped mechanism rather than inventing a second one. Event rows
   are **stamped `valid_from=turn_time`** (PB: an unstamped event ignores
   `as_of` exclusion and sorts oldest in recency ordering). PB confirms no
   harmful lens interaction: EVENT-durability rows are excluded from folds, so
   the event can never pollute presence/state, and a bare `departed_scene`
   never surfaces in `snapshot(lens="situation")`.
-- **ADOPTED (PB's optional lever):** the departure's new `in` row carries the
-  item-level `caused_by` field pointing at the `departed_scene` event. The
-  situation lens then lights "X left" in re-entry briefings for as long as X's
-  away-location is the served truth — the verified `emit_fallout` linkage
-  shape, and exactly this project's re-entry-coherence goal. An arrival needs
-  no event: the `in` row IS presence-positive truth.
+- **ADOPTED (PB's optional lever):** the bound departure's new `in` row
+  carries the item-level `caused_by` field pointing at the `departed_scene`
+  event (predetermined id, per the sequencing rule above). The situation lens
+  then lights "X left" in re-entry briefings for as long as X's away-location
+  is the served truth — the verified `emit_fallout` linkage shape, and exactly
+  this project's re-entry-coherence goal. An arrival needs no event: the `in`
+  row IS presence-positive truth.
 - Salience note: cast-move rows ride the narrator settle batch (the
   `narrator_promote` audit receipt) but — per the LWG salience split — do NOT
   feed spine-touch. An arrival becoming DM fuel would need the player to act on
@@ -138,30 +193,49 @@ the deferral to STATE deterministically).
 1. **Arrival:** narrated "Harl comes in" (X off-scene, destination==scene) →
    `in` row committed at the turn coordinate; `locate` confirms; X appears in
    `_persons_under` next turn; engageable.
-2. **Departure:** narrated exit (origin==scene) → committed + `departed_scene`
-   event (stamped `valid_from=turn_time`); the new `in` row's `caused_by`
-   points at the event; X gone from presence next turn; no re-offer; a
-   re-entry briefing surfaces "X left" via the situation lens.
+2. **Bound departure:** narrated exit to a bound destination (origin==scene)
+   → committed + `departed_scene` event (stamped `valid_from=turn_time`); the
+   new `in` row's `caused_by` points at the event; X gone from presence next
+   turn; no re-offer; a re-entry briefing surfaces "X left" via the situation
+   lens.
+2b. **Unbound exit ("the maid slips out"):** a containment row whose
+   destination fails to bind, origin==scene, rules 1/2/5 pass → EVENT-ONLY
+   `departed_scene`; no `in` row, no place mint; X gone from presence next
+   turn; her canon location is unchanged (stale by design, world-tick's to
+   move later).
 3. **Protagonist move** in prose → dropped, telemetry, player unmoved.
 4. **Companion move** (ACCOMPANYING X) → dropped, telemetry, bond intact.
 5. **Remote move** (neither endpoint is the scene) → dropped, telemetry.
 6. **Unknown destination** → rejected upstream (resolver) or by the lane's
    re-verify; never minted; telemetry.
 7. **Engaged-this-turn departure** → dropped (presence-holds); the same exit
-   next turn (unengaged) licenses.
+   next turn (unengaged) licenses. Separate cases per `engaged_this_turn`
+   source: (a) player-addressed/vocative, (b) learned-interview holder,
+   (c) autonomous speaker intent (`speaks` truthy) — each protects; an
+   unengaged present NPC does not.
 8. **Structural skip:** a move the engine refuses (e.g. cycle-forming) →
-   typed skip receipt surfaced in telemetry; turn survives.
+   typed skip receipt surfaced in telemetry; turn survives; AND a skipped
+   departure writes **NO `departed_scene` event and no negative-presence
+   projection** (the receipt-gated sequencing oracle — Cx r1 gap 4).
 9. **Ordinary person rows** (non-containment) still flow through the normal
-   promote gate unchanged — the lane takes ONLY movement — AND a
-   **synonym-authored move** (`attribute == "inside"` at the seam) enters the
-   lane rather than leaking to ordinary promotion (PB catch 2 oracle).
-10. Full suite green; live acceptance = a staged two-NPC scene where the prose
+   promote gate unchanged — the lane takes ONLY movement — AND
+   **synonym-authored moves in all three spellings** (`in`, `inside`,
+   `located_in` at the seam) enter the lane rather than leaking to ordinary
+   promotion; `located_in` especially, since un-canonicalized it would never
+   even bind its destination (Cx r1 gap 1 oracle).
+10. **Horizon oracle:** a FUTURE-stamped location or kind row (beyond the
+    play horizon `_h`) can neither license nor reject a present move — rules
+    3/4 read as-of `_h` (Cx r1 gap 5); same-turn rows at the horizon
+    coordinate are admitted.
+11. Full suite green; live acceptance = a staged two-NPC scene where the prose
     moves one out and one in across three turns, presence tracking both.
 
 ## Sequencing
 
-PB comment round on this doc — DONE 2026-07-10 (letter `<e1ca7951…>`: two
-catches folded above; direct-to-canon doorway, no-retract, and the kind
-re-verify shape all PB-confirmed; stagecraft rules 1-5 scanned, all host
-doctrine) → Cx spec review → build (delegate) → Cx code review → live
-acceptance → docs/push.
+PB comment round — DONE 2026-07-10 (letter `<e1ca7951…>`: two catches folded;
+direct-to-canon doorway, no-retract, and the kind re-verify shape all
+PB-confirmed) → Cx spec review r1 — RED 2026-07-10 (letter `<a85c6ade…>`:
+five contract gaps, all folded above — canonicalize-before-resolve, the
+unbound-exit path, `engaged_this_turn` construction, receipt-gated event
+sequencing, horizon-bound rule 3/4 reads) → Cx focused re-review → build
+(delegate) → Cx code review → live acceptance → docs/push.
