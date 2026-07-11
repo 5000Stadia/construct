@@ -130,7 +130,7 @@ class Session:
         try:
             from construct.arc.executor import arc_entities as _ae
             _reads0 = PorcelainWorldReads(self._world, horizon=self._horizon())
-            for _a in [self._arc] + list(self._side_arcs or []):
+            for _a in self._episode_arcs(_reads0):
                 _sealed_beat_scope |= _ae(_a)          # sealed (no reads)
                 self._beat_scope |= _ae(_a, _reads0)   # live overlay
         except Exception:
@@ -1309,6 +1309,23 @@ class Session:
         """The most recently planned SceneImage (fresh/cached), or None."""
         return getattr(self, "_last_image", None)
 
+    def _episode_arcs(self, reads: Any) -> list:
+        """The CURRENT EPISODE's arc membership for scope purposes (cr D3
+        round 6): the main arc plus only the LIVE side arcs. A continuation
+        deliberately retains prior episodes' concluded arcs in the portfolio
+        as past — their stored lifecycle is terminal — and unioning their
+        beat referents back into scope would re-admit EP1 through the side
+        door (the exact Cx 191 leak). Terminal-lifecycle is the same
+        discriminator run_turn's side loops use."""
+        try:
+            from construct.arc.executor import (
+                LIFECYCLE_TERMINALS, stored_lifecycle)
+            return [self._arc] + [
+                sa for sa in (self._side_arcs or [])
+                if stored_lifecycle(reads, sa) not in LIFECYCLE_TERMINALS]
+        except Exception:  # noqa: BLE001 — fail to main-only, never to the past
+            return [self._arc]
+
     def _read_independent_extra(self) -> list:
         """The persisted reshape/hook independent-scope extras (round 4)."""
         try:
@@ -1330,7 +1347,7 @@ class Session:
             from construct.arc.executor import arc_entities
             reads = PorcelainWorldReads(self._world, horizon=self._horizon())
             live: set[str] = set()
-            for _a in [self._arc] + list(self._side_arcs or []):
+            for _a in self._episode_arcs(reads):
                 live |= arc_entities(_a, reads)
             scope = set(getattr(self, "_independent_scope", set())) | live
             self._scope = sorted(e for e in scope if reads.has_entity(e))
@@ -1351,9 +1368,9 @@ class Session:
             portfolio = arc_io.portfolio_from_frame(reads)
             self._arc = next((a for a in portfolio if a.arc_id == main_id), self._arc)
             self._side_arcs = [a for a in portfolio if a.arc_id != main_id]
-            self._beat_scope = set(arc_entities(self._arc, reads))
-            for _sa in self._side_arcs or []:
-                self._beat_scope |= arc_entities(_sa, reads)
+            self._beat_scope = set()
+            for _a in self._episode_arcs(reads):
+                self._beat_scope |= arc_entities(_a, reads)
             self._independent_scope = (
                 set(getattr(self, "_independent_scope", set()))
                 | set(extra_scope or []))

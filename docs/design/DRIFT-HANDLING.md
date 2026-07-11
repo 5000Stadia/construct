@@ -352,11 +352,14 @@ becomes literally true:
    round 3):** an InFrame delivery beat re-mints ONLY when a live delivery
    channel exists — some cast holder of the exact clue that (a) still
    EXISTS in live canon, (b) CAN ACT — the shared closed eligibility
-   predicate `person_can_act` (cr round 5: an independently dead carrier
-   is a corpse at a known location, not a road; ONE predicate for repair
-   and delivery so they can never diverge; rejects only explicit settled
-   death — alive=false / dead=true / a word-boundary death word on
-   role/state/condition/status — absent rows stay eligible), (c) is
+   predicate `person_can_act` (cr rounds 5-6: an independently dead
+   carrier is a corpse at a known location, not a road; ONE predicate,
+   GENUINELY shared — repair walkability, interview clue delivery, and
+   the npc_turn action/speech candidacy all consume it, so no channel can
+   diverge on whether a corpse is a road; the body itself stays present
+   for scene/imagery. Rejects only explicit settled death — alive=false /
+   dead=true / a word-boundary death word on role/state/condition/status
+   — absent rows stay eligible), (c) is
    LOCATABLE (a containment chain resolves — the runtime half; the static
    cast blob supplies only the authored half), and (d) is NOT one of the
    witness's `driving_entities` — the
@@ -451,8 +454,13 @@ becomes literally true:
      scenario-meta cast is never re-added; the continuation persists the
      episode's own hook ids as the episode-local `independent_extra` row,
      resetting it per episode), the sealed current-episode beat baseline
-     subtracts, and the live overlay adds — so EP1 is still replaced
-     wholesale while mid-episode repairs stay coherent across reopen. Replacement-only referents
+     subtracts, and the live overlay adds — computed over EPISODE-LOCAL
+     arc membership only (the main arc + LIVE side arcs; a continuation
+     deliberately retains prior episodes' concluded arcs as past, and
+     unioning their referents back would re-admit EP1 through the side
+     door — terminal-lifecycle is the discriminator, the same one
+     run_turn's side loops use) — so EP1 is still replaced wholesale
+     while mid-episode repairs stay coherent across reopen. Replacement-only referents
      ENTER, superseded-only referents LEAVE, and an entity owned by BOTH
      an old beat and an independent source (a cast member) SURVIVES that
      beat's supersession — provenance decides, pinned by an overlap

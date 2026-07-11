@@ -4436,11 +4436,21 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 return live_reads.state(n, "accompanying") == arc.protagonist
             except Exception:  # noqa: BLE001
                 return False
+        # THE SHARED ELIGIBILITY (cr D3 round 6): a settled-dead NPC neither
+        # acts nor speaks — the same closed `person_can_act` predicate repair
+        # walkability and interview delivery use, so no channel can diverge
+        # on whether a corpse is a road. A silent no-op decision substitutes
+        # (alignment with `npcs` preserved; no model call spent); the body
+        # itself stays present for scene/imagery.
+        from construct.arc.executor import person_can_act as _npc_can_act
+        _SILENT_NPC = {"acts": False, "action": "", "speaks": False,
+                       "intent": "", "line_hint": ""}
         _thunks = [
             (lambda n=npc: cohorts.npc_turn(provider, n, sheets[n],
                                             scene_json, arc.protagonist,
                                             recent=_npc_recent,
                                             companion=_is_companion(n)))
+            if _npc_can_act(live_reads, npc) else (lambda: dict(_SILENT_NPC))
             for npc in npcs]
         if _memory_gate:
             # #97 (Cx 434 constraint 6): memory_turn rides the SAME cheap batch — one
@@ -4560,6 +4570,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # already-eligible+fresh clues; empty/irrelevant → today's authored-order behavior.
         _target_clue_ids = {getattr(_ask_by_oid[o], "clue_id", None)
                             for o in asks_targets if o in _ask_by_oid}
+        from construct.arc.executor import person_can_act as _pca
         for npc in npcs:
             node = cast.get(npc)
             _name = str(canon_table.get((npc, "name")) or "")
@@ -4567,6 +4578,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if node is None or not (only_one or npc == _voc_holder
                                     or _names_entity(npc, low, name=_name,
                                                      role=_role)):
+                continue
+            if not _pca(live_reads, npc):
+                # THE SHARED ELIGIBILITY (cr D3 round 6): the same closed
+                # predicate repair walkability uses — a settled-dead holder
+                # cannot speak a clue into the player frame, or repair and
+                # delivery would contradict each other on whether a corpse
+                # is a road. The body stays PRESENT (scene/imagery keep it);
+                # only delivery is gated.
                 continue
             # Eligible = gate-passing (none always; pressure/examine when the lever is present)
             # AND not already in the player frame. The gate is the rigid, algorithmic filter.

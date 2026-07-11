@@ -2517,6 +2517,7 @@ def test_session_scope_refresh_picks_up_live_beat_referents(world):
         _beat_scope=pre_with_cast,                   # the old beat named it too
         _independent_scope={"place:study", "person:cast_only"},
         _horizon=lambda: None)
+    dummy._episode_arcs = lambda reads: [arc]
     Session._refresh_beat_scope(dummy)
     assert "fact:hidden_route" in dummy._scope       # replacement referent IN
     assert "place:study" in dummy._scope             # independently-played scope kept
@@ -2963,5 +2964,135 @@ def test_episodic_reopen_composes_slot_scope_with_live_overlay(tmp_path):
         assert "fact:old" not in (s._scope or [])    # superseded-only left
         assert "place:hooked" in (s._scope or [])    # episode-local extra kept
         assert "fact:stale_meta_only" not in (s._scope or [])  # EP1 never re-enters
+    finally:
+        w2.close()
+
+
+def test_dead_holder_cannot_deliver_a_clue_in_interview(world):
+    # cr round-6 blocker 1: repair and delivery share ONE eligibility
+    # predicate. A present, locatable, settled-dead sole holder must not
+    # speak a clue into the player frame (the corpse stays present for the
+    # scene; only delivery is gated); the live positive control delivers.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "person:witness", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:witness", "attribute": "name", "value": "Marlow"},
+        {"entity": "person:witness", "attribute": "in", "value": SCENE,
+         "value_type": "entity", "valid_from": turn_time(1)},
+        {"entity": "person:witness", "attribute": "alive", "value": "false"},
+    ])
+    cast = {"person:witness": CastNode(
+        node_id="person:witness", location=SCENE,
+        holds_clues=(Clue(clue_id="clue:motive", pillar_id="pillar:main",
+                          surface_fact=("fact:motive", "reason", "greed")),))}
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+         "uncertain_of": ""},
+        {"prose": "The body offers no answers."},
+    ])
+    import construct.turnloop as tl
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+    try:
+        r = run_turn(world, arc, provider, "I press Marlow: why did he do it?",
+                     turn=2, cast=cast, generate=False)
+    finally:
+        mp.undo()
+    assert r.trace.learned_clues == []                    # the corpse cannot speak
+    assert world.porcelain.state(
+        "fact:motive", "reason",
+        frame=f"knows:{PLAYER}")["status"] != "known"
+    # positive control: the same holder ALIVE delivers through the same door
+    world.porcelain.ingest_structured([
+        {"entity": "person:witness", "attribute": "alive", "value": "true",
+         "valid_from": turn_time(2)},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider2 = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+         "uncertain_of": ""},
+        {"acts": False, "action": "", "speaks": True, "intent": "answers",
+         "line_hint": ""},
+        {"prose": "Marlow answers at last."},
+    ])
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+    try:
+        r2 = run_turn(world, arc, provider2, "I press Marlow again: why?",
+                      turn=3, cast=cast, generate=False)
+    finally:
+        mp.undo()
+    assert r2.trace.learned_clues == ["clue:motive"]
+
+
+def test_continuation_scope_excludes_retained_past_arcs(tmp_path):
+    # cr round-6 blocker 2, the real continuation shape: EP1's concluded
+    # main arc is deliberately RETAINED in the portfolio as past; Session
+    # scope must compose from EPISODE-LOCAL membership only — EP1-only
+    # referents absent, the repaired EP2 old-out/new-in, the hook extra
+    # kept, stale meta absent.
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    from construct.session import Session
+    from construct.arc.executor import set_lifecycle
+    import json as _json
+    rule = rule_classifier_fallback()
+
+    def _mk(path):
+        return World(path, world_id="w:d3p", model=StubModel(
+            fallback=lambda pr, sc: rule(pr, sc)
+            if pr.startswith("Classify the lifetime") else {"items": []}),
+            stance="fiction", title="D3P")
+
+    path = tmp_path / "d3p.world"
+    w1 = _mk(path)
+    w1.ingestor.cursor.advance(1.0)
+    base = make_arc()
+    # EP1: concluded, retained as past; references fact:ep1_only
+    ep1_beat = Beat("beat:ep1goal", Phase.CLIMAX, Weight.REQUIRED,
+                    achievable_via=InFrame(f"knows:{PLAYER}", "fact:ep1_only",
+                                           "settled", "true"))
+    ep1 = replace(base, arc_id="arc:ep1", beats=(ep1_beat,),
+                  climax_ready_beats=("beat:ep1goal",))
+    # EP2 (main): its beat references fact:old, repaired to fact:new
+    ep2_beat = replace(base.beats[0],
+                       achievable_via=InFrame(f"knows:{PLAYER}", "fact:old",
+                                              "route", "true"))
+    ep2 = replace(base, beats=(ep2_beat,))
+    seed_arc(w1, ep2)
+    from construct.arc import io as arc_io
+    w1.porcelain.ingest_structured(arc_io.arc_to_items(ep1))
+    set_lifecycle(w1, ep1, "won", 1)                     # terminal → past
+    for fid in ("fact:ep1_only", "fact:old", "fact:new", "place:hooked"):
+        w1.porcelain.ingest_structured([
+            {"entity": fid, "attribute": "kind",
+             "value": "place" if fid.startswith("place:") else "fact",
+             "timeless": True}])
+    w1.porcelain.ingest_structured([
+        {"entity": "session:episode", "attribute": "arc_scope",
+         "value": _json.dumps(["fact:old", "place:hooked", PLAYER]),
+         "value_type": "literal"},
+        {"entity": "session:scope", "attribute": "independent_extra",
+         "value": _json.dumps(["place:hooked"]), "value_type": "literal"},
+    ], frame="session:main")
+    repl = Beat("beat:discover_r1", Phase.CLIMAX, Weight.REQUIRED,
+                achievable_via=InFrame(f"knows:{PLAYER}", "fact:new",
+                                       "route", "true"))
+    w1.porcelain.ingest_structured(beat_to_items(repl, "arc:main"))
+    _supersede(w1, "arc:main", "discover", "beat:discover_r1")
+    w1.close()
+    w2 = _mk(path)
+    try:
+        meta = {"arc_scope": ["fact:stale_meta_only"], "cast": None,
+                "_side_arcs": [ep1]}                    # the retained past arc
+        s = Session("d3p", w2, ep2, meta, StubProvider([]), "player:test")
+        assert "fact:new" in (s._scope or [])
+        assert "fact:old" not in (s._scope or [])
+        assert "fact:ep1_only" not in (s._scope or [])   # the past never re-enters
+        assert "place:hooked" in (s._scope or [])
+        assert "fact:stale_meta_only" not in (s._scope or [])
     finally:
         w2.close()
