@@ -599,6 +599,35 @@ class TestCastMovesEndToEnd:
                    for f in snap.get("facts", [])), \
             "situation lens must surface the departure for re-entry coherence"
 
+    def test_situation_lens_negative_control_no_caused_by_no_surface(self, world):
+        # THE NEGATIVE CONTROL (cr re-review blocker): the exact twin of the positive
+        # lever assertion above — same served away-`in` fact, same departed_scene event
+        # rows, but the `in` row carries NO item-level caused_by. The situation lens
+        # must EXCLUDE the event: this proves the positive test exercises the causal
+        # lever itself, not incidental event retrieval.
+        arc = make_arc()
+        seed_arc(world, arc)
+        _seed_person(world, "person:maud", "Maud", "place:study")
+        from construct.arc.executor import turn_time as _tt
+        ev = "event:departed_maud_2"
+        world.porcelain.ingest_structured([
+            {"entity": ev, "attribute": "kind", "value": "departed_scene",
+             "valid_from": _tt(2)},
+            {"entity": ev, "attribute": "agent", "value": "person:maud",
+             "value_type": "entity", "valid_from": _tt(2)},
+            {"entity": ev, "attribute": "patient", "value": "place:study",
+             "value_type": "entity", "valid_from": _tt(2)},
+            # the away-`in` row, WITHOUT caused_by — the one difference from the lane's
+            # bound-departure commit.
+            {"entity": "person:maud", "attribute": "in", "value": "place:flat",
+             "value_type": "entity", "valid_from": _tt(2)},
+        ], classify="rules")
+        assert world.porcelain.locate("person:maud")[0] == "place:flat"  # served truth
+        snap = world.porcelain.snapshot(["person:maud"], lens="situation")
+        assert not any(str(f["entity"]).startswith("event:departed_maud")
+                       for f in snap.get("facts", [])), \
+            "without the caused_by lever the situation lens must NOT surface the event"
+
     def test_unbound_exit_the_maid_slips_out(self, world):
         # test bar 2b: destination fails to bind ("the passage") -> EVENT-ONLY departed_scene;
         # no `in` row commits, no place mint; canon location stays stale by design.
