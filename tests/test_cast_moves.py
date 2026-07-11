@@ -1242,3 +1242,93 @@ class TestCastMovesEndToEnd:
                    for d in r.trace.cast_move_drops)
         assert ("bound_move", "person:nell", "place:flat") in r.trace.cast_moves
         assert world.porcelain.locate("person:maud")[0] == "place:study"
+
+
+def test_noop_same_scene_arrival_skips_the_commit():
+    # Task #5 (#80 tuning): a bound "arrival" whose destination is the
+    # person's EXACT current location is a prose restatement — no commit,
+    # telemetry drop. A move to a DIFFERENT container within the scene
+    # still commits (the narrow skip).
+    trace, p = _lane(
+        [{"kind": "bound_move", "person": "person:maud", "destination": SCENE}],
+        present_ids={"person:maud"},
+        p=_FakeP(chains={SCENE: [SCENE], "person:maud": [SCENE]}))
+    assert trace.cast_moves == []
+    assert trace.cast_move_drops == [("person:maud", SCENE, "noop_same_scene")]
+    assert p.calls == []                              # the no-op never writes
+    # different in-scene container (a verified place head nested within the
+    # scene) → still commits
+    trace2, p2 = _lane(
+        [{"kind": "bound_move", "person": "person:maud",
+          "destination": "place:flat"}],
+        present_ids={"person:maud"},
+        p=_FakeP(chains={"place:flat": [SCENE], "person:maud": [SCENE]}))
+    assert trace2.cast_move_drops == []
+    assert p2.calls != []                             # the real move writes
+
+
+class TestAddressesPresentSignal:
+    def test_sole_npc_unaddressed_departure_licenses(self, world):
+        # Task #5 (#80 tuning, the threshold-lingering ledger note): the sole
+        # present NPC previously counted as addressed on EVERY action turn.
+        # With the classifier's addresses_present=False (the player examines
+        # papers, engaging no one), her licensed narrated exit now COMMITS.
+        arc = make_arc()
+        seed_arc(world, arc)
+        _seed_person(world, "person:edda", "Edda", "place:study")
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": [
+            {"entity": "person:edda", "attribute": "in", "value": "place:flat",
+             "value_type": "entity"},
+        ]})
+        import construct.turnloop as tl
+        mp = pytest.MonkeyPatch()
+        mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+        try:
+            provider = StubProvider([
+                {"kind": "action", "moves_to": "", "requires": [],
+                 "needs_test": False, "uncertain_of": "",
+                 "addresses_present": False},
+                {"acts": False, "action": "", "speaks": False, "intent": "",
+                 "line_hint": ""},
+                {"prose": "You bend over the papers; Edda gathers her shawl "
+                          "and goes out to the flat."},
+            ])
+            r = run_turn(world, arc, provider, "I pore over the papers.",
+                         turn=2, scope=[PLAYER, "place:study", "place:flat",
+                                        "person:edda"])
+        finally:
+            mp.undo()
+        assert ("bound_move", "person:edda", "place:flat") in r.trace.cast_moves
+        assert world.porcelain.locate("person:edda")[0] == "place:flat"
+
+    def test_sole_npc_default_protection_pinned(self, world):
+        # fail-open: a classify output WITHOUT the field keeps today's
+        # protection — the sole NPC's same-turn departure stays blocked.
+        arc = make_arc()
+        seed_arc(world, arc)
+        _seed_person(world, "person:edda", "Edda", "place:study")
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": [
+            {"entity": "person:edda", "attribute": "in", "value": "place:flat",
+             "value_type": "entity"},
+        ]})
+        import construct.turnloop as tl
+        mp = pytest.MonkeyPatch()
+        mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+        try:
+            provider = StubProvider([
+                {"kind": "action", "moves_to": "", "requires": [],
+                 "needs_test": False, "uncertain_of": ""},
+                {"acts": False, "action": "", "speaks": False, "intent": "",
+                 "line_hint": ""},
+                {"prose": "Edda hesitates by the door."},
+            ])
+            r = run_turn(world, arc, provider, "I pore over the papers.",
+                         turn=2, scope=[PLAYER, "place:study", "place:flat",
+                                        "person:edda"])
+        finally:
+            mp.undo()
+        assert any(d[0] == "person:edda" and d[2] == "engaged_this_turn"
+                   for d in r.trace.cast_move_drops)
+        assert world.porcelain.locate("person:edda")[0] == "place:study"

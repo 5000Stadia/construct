@@ -1073,6 +1073,21 @@ def _run_cast_moves_lane(
         if departure and person in engaged_this_turn:
             trace.cast_move_drops.append((person, destination or "", "engaged_this_turn"))
             continue
+        # #80 tuning (task #5): a bound "arrival" whose destination IS the
+        # person's exact current location is a prose restatement of where
+        # they already stand — committing it re-stamps an identical `in`
+        # row every mention. Skip the no-op write (telemetry, not a guard;
+        # a move to a DIFFERENT container within the scene still commits).
+        if (cand["kind"] == "bound_move" and origin_here and dest_here
+                and not departure):
+            try:
+                _cur = (p.locate(person, as_of=horizon) or [None])[0]
+            except Exception:  # noqa: BLE001 — unreadable → commit as before
+                _cur = None
+            if _cur == destination:
+                trace.cast_move_drops.append((person, destination,
+                                              "noop_same_scene"))
+                continue
         licensed.append({"kind": cand["kind"], "person": person,
                          "destination": destination, "departure": departure})
     if not licensed:
@@ -3524,6 +3539,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         drops = (verdict.get("drops") or "").strip()
         examines_target = (verdict.get("examines_target") or "").strip()
         asks_targets = [t for t in (verdict.get("asks_targets") or []) if t]
+        # #80 tuning (task #5): does this input actually ENGAGE a present
+        # person? Fail-open toward True (protection) when the field is
+        # absent — legacy stubs and older classify outputs keep today's
+        # behavior; only an explicit False lifts the sole-NPC over-hold.
+        addresses_present = bool(verdict.get("addresses_present", True))
         # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids; only action
         # turns move people; a candidate can't be both dismissed and brought along (dismissal
         # is the stronger, explicit wording — it wins the conflict).
@@ -4697,7 +4717,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     _addressed_this_turn: set = set()
     if kind == "action" and npcs:
         _low_addr = player_input.lower()
-        _only_one_addr = len(npcs) == 1 and not _voc_absent
+        # #80 tuning (task #5, the threshold-lingering ledger note): the
+        # sole-present-NPC case previously counted as ADDRESSED on EVERY
+        # action turn, holding their licensed exit whenever the player so
+        # much as examined a chair. The only_one branch now also requires
+        # the classifier's `addresses_present` signal (fail-open True —
+        # a missing signal protects); the deterministic vocative/named
+        # branches are untouched, and delivery's own only_one predicate
+        # (#93 semantics) is deliberately NOT changed by this signal.
+        _only_one_addr = (len(npcs) == 1 and not _voc_absent
+                          and addresses_present)
         for _anpc in npcs:
             _anode = cast.get(_anpc) if cast else None
             _aname = str(canon_table.get((_anpc, "name")) or "")

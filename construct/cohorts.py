@@ -158,6 +158,12 @@ CLASSIFY_SCHEMA = {
                   "page') — name that ONE specific target exactly as they referred to it. "
                   "EMPTY for a generic look-around ('glance around the room', 'look about'), "
                   "plain movement, talk, or any action not focused on inspecting one detail."},
+        "addresses_present": {"type": "boolean",
+                  "description": "true when the input SPEAKS TO or directly engages a "
+                  "present person — a question, an order, a greeting, pressing them, "
+                  "handing them something. FALSE when the player acts alone even with "
+                  "others present: examining, moving, reading, handling objects, "
+                  "thinking. Most solitary-action turns: false."},
         "asks_targets": {"type": "array", "items": {"type": "string"},
                   "description": "ONLY when the player QUESTIONS/PRESSES a present character "
                   "and ASK CANDIDATES are listed below: the candidate id(s) (e.g. 'ask_2') "
