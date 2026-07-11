@@ -6582,10 +6582,13 @@ def test_route_price_settle_backstop_retries_failed_precommit_store(world):
 
 
 def test_route_price_never_stored_from_jump_estimate(world):
-    # #113 cr guard: a positive-minutes-PLUS-jump estimate is never stored as a travel
-    # price from the settle site — the jump fields are the disqualifier, not just zero
-    # minutes (the poison-guard oracle).
-    arc = make_arc()
+    # #113 cr guard, PRE-COMMIT site (the seam the priceable bit exists for): under a
+    # live deadline the pre-commit estimator consumes a positive-minutes-PLUS-jump
+    # estimate and collapses the dict to trace.journey_est — an int with no jump fields.
+    # Without the priceable bit, the settle's durability backstop would then store 90 as
+    # a travel price off the reuse path. Pins: journey_est carries the minutes, the
+    # priceable bit is False, and NO route price exists after the settle.
+    arc = _deadline_arc(threshold=500.0)                      # permissive: fits budget, no hold
     seed_arc(world, arc)
     _hall_world(world)
     world._extractions.extend([{"items": []}, {"items": []}])
@@ -6594,12 +6597,14 @@ def test_route_price_never_stored_from_jump_estimate(world):
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},
-        {"prose": "You ride through the dusk to the village."},
         {"advance_minutes": 90, "jump_to_phase": "dusk", "jump_days": 0,
-         "reason": "rides until dusk"},                       # minutes AND a jump
+         "reason": "rides until dusk"},          # consumed PRE-COMMIT (deadline live)
+        {"prose": "You ride through the dusk to the village."},
     ])
-    run_turn(world, arc, provider, "I ride to the consulting room until dusk.",
-             turn=2, scope=[PLAYER, "place:parlor"])
+    result = run_turn(world, arc, provider, "I ride to the consulting room until dusk.",
+                      turn=2, scope=[PLAYER, "place:parlor"])
+    assert result.trace.journey_est == 90                     # the dict collapsed to an int...
+    assert result.trace.journey_priceable is False            # ...but the poison bit traveled
     from construct.turnloop import _stored_route_price
     assert _stored_route_price(world, "place:parlor", "place:consulting_room") == -1
 
