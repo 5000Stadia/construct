@@ -1332,3 +1332,42 @@ class TestAddressesPresentSignal:
         assert any(d[0] == "person:edda" and d[2] == "engaged_this_turn"
                    for d in r.trace.cast_move_drops)
         assert world.porcelain.locate("person:edda")[0] == "place:study"
+
+
+def test_classify_failure_keeps_sole_npc_protection(world):
+    # cr fail-open catch on 58f5115a: with classify raising ProviderError the
+    # turn must SURVIVE and the conservative default must hold — the sole
+    # NPC's narrated same-turn departure stays dropped as engaged.
+    from tests.test_integration import make_arc, run_turn, seed_arc
+    arc = make_arc()
+    seed_arc(world, arc)
+    _seed_person(world, "person:edda", "Edda", "place:study")
+    world._extractions.append({"items": []})
+    world._extractions.append({"items": [
+        {"entity": "person:edda", "attribute": "in", "value": "place:flat",
+         "value_type": "entity"},
+    ]})
+    import construct.turnloop as tl
+    from construct.provider import ProviderTransportError
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+
+    def _boom(*_a, **_k):
+        raise ProviderTransportError("classify down")
+
+    mp.setattr(tl.cohorts, "classify", _boom)
+    try:
+        provider = StubProvider([
+            {"acts": False, "action": "", "speaks": False, "intent": "",
+             "line_hint": ""},
+            {"prose": "Edda hesitates by the door."},
+        ])
+        r = run_turn(world, arc, provider, "I pore over the papers.",
+                     turn=2, scope=["person:player", "place:study",
+                                    "place:flat", "person:edda"])
+    finally:
+        mp.undo()
+    assert r.prose                                      # the turn survived
+    assert any(d[0] == "person:edda" and d[2] == "engaged_this_turn"
+               for d in r.trace.cast_move_drops)
+    assert world.porcelain.locate("person:edda")[0] == "place:study"

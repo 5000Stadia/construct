@@ -3437,6 +3437,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     takes = ""
     drops = ""
     examines_target = ""  # the ONE specific detail the player closely investigates (make-it-real gate)
+    addresses_present = True  # conservative default (task #5 + cr fail-open catch:
+    # a classify ProviderError must keep the rule-5 sole-NPC protection, never
+    # unbind the name — the signal only ever RELAXES on an explicit False)
     asserts_or_reveals = True  # conservative default (TURN-LATENCY A-lite): keep extraction
     # A brief actor descriptor so `classify` can wave off a test for things this
     # character is plainly proficient at (ACTION-RESOLUTION §1). Cheap point reads.
