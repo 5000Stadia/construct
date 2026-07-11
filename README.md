@@ -180,7 +180,7 @@ The project is **design-first**: 60 design documents, each recording a decision,
 | Multi-player shared worlds | Designed, not built | [Design notes](docs/design/) — shared-world observer semantics to be worked jointly with the substrate |
 | Narrator-authored NPC movement (the CAST-MOVES lane) | Live | Narrated arrivals/departures become canon presence truth through five stagecraft rules (never the player, never a bound companion, no minted places, scene-touching only, engaged cast can't vanish mid-conversation); receipt-confirmed commits; fail-closed against ambiguous prose — live-accepted |
 | Journey-price anchoring (route precedent) | Live | The first pricing of a route is its canon precedent — the same road costs the same time in both directions, forever; receipt-confirmed durability with a settle backstop |
-| Drift handling (relocate-the-beat, absence-consequence, path repair) | Specified (GREEN), building | The founder's four-part design; D1 (relocate) next |
+| Drift handling — relocate-the-beat (D1) | Live | Dodge the staged clue-holder and the mechanic finds you: the carrier moves in canon before the narration stages the arrival; gated on story-clock quiet + sustained pressure, one relocation per beat; absence-consequence (D2) and path repair (D3) building |
 
 ---
 
