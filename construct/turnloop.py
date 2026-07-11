@@ -5924,10 +5924,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # narrator re-placed the scene in the prior room ("There is no yard
     # gate in the briefing room"). The WHERE gets the same explicit force
     # the PRESENT CHARACTERS block gives the WHO — one line, every turn.
-    _scene_nm = str(canon_table.get((scene, "name")) or "") if scene else ""
-    if _scene_nm:
+    # The label is PLAYER-FRAME-scoped (cr: a canon-only name the player
+    # never learned must not ride into prose — the same frame discipline
+    # as the scene-name resolver above); with no established name the
+    # anchor goes name-free, keeping its anti-regression force.
+    if scene:
+        _scene_nm = str(names.get(scene) or "")
+        _at = (f"YOU ARE AT: {_scene_nm}." if _scene_nm
+               else "YOU ARE AT the place you now stand in.")
         briefing_parts.append(
-            f"YOU ARE AT: {_scene_nm}. The scene is HERE and only here — if "
+            f"{_at} The scene is HERE and only here — if "
             f"earlier exchanges happened in another room, that place is "
             f"BEHIND you now; never re-place this scene, its doors, or its "
             f"furniture in an earlier location. Travel that was narrated "

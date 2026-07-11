@@ -3506,25 +3506,42 @@ def test_walkability_atleast_and_not_composites(world):
     assert ok2 and carriers2 == {"person:clerk"}
 
 
-def test_briefing_carries_the_location_anchor(world):
-    # Task #10 (critic campaign run-2 verified finding): the briefing pins
-    # WHERE with the same force as WHO — the anchor names the current
-    # scene and forbids re-placing it in an earlier room.
+def test_briefing_location_anchor_is_player_frame_scoped(world):
+    # Task #10 + cr's concealment catch: the anchor pins WHERE with the
+    # presence-block force, and its LABEL is player-frame truth only —
+    # a canon-only name the player never learned goes name-free, never
+    # into the briefing.
     arc = make_arc()
     seed_arc(world, arc)
+    # NEGATIVE: a distinctive name known to canon ONLY
     world.porcelain.ingest_structured([
         {"entity": SCENE, "attribute": "kind", "value": "place",
          "timeless": True},
-        {"entity": SCENE, "attribute": "name", "value": "the study",
+        {"entity": SCENE, "attribute": "name", "value": "the Vermilion Vault",
          "timeless": True},
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
         {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
-        {"prose": "The study holds its quiet."},
+        {"prose": "The room holds its quiet."},
     ])
     r = run_turn(world, arc, provider, "I look around.", turn=2,
                  generate=False)
-    assert "YOU ARE AT: the study." in r.trace.briefing
+    assert "Vermilion Vault" not in r.trace.briefing      # no concealment leak
+    assert "YOU ARE AT the place you now stand in." in r.trace.briefing
     assert "never re-place this scene" in r.trace.briefing
+    # POSITIVE: the player LEARNS the name → the anchor names it
+    world.porcelain.ingest_structured([
+        {"entity": SCENE, "attribute": "name", "value": "the Vermilion Vault",
+         "valid_from": turn_time(2)},
+    ], frame=f"knows:{PLAYER}")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider2 = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The vault holds its quiet."},
+    ])
+    r2 = run_turn(world, arc, provider2, "I look again.", turn=3,
+                  generate=False)
+    assert "YOU ARE AT: the Vermilion Vault." in r2.trace.briefing
