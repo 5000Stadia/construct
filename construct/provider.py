@@ -96,6 +96,35 @@ class Provider(ABC):
 ModelCallable = Callable[[str, dict], dict]
 
 
+def lint_schema(schema: object, path: str = "$") -> None:
+    """Strict-schema preflight (cr follow-up after the D2 live acceptance):
+    reject schema DEFECTS the live structured-output API 400s on but the
+    permissive StubProvider used to accept — so a defective schema fails the
+    unit suite, never the first real call. Checks the proven classes only:
+    an `array` type without `items` (the ABSENCE_SCHEMA defect), and a
+    `required` name absent from `properties`. Raises ValueError with the
+    offending path."""
+    if isinstance(schema, dict):
+        t = schema.get("type")
+        types = t if isinstance(t, list) else [t]
+        if "array" in types and "items" not in schema:
+            raise ValueError(
+                f"schema lint: array without 'items' at {path} — "
+                f"the live API rejects this shape")
+        req, props = schema.get("required"), schema.get("properties")
+        if isinstance(req, list) and isinstance(props, dict):
+            unknown = set(req) - set(props)
+            if unknown:
+                raise ValueError(
+                    f"schema lint: required names {sorted(unknown)} missing "
+                    f"from properties at {path}")
+        for k, v in schema.items():
+            lint_schema(v, f"{path}.{k}")
+    elif isinstance(schema, list):
+        for i, v in enumerate(schema):
+            lint_schema(v, f"{path}[{i}]")
+
+
 def complete_sync(provider: Provider, prompt: str, schema: dict, *, tier: Tier = "main",
                   deliberate: bool = False, task: str = "") -> dict:
     """Sync bridge for the (synchronous) host stack. The v0 turn loop is
@@ -103,7 +132,12 @@ def complete_sync(provider: Provider, prompt: str, schema: dict, *, tier: Tier =
     synchronously mid-call; async fan-out is a later optimization.
 
     `task` prepends the systematic section tag (see `task_tag`/`task_of`), so
-    routing/tiering/profiling latch onto a stable marker rather than the prose."""
+    routing/tiering/profiling latch onto a stable marker rather than the prose.
+
+    Every host cohort call funnels through here, so `lint_schema` runs on
+    BOTH stub and live paths — a stub-tested cohort cannot carry a schema
+    the live API would reject."""
+    lint_schema(schema)
     if task:
         prompt = task_tag(task) + prompt
     return asyncio.run(provider.complete(prompt, schema, tier=tier, deliberate=deliberate))

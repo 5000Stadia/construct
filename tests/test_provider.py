@@ -192,3 +192,48 @@ def test_non_transient_transport_failure_fails_fast(tmp_path):
         asyncio.run(provider.complete("p", {"type": "object", "properties": {},
                                             "required": []}))
     assert calls["n"] == 1          # no retry on a non-transient failure
+
+
+# ---- strict-schema preflight (cr follow-up: the D2 live-only ABSENCE_SCHEMA
+# defect — an array without `items` passed the stub and 400'd on the real API)
+
+def test_lint_schema_rejects_array_without_items():
+    import pytest
+    from construct.provider import lint_schema
+    with pytest.raises(ValueError, match="array without 'items'"):
+        lint_schema({"type": "object", "properties": {
+            "subjects": {"type": "array", "maxItems": 2}}})
+    # nested inside items of a valid array — still caught, with the path
+    with pytest.raises(ValueError, match=r"\$\.properties\.rows\.items"):
+        lint_schema({"type": "object", "properties": {
+            "rows": {"type": "array", "items": {"type": "array"}}}})
+
+
+def test_lint_schema_rejects_required_not_in_properties():
+    import pytest
+    from construct.provider import lint_schema
+    with pytest.raises(ValueError, match="missing from properties"):
+        lint_schema({"type": "object", "properties": {"a": {"type": "string"}},
+                     "required": ["a", "ghost"]})
+
+
+def test_lint_schema_runs_on_the_stub_path_too():
+    import pytest
+    from construct.provider import StubProvider, complete_sync
+    with pytest.raises(ValueError, match="array without 'items'"):
+        complete_sync(StubProvider([{"x": []}]),
+                      "p", {"type": "object", "properties": {
+                          "x": {"type": "array"}}})
+
+
+def test_every_authored_cohort_schema_lints():
+    # The audit: every module-level *_SCHEMA constant in the host must pass
+    # the preflight — a defective schema fails HERE, never on a live call.
+    import construct.cohorts as cohorts
+    from construct.provider import lint_schema
+    audited = 0
+    for name in dir(cohorts):
+        if name.endswith("_SCHEMA"):
+            lint_schema(getattr(cohorts, name), path=name)
+            audited += 1
+    assert audited > 10  # the audit actually swept the module
