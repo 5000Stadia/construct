@@ -848,6 +848,7 @@ def _partition_cast_moves(
             # else: bound to a NON-place (e.g. a person) — falls through to the unbound-exit
             # reclassification below (cr r3/r4 test 2c-d), the lane's OWN place check —
             # resolve.py's local `_kind_ok` only catches the obj-valued case.
+        via = None
         if kind is None:
             if outcome.value_outcome not in ("dropped", "bound_non_place", "bound"):
                 continue  # e.g. a freshly-MINTED destination — not a licensable move (§1)
@@ -857,8 +858,18 @@ def _partition_cast_moves(
                                        name=scene_name):
                 guard_drops.append((person, "", "ambiguous_scene_restatement"))
                 continue
-            kind = "unbound_exit"
-        candidates.append({"kind": kind, "person": person, "destination": destination})
+            # §1.3 NARROWING (bar-11 live defect, cr <f8409447…>): a fully-DROPPED
+            # destination NEVER creates an exit candidate — live fiction proved it is
+            # as often a within-scene position ("she stays by the hearth") as an exit,
+            # and a false departed_scene is durable negative presence. A wholly novel
+            # exit ("the passage beyond") is an ACCEPTED false negative until
+            # extraction supplies a first-class departure shape.
+            if outcome.value_outcome == "dropped" or outcome.resolved_value is None:
+                guard_drops.append((person, "", "ambiguous_unbound_destination"))
+                continue
+            kind, via = "unbound_exit", str(outcome.resolved_value)
+        candidates.append({"kind": kind, "person": person, "destination": destination,
+                           "via": via})
 
     bound_keys = Counter(
         (c["person"], "in", c["destination"]) for c in candidates if c["kind"] == "bound_move")
@@ -913,6 +924,28 @@ def _run_cast_moves_lane(
         cands = by_person[person]
         if len({(c["kind"], c.get("destination")) for c in cands}) == 1:
             normalized.append(cands[0])
+            continue
+        # §2b ORIGIN-RESTATEMENT TIE-BREAK (bar-11 finding 2, cr <f8409447…>): natural
+        # arrival prose ("X comes in FROM THE YARD") extracts the destination AND a
+        # restated origin. Strictly structural, never winner-picking: EXACTLY two
+        # candidates, BOTH bound, EXACTLY one restating the person's current immediate
+        # location at _h, the other a DIFFERENT place — discard the restatement (served
+        # truth, not a move) and send the other through every ordinary check. Anything
+        # else — an unbound candidate, indeterminate origin, two non-current
+        # destinations, 3+ candidates — fails closed.
+        picked = None
+        if (len(cands) == 2
+                and all(c["kind"] == "bound_move" for c in cands)):
+            try:
+                cur = (p.locate(person, as_of=horizon) or [None])[0]
+            except Exception:  # noqa: BLE001 — indeterminate origin fails closed
+                cur = None
+            dests = [c.get("destination") for c in cands]
+            if (cur and dests.count(cur) == 1
+                    and all(d for d in dests) and dests[0] != dests[1]):
+                picked = next(c for c in cands if c.get("destination") != cur)
+        if picked is not None:
+            normalized.append(picked)
         else:
             trace.cast_move_drops.append((person, "", "ambiguous_multiple_moves"))
 
@@ -976,6 +1009,30 @@ def _run_cast_moves_lane(
             # not placeness).
             trace.cast_move_drops.append((person, destination or "", "unknown_destination"))
             continue
+        if not is_bound:
+            # §1.3 VERIFIED-CONTAINER EXIT (bar-11 defect narrowing, cr <f8409447…>):
+            # an event-only exit needs PROOF at _h that the bound non-place `via` is a
+            # physical NON-person entity with a nonempty location chain whose place
+            # head lies OUTSIDE the scene's containment area. A person destination is
+            # never exit evidence; no chain proves nothing; colocated-with-scene is a
+            # within-scene POSITION ("by the hearth"), not an exit.
+            via = str(cand.get("via") or "")
+            if not via:
+                trace.cast_move_drops.append((person, "", "ambiguous_unbound_destination"))
+                continue
+            if via.startswith("person:"):
+                trace.cast_move_drops.append((person, via, "person_destination"))
+                continue
+            try:
+                _chain = p.locate(via, as_of=horizon) or []
+            except Exception:  # noqa: BLE001 — a failed walk proves nothing
+                _chain = []
+            if not _chain or not any(str(x).startswith("place:") for x in _chain):
+                trace.cast_move_drops.append((person, via, "no_location_chain"))
+                continue
+            if _dest_in_scene(via):
+                trace.cast_move_drops.append((person, via, "colocated_destination"))
+                continue
         origin_here = present(person)
         dest_here = is_bound and _dest_in_scene(destination)
         if not origin_here and not dest_here:  # rule 4 — must touch the CURRENT scene

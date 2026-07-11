@@ -137,7 +137,8 @@ def test_partition_bound_move_candidate():
     filtered, cands, drops = _partition_cast_moves(
         [{"entity": "person:maud", "attribute": "in", "value": "place:flat"}],
         canon_rows, outcomes, scene=SCENE)
-    assert cands == [{"kind": "bound_move", "person": "person:maud", "destination": "place:flat"}]
+    assert cands == [{"kind": "bound_move", "person": "person:maud",
+                      "destination": "place:flat", "via": None}]
     assert drops == []
     assert filtered == []  # the move row is pulled OUT of ordinary promotion
 
@@ -151,15 +152,16 @@ def test_partition_subject_drop_row_is_nothing():
     assert cands == [] and drops == []
 
 
-def test_partition_destination_drop_is_unbound_exit_not_subject_drop():
-    # 2c-a/b: subject BOUND + destination DROPPED (not scene-named) -> unbound exit,
-    # distinguished from the subject-drop case above via the per-row outcome record.
+def test_partition_destination_drop_never_creates_a_candidate():
+    # §1.3 NARROWING (bar-11 live defect, cr <f8409447…>): a fully-DROPPED destination
+    # ("by the hearth" / "the passage beyond") NEVER creates an exit candidate — live
+    # fiction proved it is as often a within-scene position as an exit. Telemetry only.
     canon_rows = [{"entity": "person:nell", "attribute": "in", "value": "somewhere_unbound"}]
     outcomes = [_outcome(0, "person:nell", "bound", "dropped", raw_value="somewhere unbound")]
     _filtered, cands, drops = _partition_cast_moves(
         [], canon_rows, outcomes, scene=SCENE)
-    assert cands == [{"kind": "unbound_exit", "person": "person:nell", "destination": None}]
-    assert drops == []
+    assert cands == []
+    assert drops == [("person:nell", "", "ambiguous_unbound_destination")]
 
 
 def test_partition_multiple_simultaneous_drops_each_own_record():
@@ -173,10 +175,14 @@ def test_partition_multiple_simultaneous_drops_each_own_record():
         _outcome(0, "person:nell", "bound", "dropped", raw_value="x"),
         _outcome(1, "person:reed", "bound", "bound_non_place", raw_value="y", resolved_value="obj:box"),
     ]
-    _filtered, cands, _drops = _partition_cast_moves(
+    _filtered, cands, drops = _partition_cast_moves(
         [], canon_rows, outcomes, scene=SCENE)
-    assert {c["person"] for c in cands} == {"person:nell", "person:reed"}
-    assert all(c["kind"] == "unbound_exit" for c in cands)
+    # nell's fully-dropped destination is telemetry-only (§1.3); reed's bound_non_place
+    # destination survives as a candidate CARRYING its resolved via for the lane's
+    # verified-container check.
+    assert cands == [{"kind": "unbound_exit", "person": "person:reed",
+                      "destination": None, "via": "obj:box"}]
+    assert ("person:nell", "", "ambiguous_unbound_destination") in drops
 
 
 def test_partition_destination_bound_to_non_place_reclassifies_unbound_exit():
@@ -188,7 +194,8 @@ def test_partition_destination_bound_to_non_place_reclassifies_unbound_exit():
                          resolved_value="person:reed", raw_value="person:reed")]
     _filtered, cands, _drops = _partition_cast_moves(
         [], canon_rows, outcomes, scene=SCENE)
-    assert cands == [{"kind": "unbound_exit", "person": "person:maud", "destination": None}]
+    assert cands == [{"kind": "unbound_exit", "person": "person:maud",
+                      "destination": None, "via": "person:reed"}]
 
 
 def test_partition_no_private_metadata_reaches_the_filtered_rows():
@@ -292,11 +299,14 @@ def test_rule5_engaged_departure_blocked_unengaged_licenses():
     # two departures in the SAME batch: Maud is engaged this turn (blocked), Nell is not
     # (licenses) — the rightful person alone gets the event.
     cands = [
-        {"kind": "unbound_exit", "person": "person:maud", "destination": None},
-        {"kind": "unbound_exit", "person": "person:nell", "destination": None},
+        {"kind": "unbound_exit", "person": "person:maud", "destination": None,
+         "via": "obj:cart"},
+        {"kind": "unbound_exit", "person": "person:nell", "destination": None,
+         "via": "obj:cart"},
     ]
+    p = _FakeP(chains={"obj:cart": ["place:flat"]})
     trace, p = _lane(cands, present_ids={"person:maud", "person:nell"},
-                     engaged=frozenset({"person:maud"}))
+                     engaged=frozenset({"person:maud"}), p=p)
     assert ("person:maud", "", "engaged_this_turn") in trace.cast_move_drops
     assert trace.cast_moves == [("unbound_exit", "person:nell", "")]
     # exactly one departed_scene event batch, for Nell only
@@ -337,9 +347,11 @@ def test_bound_departure_commits_with_caused_by_and_departed_scene_event():
 
 
 def test_unbound_exit_writes_event_directly_no_move_row():
+    p = _FakeP(chains={"obj:cart": ["place:flat"]})
     trace, p = _lane(
-        [{"kind": "unbound_exit", "person": "person:nell", "destination": None}],
-        present_ids={"person:nell"})
+        [{"kind": "unbound_exit", "person": "person:nell", "destination": None,
+          "via": "obj:cart"}],
+        present_ids={"person:nell"}, p=p)
     assert trace.cast_moves == [("unbound_exit", "person:nell", "")]
     [(rows, classify)] = p.calls   # exactly ONE ingest call: the event, no move row
     assert classify == "rules"
@@ -448,9 +460,11 @@ def test_rule3_alias_destination_head_qualifies_as_place():
 def test_unbound_exit_unconfirmed_event_is_not_reported_committed():
     # reviewer-reproduced: fail-open ingest returns an empty receipt without raising —
     # the unbound exit changed nothing durable and must NOT count committed.
+    p = _FakeP(chains={"obj:cart": ["place:flat"]})
     trace, p = _lane(
-        [{"kind": "unbound_exit", "person": "person:nell", "destination": None}],
-        present_ids={"person:nell"},
+        [{"kind": "unbound_exit", "person": "person:nell", "destination": None,
+          "via": "obj:cart"}],
+        present_ids={"person:nell"}, p=p,
         receipts=_FakeReceipt(rows=[]))            # the event batch confirms nothing
     assert trace.cast_moves == []
     assert ("person:nell", "", "event_unconfirmed") in trace.cast_move_drops
@@ -511,13 +525,75 @@ def test_conflicting_kinds_for_one_person_fail_closed():
     assert p.calls == []
 
 
+def test_origin_restatement_tiebreak_licenses_the_sole_transition():
+    # §2b (bar-11 finding 2, cr <f8409447…>): natural arrival prose extracts the
+    # destination AND a restated origin. Exactly two BOUND candidates, exactly one
+    # restating the person's current immediate location at _h -> discard the
+    # restatement, license the other through every ordinary check. ORDER-INDEPENDENT.
+    restate = {"kind": "bound_move", "person": "person:maud", "destination": "place:study"}
+    move = {"kind": "bound_move", "person": "person:maud", "destination": "place:flat"}
+    for cands in ([restate, move], [move, restate]):
+        p = _FakeP(chains={"person:maud": ["place:study"]})
+        trace, p = _lane([dict(c) for c in cands], present_ids={"person:maud"}, p=p)
+        assert trace.cast_moves == [("bound_move", "person:maud", "place:flat")], cands
+        assert not any(d[2] == "ambiguous_multiple_moves" for d in trace.cast_move_drops)
+        move_rows = p.calls[0][0]
+        assert [r["value"] for r in move_rows if r["attribute"] == "in"] == ["place:flat"]
+
+
+def test_tiebreak_counterexamples_stay_fail_closed():
+    # every non-matching shape remains ambiguous_multiple_moves: two NON-current
+    # destinations (known origin), three candidates, an unbound member in the pair.
+    known_origin = {"person:maud": ["place:study"]}
+    two_noncurrent = [
+        {"kind": "bound_move", "person": "person:maud", "destination": "place:flat"},
+        {"kind": "bound_move", "person": "person:maud", "destination": "place:annex"},
+    ]
+    three = two_noncurrent + [
+        {"kind": "bound_move", "person": "person:maud", "destination": "place:study"}]
+    with_unbound = [
+        {"kind": "bound_move", "person": "person:maud", "destination": "place:study"},
+        {"kind": "unbound_exit", "person": "person:maud", "destination": None,
+         "via": "obj:cart"},
+    ]
+    for cands in (two_noncurrent, three, with_unbound):
+        p = _FakeP(place_heads=("place:study", "place:flat", "place:annex"),
+                   chains={"person:maud": ["place:study"], "obj:cart": ["place:flat"]})
+        trace, p = _lane([dict(c) for c in cands], present_ids={"person:maud"}, p=p)
+        assert trace.cast_moves == [], cands
+        assert ("person:maud", "", "ambiguous_multiple_moves") in trace.cast_move_drops
+        assert p.calls == []
+
+
+def test_verified_exit_rejections_person_no_chain_colocated():
+    # §1.3 unit battery: person destination / no location chain / colocated with the
+    # scene — each reason-tagged, no event ever.
+    cases = [
+        ("person:reed", {}, "person_destination"),
+        ("obj:mist", {}, "no_location_chain"),
+        ("obj:hearth", {"obj:hearth": [SCENE]}, "colocated_destination"),
+    ]
+    for via, chains, reason in cases:
+        p = _FakeP(chains=chains)
+        trace, p = _lane(
+            [{"kind": "unbound_exit", "person": "person:maud", "destination": None,
+              "via": via}],
+            present_ids={"person:maud"}, p=p)
+        assert trace.cast_moves == [], via
+        assert (("person:maud", via, reason) in trace.cast_move_drops), (via, reason)
+        assert p.calls == []
+
+
 def test_normalization_is_per_person_other_cast_unaffected():
     # one person's ambiguity never blocks another's clean move in the same batch.
+    p = _FakeP(chains={"obj:cart": ["place:flat"]})
     trace, p = _lane(
         [{"kind": "bound_move", "person": "person:maud", "destination": "place:flat"},
-         {"kind": "unbound_exit", "person": "person:maud", "destination": None},
-         {"kind": "unbound_exit", "person": "person:nell", "destination": None}],
-        present_ids={"person:maud", "person:nell"})
+         {"kind": "unbound_exit", "person": "person:maud", "destination": None,
+          "via": "obj:cart"},
+         {"kind": "unbound_exit", "person": "person:nell", "destination": None,
+          "via": "obj:cart"}],
+        present_ids={"person:maud", "person:nell"}, p=p)
     assert ("person:maud", "", "ambiguous_multiple_moves") in trace.cast_move_drops
     assert trace.cast_moves == [("unbound_exit", "person:nell", "")]
 
@@ -629,8 +705,11 @@ class TestCastMovesEndToEnd:
             "without the caused_by lever the situation lens must NOT surface the event"
 
     def test_unbound_exit_the_maid_slips_out(self, world):
-        # test bar 2b: destination fails to bind ("the passage") -> EVENT-ONLY departed_scene;
-        # no `in` row commits, no place mint; canon location stays stale by design.
+        # test bar 2b, NARROWED (§1.3, bar-11 live defect): a wholly-unbound destination
+        # ("the passage beyond") is now an ACCEPTED FALSE NEGATIVE — no candidate, no
+        # event, telemetry only ("by the hearth" is indistinguishable without semantics;
+        # a false departed_scene is durable negative presence). The verified-container
+        # twin below is the licensed exit path.
         arc = make_arc()
         seed_arc(world, arc)
         _seed_person(world, "person:maud", "Maud", "place:study")
@@ -655,11 +734,90 @@ class TestCastMovesEndToEnd:
                          scope=[PLAYER, "place:study", "person:maud", "person:nell"])
         finally:
             mp.undo()
+        assert r.trace.cast_moves == []                       # accepted false negative
+        assert ("person:maud", "", "ambiguous_unbound_destination") in r.trace.cast_move_drops
+        evs = PorcelainWorldReads(world).events(kind="departed_scene")
+        assert not any("person:maud" in e.agents for e in evs)  # NO false departure
+        assert world.porcelain.locate("person:maud")[0] == "place:study"
+
+    def test_verified_container_exit_licenses_event_only(self, world):
+        # §1.3: the destination binds to a physical NON-person object provably located
+        # OUTSIDE the scene at _h — the ONE surviving event-only exit shape.
+        arc = make_arc()
+        seed_arc(world, arc)
+        _seed_person(world, "person:maud", "Maud", "place:study")
+        _seed_person(world, "person:nell", "Nell", "place:study")
+        world.porcelain.ingest_structured([
+            {"entity": "obj:well_cart", "attribute": "kind", "value": "cart", "timeless": True},
+            {"entity": "obj:well_cart", "attribute": "name", "value": "the well cart"},
+            {"entity": "obj:well_cart", "attribute": "in", "value": "place:flat",
+             "value_type": "entity"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": [
+            {"entity": "person:maud", "attribute": "in", "value": "the well cart",
+             "value_type": "entity"},
+        ]})
+        import construct.turnloop as tl
+        mp = pytest.MonkeyPatch()
+        mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+        try:
+            provider = StubProvider([
+                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                 "uncertain_of": ""},
+                {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+                {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+                {"prose": "Maud climbs onto the well cart and is gone."},
+            ])
+            r = run_turn(world, arc, provider, "I look over the desk.", turn=2,
+                         scope=[PLAYER, "place:study", "obj:well_cart",
+                                "person:maud", "person:nell"])
+        finally:
+            mp.undo()
         assert ("unbound_exit", "person:maud", "") in r.trace.cast_moves
         evs = PorcelainWorldReads(world).events(kind="departed_scene")
         assert any("person:maud" in e.agents for e in evs)
-        # her canon location is UNCHANGED — stale by design (world-tick's to move later)
+        # canon location UNCHANGED — stale by design (world-tick's to move later)
         assert world.porcelain.locate("person:maud")[0] == "place:study"
+
+    def test_within_scene_position_never_a_departure(self, world):
+        # §1.3 stay-by-hearth negative, the LIVE defect exactly: an object colocated
+        # with the scene ("by the hearth") must never produce a departed_scene.
+        arc = make_arc()
+        seed_arc(world, arc)
+        _seed_person(world, "person:maud", "Maud", "place:study")
+        _seed_person(world, "person:nell", "Nell", "place:study")
+        world.porcelain.ingest_structured([
+            {"entity": "obj:hearth", "attribute": "kind", "value": "hearth", "timeless": True},
+            {"entity": "obj:hearth", "attribute": "name", "value": "the hearth"},
+            {"entity": "obj:hearth", "attribute": "in", "value": "place:study",
+             "value_type": "entity"},
+        ])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": [
+            {"entity": "person:maud", "attribute": "in", "value": "the hearth",
+             "value_type": "entity"},
+        ]})
+        import construct.turnloop as tl
+        mp = pytest.MonkeyPatch()
+        mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+        try:
+            provider = StubProvider([
+                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                 "uncertain_of": ""},
+                {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+                {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+                {"prose": "Maud stays by the hearth, saying nothing."},
+            ])
+            r = run_turn(world, arc, provider, "I look over the desk.", turn=2,
+                         scope=[PLAYER, "place:study", "obj:hearth",
+                                "person:maud", "person:nell"])
+        finally:
+            mp.undo()
+        assert r.trace.cast_moves == []
+        assert ("person:maud", "obj:hearth", "colocated_destination") in r.trace.cast_move_drops
+        evs = PorcelainWorldReads(world).events(kind="departed_scene")
+        assert not any("person:maud" in e.agents for e in evs)
 
     def test_protagonist_and_companion_moves_drop(self, world):
         arc = make_arc()
@@ -943,8 +1101,8 @@ class TestCastMovesEndToEnd:
         # bar 10, the KIND case (cr oracle addition): a place whose EVERY row is stamped
         # beyond the play horizon does not exist at `_h` — it can neither bind (the
         # resolver's candidate roster is horizon-bound) nor pass the lane's rule-3 head
-        # re-verify. The narrated exit degrades to the licensed EVENT-ONLY unbound path;
-        # the future place is never minted and nobody relocates into it.
+        # re-verify. Under the §1.3 narrowing the unbindable destination is telemetry
+        # only: no bound move, no event, nobody relocates, nothing minted.
         from construct.arc.executor import turn_time
         arc = make_arc()
         seed_arc(world, arc)
@@ -977,9 +1135,10 @@ class TestCastMovesEndToEnd:
                          horizon=turn_time(2))
         finally:
             mp.undo()
-        assert not any(m[0] == "bound_move" and m[1] == "person:maud"
-                       for m in r.trace.cast_moves)
-        assert ("unbound_exit", "person:maud", "") in r.trace.cast_moves
+        assert r.trace.cast_moves == []                      # nothing licensed at all
+        assert ("person:maud", "", "ambiguous_unbound_destination") in r.trace.cast_move_drops
+        evs = PorcelainWorldReads(world).events(kind="departed_scene")
+        assert not any("person:maud" in e.agents for e in evs)
         assert world.porcelain.locate("person:maud")[0] == "place:study"  # never relocated
 
     def test_only_one_addressed_engagement_protects_departure(self, world):

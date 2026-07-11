@@ -1,13 +1,15 @@
 # Cast Moves — the narration-seam movement lane (spec)
 
-**Status:** SPEC r4. PB comment round FOLDED (`<e1ca7951…>`) + Cx r1 RED
-FOLDED (`<a85c6ade…>`) + Cx r2 focused RED FOLDED (`<9891be53…>`) + cr r3
-focused RED FOLDED (`<787848dc…>`: amendment 1 GREEN with the learned-list
-restriction noted; amendment 2's correlation contract made real — the
-out-of-band per-input `ResolutionOutcome` record with per-SIDE outcomes,
-legacy receipt triples and output rows untouched, five new correlation
-oracles). Awaiting cr r4 confirmation; build delegates on GREEN. Task #80
-(OPTIMAL-IF-EXPERIENCE.md §narration-seam); gate opened by PB letter 125.
+**Status:** SPEC r5 — BUILT (code GREEN through three cr rounds, suite 942)
+and **bar-11 LIVE-ACCEPTANCE AMENDED**: the live probe proved the lane
+end-to-end in real fiction and found one correctness defect (a false
+unbound exit from a within-scene position) + two tunings; cr disposition
+`<f8409447…>` folded here — the unbound-exit path NARROWED fail-closed
+(§1.3), per-person normalization + the origin-restatement tie-break made
+spec text (§2b), the sole-NPC engagement follow-up slice recorded (§2 rule
+5). Review chain: PB `<e1ca7951…>` → cx r1 `<a85c6ade…>` → cx r2
+`<9891be53…>` → cr r3 `<787848dc…>` → cr code rounds → live bar 11.
+Task #80 (OPTIMAL-IF-EXPERIENCE.md §narration-seam); gate opened by PB 125.
 
 ## Problem
 
@@ -74,12 +76,28 @@ Then partition the resolved narrator rows once more — two candidate shapes:
      OUTPUT rows are unchanged and carry NO private metadata, so nothing
      needs stripping before `ingest_structured` (the outcome records are
      out-of-band and never enter the ingest path — pinned by an oracle).
-  3. The lane consumes ONLY the outcome records. UNBOUND-EXIT candidate =
-     `subject_outcome == bound` AND the resolved subject folds (as-of `_h`)
-     to a canon **person** AND `value_outcome ∈ {dropped, bound_non_place}`
-     on a containment attribute. A row whose SUBJECT dropped is nothing. A
-     row with both sides bound is a BOUND MOVE (above) — same records, one
-     partition.
+  3. The lane consumes ONLY the outcome records. UNBOUND-EXIT candidate
+     (**narrowed per the bar-11 live defect + cr disposition
+     `<f8409447…>`** — live fiction proved a fully-unbound destination is
+     as often a within-scene POSITION, "she stays by the hearth", as a true
+     exit, and a false `departed_scene` is durable negative presence for a
+     present person):
+     - `value_outcome == dropped` **NEVER creates a candidate** — telemetry
+       `ambiguous_unbound_destination`, no event, ever.
+     - `value_outcome == bound_non_place` (or bound to a non-place) may
+       carry an EVENT-ONLY exit ONLY when the retained `resolved_value`
+       PROVES at `_h`: a physical NON-person container/object; a nonempty
+       location chain; whose place head lies OUTSIDE the current scene's
+       containment area. Person destinations, unknown/no-location values,
+       and anything colocated with the scene are REJECTED (reason-tagged
+       drops). Rules 1/2/5 apply as always.
+     - **Accepted false negative:** a wholly novel exit destination ("the
+       passage beyond") no longer fires — preferable to false negative
+       presence — until extraction supplies a first-class departure/exit
+       EVENT shape (PB consultation authorized: containment rows alone
+       cannot distinguish "by the hearth" from leaving).
+     A row whose SUBJECT dropped is nothing. A row with both sides bound is
+     a BOUND MOVE (above) — same records, one partition.
   4. **Scene-restatement guard:** if `raw_value` names the CURRENT scene
      (token match against the scene's canon name — the `_names_entity`
      discipline), the row is an ambiguous restatement of where X already
@@ -156,6 +174,35 @@ A candidate move `person:X in place:D` is LICENSED only if ALL hold:
    directive still binds the narrator prompt-side, and every pre-render
    engagement signal is protected. Departures license only for cast NOT in
    `engaged_this_turn`; arrivals are presence-positive and skip this rule.
+   **FOLLOW-UP slice (bar-11 finding 3, cr-shaped, separate from the
+   correctness fix):** the `only_one` fallback over-protects — a LONE
+   present NPC is "addressed" by every action turn ("I bank the fire"), so
+   their narrated departure can never license in a two-person scene. The
+   approved shape: a backward-compatible `npcs_addressed` opaque-ID field
+   on the existing classify call (fail-open: omitted = empty; never
+   inferred from punctuation); the sole-NPC fallback then protects only
+   when that signal says the input ADDRESSES them. Named/role/vocative and
+   autonomous-speaker protection stay deterministic. Required oracle pair:
+   unnamed sole NPC + "What did you see?" → protected; unnamed sole NPC +
+   "I bank the fire" → not.
+
+### 2b. Per-person normalization (before the gate; cr code review + bar-11 tuning)
+
+One narrated intent per person per turn. Exact duplicate candidates collapse
+to ONE. Conflicting candidates for one person fail CLOSED
+(`ambiguous_multiple_moves`) — with exactly ONE structural exception, the
+**origin-restatement tie-break** (cr disposition `<f8409447…>`, from the
+live finding that natural arrival prose "X comes in FROM THE YARD" extracts
+BOTH the destination and a restated origin): when a person has EXACTLY two
+candidates, BOTH bound, and EXACTLY one resolves to the person's current
+immediate location at `_h` while the other resolves to a DIFFERENT known
+place — the current-location row is a restatement of served truth, not a
+move; discard it and send the other through every ordinary rule and receipt
+check. This is not winner-picking: one row restates the served origin, one
+is the sole state transition. Anything else — an unbound candidate in the
+pair, indeterminate origin, two non-current destinations, three or more
+candidates — stays `ambiguous_multiple_moves`. Pinned: candidate-order
+independence and each fail-closed counterexample.
 
 ### 3. Commit (the doorway)
 
@@ -239,11 +286,23 @@ the deferral to STATE deterministically).
    new `in` row's `caused_by` points at the event; X gone from presence next
    turn; no re-offer; a re-entry briefing surfaces "X left" via the situation
    lens.
-2b. **Unbound exit ("the maid slips out"):** a containment row whose
-   destination fails to bind, origin==scene, rules 1/2/5 pass → EVENT-ONLY
+2b. **Unbound exit (NARROWED — the verified-container path):** a containment
+   row bound to a physical NON-person object provably located OUTSIDE the
+   scene at `_h`, origin==scene, rules 1/2/5 pass → EVENT-ONLY
    `departed_scene`; no `in` row, no place mint; X gone from presence next
-   turn; her canon location is unchanged (stale by design, world-tick's to
-   move later).
+   turn; canon location unchanged (stale by design, world-tick's to move
+   later). AND the narrowing oracles: (i) **stay-by-hearth negative** — a
+   fully-DROPPED destination ("by the hearth") creates NO candidate, NO
+   event, `ambiguous_unbound_destination` telemetry; (ii) **novel-
+   destination false negative** — "the passage beyond" (wholly unbound) no
+   longer fires, asserted as ABSENCE; (iii) person destination / no-location
+   object / object colocated with the scene → reason-tagged drops, no event.
+2d. **Origin-restatement tie-break:** exactly two bound candidates, one ==
+   the person's current immediate location at `_h`, one == a different
+   known place → the restatement is discarded and the move licenses through
+   every ordinary check; counterexamples (unbound in the pair, two
+   non-current, 3+ candidates, order swapped) stay `ambiguous_multiple_moves`
+   — pinned order-independent.
 2c. **Row-correlation oracles (Cx r2, expanded per cr r3):** a multi-row
    same-attribute batch distinguishing (a) SUBJECT drop vs DESTINATION drop
    (subject-drop rows are nothing), (b) exactly one destination drop → the
