@@ -244,21 +244,23 @@ def _clock_firing_event(reads: Any, atom: ClockFired) -> str | None:
     return rows[atom.n - 1].event_id
 
 
-def _true_leaves(expr: Expr, reads: Any, out_true: list, out_unknown: list) -> Truth:
+def _true_leaves(expr: Expr, reads: Any, out_true: list, out_unknown: list,
+                 out_false: list) -> Truth:
     """Walk `expr` recording the DECIDING leaves per shape (§2): AnyOf records
     its TRUE branches' leaves; AllOf all leaves; AtLeast the satisfied leaves;
-    Not records the negated subtree's evaluation (its leaves land in whichever
-    bucket their own truth puts them — the Not's flip happens above them).
+    Not records the negated subtree's evaluation (cr D2 finding 5: a FALSE
+    leaf under a Not is what MADE the Not true — it persists in
+    `false_leaves`, so a `Not(StateIs(...))` closure witness is never empty).
     UNKNOWN/INDETERMINATE atoms are recorded as UNKNOWN wherever encountered.
     Returns the node's own three-valued truth (identical to `evaluate` — the
     walk IS an evaluation, just one that remembers)."""
     if isinstance(expr, Not):
         # the child's leaves record under their OWN truth; the flip is above them
-        v = _true_leaves(expr.operand, reads, out_true, out_unknown)
+        v = _true_leaves(expr.operand, reads, out_true, out_unknown, out_false)
         return {Truth.TRUE: Truth.FALSE, Truth.FALSE: Truth.TRUE}.get(
             v, Truth.INDETERMINATE)
     if isinstance(expr, (AllOf, AnyOf, AtLeast)):
-        verdicts = [_true_leaves(op, reads, out_true, out_unknown)
+        verdicts = [_true_leaves(op, reads, out_true, out_unknown, out_false)
                     for op in expr.operands]
         if isinstance(expr, AllOf):
             if any(v is Truth.FALSE for v in verdicts):
@@ -289,6 +291,8 @@ def _true_leaves(expr: Expr, reads: Any, out_true: list, out_unknown: list) -> T
         out_true.append(leaf)
     elif verdict is Truth.INDETERMINATE:
         out_unknown.append(leaf)
+    else:
+        out_false.append(leaf)  # persists the Not-negated subtree (finding 5)
     return verdict
 
 
@@ -337,7 +341,8 @@ def closure_witness_of(unreachable_if: Expr, reads: Any, turn: int) -> dict:
     expression with every clock leaf forced FALSE no longer evaluates TRUE)."""
     out_true: list = []
     out_unknown: list = []
-    _true_leaves(unreachable_if, reads, out_true, out_unknown)
+    out_false: list = []
+    _true_leaves(unreachable_if, reads, out_true, out_unknown, out_false)
     has_true_clock = any(l.get("kind") == "ClockFired" for l in out_true)
     clock_caused = bool(
         has_true_clock
@@ -345,6 +350,7 @@ def closure_witness_of(unreachable_if: Expr, reads: Any, turn: int) -> dict:
     return {
         "true_leaves": out_true,
         "unknown_leaves": out_unknown,
+        "false_leaves": out_false,
         "clock_caused": clock_caused,
         "firing_events": [l["firing_event"] for l in out_true
                           if l.get("kind") == "ClockFired"

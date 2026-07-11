@@ -2177,6 +2177,18 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         trace.dropped_cohorts.append("world_tick")
 
 
+#: DRIFT-HANDLING D2 (§3 R3, cr finding 1): consequence rows may NEVER carry
+#: structural/presence/identity vocabulary — the movement lane, world-tick,
+#: and Entity Authority own those writes; a "consequence" that relocates a
+#: person or rewires containment is an authority breach, not a lapse-fact.
+_ABSENCE_FORBIDDEN_ATTRS = frozenset({
+    "in", "inside", "located_in", "at", "holds", "contains", "within", "near",
+    "on", "accompanying", "connects_to", "same_as", "kind", "status",
+})
+
+#: entity-shaped values (kind-prefixed ids) — the value-side conjuring check.
+_ENTITY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*:")
+
 #: DRIFT-HANDLING D1 (§3 R2 step 2): decline `relocate_pick` below this confidence
 #: — relocation must feel inevitable, not conjured. The spec leaves the number
 #: unpinned ("decline on low confidence"); tune with live-test data (§7 D1 note).
@@ -2347,27 +2359,54 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 staged_scene = ""
             if not staged_scene:
                 staged_scene = str(getattr(holder_nodes[0], "location", "") or "")
-    except Exception:  # noqa: BLE001 — an unknown staging is still a lapse
+    except Exception:  # noqa: BLE001
         target = None
-    staged_scene = staged_scene or (scene or "")
     if not staged_scene:
+        # NO fabricated staging (cr D2 finding 6): the current scene is not
+        # provenance — a moment with no provable authored/canon staging
+        # declines (retry later; D3's repair may own it), never invents a
+        # patient that would instantly self-surface the callback.
         drift.record_absence_declined(world, turn, beat_id, "no_staged_scene")
         return False
-    # The occurrence license (§2): only an AUTHORED on_expiry note on the
-    # closing clock permits occurrence-facts; the witness names the clock.
-    clock_ids = [l.get("clock_id") for l in (witness.get("true_leaves") or [])
-                 if l.get("kind") == "ClockFired" and l.get("clock_id")]
+    # The CAUSAL LEAF (cr D2 finding 1, binding rule): one witness ClockFired
+    # leaf supplies BOTH the causality event and the occurrence license — the
+    # note and the firing are never selected independently. Preference: the
+    # first leaf (witness order) that carries a firing event; its clock's
+    # authored on_expiry (if any) is the ONLY occurrence license.
+    causal_leaf = next(
+        (l for l in (witness.get("true_leaves") or [])
+         if l.get("kind") == "ClockFired" and l.get("firing_event")), None)
+    firing = causal_leaf.get("firing_event") if causal_leaf else None
     on_expiry = ""
-    for cid in clock_ids:
-        note = drift.read_on_expiry(live_reads, str(cid))
-        if note:
-            on_expiry = note
-            break
-    firing = (witness.get("firing_events") or [None])[0]
+    if causal_leaf and causal_leaf.get("clock_id"):
+        on_expiry = drift.read_on_expiry(
+            live_reads, str(causal_leaf["clock_id"])) or ""
+    # THE STAGED CAST (cr D2 finding 4): every authored cast member whose
+    # place (canon locate head, else authored location) IS the staged scene —
+    # the affected set is the scene plus its people, not clue holders alone.
+    staged_cast: list[str] = list(holder_ids)
+    try:
+        _citer2 = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
+        for _nid, n in _citer2:
+            if n.node_id in staged_cast:
+                continue
+            _loc = ""
+            try:
+                _ch = p.locate(n.node_id, as_of=horizon)
+                _loc = _ch[0] if _ch else ""
+            except Exception:  # noqa: BLE001
+                _loc = ""
+            if (_loc or str(getattr(n, "location", "") or "")) == staged_scene:
+                staged_cast.append(n.node_id)
+    except Exception:  # noqa: BLE001 — holders alone still target-match
+        pass
     # The cohort: informed, never licensing — every returned row is
-    # referent-checked against this explicit allowlist (no conjuring).
-    allowed_ids = ({staged_scene} | set(holder_ids) | set(npcs)
-                   | ({scene} if scene else set()) | {arc.protagonist})
+    # authority-checked against this explicit allowlist (no conjuring), and
+    # the PROTAGONIST is deliberately EXCLUDED: no consequence row may write
+    # the player (no puppetry — cr D2 finding 1, reproduced).
+    allowed_ids = ({staged_scene} | set(staged_cast) | set(npcs)
+                   | ({scene} if scene else set()))
+    allowed_ids.discard(arc.protagonist)
     if target is not None and target.get("entity"):
         allowed_ids.add(str(target["entity"]))
     spine_lines = [f"{hid}" + (f" — {spines[hid]}" if spines.get(hid) else "")
@@ -2393,13 +2432,39 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     from construct.arc.generator import _sanitize_hook
     callback_line = _sanitize_hook(str(pick.get("callback_line") or ""))
     rows_in = [r for r in (pick.get("rows") or []) if isinstance(r, dict)]
-    kept_rows = [r for r in rows_in
-                 if str(r.get("entity")) in allowed_ids
-                 and r.get("attribute") and r.get("value") is not None][:2]
+    kept_rows: list[dict] = []
+    for r in rows_in:
+        subj = str(r.get("entity") or "")
+        attr = str(r.get("attribute") or "")
+        val = r.get("value")
+        claim = str(r.get("claim") or "lapse")
+        # AUTHORITY (cr D2 finding 1, all three reproduced shapes closed):
+        # (a) the subject must be allowlisted and NEVER the protagonist;
+        if subj not in allowed_ids or subj == arc.protagonist:
+            continue
+        # (b) structural/presence vocabulary is never a consequence — the
+        # movement/identity authorities own those writes outright;
+        if not attr or attr in _ABSENCE_FORBIDDEN_ATTRS:
+            continue
+        if val is None:
+            continue
+        # (c) an entity-shaped VALUE must itself be allowlisted (a relation
+        # pointed at an invented id is conjuring through the value side);
+        if _ENTITY_ID_RE.match(str(val)) and str(val) not in allowed_ids:
+            continue
+        # (d) the §2 occurrence rule, HOST-checked: an occurrence claim
+        # without the authored license is discarded outright.
+        if claim == "occurrence" and not on_expiry:
+            continue
+        kept_rows.append({"entity": subj, "attribute": attr, "value": str(val)})
+        if len(kept_rows) == 2:
+            break
     dropped = len(rows_in) - len(kept_rows)
-    if dropped:
-        trace.dropped_cohorts.append(f"absence rows ({dropped} off-allowlist)")
-    if not kept_rows and not callback_line:
+    if dropped > 0:
+        trace.dropped_cohorts.append(f"absence rows ({dropped} unauthorized)")
+    # COMPLETENESS (cr D2 finding 3): the R3 response is facts AND the durable
+    # callback — either alone is not the spec'd response; decline whole.
+    if not kept_rows or not callback_line:
         drift.record_absence_declined(world, turn, beat_id, "nothing_grounded")
         return False
     # ---- COMMIT 1: the moment event — receipt-CONFIRMED before anything
@@ -2418,39 +2483,55 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                            "value": str(firing), "value_type": "entity",
                            "valid_from": turn_time(turn)})
     receipt = p.ingest_structured(event_rows, classify="rules")
-    confirmed, _ = confirmed_batch(event_rows, _receipt_rows(receipt),
-                                   cap=len(event_rows))
-    if not any(c["entity"] == moment_id and c["attribute"] == "kind"
-               for c in confirmed):
+    ev_confirmed, _ = confirmed_batch(event_rows, _receipt_rows(receipt),
+                                      cap=len(event_rows))
+    ev_keys = {(c["entity"], c["attribute"]) for c in ev_confirmed}
+    if not all((r["entity"], r["attribute"]) in ev_keys for r in event_rows):
+        # the event ROW SET, not merely an event-shaped id (cr D2 finding 2):
+        # a moment without its patient/causality is not the contracted anchor.
         trace.dropped_cohorts.append("absence event (unconfirmed)")
         drift.record_absence_declined(world, turn, beat_id, "event_unconfirmed")
-        return False  # nothing durable happened — decline whole, retry later
-    # The CONFIRMED event licenses the response: trace first (the D1 review
-    # discipline — fallible bookkeeping below never erases a licensed surface).
-    trace.absence_consequences.append((moment_id, len(kept_rows)))
-    trace.absence_callback = callback_line  # debug surface; the DELIVERY is the deferred callback
-    # ---- COMMIT 2: consequence FACT rows, item-level caused_by → the lens.
-    if kept_rows:
-        try:
-            p.ingest_structured([
-                {"entity": str(r["entity"]), "attribute": str(r["attribute"]),
-                 "value": str(r["value"]), "caused_by": moment_id,
-                 "valid_from": turn_time(turn)}
-                for r in kept_rows], classify="rules")
-        except Exception:  # noqa: BLE001 — the event stands; fewer felt surfaces
-            logger.warning("absence consequence rows failed", exc_info=True)
-            trace.dropped_cohorts.append("absence consequence rows failed")
-    # ---- COMMIT 3: the durable callback (pending → surfaced on touch).
-    if callback_line:
-        try:
-            affected = [staged_scene] + holder_ids
-            world.porcelain.ingest_structured(
-                drift.callback_rows(beat_id, affected, callback_line,
-                                    moment_id, turn), frame=SESSION)
-        except Exception:  # noqa: BLE001 — consequences stand; no deferred callback
-            logger.warning("absence callback write failed", exc_info=True)
-            trace.dropped_cohorts.append("absence callback failed")
-    # ---- Bookkeeping, individually fail-open (D1 finding-3 discipline).
+        return False  # nothing depended on it — decline whole, retry later
+    # ---- COMMIT 2: consequence FACT rows, item-level caused_by → the lens —
+    # receipt-confirmed; the trace counts ONLY confirmed rows (cr finding 3).
+    fact_rows = [
+        {"entity": str(r["entity"]), "attribute": str(r["attribute"]),
+         "value": str(r["value"]), "caused_by": moment_id,
+         "valid_from": turn_time(turn)}
+        for r in kept_rows]
+    try:
+        f_receipt = p.ingest_structured(fact_rows, classify="rules")
+        f_confirmed, _ = confirmed_batch(fact_rows, _receipt_rows(f_receipt),
+                                         cap=len(fact_rows))
+    except Exception:  # noqa: BLE001
+        f_confirmed = []
+    if not f_confirmed:
+        trace.dropped_cohorts.append("absence consequences (unconfirmed)")
+        drift.record_absence_declined(world, turn, beat_id,
+                                      "consequences_unconfirmed")
+        return False  # retryable — mark_moment never ran (cr finding 3)
+    # ---- COMMIT 3: the durable callback — the COMPLETE row set must confirm
+    # (a callback missing its load-bearing `affected` is silent forever, the
+    # exact failure the durable contract exists to prevent — cr finding 3).
+    affected = [staged_scene] + staged_cast
+    cb_rows = drift.callback_rows(beat_id, affected, callback_line,
+                                  moment_id, turn)
+    try:
+        cb_receipt = world.porcelain.ingest_structured(cb_rows, frame=SESSION)
+        cb_confirmed, _ = confirmed_batch(cb_rows, _receipt_rows(cb_receipt),
+                                          cap=len(cb_rows))
+        cb_ok = len(cb_confirmed) == len(cb_rows)
+    except Exception:  # noqa: BLE001
+        cb_ok = False
+    if not cb_ok:
+        trace.dropped_cohorts.append("absence callback (unconfirmed)")
+        drift.record_absence_declined(world, turn, beat_id,
+                                      "callback_unconfirmed")
+        return False  # retryable — the beat is NOT locked; a re-run recommits
+    # Every load-bearing piece is receipt-confirmed — the response is licensed:
+    # trace first, then individually fail-open bookkeeping (the D1 discipline).
+    trace.absence_consequences.append((moment_id, len(f_confirmed)))
+    trace.absence_callback = callback_line  # debug; the DELIVERY is the deferred callback
     try:
         drift.mark_moment(world, beat_id, moment_id, turn)
     except Exception:  # noqa: BLE001 — rare re-process acceptable; silence is not

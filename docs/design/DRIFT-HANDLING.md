@@ -123,9 +123,12 @@ cohort.
 
 **Classifier (conservative, witness-based):** D-MISSED iff the witness
 proves the closure CLOCK-CAUSED — at least one `ClockFired` leaf evaluated
-TRUE, AND re-evaluating the expression with all clock leaves forced FALSE
-yields not-TRUE (the clock was NECESSARY, not incidental to a mixed
-condition). Anything else — no witness (pre-contract closures), mixed
+TRUE, AND the expression with all clock leaves forced FALSE evaluates
+not-TRUE (the clock was NECESSARY, not incidental to a mixed condition).
+**The necessity verdict is computed AT CLOSE TIME against the same reads
+that closed the beat and CAPTURED in the witness** — later classification
+is a pure witness read and never re-evaluates a moved world (cr-confirmed
+as the horizon-coherent reading). Anything else — no witness (pre-contract closures), mixed
 compound where the world-state half sufficed, undecidable — classifies
 D-HARD. `drift_state(pending_required, closures_with_witnesses, rung,
 quiet_minutes, …) -> list[Drift]` stays a pure reader in the

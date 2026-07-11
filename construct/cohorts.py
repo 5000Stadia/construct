@@ -3074,14 +3074,23 @@ ABSENCE_SCHEMA = {
     "type": "object",
     "properties": {
         "rows": {"type": "array", "maxItems": 2,
-                 "description": "1-2 concrete world-facts the lapse establishes — "
-                                "entity/attribute/value, entities ONLY from the ids "
-                                "given (never invent an id)",
+                 "description": "1-2 concrete world-facts — entity/attribute/value, "
+                                "entities ONLY from the ids given (never invent an "
+                                "id), each DECLARED lapse or occurrence",
                  "items": {"type": "object",
                            "properties": {"entity": {"type": "string"},
                                           "attribute": {"type": "string"},
-                                          "value": {"type": "string"}},
-                           "required": ["entity", "attribute", "value"]}},
+                                          "value": {"type": "string"},
+                                          "claim": {"type": "string",
+                                                    "enum": ["lapse", "occurrence"],
+                                                    "description": "lapse = the chance "
+                                                    "passed / the absence was noted; "
+                                                    "occurrence = asserts the staged "
+                                                    "moment HAPPENED (permitted ONLY "
+                                                    "when an AUTHORED OUTCOME is given "
+                                                    "above — the host discards "
+                                                    "unlicensed occurrence rows)"}},
+                           "required": ["entity", "attribute", "value", "claim"]}},
         "callback_line": {"type": "string",
                           "description": "ONE line for the narrator to weave in when "
                                          "the player next touches the affected people "
@@ -3109,10 +3118,12 @@ def absence_consequence(provider: Provider, target: dict, staged_scene: str,
     _spines = "\n".join(f"- {s}" for s in spines) or "(no one of note)"
     _ids = ", ".join(known_ids)
     _occ = (f"\nAUTHORED OUTCOME (this, and only this, may be asserted as having "
-            f"HAPPENED): {on_expiry}\n" if on_expiry else
+            f"HAPPENED — such rows are declared claim=occurrence): {on_expiry}\n"
+            if on_expiry else
             "\nNO authored outcome exists: the moment's window closed, nothing "
-            "more is known — every fact must be a LAPSE (the chance passed, the "
-            "absence was noted), NEVER a claim about what happened instead.\n")
+            "more is known — EVERY row must be declared claim=lapse (the chance "
+            "passed, the absence was noted), NEVER a claim about what happened "
+            "instead; the host DISCARDS occurrence rows outright here.\n")
     return complete_sync(provider,
         f"A story moment the player never attended has EXPIRED — its window closed "
         f"while they were elsewhere. THE MECHANIC that was staged there (only WHAT "
