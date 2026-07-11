@@ -209,9 +209,15 @@ class Session:
         # from prior sessions). Then _scope is REBUILT immediately as
         # independent ∪ live-beat — a restart opens on the repaired truth,
         # never on stale build scope.
+        # On the EPISODE-SLOT path (Cx 191) the persisted slot scope is the
+        # EPISODE-LOCAL baseline: scenario-meta CAST is stale EP1 provenance
+        # and is NOT re-added — the episode's own positive origins arrive
+        # via the episode-local `independent_extra` row the continuation
+        # writes (cr D3 round 5: compose the contracts; the slot still
+        # replaces EP1 wholesale while repairs stay coherent on reopen).
         self._independent_scope: set[str] = (
             (set(self._scope or []) - getattr(self, "_sealed_beat_scope", set()))
-            | set(self._cast or {})
+            | (set() if _slot_scope_loaded else set(self._cast or {}))
             | {self._arc.protagonist})
         try:
             _extra_raw = PorcelainWorldReads(self._world).state(
@@ -222,12 +228,10 @@ class Session:
                     else _extra_raw)
         except Exception:
             logger.exception("persisted independent-scope read failed; continuing without")
-        # The rebuild is skipped when a per-slot EPISODE scope loaded: on a
-        # CONCLUDE→CONTINUE the slot row is re-authored against the whole
-        # world and REPLACES provenance wholesale (Cx 191 — EP2 must not
-        # cold-open with EP1's cast); it is authoritative verbatim, and the
-        # next repaired turn's refresh re-derives from it normally.
-        if self._scope is not None and not _slot_scope_loaded:
+        # The rebuild runs on BOTH paths (cr D3 round 5 — a mid-episode
+        # repair must survive a reopen): the slot path differs only in its
+        # provenance inputs (episode-local baseline; no stale meta cast).
+        if self._scope is not None:
             try:
                 _reads1 = PorcelainWorldReads(self._world, horizon=self._horizon())
                 self._scope = sorted(

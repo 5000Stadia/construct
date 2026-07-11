@@ -2778,6 +2778,15 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         if _ep2_scope:
             _epi_rows.append({"entity": "session:episode", "attribute": "arc_scope",
                               "value": json.dumps(_ep2_scope), "value_type": "literal"})
+        # EPISODE-LOCAL independent provenance (cr D3 round 5): the hook ids
+        # are THIS episode's positive non-beat scope origins; writing the row
+        # here RESETS it per episode (latest-wins), so a mid-episode reopen
+        # composes Cx 191 (the slot replaces EP1 wholesale) with the D3
+        # open-time rebuild (superseded referents leave, replacements enter)
+        # without ever re-admitting stale scenario-meta cast.
+        _epi_rows.append({"entity": "session:scope", "attribute": "independent_extra",
+                          "value": json.dumps(sorted(set(_hook_ids))),
+                          "value_type": "literal"})
         world.porcelain.ingest_structured(_epi_rows, frame=SESSION)
         # THE SHAPE RECEIPT is the continuation's truth (founder ruling): read the latest terminal
         # event's grade/shape/basis rows (row-level — the receipt is session bookkeeping, not a fold).

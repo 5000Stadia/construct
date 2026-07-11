@@ -351,9 +351,15 @@ becomes literally true:
    **WALKABILITY (cr re-review blocker 2; hardened to a LIVE predicate in
    round 3):** an InFrame delivery beat re-mints ONLY when a live delivery
    channel exists — some cast holder of the exact clue that (a) still
-   EXISTS in live canon, (b) is LOCATABLE (a containment chain resolves —
-   the runtime half; the static cast blob supplies only the authored
-   half), and (c) is NOT one of the witness's `driving_entities` — the
+   EXISTS in live canon, (b) CAN ACT — the shared closed eligibility
+   predicate `person_can_act` (cr round 5: an independently dead carrier
+   is a corpse at a known location, not a road; ONE predicate for repair
+   and delivery so they can never diverge; rejects only explicit settled
+   death — alive=false / dead=true / a word-boundary death word on
+   role/state/condition/status — absent rows stay eligible), (c) is
+   LOCATABLE (a containment chain resolves — the runtime half; the static
+   cast blob supplies only the authored half), and (d) is NOT one of the
+   witness's `driving_entities` — the
    POLARITY-AWARE set persisted at close time of the entities whose leaves
    PROVED the closure, whatever their sign (cr round 4: a TRUE
    `Not(StateIs(...))` closure is driven by its FALSE child leaf; a naive
@@ -440,7 +446,13 @@ becomes literally true:
      every repaired turn, never by subtracting one set from a merged set.
      A restart over a persisted supersession therefore opens with the old
      referent gone and the replacement present before the first resumed
-     turn. Replacement-only referents
+     turn — on the EPISODE-SLOT path too (cr round 5, composed with Cx
+     191): the slot row is the EPISODE-LOCAL persisted baseline (stale
+     scenario-meta cast is never re-added; the continuation persists the
+     episode's own hook ids as the episode-local `independent_extra` row,
+     resetting it per episode), the sealed current-episode beat baseline
+     subtracts, and the live overlay adds — so EP1 is still replaced
+     wholesale while mid-episode repairs stay coherent across reopen. Replacement-only referents
      ENTER, superseded-only referents LEAVE, and an entity owned by BOTH
      an old beat and an independent source (a cast member) SURVIVES that
      beat's supersession — provenance decides, pinned by an overlap

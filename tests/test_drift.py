@@ -2849,3 +2849,119 @@ def test_session_reopen_rebuilds_scope_from_the_live_overlay(tmp_path):
         assert "place:study" in (s._scope or [])    # independent scope survived
     finally:
         w2.close()
+
+
+def test_independently_dead_second_holder_is_not_a_live_channel(world):
+    # cr round-5 blocker 1: the clerk dies INDEPENDENTLY (his death is not in
+    # this beat's closure witness — the witness names the rival), he remains
+    # a locatable corpse, and the static cast blob still lists him. The
+    # action-eligibility half of the channel predicate (`person_can_act`,
+    # shared, closed) must reject him: a corpse at a known location is not
+    # a road.
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    _stage_clerk(world)
+    reads = _close_dhard(world, arc)
+    w = drift.read_closure_witness(reads, "beat:discover")
+    assert "person:clerk" not in (w.get("driving_entities") or [])
+    world.porcelain.ingest_structured([
+        {"entity": "person:clerk", "attribute": "alive", "value": "false"},
+    ])
+    assert reads.state("person:clerk", "in") == "place:flat"  # still locatable
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=StubProvider([]), turn=5, arc=arc,
+               cast=_dhard_cast(), scene=SCENE, npcs=[], horizon=None,
+               minutes_now=None, rung=None, fuel=[], spines={})
+    assert trace.repairs == []
+    assert drift.repair_spent(reads, "arc:main") == 0
+    reasons = {r.value for e in reads.events(kind="repair_declined",
+                                             frame=SESSION)
+               for r in reads.frame_rows(SESSION, entity=e.event_id)
+               if r.attribute == "reason"}
+    assert "no_delivery_channel" in reasons
+
+
+def test_person_can_act_is_closed_and_narrow():
+    # the ONE eligibility predicate (cr round 5): explicit settled death in
+    # any of its spellings rejects; absent rows and near-miss words stay
+    # eligible (bodyguard ≠ body; deadline ≠ dead — word-boundary matched).
+    from construct.arc.executor import person_can_act
+
+    class _R:
+        def __init__(self, rows): self.rows = rows
+        def state(self, e, a, **kw): return self.rows.get((e, a))
+
+    assert person_can_act(_R({}), "person:x")                       # absent → eligible
+    assert not person_can_act(_R({("person:x", "alive"): "false"}), "person:x")
+    assert not person_can_act(_R({("person:x", "dead"): "true"}), "person:x")
+    assert not person_can_act(_R({("person:x", "role"): "dead"}), "person:x")
+    assert not person_can_act(_R({("person:x", "status"): "slain in the yard"}),
+                              "person:x")
+    assert person_can_act(_R({("person:x", "role"): "bodyguard"}), "person:x")
+    assert person_can_act(_R({("person:x", "status"): "past the deadline"}),
+                          "person:x")
+
+
+def test_episodic_reopen_composes_slot_scope_with_live_overlay(tmp_path):
+    # cr round-5 blocker 2: a MID-EPISODE repair must survive a close/reopen
+    # on the EPISODE-SLOT path too — the slot row is the episode-local
+    # baseline (Cx 191: EP1 meta/cast never re-enters), the SEALED
+    # current-episode beat baseline is subtracted, and the LIVE overlay is
+    # added: old leaves, new enters, before the first resumed turn.
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    from construct.session import Session
+    import json as _json
+    rule = rule_classifier_fallback()
+
+    def _mk(path):
+        return World(path, world_id="w:d3e", model=StubModel(
+            fallback=lambda pr, sc: rule(pr, sc)
+            if pr.startswith("Classify the lifetime") else {"items": []}),
+            stance="fiction", title="D3E")
+
+    path = tmp_path / "d3e.world"
+    w1 = _mk(path)
+    w1.ingestor.cursor.advance(1.0)
+    base = make_arc()
+    only = replace(base.beats[0],
+                   achievable_via=InFrame(f"knows:{PLAYER}", "fact:old",
+                                          "route", "true"))
+    arc = replace(base, beats=(only,))
+    seed_arc(w1, arc)
+    w1.porcelain.ingest_structured([
+        {"entity": "fact:old", "attribute": "kind", "value": "fact",
+         "timeless": True},
+        {"entity": "fact:new", "attribute": "kind", "value": "fact",
+         "timeless": True},
+        {"entity": "place:hooked", "attribute": "kind", "value": "place",
+         "timeless": True},
+    ])
+    # the continuation wrote the episode slot (episode-local baseline: the
+    # arc's own referents + a hook id) and the episode-local extras row
+    w1.porcelain.ingest_structured([
+        {"entity": "session:episode", "attribute": "arc_scope",
+         "value": _json.dumps(["fact:old", "place:hooked", PLAYER]),
+         "value_type": "literal"},
+        {"entity": "session:scope", "attribute": "independent_extra",
+         "value": _json.dumps(["place:hooked"]), "value_type": "literal"},
+    ], frame="session:main")
+    # the mid-episode repair: fact:old's beat superseded by a fact:new route
+    repl = Beat("beat:discover_r1", Phase.CLIMAX, Weight.REQUIRED,
+                achievable_via=InFrame(f"knows:{PLAYER}", "fact:new",
+                                       "route", "true"))
+    w1.porcelain.ingest_structured(beat_to_items(repl, "arc:main"))
+    _supersede(w1, "arc:main", "discover", "beat:discover_r1")
+    w1.close()
+    w2 = _mk(path)
+    try:
+        meta = {"arc_scope": ["fact:stale_meta_only"],
+                "cast": None}                        # stale EP1 meta — must not leak
+        s = Session("d3e", w2, arc, meta, StubProvider([]), "player:test")
+        assert "fact:new" in (s._scope or [])        # the repair survived reopen
+        assert "fact:old" not in (s._scope or [])    # superseded-only left
+        assert "place:hooked" in (s._scope or [])    # episode-local extra kept
+        assert "fact:stale_meta_only" not in (s._scope or [])  # EP1 never re-enters
+    finally:
+        w2.close()

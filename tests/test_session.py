@@ -426,20 +426,40 @@ class TestSession:
         w.close()
 
     def test_continuation_slot_scope_preferred_over_stale_meta(self, scenario):
-        # Cx 191/192: continue_episode persists the NEW episode's scope per-slot as
-        # session:episode.arc_scope. Session.open must PREFER it over the shared, stale scenario meta
-        # arc_scope — else EP2 cold-opens with EP1's cast. Also guards the json import (the read
-        # decodes a JSON blob; a missing import would silently fall back to the stale meta scope).
+        # Cx 191/192 composed with DRIFT D3 (cr D3 round 5): continue_episode
+        # persists the NEW episode's scope per-slot as session:episode.arc_scope.
+        # Session.open must PREFER it over the shared, stale scenario meta
+        # arc_scope — else EP2 cold-opens with EP1's cast — while the D3
+        # open-time rebuild still runs: the slot is the EPISODE-LOCAL baseline
+        # (scenario-meta CAST is not re-added), the protagonist is a positive
+        # origin, and the CURRENT arc's LIVE beat referents legitimately enter
+        # (for a real EP2 those are EP2's own beats). Also guards the json
+        # import (a missing import would silently fall back to stale meta).
         s1 = Session.open(scenario, player_id="u1", provider=_provider())
         assert s1._scope != ["person:ep2_only"]                    # baseline: the scenario-meta scope
+        meta_only = set(s1._scope or [])
+        s1._world.porcelain.ingest_structured(
+            [{"entity": "person:ep2_only", "attribute": "kind", "value": "person",
+              "timeless": True}])
         s1._world.porcelain.ingest_structured(
             [{"entity": "session:episode", "attribute": "arc_scope",
               "value": json.dumps(["person:ep2_only"]), "value_type": "literal"}],
             frame="session:main")
         s1.close()
         s2 = Session.open(scenario, player_id="u1", provider=_provider())
-        assert s2._scope == ["person:ep2_only"]                    # the slot scope wins on reopen
-        s2.close()
+        try:
+            from construct.adapter import PorcelainWorldReads
+            from construct.arc.executor import arc_entities
+            live = set(arc_entities(s2._arc, PorcelainWorldReads(s2._world)))
+            assert "person:ep2_only" in (s2._scope or [])          # the slot content won
+            # nothing beyond slot ∪ protagonist ∪ live-beat re-entered — in
+            # particular no stale meta-ONLY referent survives the slot path
+            assert set(s2._scope or []) <= (
+                {"person:ep2_only", s2._arc.protagonist} | live)
+            assert not (set(s2._scope or []) & (meta_only - live
+                                                - {s2._arc.protagonist}))
+        finally:
+            s2.close()
 
     def test_turn_failure_is_survivable(self, scenario):
         s = Session.open(scenario, player_id="u1", provider=StubProvider([]))

@@ -2800,12 +2800,17 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     if _atoms:
         _invalidated = set((witness or {}).get("driving_entities") or [])
 
+        from construct.arc.executor import person_can_act as _can_act
+
         def _live_channel(nid: str) -> bool:
             if nid in _invalidated:
                 return False
             try:
                 if not live_reads.has_entity(nid):
                     return False
+                if nid.startswith("person:") and not _can_act(live_reads, nid):
+                    return False  # an independently dead carrier is a corpse
+                    # at a known location, not a road (cr round 5)
                 return bool(p.locate(nid, as_of=horizon))
             except Exception:  # noqa: BLE001 — unprovable ≠ live
                 return False

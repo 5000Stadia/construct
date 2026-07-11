@@ -594,6 +594,39 @@ def _human(entity: str) -> str:
     return local.title() if str(entity).startswith("person:") else local
 
 
+#: The settled-death vocabulary (word-boundary matched). Deliberately NARROW:
+#: eligibility rejects only the explicit corpse — "body"-class words (the
+#: scene-image surface uses them) are too loose here (bodyguard, busybody).
+_SETTLED_DEATH_WORDS = ("dead", "slain", "corpse", "killed", "lifeless",
+                        "murdered")
+
+
+def person_can_act(reads: Any, entity: str) -> bool:
+    """CLOSED action-eligibility for a person in CURRENT canon (cr D3 round
+    5): ONE predicate shared by repair walkability and any delivery/NPC
+    eligibility read, so the two can never diverge on whether a person can
+    act. False on an explicit settled death — `alive` false-ish, `dead`
+    true-ish, or a death word on role/state/condition/status. Absent rows
+    are ELIGIBLE (most living cast carry no liveness rows; this rejects
+    only the explicit corpse). Fail-open on read errors — the witness
+    driving-entity gate still stands above it."""
+    import re as _re
+    try:
+        if str(reads.state(entity, "alive") or "").strip().lower() in (
+                "false", "no", "0"):
+            return False
+        if str(reads.state(entity, "dead") or "").strip().lower() in (
+                "true", "yes", "1"):
+            return False
+        blob = " ".join(str(reads.state(entity, a) or "")
+                        for a in ("role", "state", "condition", "status")
+                        ).lower()
+        return not any(_re.search(rf"\b{w}\b", blob)
+                       for w in _SETTLED_DEATH_WORDS)
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _required_unreachable(reads: Any, arc: Arc) -> bool:
     """Is a REQUIRED beat closed (its `unreachable_if` fired)? The path-foreclosed
     half of `incompletable`. Reads beat statuses `beat_pass` already wrote."""
