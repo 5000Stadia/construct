@@ -3075,38 +3075,33 @@ ABSENCE_SCHEMA = {
     "properties": {
         "subjects": {"type": "array", "maxItems": 2,
                      "description": "1-2 ids FROM THE LIST GIVEN of who noticed / "
-                                    "carries the lapse — the HOST writes the facts; "
-                                    "you only choose who they attach to"},
-        "callback_line": {"type": "string",
-                          "description": "ONE line for the narrator to weave in when "
-                                         "the player next touches the affected people "
-                                         "or places — a felt consequence, never an "
-                                         "announcement"},
+                                    "carries the lapse — the HOST writes the facts "
+                                    "AND the callback directive; you only choose "
+                                    "who the lapse attaches to"},
         "confidence": {"type": "number",
                        "description": "0.0-1.0 — how grounded this lapse is; LOW if "
                                       "nobody here plausibly registers it"},
     },
-    "required": ["subjects", "callback_line", "confidence"],
+    "required": ["subjects", "confidence"],
 }
 
 
 def absence_consequence(provider: Provider, target: dict, staged_scene: str,
                         candidates: list[str], spines: list[str],
                         on_expiry: str, protagonist: str) -> dict:
-    """DRIFT-HANDLING.md §3 R3 + §2's occurrence rule, cr-hardened: the model
-    NEVER authors fact semantics here — the host constructs every canon row
-    from closed lapse predicates (and, when licensed, commits the authored
-    `on_expiry` note VERBATIM as the only occurrence value). A relabeling
-    attack is structurally impossible: this cohort only picks WHICH allowed
-    subjects the lapse attaches to and phrases the deferred callback line.
-    `target` carries only the mechanic's entity/attribute (concealment)."""
+    """DRIFT-HANDLING.md §3 R3 + §2's occurrence rule, cr-hardened twice over:
+    the model authors NOTHING that can reach canon or the narrator briefing —
+    the host constructs the fact rows AND the deferred callback directive from
+    closed lapse predicates (plus, when licensed, the authored `on_expiry`
+    note verbatim). This cohort's whole authority is WHO the lapse attaches
+    to (1-2 ids from the given people) and a confidence. `target` carries only
+    the mechanic's entity/attribute (concealment)."""
     _spines = "\n".join(f"- {s}" for s in spines) or "(no one of note)"
     _cands = ", ".join(candidates)
-    _occ = (f"\nAUTHORED OUTCOME (the host records this verbatim; nothing else "
-            f"about what happened may be implied): {on_expiry}\n" if on_expiry else
+    _occ = (f"\nAUTHORED OUTCOME (recorded by the host verbatim; informs your "
+            f"choice of who carries it): {on_expiry}\n" if on_expiry else
             "\nNO authored outcome exists — the window closed, nothing more is "
-            "known; the callback line must speak only of the LAPSE (the chance "
-            "passed, the absence noted), never of what happened instead.\n")
+            "known.\n")
     return complete_sync(provider,
         f"A story moment the player never attended has EXPIRED — its window closed "
         f"while they were elsewhere. THE MECHANIC that was staged there (only WHAT "
@@ -3117,11 +3112,9 @@ def absence_consequence(provider: Provider, target: dict, staged_scene: str,
         f"{_occ}\n"
         f"WHO MAY CARRY THE LAPSE (choose 1-2 of exactly these ids): {_cands}\n\n"
         f"{player_constraint(protagonist)}\n\n"
-        f"Choose WHO registers the lapse, and give ONE callback line for when the "
-        f"player next crosses the affected people or places — minor is fine, FELT "
-        f"is the point. If nobody here plausibly registers it, say so with LOW "
-        f"confidence."
-        , ABSENCE_SCHEMA, tier="cheap", task="abs")
+        f"Choose WHO registers the lapse. If nobody here plausibly registers it, "
+        f"say so with LOW confidence.",
+        ABSENCE_SCHEMA, tier="cheap", task="abs")
 
 
 def weave_pick(provider: Provider, scene: str, cards: list[str], floor_debt: list[str],

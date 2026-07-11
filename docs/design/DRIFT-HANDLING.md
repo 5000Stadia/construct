@@ -270,21 +270,25 @@ contradictory and promised a salience path that does not exist):
    ROW** pointing at the arc's fired clock event when one exists (item-level
    `caused_by` metadata is NOT surfaced by `events().caused_by` — the
    explicit-row rule, Cx 117, same as `_fire_event_occurs`).
-2. **Consequence rows — HOST-CONSTRUCTED closed predicates (cr D2 review:
-   a schema label is model self-classification and can be relabeled; the
-   authority boundary must be structural).** The `absence_consequence`
-   cohort chooses only SUBJECTS (1-2 ids from an explicit allowlist — the
-   staged cast + present NPCs, protagonist excluded) and phrases the
-   deferred callback line; the HOST writes every canon row itself: per
-   subject a closed lapse predicate (`noted_absence` = "the appointed
-   moment at <staged place> passed unmet (turn N)"), plus — ONLY under an
-   authored `on_expiry` annotation (§2) — exactly one occurrence row whose
-   value is the authored note VERBATIM (`missed_moment_outcome` on the
-   staged scene). Model text can never become a fact; without the license
-   no occurrence-shaped attribute exists at all. Committed via
-   `ingest_structured` to canon **with item-level `caused_by` =
-   `event:moment_missed_<slug>`** — the situation-lens linkage PB verified
-   for the CAST-MOVES departure lever.
+2. **Consequence rows AND the callback directive — HOST-CONSTRUCTED
+   closed predicates (cr D2 review, twice: a schema label is model
+   self-classification, and free callback prose is the same bypass in a
+   player-facing channel — the boundary must be structural in BOTH).** The
+   `absence_consequence` cohort's whole authority is WHO (1-2 subjects
+   from exactly the staged cast + present NPCs, protagonist excluded — a
+   place, proposition, or delivery target is never a "who") and a
+   confidence. The HOST writes everything: per subject a closed lapse
+   predicate (`noted_absence` = "the appointed moment at <staged place>
+   passed unmet (turn N)"); ONLY under an authored `on_expiry` annotation
+   (§2) additionally exactly one occurrence row — the authored note
+   VERBATIM (`missed_moment_outcome` on the staged scene), appended so a
+   licensed note never displaces a subject's predicate (≤3 rows total);
+   and the deferred callback DIRECTIVE, host-built from the same closed
+   predicate (+ the verbatim note when licensed, else an explicit
+   never-assert-what-happened clause). Model text can reach neither canon
+   nor the briefing. Committed via `ingest_structured` to canon **with
+   item-level `caused_by` = `event:moment_missed_<slug>`** — the
+   situation-lens linkage PB verified for the CAST-MOVES departure lever.
 3. **Surfacing, two channels, both real:** (a) re-entry/standing briefings —
    the item-level `caused_by` lights the consequence in
    `snapshot(lens="situation")` while it is served truth; (b) the

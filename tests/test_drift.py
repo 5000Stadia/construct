@@ -1040,9 +1040,7 @@ def test_absence_beat_commits_event_consequences_and_callback(world):
     reads = _closed_with_witness(world, arc)
     trace = TurnTrace(turn=5)
     provider = StubProvider([
-        {"subjects": ["person:aldous"],
-         "callback_line": "Aldous's patience has thinned since the ledgers went unread.",
-         "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=_absence_cast(),
@@ -1080,9 +1078,7 @@ def test_absence_all_unauthorized_subjects_decline_whole(world):
     reads = _closed_with_witness(world, arc)
     trace = TurnTrace(turn=5)
     provider = StubProvider([
-        {"subjects": ["person:invented", PLAYER],
-         "callback_line": "word of the unread ledgers is getting around",
-         "confidence": 0.9},
+        {"subjects": ["person:invented", PLAYER], "confidence": 0.9},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=_absence_cast(),
@@ -1102,12 +1098,13 @@ def test_absence_low_confidence_declines_whole(world):
     reads = _closed_with_witness(world, arc)
     trace = TurnTrace(turn=5)
     provider = StubProvider([
-        {"rows": [], "callback_line": "", "confidence": 0.1},
+        {"subjects": ["person:aldous"], "confidence": 0.1},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=_absence_cast(),
                scene=SCENE, npcs=[], horizon=None, minutes_now=None,
                rung=None, fuel=[], spines={})
+    assert any("low confidence" in d for d in trace.dropped_cohorts)  # THE gate
     assert ("beat:discover", "D-MISSED") in trace.drift  # classified…
     assert trace.absence_consequences == []              # …but no response
     assert not PorcelainWorldReads(world).events(kind="moment_missed")
@@ -1123,7 +1120,7 @@ def test_absence_occurrence_rule_in_the_prompt(world):
     seed_arc(world, arc)
     reads = _closed_with_witness(world, arc)
     provider = StubProvider([
-        {"subjects": [], "callback_line": "x", "confidence": 0.9},
+        {"subjects": [], "confidence": 0.9},
     ])
     trace = TurnTrace(turn=5)
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
@@ -1135,7 +1132,7 @@ def test_absence_occurrence_rule_in_the_prompt(world):
     # now with the annotation (fresh world state: new beat id via a fresh arc
     # is overkill — a second closed beat isn't needed; assert the WITH-note
     # branch at the cohort layer directly)
-    p2 = StubProvider([{"subjects": [], "callback_line": "x", "confidence": 0.9}])
+    p2 = StubProvider([{"subjects": [], "confidence": 0.9}])
     import construct.cohorts as cohorts
     cohorts.absence_consequence(p2, {"entity": "fact:x", "attribute": "culprit"},
                                 "place:mill", ["place:mill"], [],
@@ -1186,9 +1183,7 @@ def test_run_turn_missed_moment_full_arc_suppress_classify_surface_once(world):
     provider = StubProvider([
         {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
-        {"subjects": ["person:aldous"],
-         "callback_line": "Aldous has been asking after the assessor who never came.",
-         "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
         {"prose": "The evening settles."},
     ])
     rB = run_turn(world, arc, provider, "I sit with my notes.", turn=6,
@@ -1220,7 +1215,7 @@ def test_run_turn_missed_moment_full_arc_suppress_classify_surface_once(world):
         mp.undo()
     assert rC.trace.callbacks == ["callback:moment_missed_discover"]
     assert "CONSEQUENCE CALLBACK" in rC.trace.briefing
-    assert "asking after the assessor" in rC.trace.briefing
+    assert "passed unmet" in rC.trace.briefing        # the HOST-built directive
     # ---- (D) once-only: the same touch never re-surfaces it.
     provider = StubProvider([
         {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
@@ -1275,8 +1270,8 @@ def test_absence_model_semantics_can_never_become_facts(world):
     trace = TurnTrace(turn=5)
     provider = StubProvider([
         {"subjects": ["person:aldous"],
-         "callback_line": "the vote passed 4-1 while you were away",  # model TEXT —
-         # reaches only the (sanitized) deferred callback DIRECTIVE, never canon
+         "callback_line": "the vote passed 4-1 while you were away",  # a HOSTILE
+         # extra key: schema-ignored, host-ignored — a DEAD channel (cr r4)
          "confidence": 0.9},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
@@ -1290,6 +1285,12 @@ def test_absence_model_semantics_can_never_become_facts(world):
     assert val["status"] == "known" and "passed unmet" in str(val["fact"]["value"])
     assert world.porcelain.state("place:flat", "missed_moment_outcome")["status"] != "known"
     assert world.porcelain.state(PLAYER, "noted_absence")["status"] != "known"
+    # and the PENDING callback directive is HOST text — the hostile string
+    # never reaches the player-facing channel (cr r4 blocker 1).
+    cbs = drift.pending_callbacks(world)
+    assert cbs and "vote passed" not in cbs[0]["directive"]
+    assert "passed unmet" in cbs[0]["directive"]
+    assert "never assert what happened instead" in cbs[0]["directive"]
 
 
 def test_absence_occurrence_licensed_only_with_the_causal_leaf_note(world):
@@ -1303,9 +1304,7 @@ def test_absence_occurrence_licensed_only_with_the_causal_leaf_note(world):
     reads = _closed_with_witness(world, arc)
     trace = TurnTrace(turn=5)
     provider = StubProvider([
-        {"subjects": ["person:aldous"],
-         "callback_line": "the sealed ledgers hang over every greeting now",
-         "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=_absence_cast(),
@@ -1317,6 +1316,64 @@ def test_absence_occurrence_licensed_only_with_the_causal_leaf_note(world):
     assert str(out["fact"]["value"]) == "the ledgers were sealed unread"  # VERBATIM
     prompt = provider.calls[0][0]
     assert "the ledgers were sealed unread" in prompt   # the bound note, in-prompt
+    cbs = drift.pending_callbacks(world)
+    assert cbs and "What became of it (authored): the ledgers were sealed unread" \
+        in cbs[0]["directive"]                          # licensed, verbatim, host-framed
+
+
+def test_absence_two_subjects_plus_license_keeps_all_three_rows(world):
+    # cr r4 blocker 3: two licensed subjects + on_expiry = BOTH noted_absence
+    # predicates AND the occurrence row (3 rows) — never trade a subject's
+    # fact for the note.
+    arc = _absence_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured(on_expiry_items(
+        "clock:escalate", "the ledgers were sealed unread"), frame=PLOT)
+    world.porcelain.ingest_structured([
+        {"entity": "person:witness", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:witness", "attribute": "in", "value": "place:flat",
+         "value_type": "entity"},
+    ])
+    reads = _closed_with_witness(world, arc)
+    cast = dict(_absence_cast())
+    cast["person:witness"] = CastNode(node_id="person:witness", holds_clues=(),
+                                      location="place:flat")
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([
+        {"subjects": ["person:aldous", "person:witness"], "confidence": 0.9},
+    ])
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=cast,
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.absence_consequences and trace.absence_consequences[0][1] == 3
+    assert world.porcelain.state("person:aldous", "noted_absence")["status"] == "known"
+    assert world.porcelain.state("person:witness", "noted_absence")["status"] == "known"
+    assert world.porcelain.state("place:flat", "missed_moment_outcome")["status"] == "known"
+
+
+def test_absence_nonperson_subjects_rejected(world):
+    # cr r4 blocker 2 (reproduced): the delivery target entity, the staged
+    # place, and the current place are never a "who" — subjects filter to the
+    # staged cast + present NPCs only; nothing else commits a lapse predicate.
+    arc = _absence_arc()
+    seed_arc(world, arc)
+    reads = _closed_with_witness(world, arc)
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([
+        {"subjects": ["fact:secret", "place:flat"], "confidence": 0.9},
+    ])
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_absence_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.absence_consequences == []
+    assert world.porcelain.state("fact:secret", "noted_absence")["status"] != "known"
+    assert world.porcelain.state("place:flat", "noted_absence")["status"] != "known"
+    assert world.porcelain.state(SCENE, "noted_absence")["status"] != "known"
+    assert any("unauthorized" in d for d in trace.dropped_cohorts)
+    assert drift.moment_receipt(reads, "beat:discover") is False
 
 
 def test_absence_partial_event_receipt_declines_and_stays_retryable(world):
@@ -1333,8 +1390,7 @@ def test_absence_partial_event_receipt_declines_and_stays_retryable(world):
         doctor=lambda rr: [r for r in rr
                            if r.get("attribute") not in ("patient", "caused_by")])
     provider = StubProvider([
-        {"subjects": ["person:aldous"],
-         "callback_line": "x marks the lapse", "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
     ])
     _drift_pass(world, doctored, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=_absence_cast(),
@@ -1346,24 +1402,19 @@ def test_absence_partial_event_receipt_declines_and_stays_retryable(world):
     assert any("event (unconfirmed)" in d for d in trace.dropped_cohorts)
 
 
-def test_absence_rows_only_and_callback_only_both_decline(world):
-    # cr finding 3: the response is facts AND the durable callback — either
-    # side alone declines whole (telemetry, not a lock).
+def test_absence_empty_subjects_decline_whole(world):
+    # completeness: no authorized subject -> decline whole (telemetry, not a
+    # lock); the callback is host-built so subjects are the ONLY model input.
     arc = _absence_arc()
     seed_arc(world, arc)
     reads = _closed_with_witness(world, arc)
-    for stub in (
-        {"subjects": ["person:aldous"],
-         "callback_line": "", "confidence": 0.9},                   # subjects only
-        {"subjects": [], "callback_line": "a felt line", "confidence": 0.9},  # callback only
-    ):
-        trace = TurnTrace(turn=5)
-        _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
-                   provider=StubProvider([stub]), turn=5, arc=arc,
-                   cast=_absence_cast(), scene=SCENE, npcs=[], horizon=None,
-                   minutes_now=None, rung=None, fuel=[], spines={})
-        assert trace.absence_consequences == []
-        assert drift.moment_receipt(reads, "beat:discover") is False
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=StubProvider([{"subjects": [], "confidence": 0.9}]),
+               turn=5, arc=arc, cast=_absence_cast(), scene=SCENE, npcs=[],
+               horizon=None, minutes_now=None, rung=None, fuel=[], spines={})
+    assert trace.absence_consequences == []
+    assert drift.moment_receipt(reads, "beat:discover") is False
 
 
 def test_absence_callback_partial_receipt_declines_not_locked(world):
@@ -1388,8 +1439,7 @@ def test_absence_callback_partial_receipt_declines_not_locked(world):
             return getattr(self._real, name)
 
     provider = StubProvider([
-        {"subjects": ["person:aldous"],
-         "callback_line": "a felt line", "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
     ])
     _drift_pass(_WorldProxy(world), world.porcelain, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=_absence_cast(),
@@ -1457,8 +1507,7 @@ def test_absence_affected_includes_staged_scene_cast(world):
                                       location="place:flat")
     trace = TurnTrace(turn=5)
     provider = StubProvider([
-        {"subjects": ["person:aldous"],
-         "callback_line": "the flat has been talking", "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=cast,
@@ -1487,8 +1536,7 @@ def test_absence_offscene_secondary_holder_excluded_from_affected(world):
         location="place:mill")
     trace = TurnTrace(turn=5)
     provider = StubProvider([
-        {"subjects": ["person:aldous"],
-         "callback_line": "the flat has been talking", "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
     ])
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
                provider=provider, turn=5, arc=arc, cast=cast,
@@ -1549,9 +1597,7 @@ def test_absence_restart_oracle_surfaces_after_reopen_once(tmp_path):
     reads1 = _closed_with_witness(w1, arc)
     trace = TurnTrace(turn=5)
     provider = StubProvider([
-        {"subjects": ["person:aldous"],
-         "callback_line": "Aldous has been asking after the assessor.",
-         "confidence": 0.9},
+        {"subjects": ["person:aldous"], "confidence": 0.9},
     ])
     _drift_pass(w1, w1.porcelain, live_reads=PorcelainWorldReads(w1), trace=trace,
                provider=provider, turn=5, arc=arc, cast=_absence_cast(),
@@ -1597,7 +1643,7 @@ def test_absence_restart_oracle_surfaces_after_reopen_once(tmp_path):
             mp.undo()
         assert r2.trace.callbacks == ["callback:moment_missed_discover"]
         assert "CONSEQUENCE CALLBACK" in r2.trace.briefing
-        assert "asking after the assessor" in r2.trace.briefing
+        assert "passed unmet" in r2.trace.briefing    # the HOST-built directive
         # (iii) never again.
         ex2.extend([{"items": []}, {"items": []}])
         provider = StubProvider([

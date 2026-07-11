@@ -2388,21 +2388,20 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 staged_cast.append(n.node_id)
     except Exception:  # noqa: BLE001 — an empty staged cast still lapse-notes the scene
         pass
-    # The cohort: informed, never licensing — every returned row is
-    # authority-checked against this explicit allowlist (no conjuring), and
-    # the PROTAGONIST is deliberately EXCLUDED: no consequence row may write
-    # the player (no puppetry — cr D2 finding 1, reproduced).
-    allowed_ids = ({staged_scene} | set(staged_cast) | set(npcs)
-                   | ({scene} if scene else set()))
-    allowed_ids.discard(arc.protagonist)
-    if target is not None and target.get("entity"):
-        allowed_ids.add(str(target["entity"]))
+    # THE SUBJECT SET (cr r4 blocker 2): WHO can notice/carry a lapse is
+    # exactly the staged cast plus the present NPCs, minus the player — a
+    # place, a proposition, or the delivery target is never a "who". This is
+    # both the candidate list the cohort sees and the host filter beneath it.
+    subject_ids = (set(staged_cast) | set(npcs)) - {arc.protagonist}
     spine_lines = [f"{hid}" + (f" — {spines[hid]}" if spines.get(hid) else "")
                    for hid in (holder_ids + [n for n in npcs if n not in holder_ids])]
+    if not subject_ids:
+        drift.record_absence_declined(world, turn, beat_id, "no_subjects")
+        return False
     try:
         pick = cohorts.absence_consequence(
             provider, target or {"entity": beat_id, "attribute": "delivery"},
-            staged_scene, sorted(allowed_ids), spine_lines, on_expiry,
+            staged_scene, sorted(subject_ids), spine_lines, on_expiry,
             arc.protagonist)
         trace.cohort_calls.append("absence_consequence:cheap")
     except ProviderError as exc:
@@ -2417,22 +2416,16 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         trace.dropped_cohorts.append("absence_consequence (low confidence)")
         drift.record_absence_declined(world, turn, beat_id, "low_confidence")
         return False
-    from construct.arc.generator import _sanitize_hook
-    callback_line = _sanitize_hook(str(pick.get("callback_line") or ""))
-    # HOST-CONSTRUCTED facts ONLY (cr r3 blocker 1 — a schema label is model
-    # self-classification and can be relabeled; the authority boundary must be
-    # structural): the cohort chose SUBJECTS from the allowlist; the host
-    # writes every canon row itself from closed lapse predicates. Without an
-    # authored `on_expiry`, NO model text ever becomes a fact — the only
-    # occurrence value that can exist is the authored note, VERBATIM.
+    # HOST-CONSTRUCTED everything (cr r3+r4: the model's only authority here
+    # is WHO — every string that can reach canon OR the narrator briefing is
+    # host-built from closed predicates, or the authored note verbatim; there
+    # is no channel for unlicensed model text to assert what happened).
     subj_in = [str(x) for x in (pick.get("subjects") or [])]
-    subjects = [x for x in subj_in
-                if x in allowed_ids and x != arc.protagonist][:2]
+    subjects = [x for x in subj_in if x in subject_ids][:2]
     if len(subj_in) > len(subjects):
         trace.dropped_cohorts.append(
             f"absence subjects ({len(subj_in) - len(subjects)} unauthorized)")
-    # COMPLETENESS (cr finding 3): subjects AND the callback, or decline whole.
-    if not subjects or not callback_line:
+    if not subjects:
         drift.record_absence_declined(world, turn, beat_id, "nothing_grounded")
         return False
     try:
@@ -2440,16 +2433,33 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     except Exception:  # noqa: BLE001
         _sname = ""
     _swhere = _sname or staged_scene.split(":", 1)[-1].replace("_", " ")
+
+    def _display(pid: str) -> str:
+        try:
+            nm = str(live_reads.state(pid, "name") or "")
+        except Exception:  # noqa: BLE001
+            nm = ""
+        return nm or pid.split(":", 1)[-1].replace("_", " ")
+
+    # per-subject closed lapse predicates PLUS (licensed only) the verbatim
+    # authored occurrence — ALL subject rows kept, the note appended (cr r4
+    # blocker 3: never trade a subject's fact for the occurrence; cap 3).
     kept_rows = [
         {"entity": subj, "attribute": "noted_absence",
          "value": f"the appointed moment at {_swhere} passed unmet (turn {turn})"}
         for subj in subjects]
     if on_expiry:
-        # the ONE licensed occurrence row: the authored note, verbatim, on the
-        # staged scene — never model-authored semantics (§2, host-enforced).
-        kept_rows = kept_rows[:1] + [
-            {"entity": staged_scene, "attribute": "missed_moment_outcome",
-             "value": on_expiry}]
+        kept_rows.append({"entity": staged_scene,
+                          "attribute": "missed_moment_outcome",
+                          "value": on_expiry})
+    # the deferred callback DIRECTIVE, host-built: names only the lapse (and,
+    # when licensed, the authored outcome verbatim) — never model prose.
+    _who = " and ".join(_display(x) for x in subjects)
+    callback_line = (
+        f"the appointed moment at {_swhere} passed unmet while they were "
+        f"elsewhere; {_who} registered the absence."
+        + (f" What became of it (authored): {on_expiry}" if on_expiry else
+           " Only the lapse is known — never assert what happened instead."))
     # ---- COMMIT 1: the moment event — receipt-CONFIRMED before anything
     # depends on it (the caused_by anchor for lens + consequence rows).
     moment_id = f"event:moment_missed_{slug}"
