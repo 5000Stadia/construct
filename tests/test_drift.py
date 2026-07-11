@@ -3408,3 +3408,99 @@ def test_mixed_inframe_polarity_gates_only_the_positive_fact(world):
     pr = [p_ for p_, _sc, _t in prov.calls if "FORECLOSED" in p_][0]
     assert "presently at" in pr                        # the positive carrier
     assert "remaining UNLEARNED" in pr                 # the negative absence
+
+
+def test_walkability_recurses_over_the_condition_shape(world):
+    # cr expression-level round: walkability honors AllOf/AnyOf/AtLeast
+    # decision semantics — an available alternative branch IS a road.
+    # (a) AnyOf(missing InFrame, Occurred) → repairs through the act branch;
+    # (b) AllOf(missing InFrame, Occurred) → declines (all branches needed);
+    # (c) AtLeast(1, missing InFrame + Occurred) → repairs;
+    #     AtLeast(2, ...) → declines;
+    # (d) Not/false-polarity composite: Not(AllOf(missing InFrame, ...)) is
+    #     walkable by falsifying ONE branch — the mirror rule.
+    from construct.arc.conditions import (AllOf as _AllOf, AnyOf as _AnyOf,
+                                          AtLeast as _AtLeast, Not as _Not)
+    missing = InFrame(f"knows:{PLAYER}", "fact:secret", "culprit",
+                      "person:rival")     # no live holder in an EMPTY cast
+    act = Occurred("event:confrontation")
+
+    def _try(shape, beat_id_suffix, world, arcbase, reads, turn):
+        b = replace(arcbase.beats[0], beat_id=f"beat:{beat_id_suffix}",
+                    achievable_via=shape)
+        a = replace(arcbase, beats=(b,),
+                    climax_ready_beats=(f"beat:{beat_id_suffix}",))
+        world.porcelain.ingest_structured(beat_to_items(b, "arc:main"),
+                                          frame=PLOT)
+        _ach, closed, _r = beat_pass(world, a, reads, turn=turn)
+        assert closed == [f"beat:{beat_id_suffix}"]
+        prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+        trace = TurnTrace(turn=turn + 1)
+        _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+                   provider=prov, turn=turn + 1, arc=a, cast={},
+                   scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+                   rung=None, fuel=[], spines={})
+        return trace
+
+    # fresh world per shape (budget: 2 per arc) — (a)+(b) here, (c)+(d) below
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    t_any = _try(_AnyOf((missing, act)), "anyof", world, arc, reads, 5)
+    assert [r[2] for r in t_any.repairs] == ["replace"]      # (a) act branch
+    t_all = _try(_AllOf((missing, act)), "allof", world, arc, reads, 7)
+    assert t_all.repairs == []                                # (b) declines
+    reasons = {r.value for e in reads.events(kind="repair_declined",
+                                             frame=SESSION)
+               for r in reads.frame_rows(SESSION, entity=e.event_id)
+               if r.attribute == "reason"}
+    assert "no_delivery_channel" in reasons
+
+
+def test_walkability_atleast_and_not_composites(world):
+    from construct.arc.conditions import (AllOf as _AllOf,
+                                          AtLeast as _AtLeast, Not as _Not)
+    missing = InFrame(f"knows:{PLAYER}", "fact:secret", "culprit",
+                      "person:rival")
+    act = Occurred("event:confrontation")
+    arc = _dhard_arc()
+
+    def _run(shape, suffix, world, reads, turn):
+        b = replace(arc.beats[0], beat_id=f"beat:{suffix}",
+                    achievable_via=shape)
+        a = replace(arc, beats=(b,), climax_ready_beats=(f"beat:{suffix}",))
+        world.porcelain.ingest_structured(beat_to_items(b, "arc:main"),
+                                          frame=PLOT)
+        _ach, closed, _r = beat_pass(world, a, reads, turn=turn)
+        assert closed == [f"beat:{suffix}"]
+        prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+        trace = TurnTrace(turn=turn + 1)
+        _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+                   provider=prov, turn=turn + 1, arc=a, cast={},
+                   scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+                   rung=None, fuel=[], spines={})
+        return trace
+
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    # (c) AtLeast(1) walkable through the act; AtLeast(2) needs both → declines
+    t1 = _run(_AtLeast(1, (missing, act)), "atleast1", world, reads, 5)
+    assert [r[2] for r in t1.repairs] == ["replace"]
+    t2 = _run(_AtLeast(2, (missing, act)), "atleast2", world, reads, 7)
+    assert t2.repairs == []
+    # (d) the mirror rule: Not(AllOf(missing, act)) proves FALSE by
+    # falsifying ONE branch (abstaining from the act) — walkable, empty cast
+    # NOTE: budget is spent (t1) + this = 2; run in the same arc while one
+    # slot remains would decline on budget — so verify the GATE directly.
+    import construct.turnloop as tl
+    ok, carriers = tl._walkable_route(_Not(_AllOf((missing, act))), True,
+                                      {}, lambda _n: False)
+    assert ok and carriers == set()
+    # and the flat-required regression stays dead: AnyOf of two clue
+    # branches with ONE live holder is walkable through that holder
+    live_map = {("fact:secret", "culprit", "person:rival"): ["person:clerk"]}
+    from construct.arc.conditions import AnyOf as _AnyOf
+    other = InFrame(f"knows:{PLAYER}", "fact:other", "route", "true")
+    ok2, carriers2 = tl._walkable_route(_AnyOf((other, missing)), True,
+                                        live_map, lambda _n: True)
+    assert ok2 and carriers2 == {"person:clerk"}

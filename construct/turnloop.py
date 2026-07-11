@@ -2734,6 +2734,50 @@ def _polar_atoms(expr: Any, positive: bool = True):
         yield expr, positive
 
 
+def _walkable_route(expr: Any, want: bool, holders: dict,
+                    live_ok: Any) -> tuple[bool, set]:
+    """RECURSIVE walkability over the CONDITION SHAPE (cr: flattening the
+    expression required every positive InFrame leaf, so an AnyOf with one
+    dead delivery branch and one live act branch declined — the opposite of
+    D3). Same wanted-polarity semantics as the witness driving-entity walk:
+    Not flips `want`; AllOf proving TRUE needs every branch and proving
+    FALSE needs one falsifiable branch; AnyOf mirrored; AtLeast honors k /
+    its complement (n-k+1). Leaves: a positive InFrame is walkable iff a
+    LIVE eligible holder exists (and contributes those holders as
+    carriers); a negative InFrame is walkable without delivery; Occurred
+    and world/structural leaves are walkable in both polarities. Returns
+    `(walkable, carrier_ids)` — carriers gathered ONLY from walkable
+    deciding branches, never from unavailable alternatives."""
+    from construct.arc.conditions import (AllOf, AnyOf, AtLeast,
+                                          InFrame, Not)
+    if isinstance(expr, Not):
+        return _walkable_route(expr.operand, not want, holders, live_ok)
+    if isinstance(expr, (AllOf, AnyOf, AtLeast)):
+        results = [_walkable_route(op, want, holders, live_ok)
+                   for op in expr.operands]
+        n = len(results)
+        if isinstance(expr, AllOf):
+            need = n if want else 1
+        elif isinstance(expr, AnyOf):
+            need = 1 if want else n
+        else:  # AtLeast
+            need = expr.k if want else (n - expr.k + 1)
+        ok = [r for r in results if r[0]]
+        if len(ok) < need:
+            return False, set()
+        carriers: set = set()
+        for _okflag, _c in ok:
+            carriers |= _c
+        return True, carriers
+    if isinstance(expr, InFrame):
+        if not want:
+            return True, set()  # the absence of knowledge needs no channel
+        live = [h for h in holders.get((expr.entity, expr.attribute,
+                                        expr.value), []) if live_ok(h)]
+        return bool(live), set(live)
+    return True, set()  # Occurred (either polarity) / world / structural
+
+
 def _refusal_fired(reads: Any, arc: Arc) -> bool:
     """Has this arc's OWN refusal clock fired? The verdict doctrine's single
     read — repair, rescue-holds, and side-deferral all gate on it."""
@@ -2811,48 +2855,39 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     # walkable by the player act itself.
     from construct.arc.conditions import InFrame as _InFrame, Occurred as _Occurred
     _pairs = list(_polar_atoms(beat.achievable_via))
-    # POSITIVE-polarity InFrame leaves only (cr: a Not(InFrame) mechanic is
-    # the ABSENCE of player knowledge — it needs no delivery channel, and
-    # delivering the fact would falsify it; requiring a holder there blocked
-    # a valid repair before the cohort was ever called).
-    _atoms = [a for a, _pos in _pairs if isinstance(a, _InFrame) and _pos]
-    live_holders: list[str] = []  # empty for non-carrier mechanics
-    if _atoms:
-        _invalidated = set((witness or {}).get("driving_entities") or [])
+    _invalidated = set((witness or {}).get("driving_entities") or [])
+    from construct.arc.executor import person_can_act as _can_act
+    _live_memo: dict[str, bool] = {}
 
-        from construct.arc.executor import person_can_act as _can_act
+    def _live_channel(nid: str) -> bool:
+        if nid in _live_memo:
+            return _live_memo[nid]
+        ok = False
+        try:
+            if nid not in _invalidated and live_reads.has_entity(nid):
+                if not (nid.startswith("person:")
+                        and not _can_act(live_reads, nid)):
+                    # an independently dead carrier is a corpse at a known
+                    # location, not a road (cr round 5)
+                    ok = bool(p.locate(nid, as_of=horizon))
+        except Exception:  # noqa: BLE001 — unprovable ≠ live
+            ok = False
+        _live_memo[nid] = ok
+        return ok
 
-        def _live_channel(nid: str) -> bool:
-            if nid in _invalidated:
-                return False
-            try:
-                if not live_reads.has_entity(nid):
-                    return False
-                if nid.startswith("person:") and not _can_act(live_reads, nid):
-                    return False  # an independently dead carrier is a corpse
-                    # at a known location, not a road (cr round 5)
-                return bool(p.locate(nid, as_of=horizon))
-            except Exception:  # noqa: BLE001 — unprovable ≠ live
-                return False
-
-        _citer = (cast.items() if hasattr(cast, "items")
-                  else [(n.node_id, n) for n in cast]) if cast else []
-        holders: dict[tuple, list[str]] = {}
-        for _nid, n in _citer:
-            for c in (getattr(n, "holds_clues", ()) or ()):
-                holders.setdefault(c.surface_fact, []).append(_nid)
-        walkable = True
-        for a in _atoms:
-            _live = [h for h in holders.get((a.entity, a.attribute, a.value), [])
-                     if _live_channel(h)]
-            if not _live:
-                walkable = False
-                break
-            live_holders.extend(h for h in _live if h not in live_holders)
-        if not walkable:
-            drift.record_repair_declined(world, turn, beat_id,
-                                         "no_delivery_channel")
-            return False
+    _citer = (cast.items() if hasattr(cast, "items")
+              else [(n.node_id, n) for n in cast]) if cast else []
+    holders: dict[tuple, list[str]] = {}
+    for _nid, n in _citer:
+        for c in (getattr(n, "holds_clues", ()) or ()):
+            holders.setdefault(c.surface_fact, []).append(_nid)
+    walkable, _carrier_ids = _walkable_route(beat.achievable_via, True,
+                                             holders, _live_channel)
+    if not walkable:
+        drift.record_repair_declined(world, turn, beat_id,
+                                     "no_delivery_channel")
+        return False
+    live_holders: list[str] = sorted(_carrier_ids)
     # ---- mode: travelable D-MISSED re-opens (silent; relocation re-stages);
     # everything else replaces (the hook narrates the new road).
     mode = "reopen" if cls == "D-MISSED" else "replace"
