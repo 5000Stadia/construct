@@ -1,7 +1,14 @@
 # Drift Handling — when the player leaves the road (spec)
 
-**Status:** SPEC, for Cx review then phased build (task number TBD on the
-founder's board; the headline design item after LWG P2). The founder's captured
+**Status:** SPEC r2 — cx review r1 RED (`<d645fd14…>`, six persistence/
+ordering contract gaps) FOLDED: the closure-witness contract (§2), drift_pass
+ordering pinned before lifecycle (§4), the append-safe beat-replacement
+membership model (§3 R4), the diegetic-minute drift gate replacing the false
+turns-are-free claim (§3 R2 / §2), the R3 event graph made real (routine
+moment_missed; situation-lens + directive surfacing; the causal-ripple claim
+retracted), and the shared carrier-move commit surface extracted from
+world-tick (§3 R2). For cr review, then phased build (task number TBD; the
+headline design item after LWG P2). The founder's captured
 4-part design (2026-06-22, extended 2026-06-24 with relocate-the-beat): *"If
 the player ignores the established call to action, GENTLE nudges back to the
 primary narrative help — nothing heavy-handed. If I skip the important meeting
@@ -57,28 +64,62 @@ ingestor doorway).
 Drift is never inferred from prose or from turn counts. Three classes, each
 keyed to a shipped structural signal:
 
-- **D-SOFT — wandering.** Pending REQUIRED beats exist, and the escalation
-  rungs are rising (`navigate(counters, …)` — the shipped idle measure, which
-  already respects diegetic time via its counters). The player is engaged
-  elsewhere; the road is unwalked, not foreclosed.
+- **D-SOFT — wandering.** Pending REQUIRED beats exist, the escalation rungs
+  are rising, AND the world has been development-quiet for
+  `RELOCATE_QUIET_MIN` **diegetic minutes** (read from the LWG development
+  ledger, `session:ambient` / `last_development_min`). **Correction (cx r1
+  finding 4):** the shipped rung ladder counts TURNS (`counters.turns_quiet`,
+  executor.py; `counters_from_session` counts turn events) — it does NOT
+  respect diegetic time, and this spec no longer claims it does. Every NEW
+  drift trigger here keys on the story clock, honoring the sealed
+  turns-are-free ruling: 30 contemplation turns = five in-world minutes = no
+  drift. The rung is a NECESSARY co-signal (story pressure is rising), the
+  diegetic quiet gate is the license. *Flagged for the founder (open item):
+  the pre-existing rung ladder itself remains turn-counted — outside this
+  spec's scope, noted for a future ruling.*
 - **D-MISSED — the skipped moment.** A REQUIRED beat was closed by a
-  TIME-anchored foreclosure: its `unreachable_if` went TRUE via a fired clock
-  (`ClockFired` in the closure's `justified_by` — the classifier below). The
-  meeting happened; the player was at the pub. Distinct from D-HARD because
-  the world-moment *occurred without the player* — there is an absence to
-  narrate.
+  CLOCK-CAUSED foreclosure, proven by the closure witness (below). The
+  window passed; the player was at the pub. Distinct from D-HARD because
+  there is an ABSENCE to narrate — though see the occurrence rule: a fired
+  deadline proves only that the window closed, never that the staged moment
+  happened.
 - **D-HARD — foreclosure.** A REQUIRED beat closed by a WORLD-STATE
-  foreclosure (its `unreachable_if` went TRUE via a non-clock condition — the
-  witness died, the ledger burned). Nothing "happened without" the player;
-  the path itself is gone.
+  foreclosure (the witness died, the ledger burned) — or ANY closure whose
+  witness is absent, mixed-undecidable, or pre-contract. Nothing "happened
+  without" the player; the path itself is gone. D-HARD is the CONSERVATIVE
+  default.
 
-**Classifier:** `beat_pass` already writes `status=closed` + `justified_by`.
-The drift detector re-reads the closure's justification atoms: any
-`ClockFired` present → D-MISSED, else D-HARD. D-SOFT needs no new detection
-at all — it IS the shipped rung ladder. A pure reader
-`drift_state(pending_required, closures, rung, …) -> list[Drift]` mirrors the
-`salient_moments` discipline: explicit inputs, no hidden reads, unit-testable
-without a world.
+**The closure-witness contract (cx r1 finding 1 — the provenance this spec
+needs does not exist yet and is built in D2):** today `beat_pass`
+(executor.py:201-209) writes only `status=closed`; `justified_by` is written
+on ACHIEVEMENT only and holds only `{turn}`. D2 adds: on closing a beat,
+`beat_pass` also writes a **closure witness** row (`plot:` frame,
+`beat:<id>` / `closure_witness`, `valid_from=turn_time(turn)` — horizon-safe)
+recording the EVALUATED witness of the closing evaluation: the set of leaf
+atoms of `unreachable_if` that evaluated TRUE, with their kinds and ids.
+Atom *presence* in the expression is never proof — for compound
+`AnyOf`/`AllOf`/`AtLeast`/`Not` shapes the witness records what actually
+evaluated TRUE at close time.
+
+**Classifier (conservative, witness-based):** D-MISSED iff the witness
+proves the closure CLOCK-CAUSED — at least one `ClockFired` leaf evaluated
+TRUE, AND re-evaluating the expression with all clock leaves forced FALSE
+yields not-TRUE (the clock was NECESSARY, not incidental to a mixed
+condition). Anything else — no witness (pre-contract closures), mixed
+compound where the world-state half sufficed, undecidable — classifies
+D-HARD. `drift_state(pending_required, closures_with_witnesses, rung,
+quiet_minutes, …) -> list[Drift]` stays a pure reader in the
+`salient_moments` discipline: explicit inputs, no hidden reads,
+unit-testable without a world.
+
+**The occurrence rule (cx r1 finding 1, second half):** a fired deadline
+never establishes that the staged moment OCCURRED — only that its window
+closed. R3 consequences are therefore LAPSE-facts by default ("the window
+closed", "your seat was noted empty") grounded in the beat's staging
+context. Asserting the moment happened ("the vote landed 4-1") requires an
+AUTHORED occurrence: an optional build-time annotation on the beat/clock
+(`on_expiry` occurrence note) that licenses occurrence-facts. No
+annotation → no occurrence claim, ever.
 
 ## 3. The four responses (lightest first — the founder's order of preference)
 
@@ -127,7 +168,9 @@ carrier — or re-homes the delivery onto a present, fiction-plausible channel:
 
 1. **Detect:** a D-MISSED beat, or a D-SOFT beat whose rung has reached the
    relocation threshold (below SURFACE→…→REFUSAL's terminal rung — relocate
-   BEFORE the refusal clock is in sight).
+   BEFORE the refusal clock is in sight) AND whose diegetic quiet gate is
+   open (§2 D-SOFT: `RELOCATE_QUIET_MIN` story-clock minutes since the last
+   development).
 2. **Pick the staging:** a cheap-tier cohort (`relocate_pick`, the
    `nudge_pick` shape) receives the beat's mechanic (its delivery target,
    NEVER the hidden answer beyond what the carrier may say), the player's
@@ -138,14 +181,23 @@ carrier — or re-homes the delivery onto a present, fiction-plausible channel:
    licenses), the staging line (how the mechanic arrives HERE), and a
    confidence. Decline on low confidence — relocation must feel inevitable,
    not conjured (unveil-intelligently, not script).
-3. **Move the carrier in CANON, not in prose.** If the original holder
-   travels, the host commits the move through the WORLD-TICK doorway (the
-   deliberate off-screen mover) *before* the narrator stages the arrival —
-   presence truth moves first, so the narrated arrival matches canon and the
-   #80 cast-moves lane (or the promote gate) sees no contradiction. The
-   narrator gets a briefing directive to stage the arrival diegetically. If
-   the delivery re-homes to an already-present carrier, no move is needed —
-   only the directive.
+3. **Move the carrier in CANON, not in prose — through a SHARED commit
+   surface (cx r1 finding 6).** `_world_tick` is a whole autonomous cohort
+   policy (elapsed-floor, discovery gating, anchoring, roster, current-scene
+   exclusions) — it is never called to force a selected relocation. D1
+   instead EXTRACTS the host-owned carrier-move surface both paths use:
+   `commit_carrier_move(world, person, dest, turn, *, scene, protagonist,
+   companions, horizon)` — the validator + commit half (never-the-player /
+   never-a-bound-companion / anchor / scene / horizon guards, then the canon
+   `in`-row commit with receipt audit), factored from world-tick's low-level
+   move and re-consumed by it. R2 calls this surface *before* the narrator
+   stages the arrival — presence truth moves first, so the narrated arrival
+   matches canon and the #80 cast-moves lane (or the promote gate) sees no
+   contradiction. An INVALID carrier move (guard-rejected) produces NO
+   briefing directive and NO relocation receipt — the response declines
+   whole. The narrator gets the staging directive only after a confirmed
+   commit. If the delivery re-homes to an already-present carrier, no move
+   is needed — only the directive.
 4. **Relocation receipt** (`session:` frame, per-beat): beat_id, old staging,
    new staging, turn. One relocation per beat until its staging is
    invalidated again (no re-relocate thrash — the Phase-2 note in
@@ -163,34 +215,46 @@ system-speak).
 
 ### R3 — Absence-consequence (the world moved without you)
 
-On D-MISSED, the missed moment becomes TRUE canon — the same doorway
-discipline as `emit_fallout` (executor.py:608), which is the membrane's
-proven shape:
+On D-MISSED, the lapse becomes TRUE canon — the same doorway discipline as
+`emit_fallout` (executor.py:608), which is the membrane's proven shape. The
+event graph, made exact (cx r1 finding 5 — the r1 text was internally
+contradictory and promised a salience path that does not exist):
 
-1. **Event row:** `event:moment_missed_<beat_slug>` (kind `moment_missed`),
-   stamped `valid_from=turn_time(turn)`.
-2. **Consequence rows:** 1-2 concrete world-facts, `caused_by` the event —
-   "the vote landed 4-1", "your seat was noted empty" — proposed by a
-   cheap-tier cohort (`absence_consequence`) from the beat's context + the
-   scene it was staged in + present-cast spines, constrained to the
-   `known_ids` allowlist (the session-zero arc-authoring rule), validated
-   like the generator preflight (referents must exist), committed via
-   `ingest_structured` to canon. NEVER a derived notion ("tension rose") —
-   only facts a camera at the missed scene could have recorded.
-3. **Surfacing:** the `caused_by` linkage makes the consequence a live
-   thread — the situation lens lights it exactly as PB verified for the
-   `departed_scene` lever (CAST-MOVES §4), and it feeds back as generator
-   fuel through the causal-ripple signal with zero new plumbing. The
-   narrator briefs it as a consequence-callback (the newspaper-front-page
-   ruling: minor is fine, FELT is the point) — when the player next touches
-   the affected people/places, not as an announcement.
-4. **`moment_missed` joins `ROUTINE_EVENT_KINDS`?** NO — deliberately: the
-   consequence rows (not the bookkeeping event) are what carry salience, and
-   they qualify via causal ripple. The event kind itself IS excluded from the
-   first-time-kind signal (it is host bookkeeping, same reasoning as
-   `arc_terminal`); pinned by test.
-5. `ROUTINE_EVENT_KINDS` gains `"moment_missed"`; `_FALLOUT`-style phrasing
-   is NOT reused — absence consequences are situational, not delta_type-keyed.
+1. **Event row set:** `event:moment_missed_<beat_slug>` — `kind` =
+   `moment_missed`, `patient` = the staged scene, all stamped
+   `valid_from=turn_time(turn)`; PLUS an **explicit event-entity `caused_by`
+   ROW** pointing at the arc's fired clock event when one exists (item-level
+   `caused_by` metadata is NOT surfaced by `events().caused_by` — the
+   explicit-row rule, Cx 117, same as `_fire_event_occurs`).
+2. **Consequence rows:** 1-2 concrete world-facts — LAPSE-facts by default,
+   occurrence-facts only under an authored `on_expiry` annotation (§2, the
+   occurrence rule) — proposed by a cheap-tier cohort
+   (`absence_consequence`) from the beat's staging context + present-cast
+   spines, constrained to the `known_ids` allowlist, validated like the
+   generator preflight (referents must exist), committed via
+   `ingest_structured` to canon **with item-level `caused_by` =
+   `event:moment_missed_<slug>`** — the situation-lens linkage PB verified
+   for the CAST-MOVES departure lever. NEVER a derived notion ("tension
+   rose") — only facts a camera at the staged scene could have recorded.
+3. **Surfacing, two channels, both real:** (a) re-entry/standing briefings —
+   the item-level `caused_by` lights the consequence in
+   `snapshot(lens="situation")` while it is served truth; (b) the
+   consequence-callback directive — `drift_pass` itself writes the briefing
+   directive (newspaper-front-page ruling: minor is fine, FELT is the
+   point), surfaced when the player next touches the affected people/places,
+   never as an announcement. There is NO reliance on a caused_by reader over
+   fact rows — none exists.
+4. **`moment_missed` IS routine.** It joins `ROUTINE_EVENT_KINDS` (host
+   bookkeeping, the `arc_terminal` reasoning) and is thereby excluded from
+   BOTH the first-time-kind and causal-ripple salience signals — the shipped
+   exclusions apply to ripple too (generator.py). **The r1 "zero new
+   plumbing" generator-feedback claim is RETRACTED:** consequence FACT rows
+   never enter `salient_moments` on their own (its fact input is the current
+   player-action batch). Generator feedback is INDIRECT and honest: when the
+   player later acts on an affected spined NPC, spine-touch qualifies that
+   turn. Pinned by test: the moment_missed event wakes nothing by itself.
+5. `_FALLOUT`-style phrasing is NOT reused — absence consequences are
+   situational, not delta_type-keyed.
 
 ### R4 — Alternative-path repair (activating `repair_budget`)
 
@@ -209,10 +273,32 @@ becomes literally true:
    genuinely walkable and not a re-skin of the dead one. Full generator-style
    preflight: referents exist, premise reachable, `lint_arc` on the amended
    arc.
-3. **Commit:** the replacement beat's items + indexes into `plot:` (the
-   `arc_to_items`/`index_items` path), a `repaired_from=<old_beat_id>` row,
-   and the old closure stands (append-only — the closed beat stays closed;
-   the ARC's required set now points at the replacement via the repair row).
+3. **Commit — the append-safe beat-membership model (cx r1 finding 3: the r1
+   `repaired_from` row had NO reader; the sealed `beat_index` JSON list is
+   what `arc_from_frame` reconstructs beats from, so nothing would have
+   changed the arc).** The monotonic-membership shape that fixed the
+   portfolio (#111) applied to beats:
+   - the replacement beat's items + index rows commit into `plot:` (the
+     `arc_to_items`/`index_items` per-beat shapes);
+   - one **supersession row** — `arc:<arc_id>` /
+     `beat_superseded_<old_beat_slug>` = `<new_beat_id>`,
+     `valid_from=turn_time(turn)` — the durable pointer;
+   - **`arc_from_frame` reconstruction is EXTENDED** (this is the reader):
+     after materializing beats from the sealed `beat_index`, apply
+     supersession rows — the old beat leaves the ACTIVE set, the replacement
+     (read from its own indexed rows) joins it. The sealed index is never
+     rewritten; the closure row stands (append-only).
+   - **Every active-set consumer routes through one accessor** —
+     `active_beats(arc, reads)` — so `beat_pass`, `_required_unreachable`,
+     `climax_ready`/`climax_ready_beats`, and coverage all see the
+     replacement identically. Reconstruction is horizon-safe: a
+     future-stamped supersession row is invisible at `_h`.
+   - **Re-open (the D-MISSED relocate pairing)** is the degenerate case of
+     the same model: the closed beat's `status` row is superseded back to
+     `pending` (`valid_from`-stamped, latest-wins — the engine's ordinary
+     supersession), with the relocation receipt as provenance; no
+     replacement beat, no index touch. Restart/reopen reconstruction reads
+     the latest status exactly as it reads any status.
    A briefing directive seeds the new route diegetically (sanitized hook).
 4. **`repair_budget`:** a per-arc `session:` counter, default
    `REPAIR_BUDGET = 2`, decremented per committed repair (relocations of
@@ -225,12 +311,20 @@ becomes literally true:
    repair of a SIDE arc defers while `main_at_peak` (silent, no receipt —
    the right-of-way contract).
 
-## 4. Where it runs
+## 4. Where it runs (ordering corrected — cx r1 finding 2)
 
-A `drift_pass` step in `run_turn`, placed AFTER the beat/lifecycle passes
-(closures for THIS turn are known) and AFTER the committed-delta/salience
-inputs are assembled, BEFORE briefing assembly (directives must land this
-turn) — i.e., adjacent to the existing generator step, sharing its inputs:
+A `drift_pass` step in `run_turn`, placed **AFTER `beat_pass` (this turn's
+closures are known) but BEFORE lifecycle classification, persistence, and
+fallout** — for the MAIN arc that means before the `arc_lifecycle` read and
+its terminal effects (turnloop.py:3844 onward), and for SIDE arcs before the
+side-arc lifecycle/fallout loop (turnloop.py:4011-4029). The r1 "after the
+lifecycle passes" placement was wrong: a same-turn closure of a required
+beat must get its repair BEFORE `_required_unreachable` can feed a terminal
+— otherwise the terminal receipt and fallout escape first and the repair
+arrives at a corpse. Directive assembly still follows (directives land this
+turn). **Pinned by SEPARATE ordering tests for main and side:** a required
+beat closing this turn, repaired this turn, produces NO terminal receipt and
+NO fallout. Inputs shared with the adjacent generator step:
 
 1. `drift_state(...)` — pure classifier, no model calls.
 2. Right-of-way check (R3/R4-side, per §3 rules).
@@ -263,27 +357,43 @@ discipline). All bookkeeping in `plot:`/`session:` — membrane-clean.
   delivers the *moment*; sanitizer on every model-authored surface.
 - **Converge the scene, not the verdict:** relocation and repair route to the
   DECISION POINT; they never bias which conclusion the player reaches.
-- **Turns are free:** every cadence in this spec (nudge suppression, drift
-  thresholds via rungs/clocks) keys on diegetic time or structural closures —
-  never on turn counts.
+- **Turns are free:** every cadence THIS SPEC INTRODUCES (nudge suppression,
+  the D-SOFT quiet gate, missed-moment detection) keys on diegetic time or
+  structural closures — never on turn counts. The pre-existing rung ladder
+  co-signal is turn-counted (§2, flagged founder item); no new trigger fires
+  on it alone.
 - **Membrane:** consequences and repairs are concrete world-facts/plot rows
   through the ingestor doorway; `drift_state` output is derived and lives
   only in the trace.
 - **Fail-open everywhere;** a quiet world is always an acceptable outcome.
 
-## 7. Phasing (each slice: build → Cx review → live test, logged)
+## 7. Phasing (each slice: build → cr review → live test, logged)
 
 - **D1 — Relocate-the-beat** (R2 for D-SOFT high-rung beats only — no
-  closures yet) + the R1 nudge tuning + `drift_state` + receipts/trace. The
-  lightest, founder-preferred move, live-testable immediately: dodge a
-  staged clue-holder, wander to the tavern, watch the mechanic arrive.
-- **D2 — Absence-consequence** (D-MISSED classification + `moment_missed` +
-  consequence commit + callback surfacing). Live test: skip the meeting
-  with a deadline clock; find the vote landed without you.
-- **D3 — Alternative-path repair** (R4 + `repair_budget` + the completed
-  incompletable rule + D-MISSED re-open pairing). Live test: burn the
-  ledger a required beat needs; watch a new route appear; exhaust the
-  budget; watch the arc go incompletable, not zombie.
+  closures yet) + the `commit_carrier_move` extraction from world-tick +
+  the diegetic-quiet drift gate + the R1 nudge tuning + `drift_state` +
+  receipts/trace. Oracles: 30 free contemplation turns → NO drift response
+  (five in-world minutes); an INVALID carrier move (guard-rejected) → no
+  directive, no receipt; a successful move committed BEFORE the briefing
+  stages it. Live test: dodge a staged clue-holder, wander to the tavern,
+  watch the mechanic arrive.
+- **D2 — Absence-consequence** (the closure-witness contract in `beat_pass`
+  + the witness-based classifier + the occurrence rule + `moment_missed` +
+  consequence commit + callback surfacing). Oracles: a COMPOUND
+  `unreachable_if` (clock OR world-state) where the world-state half
+  sufficed → D-HARD, not D-MISSED; clock expiry WITHOUT an authored
+  `on_expiry` → lapse-facts only, no occurrence claim; the routine
+  `moment_missed` event wakes no salience signal by itself. Live test: skip
+  the meeting with a deadline clock; find the window closed without you.
+- **D3 — Alternative-path repair** (R4 + the beat-membership supersession
+  model + `active_beats` accessor + `repair_budget` + the completed
+  incompletable rule + D-MISSED re-open pairing). Oracles: same-turn
+  close-before-lifecycle repair (main AND side — no terminal receipt, no
+  fallout); RESTART reconstruction yields the replacement active set;
+  `climax_ready` sees a replacement climax beat; a future-stamped
+  supersession row is invisible at `_h`. Live test: burn the ledger a
+  required beat needs; watch a new route appear; exhaust the budget; watch
+  the arc go incompletable, not zombie.
 
 ## 8. Open questions for the mesh (raise only if they bite)
 
@@ -291,10 +401,10 @@ discipline). All bookkeeping in `plot:`/`session:` — membrane-clean.
   (both are "stage this mechanic HERE" reads) — decide at D1 build time.
 - The relocation threshold rung (proposal: the rung immediately below the
   refusal-warning rung) — tune in live test.
-- Whether a D-MISSED beat's re-open should be a status supersession
-  (`status=pending` row re-asserted) or always the R4 replacement path even
-  when the mechanic travels — PB may have an opinion on status row
-  supersession semantics; ask at D2 if the simple supersession looks wrong.
+- The D-MISSED re-open is now specified as ordinary status supersession
+  (§3 R4 — latest-wins, relocation receipt as provenance); PB gets a
+  confirmation ask at D3 build time that status-row supersession semantics
+  carry no surprises (fold ordering, as-of reads).
 
 Related: LIVING-WORLD-GENERATOR-P2.md (§A one-reader-several-consumers, §B
 right-of-way), STORY-SHAPE-AND-RESOLUTION.md (converge the scene),
