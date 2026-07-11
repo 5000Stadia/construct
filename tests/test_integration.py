@@ -1436,10 +1436,17 @@ class TestFullTurn:
         # rule it sits beside.
         assert "DESCRIBED ONCE, IT STAYS" in cohorts.RENDER_STYLE
         assert "status changes, someone interacts with it" in cohorts.RENDER_STYLE
-        assert "unchanged scene earns no fresh inventory" in cohorts.RENDER_STYLE
+        # the FOURTH within-stay exception (cr): a deliberate same-stay look
+        # composes with the GROUND-on-look-around sibling — deepen, never replay.
+        assert "the player deliberately looks again" in cohorts.RENDER_STYLE
+        assert "never a replay of the inventory" in cohorts.RENDER_STYLE
+        assert "unexamined scene earns no fresh inventory" in cohorts.RENDER_STYLE
         assert "ON RE-ENTRY" in cohorts.RENDER_STYLE
-        assert "second look MAY go deeper" in cohorts.RENDER_STYLE
-        assert "GROUND" in cohorts.RENDER_STYLE       # the sibling rule intact
+        # perceptual wording only — the narrator never supplies player thought
+        # (no-puppetry): the deepening is a detail newly LEGIBLE, not felt.
+        assert "newly legible" in cohorts.RENDER_STYLE
+        assert "thought the character" not in cohorts.RENDER_STYLE
+        assert "explicit look-around" in cohorts.RENDER_STYLE  # the sibling intact
 
     def test_destination_directive_carries_foreshadow_restraint(self, world):
         # FOUNDER live (the "poltergeist fibers everywhere / NPCs acting weird" fixation, mechanical):
