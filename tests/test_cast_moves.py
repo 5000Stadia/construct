@@ -565,6 +565,44 @@ def test_tiebreak_counterexamples_stay_fail_closed():
         assert p.calls == []
 
 
+def test_distinct_vias_for_one_person_fail_closed_both_orders():
+    # cr <dc7e4a13…> gap 1: two unbound exits with DISTINCT vias share
+    # destination=None — keying without via would collapse to whichever came first,
+    # letting candidate ORDER decide whether negative presence mints. Both orders
+    # must fail closed; exact same-via duplicates still collapse.
+    hearth = {"kind": "unbound_exit", "person": "person:maud", "destination": None,
+              "via": "obj:hearth"}
+    cart = {"kind": "unbound_exit", "person": "person:maud", "destination": None,
+            "via": "obj:well_cart"}
+    for cands in ([hearth, cart], [cart, hearth]):
+        p = _FakeP(chains={"obj:hearth": [SCENE], "obj:well_cart": ["place:flat"]})
+        trace, p = _lane([dict(c) for c in cands], present_ids={"person:maud"}, p=p)
+        assert trace.cast_moves == [], cands
+        assert ("person:maud", "", "ambiguous_multiple_moves") in trace.cast_move_drops
+        assert p.calls == []
+    # exact same-via duplicates collapse to ONE committed exit
+    p = _FakeP(chains={"obj:well_cart": ["place:flat"]})
+    trace, p = _lane([dict(cart), dict(cart)], present_ids={"person:maud"}, p=p)
+    assert trace.cast_moves == [("unbound_exit", "person:maud", "")]
+    [(rows, _cl)] = p.calls
+    assert sum(1 for r in rows if r["attribute"] == "kind") == 1   # ONE event triple
+
+
+def test_nonphysical_via_rejected_even_when_located():
+    # cr <dc7e4a13…> gap 2: a located event:/fact: entity can carry a place chain yet
+    # is not a physical container — the gate proves its own authority; only obj:
+    # namespaces carry a verified exit.
+    for via in ("event:harvest_feast", "fact:the_old_road"):
+        p = _FakeP(chains={via: ["place:flat"]})
+        trace, p = _lane(
+            [{"kind": "unbound_exit", "person": "person:maud", "destination": None,
+              "via": via}],
+            present_ids={"person:maud"}, p=p)
+        assert trace.cast_moves == [], via
+        assert ("person:maud", via, "nonphysical_destination") in trace.cast_move_drops
+        assert p.calls == []
+
+
 def test_verified_exit_rejections_person_no_chain_colocated():
     # §1.3 unit battery: person destination / no location chain / colocated with the
     # scene — each reason-tagged, no event ever.

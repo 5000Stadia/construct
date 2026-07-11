@@ -303,18 +303,26 @@ the deferral to STATE deterministically).
    every ordinary check; counterexamples (unbound in the pair, two
    non-current, 3+ candidates, order swapped) stay `ambiguous_multiple_moves`
    — pinned order-independent.
-2c. **Row-correlation oracles (Cx r2, expanded per cr r3):** a multi-row
-   same-attribute batch distinguishing (a) SUBJECT drop vs DESTINATION drop
-   (subject-drop rows are nothing), (b) exactly one destination drop → the
-   RIGHTFUL person alone gets the event, (c) multiple simultaneous drops —
-   each resolved per its own outcome record, (d) a destination bound to a
-   NON-place → unbound-exit path, not a bound move, (e) NO private
-   correlation metadata reaches `ingest_structured` (outcome records are
-   out-of-band; committed rows are byte-identical to today's), and (f) an
-   ambiguous restatement of the CURRENT scene ("she's in the room",
-   unresolvable) emits NO `departed_scene` (`ambiguous_scene_restatement`
-   drop). Plus: the legacy receipt-triple surface (`trace.resolver` and
-   its destructuring consumers) is byte-for-byte unchanged.
+2c. **Row-correlation oracles (Cx r2, expanded per cr r3; rewritten to the
+   §1.3 narrowing per cr `<dc7e4a13…>`):** a multi-row same-attribute batch
+   distinguishing (a) SUBJECT drop vs DESTINATION drop — subject-drop rows
+   are nothing; a destination DROP is the RIGHTFUL person's
+   `ambiguous_unbound_destination` TELEMETRY, never an event; (b) multiple
+   simultaneous failures — each resolved per its own outcome record: the
+   dropped destination is telemetry, the verified `bound_non_place` routes
+   to the exit gate carrying its `via`; (c) a destination bound to a
+   NON-place → the verified-container gate, not a bound move; (d) NO
+   private correlation metadata reaches `ingest_structured` (outcome
+   records are out-of-band; committed rows byte-identical to today's);
+   (e) an ambiguous restatement of the CURRENT scene emits NO
+   `departed_scene` (`ambiguous_scene_restatement` drop). Plus: the legacy
+   receipt-triple surface is byte-for-byte unchanged. **Normalization keys
+   include `via`:** exact same-via duplicates collapse; DISTINCT vias for
+   one person (obj:hearth beside obj:well_cart) fail
+   `ambiguous_multiple_moves` — candidate order must never decide whether
+   negative presence is minted (pinned both orders). **Physical namespace
+   enforced:** a located `event:`/`fact:` entity as via →
+   `nonphysical_destination` drop — only `obj:` carries a verified exit.
 3. **Protagonist move** in prose → dropped, telemetry, player unmoved.
 4. **Companion move** (ACCOMPANYING X) → dropped, telemetry, bond intact.
 5. **Remote move** (neither endpoint is the scene) → dropped, telemetry.

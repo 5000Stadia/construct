@@ -803,11 +803,15 @@ def _partition_cast_moves(
     *, scene: str | None, scene_name: str = "",
 ) -> tuple[list[dict], list[dict], list[tuple[str, str, str]]]:
     """CAST-MOVES.md §1: classify each canonicalized `in` row's `ResolutionOutcome` into a
-    BOUND MOVE (both sides bound; destination prefix `place:`) or an UNBOUND EXIT (subject
-    folds to a canon `person`; destination dropped, bound to a NON-place, or an ambiguous
-    restatement of the current scene) movement candidate. `outcome.row_index` addresses the
-    row within `canon_rows` (the exact list `resolve_rows` was called over) — the per-row
-    correlation the legacy global receipt tuple can't give (CAST-MOVES.md §1, cr r3/r4).
+    BOUND MOVE (both sides bound; destination prefix `place:`) or an UNBOUND-EXIT candidate
+    (subject folds to a canon `person`; destination BOUND to a non-place — the retained
+    `via` the lane's verified-container check proves at `_h`). A fully-DROPPED destination
+    NEVER creates a candidate (§1.3 narrowing, the bar-11 live defect: "by the hearth" is
+    indistinguishable from an exit without semantics) — `ambiguous_unbound_destination`
+    telemetry only; an ambiguous restatement of the current scene likewise drops here.
+    `outcome.row_index` addresses the row within `canon_rows` (the exact list
+    `resolve_rows` was called over) — the per-row correlation the legacy global receipt
+    tuple can't give (CAST-MOVES.md §1, cr r3/r4).
 
     The id-PREFIX here is only the CLASSIFICATION signal (which candidate SHAPE a row takes —
     the same prefix-typing discipline as resolve.py's `_kind_ok`/`_match_one`; the canon `kind`
@@ -820,9 +824,11 @@ def _partition_cast_moves(
     Returns `(resolved_rows_minus_move_rows, candidates, guard_drops)`: licensed BOUND MOVE
     rows are pulled OUT of `resolved_rows` here (they never re-enter ordinary promotion,
     win or lose the policy gate downstream — CAST-MOVES.md §1); `candidates` are
-    `{"kind": "bound_move"|"unbound_exit", "person": id, "destination": id|None}` dicts for
-    the stagecraft gate (`_run_cast_moves_lane`); `guard_drops` are (person, "", reason)
-    telemetry triples decided HERE (currently only the scene-restatement guard, §1.4)."""
+    `{"kind": "bound_move"|"unbound_exit", "person": id, "destination": id|None,
+    "via": id|None}` dicts for the stagecraft gate (`_run_cast_moves_lane` — `via` is the
+    unbound exit's bound non-place value, verified there); `guard_drops` are
+    (person, "", reason) telemetry triples decided HERE: the scene-restatement guard
+    (§1.4) and the §1.3 dropped-destination narrowing."""
     from collections import Counter
 
     candidates: list[dict] = []
@@ -922,7 +928,12 @@ def _run_cast_moves_lane(
     normalized: list[dict] = []
     for person in person_order:
         cands = by_person[person]
-        if len({(c["kind"], c.get("destination")) for c in cands}) == 1:
+        # the identity key includes `via` (cr <dc7e4a13…>): every unbound exit has
+        # destination=None, so keying on destination alone would collapse DISTINCT
+        # exits (via obj:hearth vs via obj:well_cart) to whichever came first —
+        # candidate order must never decide whether negative presence is minted.
+        # Exact same-via duplicates collapse; distinct vias fail ambiguous.
+        if len({(c["kind"], c.get("destination"), c.get("via")) for c in cands}) == 1:
             normalized.append(cands[0])
             continue
         # §2b ORIGIN-RESTATEMENT TIE-BREAK (bar-11 finding 2, cr <f8409447…>): natural
@@ -1022,6 +1033,13 @@ def _run_cast_moves_lane(
                 continue
             if via.startswith("person:"):
                 trace.cast_move_drops.append((person, via, "person_destination"))
+                continue
+            if not via.startswith("obj:"):
+                # "physical non-person" ENFORCED (cr <dc7e4a13…>): a located event:/
+                # fact:/arc: entity can carry a place chain yet is not a physical
+                # container — the gate proves its own stated authority, never
+                # delegating it to what the resolver happens to emit.
+                trace.cast_move_drops.append((person, via, "nonphysical_destination"))
                 continue
             try:
                 _chain = p.locate(via, as_of=horizon) or []
