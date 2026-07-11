@@ -2797,6 +2797,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     from construct.arc.conditions import InFrame as _InFrame, atoms_of as _atoms_of
     _atoms = [a for a in _atoms_of(beat.achievable_via)
               if isinstance(a, _InFrame)]
+    live_holders: list[str] = []  # empty for non-carrier (Occurred) mechanics
     if _atoms:
         _invalidated = set((witness or {}).get("driving_entities") or [])
 
@@ -2821,7 +2822,6 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         for _nid, n in _citer:
             for c in (getattr(n, "holds_clues", ()) or ()):
                 holders.setdefault(c.surface_fact, []).append(_nid)
-        live_holders: list[str] = []
         walkable = True
         for a in _atoms:
             _live = [h for h in holders.get((a.entity, a.attribute, a.value), [])
@@ -2846,6 +2846,13 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             # declined low_confidence — the walkable road must be described
             # to the cohort that narrates it opening).
             threads = []
+            if not live_holders:
+                # a non-carrier (Occurred) mechanic: the road is the player's
+                # own act — an honest live context, not "(none live)" (which
+                # made the real model decline low_confidence in probe run 1)
+                threads.append("the road is the player's own act — the deed "
+                               "remains open to attempt in the world as it "
+                               "stands")
             for _h in live_holders:
                 try:
                     _hn = str(live_reads.state(_h, "name")

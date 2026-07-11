@@ -3136,3 +3136,31 @@ def test_dead_present_npc_briefs_as_a_body_not_an_interlocutor(world):
     assert "the body of Marlow" in r.trace.briefing
     assert "DEAD — present as a body only" in r.trace.briefing
     assert "Marlow: present, silent for now" not in r.trace.briefing
+
+
+def test_occurred_beat_repairs_without_carriers(world):
+    # cr post-GREEN blocker (letter <0383f624…>): the live-thread fix left
+    # `live_holders` unbound for a non-InFrame mechanic — a D-HARD Occurred
+    # beat must repair through its player-act route (walkable by the act
+    # itself; an honest host-built thread line), never raise.
+    arc = _dhard_arc()
+    occ = replace(arc.beats[0],
+                  achievable_via=Occurred("event:confrontation"))
+    arc = replace(arc, beats=(occ,))
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([{"hook": "The factor crosses the green at dusk, "
+                                      "alone.", "confidence": 0.9}])
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert ("beat:discover", "D-HARD") in trace.drift
+    assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    live = active_beats(reads, arc)
+    assert live[0].achievable_via == occ.achievable_via   # same act, re-minted
+    # the cohort saw an honest player-act thread, never "(none live)"
+    rpr_prompts = [pr for pr, _sc, _t in provider.calls if "FORECLOSED" in pr]
+    assert rpr_prompts and "player's own act" in rpr_prompts[0]
+    assert "(none live)" not in rpr_prompts[0]
