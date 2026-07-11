@@ -141,25 +141,7 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
          "timeless": True},
     ]
     for beat in arc.beats:
-        items += [
-            {"entity": beat.beat_id, "attribute": "kind", "value": "beat", "timeless": True},
-            {"entity": beat.beat_id, "attribute": "part_of", "value": arc.arc_id,
-             "timeless": True},
-            {"entity": beat.beat_id, "attribute": "beat_phase", "value": beat.phase.value,
-             "timeless": True},
-            {"entity": beat.beat_id, "attribute": "weight", "value": beat.weight.value,
-             "timeless": True},
-            {"entity": beat.beat_id, "attribute": "achievable_via",
-             "value": json.dumps(expr_to_obj(beat.achievable_via)), "timeless": True},
-            {"entity": beat.beat_id, "attribute": "status", "value": "pending"},
-        ]
-        if beat.unreachable_if is not None:
-            items.append({"entity": beat.beat_id, "attribute": "unreachable_if",
-                          "value": json.dumps(expr_to_obj(beat.unreachable_if)),
-                          "timeless": True})
-        if beat.correlates is not None:
-            items.append({"entity": beat.beat_id, "attribute": "correlates",
-                          "value": json.dumps(list(beat.correlates)), "timeless": True})
+        items += _beat_rows(beat, arc.arc_id)
     for clock in tuple(arc.clocks) + (arc.refusal_clock,):
         items += clock_to_items(clock, arc.arc_id)
     for pin in arc.pins:
@@ -169,6 +151,70 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
     for gauge in arc.gauges:
         items += gauge_to_items(gauge, arc.arc_id)
     return _with_frame_and_types(items, frame)
+
+
+def _beat_rows(beat: Beat, arc_id: str) -> list[dict]:
+    """One beat's plot rows — the SINGLE serialization both `arc_to_items`
+    (the sealed build) and `beat_to_items` (a D3 repair REPLACEMENT) emit, so
+    a replacement beat is byte-shaped like a sealed one."""
+    rows = [
+        {"entity": beat.beat_id, "attribute": "kind", "value": "beat", "timeless": True},
+        {"entity": beat.beat_id, "attribute": "part_of", "value": arc_id,
+         "timeless": True},
+        {"entity": beat.beat_id, "attribute": "beat_phase", "value": beat.phase.value,
+         "timeless": True},
+        {"entity": beat.beat_id, "attribute": "weight", "value": beat.weight.value,
+         "timeless": True},
+        {"entity": beat.beat_id, "attribute": "achievable_via",
+         "value": json.dumps(expr_to_obj(beat.achievable_via)), "timeless": True},
+        {"entity": beat.beat_id, "attribute": "status", "value": "pending"},
+    ]
+    if beat.unreachable_if is not None:
+        rows.append({"entity": beat.beat_id, "attribute": "unreachable_if",
+                     "value": json.dumps(expr_to_obj(beat.unreachable_if)),
+                     "timeless": True})
+    if beat.correlates is not None:
+        rows.append({"entity": beat.beat_id, "attribute": "correlates",
+                     "value": json.dumps(list(beat.correlates)), "timeless": True})
+    return rows
+
+
+def beat_to_items(beat: Beat, arc_id: str, frame: str = "plot:main") -> list[dict]:
+    """DRIFT-HANDLING.md §3 R4 (cr: additive per-beat IO — `arc_to_items`
+    emits the whole arc and `index_items` REWRITES the sealed `beat_index`,
+    so neither may serve a repair): ONLY the replacement beat's own rows,
+    ready to batch with the supersession pointer. The sealed index is never
+    touched; discovery is the `beat_superseded_<slug>` row."""
+    return _with_frame_and_types(_beat_rows(beat, arc_id), frame)
+
+
+def beat_from_reads(reads, beat_id: str, frame: str = "plot:main") -> Beat | None:
+    """Materialize ONE beat from its plot rows (the replacement-discovery
+    read `active_beats` uses on BOTH load paths — frame reconstruction and
+    the legacy `arc_cache`, which never bakes supersessions in). Returns
+    None when the rows are absent/incomplete — the caller fails open to the
+    sealed beat (a repair that cannot be read is a repair that never
+    happened, never a crash)."""
+    def get(attribute):
+        return reads.state(beat_id, attribute, frame=frame)
+
+    achievable = get("achievable_via")
+    if not achievable:
+        return None
+    try:
+        unreachable = get("unreachable_if")
+        correlates = get("correlates")
+        return Beat(
+            beat_id=beat_id,
+            phase=_safe_phase(get("beat_phase"), beat_id),
+            weight=_safe_weight(get("weight"), beat_id),
+            achievable_via=expr_from_obj(json.loads(achievable)),
+            unreachable_if=(expr_from_obj(json.loads(unreachable))
+                            if unreachable else None),
+            correlates=tuple(json.loads(correlates)) if correlates else None,
+        )
+    except (TypeError, ValueError, KeyError):
+        return None
 
 
 def pillar_to_items(pillar: Pillar, arc_id: str) -> list[dict]:

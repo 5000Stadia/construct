@@ -427,7 +427,9 @@ class Session:
                 f"Premise (hidden): {sh.premise}",
                 f"The win-state condition: {sh.world_condition}",
             ]
-            for b in arc.beats:
+            from construct.adapter import PorcelainWorldReads as _PWR
+            from construct.arc.executor import active_beats as _active_beats
+            for b in _active_beats(_PWR(self._world), arc):  # D3: live beat set
                 if getattr(b, "correlates", None):
                     a, c = b.correlates
                     lines.append(f"REVEAL twist: {a} and {c} are secretly the same / linked")

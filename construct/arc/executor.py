@@ -194,7 +194,7 @@ def beat_pass(world: Any, arc: Arc, reads: Any,
     identity, not merged. Returns (achieved, closed, revealed) where revealed is
     the list of correlated (a, b) pairs this tick."""
     achieved, closed, revealed = [], [], []
-    for beat in arc.beats:
+    for beat in active_beats(reads, arc):
         status = reads.state(beat.beat_id, "status", frame=PLOT)
         if status not in (None, "pending"):
             continue
@@ -444,13 +444,46 @@ _PHASE_ORDER = {Phase.SETUP: 0, Phase.RISING: 1, Phase.CRISIS: 2,
                 Phase.CLIMAX: 3, Phase.FALLING: 4}
 
 
+def resolve_beat_id(reads: Any, beat_id: str) -> str:
+    """DRIFT-HANDLING.md §3 R4: the terminal id of a beat's supersession
+    chain (identity when unsuperseded). One walker — delegates to
+    `conditions.resolve_superseded_beat` so `BeatAchieved` evaluation and
+    every structural read here can never diverge on the chain rule."""
+    from construct.arc.conditions import resolve_superseded_beat
+    return resolve_superseded_beat(reads, beat_id, PLOT)
+
+
+def active_beats(reads: Any, arc: Arc) -> tuple:
+    """The arc's LIVE beat set (§3 R4): the sealed beats with superseded ones
+    replaced by their repair replacements, materialized via
+    `io.beat_from_reads`. READS-BACKED overlay — never baked into the Arc —
+    so the legacy `arc_cache` load path and a same-turn repair are coherent
+    by construction. Fail-open per beat: an unmaterializable replacement
+    keeps the sealed beat (a repair that cannot be read never crashes a
+    turn)."""
+    out = []
+    for b in arc.beats:
+        rid = resolve_beat_id(reads, b.beat_id)
+        if rid == b.beat_id:
+            out.append(b)
+            continue
+        from construct.arc.io import beat_from_reads
+        rb = beat_from_reads(reads, rid, frame=PLOT)
+        out.append(rb if rb is not None else b)
+    return tuple(out)
+
+
 def climax_ready(reads: Any, arc: Arc) -> bool:
     """Has the arc reached climax readiness — K of its `climax_ready_beats`
     achieved? (Fields existed; this is the one interpretation tests pin — Cx C1#2.)"""
     if not arc.climax_ready_beats:
         return False
+    # the sealed id TUPLE is never rewritten; each element resolves through
+    # the supersession chain at read time (§3 R4 — a replaced climax beat
+    # counts via its replacement).
     got = sum(1 for bid in arc.climax_ready_beats
-              if reads.state(bid, "status", frame=PLOT) == "achieved")
+              if reads.state(resolve_beat_id(reads, bid), "status",
+                             frame=PLOT) == "achieved")
     return got >= arc.climax_ready_k
 
 
@@ -462,7 +495,7 @@ def current_phase(reads: Any, arc: Arc) -> Phase:
         return Phase.FALLING
     if climax_ready(reads, arc):
         return Phase.CLIMAX
-    achieved = [b.phase for b in arc.beats
+    achieved = [b.phase for b in active_beats(reads, arc)
                 if reads.state(b.beat_id, "status", frame=PLOT) == "achieved"]
     if not achieved:
         return Phase.SETUP
@@ -564,9 +597,12 @@ def _human(entity: str) -> str:
 def _required_unreachable(reads: Any, arc: Arc) -> bool:
     """Is a REQUIRED beat closed (its `unreachable_if` fired)? The path-foreclosed
     half of `incompletable`. Reads beat statuses `beat_pass` already wrote."""
-    for beat in arc.beats:
+    for beat in active_beats(reads, arc):
         if beat.weight is Weight.REQUIRED and \
                 reads.state(beat.beat_id, "status", frame=PLOT) == "closed":
+            # a closure whose beat has been SUPERSEDED is repaired, not
+            # foreclosed — active_beats already swapped it out, so any closed
+            # beat still HERE is genuinely unrepaired (§3 R4).
             return True
     return False
 
@@ -669,7 +705,7 @@ def navigate(counters: PacingCounters, delta_size: int,
     return choice
 
 
-def arc_protected_keys(arc: Arc) -> set[tuple[str, str]]:
+def arc_protected_keys(arc: Arc, reads: Any = None) -> set[tuple[str, str]]:
     """The `(entity, attribute)` KEYS the hidden arc turns on — its beats'
     conditions + the destination + premise (GATED-INGEST-COHORT, momentous
     default-deny, option A). The ingest gate default-denies a NEW, UNLICENSED
@@ -680,8 +716,9 @@ def arc_protected_keys(arc: Arc) -> set[tuple[str, str]]:
     from construct.arc.conditions import InFrame, StateIs, atoms_of
 
     keys: set[tuple[str, str]] = set()
-    exprs = [b.achievable_via for b in arc.beats]
-    exprs += [b.unreachable_if for b in arc.beats if b.unreachable_if]
+    _beats = active_beats(reads, arc) if reads is not None else arc.beats
+    exprs = [b.achievable_via for b in _beats]
+    exprs += [b.unreachable_if for b in _beats if b.unreachable_if]
     exprs += [arc.shape.world_condition, arc.shape.premise]
     # PILLAR CLUE FACTS are load-bearing answers too (Cx 041): the genuine/false coverage
     # conditions reference the clue facts the player must EARN through play. Protect them so
@@ -731,15 +768,16 @@ def value_leaks(text: str, tokens: set[str]) -> bool:
     return bool(tokens & words)
 
 
-def arc_entities(arc: Arc) -> set[str]:
+def arc_entities(arc: Arc, reads: Any = None) -> set[str]:
     """Entity ids the arc references (for arc_touch detection and the
     irony-delta scope)."""
     from construct.arc.conditions import atoms_of
     from construct.arc.lint import _entity_referents
 
     out: set[str] = set()
-    exprs = [b.achievable_via for b in arc.beats]
-    exprs += [b.unreachable_if for b in arc.beats if b.unreachable_if]
+    _beats = active_beats(reads, arc) if reads is not None else arc.beats
+    exprs = [b.achievable_via for b in _beats]
+    exprs += [b.unreachable_if for b in _beats if b.unreachable_if]
     exprs += [arc.shape.world_condition, arc.shape.premise]
     # Pillar coverage conditions reference the clue FACT entities (STORY-SHAPES §8 / Cx 032
     # blocker 1): include them so the scenario scope surfaces the clues the player gathers.

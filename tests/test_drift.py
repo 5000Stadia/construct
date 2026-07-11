@@ -1746,3 +1746,140 @@ def test_absence_same_scene_closure_never_claims_player_was_elsewhere(world):
     assert "passed unmet" in cbs[0]["directive"]
     val = world.porcelain.state("person:aldous", "noted_absence")
     assert "elsewhere" not in str(val["fact"]["value"])
+
+
+# ============================================================================
+# 5. D3 stage 1 — the supersession resolver, per-beat IO, consumer redirects
+# ============================================================================
+
+from construct.arc.conditions import evaluate as _evaluate  # noqa: E402
+from construct.arc.executor import (  # noqa: E402
+    active_beats, climax_ready, current_phase, resolve_beat_id,
+)
+from construct.arc.io import beat_from_reads, beat_to_items  # noqa: E402
+
+
+def _supersede(world, arc_id: str, old_slug: str, new_id: str, turn: int = 5):
+    world.porcelain.ingest_structured([
+        {"entity": arc_id, "attribute": f"beat_superseded_{old_slug}",
+         "value": new_id, "valid_from": turn_time(turn)},
+    ], frame=PLOT)
+
+
+def _replacement_beat(new_id="beat:discover_r1"):
+    from construct.arc.conditions import InFrame
+    return Beat(new_id, Phase.CLIMAX, Weight.REQUIRED,
+                achievable_via=InFrame("knows:person:player", "fact:secret",
+                                       "culprit", "person:rival"))
+
+
+def test_beat_to_items_emits_only_the_one_beat(world):
+    rows = beat_to_items(_replacement_beat(), "arc:main")
+    assert {r["entity"] for r in rows} == {"beat:discover_r1"}
+    assert not any(r["attribute"] == "beat_index" for r in rows)  # sealed index untouched
+    world.porcelain.ingest_structured(rows)
+    rb = beat_from_reads(PorcelainWorldReads(world), "beat:discover_r1")
+    assert rb is not None and rb.weight is Weight.REQUIRED
+    assert beat_from_reads(PorcelainWorldReads(world), "beat:never_written") is None
+
+
+def test_resolver_chain_cycle_and_collision(world):
+    arc = make_arc()
+    seed_arc(world, arc)
+    reads = PorcelainWorldReads(world)
+    # unsuperseded → identity
+    assert resolve_beat_id(reads, "beat:discover") == "beat:discover"
+    # chain old → r1 → r2 follows to the terminal (each hop needs part_of rows)
+    world.porcelain.ingest_structured(beat_to_items(_replacement_beat("beat:discover_r1"),
+                                                    "arc:main"))
+    world.porcelain.ingest_structured(beat_to_items(_replacement_beat("beat:discover_r2"),
+                                                    "arc:main"))
+    _supersede(world, "arc:main", "discover", "beat:discover_r1", 5)
+    _supersede(world, "arc:main", "discover_r1", "beat:discover_r2", 6)
+    assert resolve_beat_id(reads, "beat:discover") == "beat:discover_r2"
+    # collision: one attribute key — a re-assert supersedes by valid_from
+    world.porcelain.ingest_structured(beat_to_items(_replacement_beat("beat:discover_r3"),
+                                                    "arc:main"))
+    _supersede(world, "arc:main", "discover_r1", "beat:discover_r3", 7)
+    assert resolve_beat_id(reads, "beat:discover") == "beat:discover_r3"
+    # cycle fails safe to the ORIGINAL id
+    _supersede(world, "arc:main", "discover_r3", "beat:discover", 8)
+    assert resolve_beat_id(reads, "beat:discover") == "beat:discover"
+
+
+def test_beat_achieved_and_climax_tuple_observe_the_replacement(world):
+    # a downstream BeatAchieved(old) + the sealed climax id tuple both fire
+    # when the REPLACEMENT achieves (§3 R4 — the resolver redirects both).
+    from construct.arc.conditions import BeatAchieved
+    arc = make_arc()
+    seed_arc(world, arc)
+    reads = PorcelainWorldReads(world)
+    world.porcelain.ingest_structured(beat_to_items(_replacement_beat(), "arc:main"))
+    _supersede(world, "arc:main", "discover", "beat:discover_r1")
+    assert _evaluate(BeatAchieved("beat:discover"), reads) is not None  # evaluable
+    assert not climax_ready(reads, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "beat:discover_r1", "attribute": "status", "value": "achieved",
+         "valid_from": turn_time(6)},
+    ], frame=PLOT)
+    from construct.arc.truth import Truth as _T
+    assert _evaluate(BeatAchieved("beat:discover"), reads) is _T.TRUE
+    assert climax_ready(reads, arc)                       # the tuple, redirected
+    assert current_phase(reads, arc) is Phase.CLIMAX
+
+
+def test_active_beats_overlay_survives_restart_both_load_paths(tmp_path):
+    # reads-backed overlay: the SEALED arc object (frame-loaded or cached) is
+    # irrelevant — a reopened world's reads still serve the replacement.
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    rule = rule_classifier_fallback()
+
+    def _mk(path):
+        return World(path, world_id="w:d3", model=StubModel(
+            fallback=lambda pr, sc: rule(pr, sc)
+            if pr.startswith("Classify the lifetime") else {"items": []}),
+            stance="fiction", title="D3")
+
+    path = tmp_path / "d3.world"
+    w1 = _mk(path)
+    w1.ingestor.cursor.advance(1.0)
+    arc = make_arc()
+    seed_arc(w1, arc)
+    w1.porcelain.ingest_structured(beat_to_items(_replacement_beat(), "arc:main"))
+    _supersede(w1, "arc:main", "discover", "beat:discover_r1")
+    live1 = [b.beat_id for b in active_beats(PorcelainWorldReads(w1), arc)]
+    assert live1 == ["beat:discover_r1"]                  # same-turn, live arc object
+    w1.close()
+    w2 = _mk(path)
+    try:
+        # the same SEALED arc object (the arc_cache shape) against reopened reads
+        live2 = [b.beat_id for b in active_beats(PorcelainWorldReads(w2), arc)]
+        assert live2 == ["beat:discover_r1"]
+        # frame reconstruction path: arc_from_frame yields the sealed set; the
+        # overlay still swaps at read time
+        from construct.arc import io as arc_io
+        arc2 = arc_io.arc_from_frame(PorcelainWorldReads(w2))
+        live3 = [b.beat_id for b in active_beats(PorcelainWorldReads(w2), arc2)]
+        assert live3 == ["beat:discover_r1"]
+    finally:
+        w2.close()
+
+
+def test_future_stamped_supersession_invisible_at_horizon(world):
+    from construct.arc.executor import turn_time as _tt
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured(beat_to_items(_replacement_beat(), "arc:main"))
+    _supersede(world, "arc:main", "discover", "beat:discover_r1", turn=999)
+    bounded = PorcelainWorldReads(world, horizon=_tt(5))
+    assert resolve_beat_id(bounded, "beat:discover") == "beat:discover"
+    assert [b.beat_id for b in active_beats(bounded, arc)] == ["beat:discover"]
+
+
+def test_unmaterializable_replacement_fails_open_to_the_sealed_beat(world):
+    arc = make_arc()
+    seed_arc(world, arc)
+    _supersede(world, "arc:main", "discover", "beat:ghost")  # no rows for beat:ghost
+    live = [b.beat_id for b in active_beats(PorcelainWorldReads(world), arc)]
+    assert live == ["beat:discover"]                       # never crash, never vanish

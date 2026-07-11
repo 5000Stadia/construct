@@ -50,6 +50,7 @@ from construct.arc.executor import (
     clock_pass,
     climax_ready,
     conclusion_from_coverage,
+    active_beats,
     counters_from_session,
     coverage_summary,
     current_phase,
@@ -1993,7 +1994,8 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         _pvals: set[str] = set()
         try:
             from construct.arc.conditions import InFrame, StateIs, atoms_of
-            _exprs = [b.achievable_via for b in arc.beats] + [arc.shape.world_condition,
+            _wt_beats = active_beats(live_reads, arc)  # D3: replacements protect too
+            _exprs = [b.achievable_via for b in _wt_beats] + [arc.shape.world_condition,
                                                               arc.shape.premise]
             for _x in _exprs:
                 for _atom in atoms_of(_x):
@@ -2246,7 +2248,7 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         # response ONCE. Classification does not need the D-SOFT gates (rung /
         # quiet) — the closure already happened; the gates license PRESSURE,
         # not the reading of an accomplished fact.
-        for b in arc.beats:
+        for b in active_beats(live_reads, arc):
             if b.weight is not Weight.REQUIRED:
                 continue
             if live_reads.state(b.beat_id, "status", frame=PLOT) != "closed":
@@ -2268,7 +2270,7 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         if not cast:
             return  # R2's carrier concept needs a cast blob — no cast, no relocation target
         pending_required = [
-            b.beat_id for b in arc.beats
+            b.beat_id for b in active_beats(live_reads, arc)
             if b.weight is Weight.REQUIRED
             and live_reads.state(b.beat_id, "status", frame=PLOT) in (None, "pending")
         ]
@@ -2282,7 +2284,8 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         # Classification is recorded for EVERY classified beat, before response
         # selection — trace.drift means "classified", never "responded" (finding 4).
         trace.drift.extend((d.beat_id, d.cls) for d in drifts)
-        targets = {t["beat_id"]: t for t in beat_delivery_targets(arc.beats)}
+        targets = {t["beat_id"]: t
+                   for t in beat_delivery_targets(active_beats(live_reads, arc))}
         for d in drifts:
             if d.cls != "D-SOFT":
                 continue  # closures were handled above; drift_state emits D-SOFT only
@@ -2327,7 +2330,8 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     holder_ids: list[str] = []
     holder_nodes: list = []
     try:
-        targets = {t["beat_id"]: t for t in beat_delivery_targets(arc.beats)}
+        targets = {t["beat_id"]: t
+                   for t in beat_delivery_targets(active_beats(live_reads, arc))}
         target = targets.get(beat_id)
         if target is not None and cast:
             _citer = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
@@ -4814,7 +4818,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # Arc progress drives foreshadowing escalation: fraction of REQUIRED
         # beats achieved → an `escalates` pin's clue gets louder as the reveal
         # nears (v2 clue-trail).
-        required = [b for b in arc.beats if b.weight is Weight.REQUIRED]
+        required = [b for b in active_beats(live_reads, arc)
+                    if b.weight is Weight.REQUIRED]  # D3: replacements count
         done = sum(1 for b in required
                    if live_reads.assertion_in_frame("plot:main", b.beat_id, "status", "achieved"))
         progress = (done / len(required)) if required else 0.0

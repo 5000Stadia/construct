@@ -244,6 +244,33 @@ def atoms_of(expr: Expr) -> list[Atom]:
     return [expr]
 
 
+def resolve_superseded_beat(world: WorldReads, beat_id: str,
+                            plot_frame: str = "plot:main") -> str:
+    """DRIFT-HANDLING.md §3 R4: follow beat SUPERSESSION rows
+    (`arc:<id>` / `beat_superseded_<slug>` — written by the repair pass) to
+    the terminal id. The arc context derives from the referenced beat's own
+    persisted `part_of` row (cr: a defined lookup, never an ad-hoc global
+    scan). Chain follows old→new1→new2; a CYCLE stops at the first repeated
+    id and fails safe to the ORIGINAL id (unsuperseded); a missing `part_of`
+    (a beat that never serialized) is simply unsuperseded. The ONE walker —
+    `BeatAchieved` evaluation and the executor's `resolve_beat_id` both use
+    it, so structural references can never diverge on the chain rule."""
+    seen = {beat_id}
+    cur = beat_id
+    while True:
+        arc_id = world.state(cur, "part_of", frame=plot_frame)
+        if not arc_id:
+            return cur
+        slug = cur.split(":", 1)[-1]
+        nxt = world.state(str(arc_id), f"beat_superseded_{slug}", frame=plot_frame)
+        if not nxt:
+            return cur
+        if str(nxt) in seen:  # cycle — fail safe to the original (log-free pure layer)
+            return beat_id
+        cur = str(nxt)
+        seen.add(cur)
+
+
 def evaluate(
     expr: Expr,
     world: WorldReads,
@@ -290,7 +317,11 @@ def evaluate(
         return Truth.TRUE if len(rows) >= expr.min_count else Truth.FALSE
 
     if isinstance(expr, BeatAchieved):
-        status = world.state(expr.beat_id, "status", frame=expr.plot_frame)
+        # DRIFT-HANDLING §3 R4: a downstream `BeatAchieved(old)` observes the
+        # repair REPLACEMENT — the reference resolves through the supersession
+        # chain before the status read.
+        bid = resolve_superseded_beat(world, expr.beat_id, expr.plot_frame)
+        status = world.state(bid, "status", frame=expr.plot_frame)
         return Truth.TRUE if status == "achieved" else Truth.FALSE
 
     if isinstance(expr, ClockFired):
