@@ -30,6 +30,7 @@ from construct import resolution
 from construct.resolve import (
     resolve_rows, bind_or_mint, _PLAYER_INPUT_MINT_KINDS,
     _NARRATION_MINT_KINDS, _NARRATION_STUB_KINDS, _PLACE_LIKE_KINDS,
+    ResolutionOutcome,
 )
 from construct.adapter import PorcelainWorldReads, frame_facts
 from construct.gauge import (
@@ -683,6 +684,8 @@ class TurnTrace:
     contradictions: list = field(default_factory=list)  # narrator rows quarantined (changed established canon)
     quarantined: list = field(default_factory=list)  # narrator rows quarantined (unlicensed assertion of an arc key)
     laws: list = field(default_factory=list)  # WORLD LAWS (#105): law names briefed this turn (reserved lane)
+    cast_moves: list = field(default_factory=list)  # #80: (kind, person, destination) licensed narrator moves committed this turn
+    cast_move_drops: list = field(default_factory=list)  # #80: (person, destination, reason) stagecraft-gate/engine-skip drops this turn
     reshape: str = ""  # WORLD-CHANGING AGENCY: the narrator directive for a canon reshape committed this turn (flag-gated)
     replanned: str = ""  # the new main arc id if a reshape re-aimed the arc mid-story (flag-gated)
     reshape_entities: list = field(default_factory=list)  # visible committed reshape entity ids (carried into next-turn scope)
@@ -771,6 +774,191 @@ def _partition_frames(items: list) -> tuple[list[dict], list[str]]:
         else:
             dropped.append(f"{row.get('entity')}/{row.get('attribute')}→{fr!r}")
     return accepted, dropped
+
+
+#: CAST-MOVES.md §1 (Cx r1 gap 1): the containment-synonym set that collapses to the single
+#: canonical `in` spelling BEFORE `resolve_rows` — the resolver's `_ENTITY_VALUED_ATTRS`
+#: (resolve.py:40) covers `in`/`inside` but NOT `located_in`.
+_CONTAINMENT_SYNONYMS = frozenset({"in", "inside", "located_in"})
+
+
+def _canonicalize_containment(rows: list[dict]) -> list[dict]:
+    """Rewrite `inside`/`located_in` rows to the canonical `in` spelling — run on the ACCEPTED
+    RAW extraction rows, BEFORE `resolve_rows` sees them (CAST-MOVES.md §1). Un-canonicalized, a
+    `located_in` row would never have its destination bound (the resolver's entity-valued
+    vocabulary doesn't recognize that spelling) and would silently strand as a literal-valued
+    row instead of a movement candidate. Every OTHER attribute passes through untouched; a
+    changed row is copied, never mutated in place."""
+    out: list[dict] = []
+    for r in rows:
+        if isinstance(r, dict) and r.get("attribute") in _CONTAINMENT_SYNONYMS and r.get("attribute") != "in":
+            r = {**r, "attribute": "in"}
+        out.append(r)
+    return out
+
+
+def _partition_cast_moves(
+    resolved_rows: list[dict], canon_rows: list[dict], outcomes: list[ResolutionOutcome],
+    *, scene: str | None, scene_name: str = "",
+) -> tuple[list[dict], list[dict], list[tuple[str, str, str]]]:
+    """CAST-MOVES.md §1: classify each canonicalized `in` row's `ResolutionOutcome` into a
+    BOUND MOVE (both sides bound; destination folds to a `place`) or an UNBOUND EXIT (subject
+    folds to a canon `person`; destination dropped, bound to a NON-place, or an ambiguous
+    restatement of the current scene) movement candidate. `outcomes[i]` corresponds to
+    `canon_rows[i]` (the exact list `resolve_rows` was called over) — the row_index correlation
+    the legacy global receipt tuple can't give (CAST-MOVES.md §1, cr r3/r4).
+
+    "Folded kind" is read off the RESOLVED id's own kind-PREFIX (`place:`/`person:`/`obj:`), not
+    a canon `kind` FACT — that attribute is a free-text descriptive noun ("room", "inn", "the
+    family physician"), never a type tag (resolve.py's own `_kind_ok`/`_match_one` type
+    discipline is prefix-based for exactly this reason). `same_as` never merges across a
+    type-prefix namespace (Entity Authority binds same-kind-prefix only, resolve.py:216-219), so
+    a resolved id's prefix is stable through any fold.
+
+    Returns `(resolved_rows_minus_move_rows, candidates, guard_drops)`: licensed BOUND MOVE
+    rows are pulled OUT of `resolved_rows` here (they never re-enter ordinary promotion,
+    win or lose the policy gate downstream — CAST-MOVES.md §1); `candidates` are
+    `{"kind": "bound_move"|"unbound_exit", "person": id, "destination": id|None}` dicts for
+    the stagecraft gate (`_run_cast_moves_lane`); `guard_drops` are (person, "", reason)
+    telemetry triples decided HERE (currently only the scene-restatement guard, §1.4)."""
+    from collections import Counter
+
+    candidates: list[dict] = []
+    guard_drops: list[tuple[str, str, str]] = []
+    for i, outcome in enumerate(outcomes):
+        row = canon_rows[i] if i < len(canon_rows) else None
+        if not isinstance(row, dict) or row.get("attribute") != "in":
+            continue
+        if outcome.subject_outcome != "bound":
+            continue  # subject never bound to an existing entity — a row that's nothing (2c-a)
+        person = outcome.resolved_entity
+        if not isinstance(person, str) or not person.startswith("person:"):
+            continue  # not a person row — ordinary promotion owns it untouched
+        kind, destination = None, None
+        if outcome.value_outcome == "bound":
+            dest = outcome.resolved_value
+            if isinstance(dest, str) and dest.startswith("place:"):
+                kind, destination = "bound_move", dest
+            # else: bound to a NON-place (e.g. a person) — falls through to the unbound-exit
+            # reclassification below (cr r3/r4 test 2c-d), the lane's OWN place check —
+            # resolve.py's local `_kind_ok` only catches the obj-valued case.
+        if kind is None:
+            if outcome.value_outcome not in ("dropped", "bound_non_place", "bound"):
+                continue  # e.g. a freshly-MINTED destination — not a licensable move (§1)
+            # Scene-restatement guard (§1.4): the raw value NAMES the current scene — an
+            # ambiguous restatement of where X already is, not an exit.
+            if scene and _names_entity(scene, str(outcome.raw_value or "").lower(),
+                                       name=scene_name):
+                guard_drops.append((person, "", "ambiguous_scene_restatement"))
+                continue
+            kind = "unbound_exit"
+        candidates.append({"kind": kind, "person": person, "destination": destination})
+
+    bound_keys = Counter(
+        (c["person"], "in", c["destination"]) for c in candidates if c["kind"] == "bound_move")
+    filtered: list[dict] = []
+    for row in resolved_rows:
+        key = (row.get("entity"), row.get("attribute"), row.get("value"))
+        if bound_keys.get(key, 0) > 0:
+            bound_keys[key] -= 1
+            continue  # pulled into the movement lane — never ordinary promotion (§1)
+        filtered.append(row)
+    return filtered, candidates, guard_drops
+
+
+def _run_cast_moves_lane(
+    p: Any, *, live_reads: "PorcelainWorldReads", trace: "TurnTrace", turn: int,
+    protagonist: str, scene: str | None, present: Callable[[str], bool],
+    engaged_this_turn: frozenset, candidates: list[dict],
+) -> None:
+    """CAST-MOVES.md §2-§4: the five-rule stagecraft gate over `candidates`
+    (`_partition_cast_moves`'s output), then commit. Licensed BOUND MOVE rows go DIRECT to
+    canon (`classify="rules"`, zero model calls — §3); a bound DEPARTURE's `departed_scene`
+    event writes only after its `in` row is RECEIPT-CONFIRMED (`confirmed_batch` discipline,
+    §4) and carries a PREDETERMINED id the `in` row's item-level `caused_by` references (the
+    re-entry-coherence lever); an UNBOUND EXIT has no move row to gate on and writes its event
+    directly. Mutates `trace.cast_moves` (committed) / `trace.cast_move_drops` (reason-tagged);
+    an engine skip receipt is telemetry, not error (PB) — `merged_self_edge` is a known benign
+    reason (a same_as fold after a place merge, not authored drift)."""
+    licensed: list[dict] = []
+    for cand in candidates:
+        person, destination = cand["person"], cand.get("destination")
+        is_bound = cand["kind"] == "bound_move"
+        if person == protagonist:  # rule 1 — never the protagonist (structural-absence)
+            trace.cast_move_drops.append((person, destination or "", "protagonist"))
+            continue
+        if live_reads.state(person, "accompanying") == protagonist:  # rule 2 — never a companion
+            trace.cast_move_drops.append((person, destination or "", "companion"))
+            continue
+        origin_here = present(person)
+        dest_here = is_bound and destination == scene
+        if not origin_here and not dest_here:  # rule 4 — must touch the CURRENT scene
+            trace.cast_move_drops.append((person, destination or "", "remote"))
+            continue
+        departure = origin_here and not dest_here
+        # rule 5 — a same-turn narrated departure of an engaged NPC contradicts presence-holds;
+        # arrivals are presence-positive and skip this rule.
+        if departure and person in engaged_this_turn:
+            trace.cast_move_drops.append((person, destination or "", "engaged_this_turn"))
+            continue
+        if not departure and not is_bound:
+            continue  # an unbound exit with no on-scene origin already failed rule 4 above
+        licensed.append({"kind": cand["kind"], "person": person,
+                         "destination": destination, "departure": departure})
+    if not licensed:
+        return
+
+    # ---- COMMIT (§3): bound moves go DIRECT to canon — the render already told the player
+    # this is world truth; the old `in` value IS the supersession this lane intends, and
+    # single-parent semantics retire it automatically (no retract needed).
+    move_rows: list[dict] = []
+    departure_events: dict[str, str] = {}
+    for c in licensed:
+        if c["kind"] != "bound_move":
+            continue
+        row = {"entity": c["person"], "attribute": "in", "value": c["destination"],
+               "value_type": "entity", "valid_from": turn_time(turn)}
+        if c["departure"]:
+            ev = f"event:departed_{c['person'].split(':', 1)[-1]}_{turn}"
+            departure_events[c["person"]] = ev
+            row["caused_by"] = ev  # the ADOPTED lever: re-entry briefings can cite "X left"
+        move_rows.append(row)
+    confirmed_persons: set[str] = set()
+    if move_rows:
+        receipt = p.ingest_structured(move_rows, classify="rules")
+        for s in (getattr(receipt, "skipped", None) or []):
+            trace.cast_move_drops.append(
+                (s.get("entity"), s.get("value"), f"engine_skip:{s.get('reason')}"))
+        confirmed, _ = confirmed_batch(move_rows, _receipt_rows(receipt))
+        confirmed_persons = {c["entity"] for c in confirmed}
+
+    # ---- EVENTS (§4 receipt-gated sequencing): a `departed_scene` event for every
+    # RECEIPT-CONFIRMED bound departure + every licensed unbound exit (no move row to gate on
+    # — the event alone is what was licensed). A structurally skipped move writes NO event.
+    event_rows: list[dict] = []
+    for c in licensed:
+        person, destination = c["person"], c["destination"]
+        if c["kind"] == "bound_move":
+            if not c["departure"]:
+                if person in confirmed_persons:  # an arrival needs no event (§4)
+                    trace.cast_moves.append(("bound_move", person, destination or ""))
+                continue
+            if person not in confirmed_persons:
+                continue  # structurally skipped — no event, no negative presence
+            ev = departure_events[person]
+        else:
+            ev = f"event:departed_{person.split(':', 1)[-1]}_{turn}"
+        event_rows += [
+            {"entity": ev, "attribute": "kind", "value": "departed_scene",
+             "valid_from": turn_time(turn)},
+            {"entity": ev, "attribute": "agent", "value": person,
+             "value_type": "entity", "valid_from": turn_time(turn)},
+            {"entity": ev, "attribute": "patient", "value": scene,
+             "value_type": "entity", "valid_from": turn_time(turn)},
+        ]
+        trace.cast_moves.append((c["kind"], person, destination or ""))
+    if event_rows:
+        p.ingest_structured(event_rows, classify="rules")
 
 
 def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon",
@@ -3212,6 +3400,25 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     _voc_absent = True
                     trace.vocative = f"{_vtok}->{_vh} (ABSENT)"
 
+    # ---- #80 CAST-MOVES: the ADDRESSED half of `engaged_this_turn` (docs/design/CAST-MOVES.md
+    # §2 rule 5) --------------------------------------------------------------------------
+    # The SHIPPED interview addressing predicate (only_one / vocative-holder / named — see the
+    # interview-delivery loop below), evaluated over EVERY present NPC BEFORE eligibility/
+    # delivery filtering (independent of `cast`, so a world with no cast data still protects an
+    # addressed NPC from a same-turn narrated departure) — a questioned NPC with NO eligible or
+    # fresh clue is still engaged (cr r2 oracle).
+    _addressed_this_turn: set = set()
+    if kind == "action" and npcs:
+        _low_addr = player_input.lower()
+        _only_one_addr = len(npcs) == 1 and not _voc_absent
+        for _anpc in npcs:
+            _anode = cast.get(_anpc) if cast else None
+            _aname = str(canon_table.get((_anpc, "name")) or "")
+            _arole = getattr(_anode, "surface_role", "") if _anode else ""
+            if (_only_one_addr or _anpc == _voc_holder
+                    or _names_entity(_anpc, _low_addr, name=_aname, role=_arole)):
+                _addressed_this_turn.add(_anpc)
+
     # ---- INTERVIEW DELIVERY (STORY-SHAPES §8) ----------------------------
     # Questioning a present cast member surfaces its authorized clues into the player
     # frame — the moment that advances pillar coverage in real play. Earned + bounded:
@@ -3315,6 +3522,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 except Exception as exc:  # discovery must not sink the turn
                     trace.dropped_cohorts.append(f"discover:{ref} ({exc})")
     trace.discovered = [ref for (ref, _loc) in discovered]
+
+    # ---- #80 CAST-MOVES: `engaged_this_turn` assembled (docs/design/CAST-MOVES.md §2 rule 5) --
+    # The union of the ADDRESSED set (above) + learned INTERVIEW-source NPCs this turn
+    # (confirmation only, always a subset of addressed — NEVER the whole `learned` list, which
+    # also carries EXAMINE object holders after the block below; person: ids are exactly the
+    # ASK-loop's contribution since EXAMINE never touches a `person:` node) + autonomous speaker
+    # intent (every NPC whose folded npc_turn decision carries `speaks` truthy). Computed here,
+    # not inside `_settle` — passed BY VALUE into that deferred closure below (a default
+    # parameter, frozen at `_settle`'s definition, not a live closure read at call time).
+    _engaged_this_turn = frozenset(_addressed_this_turn
+        | {_lnpc for (_lnpc, _lclue) in learned if isinstance(_lnpc, str)
+           and _lnpc.startswith("person:")}
+        | {_snpc for _snpc, _sres in npc_turn_results.items()
+           if isinstance(_sres, dict) and _sres.get("speaks")})
 
     # ---- MAKE-IT-REAL: a PURSUED off-script thread becomes THE path (NARRATION-DISCIPLINE.md) -
     # When the player pursued an investigative thread that delivered NO authored clue, and an
@@ -5045,11 +5266,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if names_protagonist(prose, arc.protagonist):
         trace.player_boundary = "FLAGGED: protagonist named in third person"
 
-    def _settle():
+    def _settle(_engaged_this_turn=_engaged_this_turn):
         """Deferred post-narrate bookkeeping (TURN-LATENCY dumbfire): extract narrator
         facts to canon, mirror, append the transcript, compact memory, advance time. Feeds
         FUTURE turns only — never the prose already returned. The caller runs it in the
-        background and JOINS it before the next turn (single PB connection demands ordering)."""
+        background and JOINS it before the next turn (single PB connection demands ordering).
+
+        `_engaged_this_turn` (#80 CAST-MOVES §2 rule 5) is a DEFAULT PARAMETER, not a bare
+        closure read — its value is frozen at THIS `def`'s execution (passed BY VALUE), so a
+        rebind of the outer name after this point (there is none today) could never leak into
+        an already-deferred settle call."""
         nonlocal _recent  # the compaction branch rebinds the rolling window (trims it)
         # ---- POST: INGEST GATE (GATED-INGEST-COHORT) --------------------------
         # The licensed narrator improvises freely WITHIN its grounding, but its
@@ -5137,6 +5363,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         len(_dropped_framed), _dropped_framed[:5])
                     trace.dropped_cohorts.append(
                         f"settle_noncanon_frames ({len(_dropped_framed)})")
+                # #80 CAST-MOVES §1 (Cx r1 gap 1): the containment-synonym set collapses to
+                # `in` BEFORE resolve_rows — must precede reconstruct_names/resolve_rows so
+                # every downstream step (the resolver, the movement lane) sees one spelling.
+                _canon_items = _canonicalize_containment(_canon_items)
                 # #98 live-probe finding: the lean extractor omits name rows — reconstruct
                 # the cased surface form from the prose (the stub gate's only evidence);
                 # synthetic names commit only WITH a stub, never onto bound entities.
@@ -5147,12 +5377,31 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # #98 (Cx 415 #2): the NARRATION channel — person leaves the free mint set;
                 # place/person enter ONLY through the proper-name stub gate (minimal rows,
                 # non-present).
+                # #80 CAST-MOVES §1: the out-of-band `ResolutionOutcome` collector — the
+                # per-row correlation surface the movement lane consumes below, additive to
+                # the legacy `_receipts` triples (byte-identical, untouched).
+                _move_outcomes: list[ResolutionOutcome] = []
                 _resolved, _receipts = resolve_rows(
                     _canon_items, scene=_resolve_cands, protagonist=arc.protagonist,
                     name_of=_resolve_name_of, allow_mint=True,
                     mint_kinds=_NARRATION_MINT_KINDS,
-                    stub_kinds=_NARRATION_STUB_KINDS)
+                    stub_kinds=_NARRATION_STUB_KINDS,
+                    outcomes=_move_outcomes)
                 trace.resolver = (trace.resolver or []) + _receipts
+                # #80 CAST-MOVES §1-§4: partition licensed person-movement out of ordinary
+                # promotion (BOUND MOVE / UNBOUND EXIT), gate it through the five stagecraft
+                # rules, and commit direct to canon — never through the quarantine stage
+                # below (a narrated `in` change is exactly the contradiction that stage
+                # exists to catch; movement needs its own licensed lane).
+                _resolved, _cast_candidates, _cast_guard_drops = _partition_cast_moves(
+                    _resolved, _canon_items, _move_outcomes, scene=scene,
+                    scene_name=str(canon_table.get((scene, "name")) or "") if scene else "")
+                trace.cast_move_drops.extend(_cast_guard_drops)
+                if _cast_candidates:
+                    _run_cast_moves_lane(
+                        p, live_reads=live_reads, trace=trace, turn=turn,
+                        protagonist=arc.protagonist, scene=scene, present=_present,
+                        engaged_this_turn=_engaged_this_turn, candidates=_cast_candidates)
                 staged = _receipt_rows(p.ingest_structured(
                     _resolved, frame=_PROPOSED, classify="defer"))
         except Exception as exc:  # noqa: BLE001

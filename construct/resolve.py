@@ -17,6 +17,7 @@ Decisions are deterministic (Cx 304 pin 7: ambiguity calls no model and never mi
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any, Callable
 
 #: deixis → the protagonist (these DO have a referent; never mint a phantom). Cx 304 / Kernos 084 4c.
@@ -262,10 +263,48 @@ def decide_entity(eid: str, name: str, *, candidates, protagonist: str,
     return None, "novel_denied"
 
 
+#: the public vocabulary for `ResolutionOutcome.subject_outcome`/`value_outcome` (CAST-MOVES.md
+#: §1, cr r3/r4 focused RED `<787848dc…>`): each SIDE of a row is classified independent of
+#: whether the row survived overall. `subject_outcome` only ever takes {bound, minted, dropped}
+#: (a subject is always evaluated — "not applicable" never applies); `value_outcome` additionally
+#: takes `not_entity_valued` (an attribute whose value is never entity-shaped — name/kind/
+#: description rows) and `bound_non_place` (destination-side ONLY: the value DID resolve to a
+#: real entity, just not one the row's kind expectation accepts — a movement-lane concern).
+_SUBJECT_OUTCOME = {"bound": "bound", "deixis_bound": "bound",
+                    "minted": "minted", "stub_minted": "minted"}
+_VALUE_OUTCOME = {"bound": "bound", "deixis_bound": "bound", "minted": "minted"}
+
+
+@dataclass(frozen=True)
+class ResolutionOutcome:
+    """One per-input-row correlation record for `resolve_rows` (CAST-MOVES.md §1). Out-of-band
+    from the legacy `(id, attribute, reason)` receipt triples — a #80 movement-lane consumer needs
+    to know WHICH person a row was about and WHICH SIDE (subject or destination) failed, which the
+    flat global receipt list cannot say when several same-attribute rows are in flight (row_index
+    is the correlation key back to the caller's input list). `subject_outcome`/`value_outcome`
+    classify each side into the small public vocabulary above; `resolved_entity`/`resolved_value`
+    PRESERVE whatever actually resolved even when the other side's failure drops the whole row
+    (a value drop never blanks `resolved_entity`). `reason` keeps the granular internal decision
+    string (`deixis_bound`, `stub_minted`, `kind_mismatch`, `bound_kind_skipped`, ...) for
+    debugging — only the two `*_outcome` fields are squashed into the public vocabulary a
+    correlation consumer reads. Emitted EXACTLY one per input row, on every control path
+    (including stub trims / value denial / the final kind-mismatch drop) — never conditioned on
+    whether the row was ultimately accepted."""
+    row_index: int
+    raw_entity: Any
+    raw_value: Any
+    resolved_entity: str | None
+    resolved_value: Any
+    subject_outcome: str
+    value_outcome: str
+    reason: str
+
+
 def resolve_rows(rows: list[dict], *, scene, protagonist: str,
                  name_of: Callable[[str], str], allow_mint: bool = True,
                  mint_kinds=_FREE_TEXT_MINT_KINDS,
-                 stub_kinds=None) -> tuple[list[dict], list[tuple]]:
+                 stub_kinds=None,
+                 outcomes: list[ResolutionOutcome] | None = None) -> tuple[list[dict], list[tuple]]:
     """Resolve a freeform extraction's rows (the player-input / NPC / settle-prose sites) into
     canon-ready structured rows. Rewrites BOTH the subject and any entity-valued value; DROPS the
     whole row if either side resolves to None or violates the kind expectation (Cx 304 #2/#3). A
@@ -277,7 +316,11 @@ def resolve_rows(rows: list[dict], *, scene, protagonist: str,
     settle path passes {"place","person"}). A stub commits ONLY its `_STUB_ATTRS` rows (everything
     else trims); a stub's `in` needs a container that BINDS to an existing place; a stub in the
     VALUE position is denied outright (containment/presence toward a brand-new place would be a
-    relocation effect — the move/staging authorities own those)."""
+    relocation effect — the move/staging authorities own those).
+
+    `outcomes` (CAST-MOVES.md §1), if passed, receives exactly ONE `ResolutionOutcome` per input
+    row — additive and out-of-band: the legacy receipts/output rows below are computed exactly as
+    before this parameter existed; nothing here changes their content or order."""
     names = {r["entity"]: r["value"] for r in rows
              if r.get("attribute") == "name" and isinstance(r.get("value"), str)}
     kinds = {r["entity"]: r["value"] for r in rows
@@ -295,15 +338,37 @@ def resolve_rows(rows: list[dict], *, scene, protagonist: str,
 
     out: list[dict] = []
     receipts: list[tuple] = []
-    for r in rows:
+    for i, r in enumerate(rows):
+        raw_entity, raw_value = r.get("entity"), r.get("value")
+        entity_valued = _entity_valued(r)
+        # the outcome's DEFAULT shape for a row that never reaches the value-side decide()
+        # call below (subject drop, or an attribute whose value is never entity-shaped) —
+        # overwritten inline wherever the value side actually gets evaluated.
+        default_value_outcome = "not_entity_valued" if not entity_valued else "dropped"
+        default_resolved_value = raw_value if not entity_valued else None
+
+        def _emit(resolved_entity: str | None, value_outcome: str, resolved_value: Any,
+                  reason: str, _i=i, _re=raw_entity, _rv=raw_value, _re_reason=None) -> None:
+            if outcomes is None:
+                return
+            subj = _SUBJECT_OUTCOME.get(_re_reason, "dropped") if _re_reason else "dropped"
+            outcomes.append(ResolutionOutcome(
+                row_index=_i, raw_entity=_re, raw_value=_rv,
+                resolved_entity=resolved_entity, resolved_value=resolved_value,
+                subject_outcome=subj, value_outcome=value_outcome, reason=reason))
+
         e_id, e_reason = decide(r["entity"])
         if e_id is None:
             receipts.append((r["entity"], r.get("attribute"), e_reason))
+            _emit(None, default_value_outcome, default_resolved_value, e_reason,
+                  _re_reason=e_reason)
             continue
         # never RE-TYPE an existing entity: a `kind` row whose subject BOUND to a known entity is
         # the extractor's typing opinion about something already canon — drop it (Cx 306).
         if r.get("attribute") == "kind" and e_reason == "bound":
             receipts.append((e_id, "kind", "bound_kind_skipped"))
+            _emit(e_id, "not_entity_valued", raw_value, "bound_kind_skipped",
+                  _re_reason=e_reason)
             continue
         # #98: a stub is MINIMAL (Cx 415 #3) — anything beyond typing/name/(sanctioned
         # containment) trims; the picture gets painted only when engagement earns it.
@@ -311,42 +376,59 @@ def resolve_rows(rows: list[dict], *, scene, protagonist: str,
             _pref = e_id.split(":", 1)[0]
             if r.get("attribute") not in _STUB_ATTRS.get(_pref, frozenset()):
                 receipts.append((e_id, r.get("attribute"), "stub_trimmed"))
+                _emit(e_id, default_value_outcome, default_resolved_value, "stub_trimmed",
+                      _re_reason=e_reason)
                 continue
         # a RECONSTRUCTED name (prose-casing evidence, `reconstruct_names`) exists to
         # feed the stub gate — it commits ONLY with the stub; a bound entity's canon
         # name is never re-asserted from prose casing.
         if r.get("_synthetic_name") and e_reason != "stub_minted":
             receipts.append((e_id, "name", "synthetic_name_skipped"))
+            _emit(e_id, "not_entity_valued", raw_value, "synthetic_name_skipped",
+                  _re_reason=e_reason)
             continue
         r2 = dict(r)
         r2.pop("_synthetic_name", None)
         r2["entity"] = e_id
-        if _entity_valued(r):
+        value_outcome, resolved_value = default_value_outcome, default_resolved_value
+        if entity_valued:
             v_id, v_reason = decide(str(r.get("value")))
             if v_id is None:
                 receipts.append((str(r.get("value")), r.get("attribute"), v_reason))
+                _emit(e_id, "dropped", None, v_reason, _re_reason=e_reason)
                 continue
             if v_reason == "stub_minted":
                 # #98: a stub never enters the VALUE position — pointing an existing
                 # entity's `in`/`holds` at a brand-new place/person is a presence effect
                 # the stub gate does not own (Cx 415 #3/#6).
                 receipts.append((v_id, r.get("attribute"), "stub_value_denied"))
+                _emit(e_id, "dropped", None, "stub_value_denied", _re_reason=e_reason)
                 continue
             r2["value"] = v_id
             if v_reason in ("bound", "minted", "deixis_bound"):
                 receipts.append((v_id, r.get("attribute"), v_reason))
+            resolved_value = v_id
+            value_outcome = _VALUE_OUTCOME.get(v_reason, "dropped")
         if (e_reason == "stub_minted" and r.get("attribute") == "in"
                 and not str(r2.get("value", "")).startswith("place:")):
             # a stub's containment must land on an EXISTING place (bound above) — a
-            # person container or anything unbound drops (Cx 415 #3).
+            # person container or anything unbound drops (Cx 415 #3). The value DID
+            # resolve (just not to a place) — destination-side `bound_non_place`.
             receipts.append((e_id, "in", "stub_containment_unbound"))
+            _emit(e_id, "bound_non_place", resolved_value, "stub_containment_unbound",
+                  _re_reason=e_reason)
             continue
         if not _kind_ok(r2["entity"], r2.get("attribute"), r2.get("value")):
+            # the value bound to a real entity, just the WRONG kind for this attribute
+            # (person.in -> obj:) — destination-side `bound_non_place`, not a plain drop.
             receipts.append((r2["entity"], r2.get("attribute"), "kind_mismatch"))
+            _emit(e_id, "bound_non_place", resolved_value, "kind_mismatch",
+                  _re_reason=e_reason)
             continue
         out.append(r2)
         if e_reason in ("bound", "minted", "deixis_bound", "stub_minted"):
             receipts.append((r2["entity"], r2.get("attribute"), e_reason))
+        _emit(e_id, value_outcome, resolved_value, e_reason, _re_reason=e_reason)
     return out, receipts
 
 

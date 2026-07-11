@@ -417,3 +417,167 @@ def test_synthetic_name_never_reasserted_onto_a_bound_entity():
                                          stub_kinds=resolve._NARRATION_STUB_KINDS)
     assert not any(r["attribute"] == "name" for r in out)
     assert ("place:hart_and_bell", "name", "synthetic_name_skipped") in receipts
+
+
+# ---- #80 CAST-MOVES: the `ResolutionOutcome` correlation contract (CAST-MOVES.md §1) ----
+# The out-of-band per-input-row collector a movement-lane consumer reads — additive to the
+# legacy receipt triples/output rows, which must stay byte-for-byte unchanged either way.
+
+_MIXED_ROWS = [
+    {"entity": "person:harl", "attribute": "in", "value": "place:study",
+     "value_type": "entity"},                                             # bound/bound
+    {"entity": "obj:thing", "attribute": "kind", "value": "thing"},        # ambiguous subject drop
+    {"entity": "person:you", "attribute": "in", "value": "obj:street",
+     "value_type": "entity"},                                             # deixis subject, kind_mismatch
+    {"entity": "person:harl", "attribute": "role", "value": "footman"},   # not-entity-valued, accepted
+    {"entity": "place:hart_and_bell", "attribute": "kind", "value": "inn"},         # stub mint
+    {"entity": "place:hart_and_bell", "attribute": "name", "value": "The Hart and Bell"},
+    {"entity": "place:hart_and_bell", "attribute": "description", "value": "a coach inn"},
+]
+_MIXED_SCENE = {"person:harl", "place:study", "obj:thing_a", "obj:thing_b", "obj:street"}
+_MIXED_NAMES = {"obj:thing_a": "thing", "obj:thing_b": "thing"}
+
+
+def test_outcomes_collector_is_additive_legacy_output_unchanged():
+    out1, receipts1 = resolve.resolve_rows(
+        _MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+        name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+        stub_kinds=resolve._NARRATION_STUB_KINDS)
+    outcomes: list = []
+    out2, receipts2 = resolve.resolve_rows(
+        _MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+        name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+        stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    assert out1 == out2
+    assert receipts1 == receipts2
+    assert len(outcomes) == len(_MIXED_ROWS)          # exactly one per input row
+
+
+def test_outcome_row_index_correlates_to_the_input_list():
+    outcomes: list = []
+    resolve.resolve_rows(_MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+                         name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+                         stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    assert [o.row_index for o in outcomes] == list(range(len(_MIXED_ROWS)))
+    assert [o.raw_entity for o in outcomes] == [r["entity"] for r in _MIXED_ROWS]
+
+
+def test_outcome_bound_move_shape_both_sides_bound():
+    outcomes: list = []
+    resolve.resolve_rows(_MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+                         name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+                         stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    o = outcomes[0]
+    assert o.subject_outcome == "bound" and o.value_outcome == "bound"
+    assert o.resolved_entity == "person:harl" and o.resolved_value == "place:study"
+
+
+def test_outcome_subject_drop_row_is_dropped_and_row_absent_from_output():
+    # 2c-a: an ambiguous subject drops the WHOLE row — outcome reports subject dropped.
+    outcomes: list = []
+    out, _receipts = resolve.resolve_rows(
+        _MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+        name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+        stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    o = outcomes[1]
+    assert o.subject_outcome == "dropped" and o.resolved_entity is None
+    assert o.reason == "ambiguous"
+    assert not any(r["entity"] == "obj:thing" for r in out)
+
+
+def test_outcome_value_drop_preserves_resolved_entity_kind_mismatch_is_bound_non_place():
+    # a person's `in` bound to a real OBJECT (kind_mismatch): resolved_entity is
+    # PRESERVED (deixis bound the subject to the protagonist) even though the whole
+    # row drops; the destination side is `bound_non_place`, never a bare `dropped`.
+    outcomes: list = []
+    resolve.resolve_rows(_MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+                         name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+                         stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    o = outcomes[2]
+    assert o.subject_outcome == "bound"                 # deixis_bound -> public "bound"
+    assert o.resolved_entity == "person:clara"          # preserved, not blanked
+    assert o.value_outcome == "bound_non_place"
+    assert o.resolved_value == "obj:street"
+    assert o.reason == "kind_mismatch"
+
+
+def test_outcome_not_entity_valued_for_a_plain_accepted_attribute():
+    outcomes: list = []
+    resolve.resolve_rows(_MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+                         name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+                         stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    o = outcomes[3]
+    assert o.subject_outcome == "bound" and o.value_outcome == "not_entity_valued"
+    assert o.resolved_entity == "person:harl" and o.resolved_value == "footman"
+
+
+def test_outcome_stub_minted_maps_to_minted_and_stub_trim_is_not_entity_valued():
+    # the stub-mint kind row accepts (subject_outcome "minted"); the stub-trimmed
+    # description row drops but still reports the subject as minted, not dropped.
+    outcomes: list = []
+    resolve.resolve_rows(_MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+                         name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+                         stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    kind_o, name_o, desc_o = outcomes[4], outcomes[5], outcomes[6]
+    assert kind_o.subject_outcome == "minted" and kind_o.value_outcome == "not_entity_valued"
+    assert kind_o.reason == "stub_minted"
+    assert name_o.subject_outcome == "minted"           # the stub's OWN name row commits
+    assert desc_o.subject_outcome == "minted"           # subject still "minted" though trimmed
+    assert desc_o.reason == "stub_trimmed"
+
+
+def test_outcome_bound_kind_skipped_reports_bound_subject_not_entity_valued():
+    outcomes: list = []
+    rows = [{"entity": "place:street", "attribute": "kind", "value": "object"}]
+    resolve.resolve_rows(rows, scene={"place:street"}, protagonist="person:p",
+                         name_of=_name_of({"place:street": "street"}), outcomes=outcomes)
+    o = outcomes[0]
+    assert o.subject_outcome == "bound" and o.value_outcome == "not_entity_valued"
+    assert o.reason == "bound_kind_skipped"
+
+
+def test_outcome_stub_value_denied_is_a_destination_side_drop():
+    # #98: a stub can never enter the VALUE position — the value-side outcome is
+    # `dropped` (nothing usable resolved there), subject side unaffected.
+    outcomes: list = []
+    names = {"person:witness": "the witness"}
+    rows = [{"entity": "person:witness", "attribute": "in", "value": "place:hart_and_bell",
+            "value_type": "entity"},
+           {"entity": "place:hart_and_bell", "attribute": "name", "value": "The Hart and Bell"}]
+    resolve.resolve_rows(rows, scene={"person:witness"}, protagonist="person:p",
+                         name_of=_name_of(names), mint_kinds=resolve._NARRATION_MINT_KINDS,
+                         stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    o = outcomes[0]
+    assert o.subject_outcome == "bound"
+    assert o.value_outcome == "dropped" and o.resolved_value is None
+    assert o.reason == "stub_value_denied"
+
+
+def test_outcome_stub_containment_unbound_is_bound_non_place():
+    # a stub's `in` bound to a REAL but non-place entity (here a person) — the
+    # containment drops (Cx 415 #3), classified destination-side as `bound_non_place`.
+    outcomes: list = []
+    rows = [
+        {"entity": "place:hart_and_bell", "attribute": "name", "value": "The Hart and Bell"},
+        {"entity": "place:hart_and_bell", "attribute": "in", "value": "person:innkeeper",
+         "value_type": "entity"},
+    ]
+    resolve.resolve_rows(rows, scene={"person:innkeeper"}, protagonist="person:p",
+                         name_of=_name_of({"person:innkeeper": "the innkeeper"}),
+                         mint_kinds=resolve._NARRATION_MINT_KINDS,
+                         stub_kinds=resolve._NARRATION_STUB_KINDS, outcomes=outcomes)
+    in_o = outcomes[1]
+    assert in_o.subject_outcome == "minted"             # the stub place itself
+    assert in_o.value_outcome == "bound_non_place"
+    assert in_o.resolved_value == "person:innkeeper"
+    assert in_o.reason == "stub_containment_unbound"
+
+
+def test_outcome_collector_is_optional_default_none_is_a_pure_noop():
+    # calling without `outcomes=` (the default) must not raise or change behavior —
+    # additive only, never a required parameter.
+    out, receipts = resolve.resolve_rows(
+        _MIXED_ROWS, scene=_MIXED_SCENE, protagonist="person:clara",
+        name_of=_name_of(_MIXED_NAMES), mint_kinds=resolve._NARRATION_MINT_KINDS,
+        stub_kinds=resolve._NARRATION_STUB_KINDS)
+    assert isinstance(out, list) and isinstance(receipts, list)
