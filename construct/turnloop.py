@@ -2869,26 +2869,49 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             # value and never an agency claim. Nothing is ever relabeled
             # as player action, and no branch is fed "(none live)" (the
             # probe-run-1 low-confidence trap).
+            # COMPLETE over the condition grammar (cr: a skipped leaf left
+            # threads=[] and the prompt said "(none live)" — the acceptance
+            # run-1 low-confidence trap through the back door): every polar
+            # leaf contributes ONE truthful, value-free line.
+            from construct.arc.conditions import (BeatAchieved as _BeatAch,
+                                                  ClockFired as _ClockF)
             threads = []
             if any(isinstance(a, _Occurred) and _pos for a, _pos in _pairs):
                 threads.append("the road is the player's own act — the deed "
                                "remains open to attempt in the world as it "
                                "stands")
             for _a, _pos in _pairs:
-                if isinstance(_a, (_InFrame, _Occurred)):
-                    continue
+                if isinstance(_a, _InFrame):
+                    continue  # the live carrier lines below carry these
+                if isinstance(_a, _Occurred):
+                    if not _pos:
+                        threads.append(
+                            "the route depends on a certain deed remaining "
+                            "UNDONE — the road holds so long as that event "
+                            "stays absent; there is nothing here for anyone "
+                            "to perform")
+                    continue  # positive Occurred: the act line above, once
                 _ent = getattr(_a, "entity", None)
-                if not _ent:
-                    continue
-                try:
-                    _en = str(live_reads.state(_ent, "name")
-                              or _ent.split(":", 1)[-1].replace("_", " "))
-                except Exception:  # noqa: BLE001
-                    _en = _ent.split(":", 1)[-1].replace("_", " ")
-                threads.append(
-                    f"the road turns on the standing state of {_en} "
-                    f"({getattr(_a, 'attribute', 'its state')}) — the world "
-                    f"itself can still move it")
+                if _ent:
+                    try:
+                        _en = str(live_reads.state(_ent, "name")
+                                  or _ent.split(":", 1)[-1].replace("_", " "))
+                    except Exception:  # noqa: BLE001
+                        _en = _ent.split(":", 1)[-1].replace("_", " ")
+                    threads.append(
+                        f"the road turns on the standing state of {_en} "
+                        f"({getattr(_a, 'attribute', 'its state')}) — the "
+                        f"world itself can still move it")
+                elif isinstance(_a, _BeatAch):
+                    threads.append("the road turns on another thread of the "
+                                   "story reaching its mark first")
+                elif isinstance(_a, _ClockF):
+                    threads.append("the road turns on the story's own clock "
+                                   "— a pressure already set in motion")
+                else:  # pacing/counter and any future leaf: truthful, generic
+                    threads.append("the road turns on the standing world "
+                                   "itself, as it now lies")
+            threads = list(dict.fromkeys(threads))  # dedupe repeated shapes
             for _h in live_holders:
                 try:
                     _hn = str(live_reads.state(_h, "name")

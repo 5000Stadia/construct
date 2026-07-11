@@ -3213,8 +3213,36 @@ def test_repair_threads_classify_from_the_condition_shape(world):
                scene=SCENE, npcs=[], horizon=None, minutes_now=None,
                rung=None, fuel=[], spines={})
     assert trace_b.repairs == [("beat:quiet", "beat:quiet_r1", "replace")]
-    assert "player's own act" not in _rpr_prompt(prov_b)
+    pr_b = _rpr_prompt(prov_b)
+    assert "player's own act" not in pr_b
+    # cr completeness round: the absent-event leaf CONTRIBUTES context — the
+    # prompt never falls back to "(none live)" (the run-1 confidence trap)
+    assert "(none live)" not in pr_b
+    assert "remaining UNDONE" in pr_b
 
+
+
+def test_repair_threads_cover_entityless_structural_atoms(world):
+    # cr completeness round: a leaf with no .entity (BeatAchieved here) must
+    # still contribute truthful structural context — never a silent skip
+    # into "(none live)".
+    arc = _dhard_arc()
+    dep = replace(arc.beats[0], beat_id="beat:after",
+                  achievable_via=BeatAchieved("beat:discover"))
+    arc_d = replace(arc, beats=(dep,), climax_ready_beats=("beat:after",))
+    seed_arc(world, arc_d)
+    reads = _close_dhard(world, arc_d)
+    prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=prov, turn=5, arc=arc_d, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.repairs == [("beat:after", "beat:after_r1", "replace")]
+    pr = [p_ for p_, _sc, _t in prov.calls if "FORECLOSED" in p_][0]
+    assert "(none live)" not in pr
+    assert "another thread of the story" in pr
+    assert "player's own act" not in pr
 
 
 def test_repair_threads_mixed_shape_carries_both_contexts(world):
