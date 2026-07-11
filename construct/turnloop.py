@@ -4445,12 +4445,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         from construct.arc.executor import person_can_act as _npc_can_act
         _SILENT_NPC = {"acts": False, "action": "", "speaks": False,
                        "intent": "", "line_hint": ""}
+        _npc_eligible = {npc: _npc_can_act(live_reads, npc) for npc in npcs}
         _thunks = [
             (lambda n=npc: cohorts.npc_turn(provider, n, sheets[n],
                                             scene_json, arc.protagonist,
                                             recent=_npc_recent,
                                             companion=_is_companion(n)))
-            if _npc_can_act(live_reads, npc) else (lambda: dict(_SILENT_NPC))
+            if _npc_eligible[npc] else (lambda: dict(_SILENT_NPC))
             for npc in npcs]
         if _memory_gate:
             # #97 (Cx 434 constraint 6): memory_turn rides the SAME cheap batch — one
@@ -4471,7 +4472,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if isinstance(decision, Exception):
                 trace.dropped_cohorts.append(f"npc_turn:{npc} ({decision})")
                 continue
-            trace.cohort_calls.append(f"npc_turn:{npc}:cheap")
+            if _npc_eligible.get(npc, True):
+                # the receipt means A COHORT FIRED (the debug ledger's
+                # contract) — the silent dead-NPC substitute spends no model
+                # call and writes no receipt (cr D3 round 7)
+                trace.cohort_calls.append(f"npc_turn:{npc}:cheap")
             npc_turn_results[npc] = decision  # carry the speak-intent half forward
             if decision["acts"] and decision["action"]:
                 # ENTITY AUTHORITY (Cx 304): resolve the NPC's narrated act before it touches canon —

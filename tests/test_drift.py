@@ -3005,6 +3005,9 @@ def test_dead_holder_cannot_deliver_a_clue_in_interview(world):
     assert world.porcelain.state(
         "fact:motive", "reason",
         frame=f"knows:{PLAYER}")["status"] != "known"
+    # cr round 7: the silent substitute is NOT receipted as a fired cohort —
+    # cost/acceptance telemetry stays honest
+    assert "npc_turn:person:witness:cheap" not in r.trace.cohort_calls
     # positive control: the same holder ALIVE delivers through the same door
     world.porcelain.ingest_structured([
         {"entity": "person:witness", "attribute": "alive", "value": "true",
@@ -3026,6 +3029,7 @@ def test_dead_holder_cannot_deliver_a_clue_in_interview(world):
     finally:
         mp.undo()
     assert r2.trace.learned_clues == ["clue:motive"]
+    assert "npc_turn:person:witness:cheap" in r2.trace.cohort_calls  # real cohort receipted
 
 
 def test_continuation_scope_excludes_retained_past_arcs(tmp_path):
