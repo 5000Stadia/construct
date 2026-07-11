@@ -2719,6 +2719,21 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     return True
 
 
+def _polar_atoms(expr: Any, positive: bool = True):
+    """Yield `(atom, positive)` pairs with `Not` flipping polarity — the
+    repair-thread classifier reads mechanics from the CONDITION SHAPE, never
+    from whether carrier discovery returned rows (cr: `not live_holders`
+    conflated "no carriers" with "player act")."""
+    from construct.arc.conditions import AllOf, AnyOf, AtLeast, Not
+    if isinstance(expr, Not):
+        yield from _polar_atoms(expr.operand, not positive)
+    elif isinstance(expr, (AllOf, AnyOf, AtLeast)):
+        for op in expr.operands:
+            yield from _polar_atoms(op, positive)
+    else:
+        yield expr, positive
+
+
 def _refusal_fired(reads: Any, arc: Arc) -> bool:
     """Has this arc's OWN refusal clock fired? The verdict doctrine's single
     read — repair, rescue-holds, and side-deferral all gate on it."""
@@ -2794,10 +2809,10 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     # road, so the dead rival can't carry the clue past his own death). No
     # live channel → decline; never a zombie mint. `Occurred` beats stay
     # walkable by the player act itself.
-    from construct.arc.conditions import InFrame as _InFrame, atoms_of as _atoms_of
-    _atoms = [a for a in _atoms_of(beat.achievable_via)
-              if isinstance(a, _InFrame)]
-    live_holders: list[str] = []  # empty for non-carrier (Occurred) mechanics
+    from construct.arc.conditions import InFrame as _InFrame, Occurred as _Occurred
+    _pairs = list(_polar_atoms(beat.achievable_via))
+    _atoms = [a for a, _pos in _pairs if isinstance(a, _InFrame)]
+    live_holders: list[str] = []  # empty for non-carrier mechanics
     if _atoms:
         _invalidated = set((witness or {}).get("driving_entities") or [])
 
@@ -2845,14 +2860,35 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             # threads=[] the real model was TOLD "(none live)" and honestly
             # declined low_confidence — the walkable road must be described
             # to the cohort that narrates it opening).
+            # Thread context is classified from the CONDITION SHAPE (cr,
+            # round on b9514c9): InFrame → the live carrier lines; a
+            # POSITIVE-polarity Occurred → the player-act line (a
+            # Not(Occurred) road is the act's absence, never player
+            # agency); any other atom (StateIs/Quantity/…) → a truthful
+            # world-state line naming its subject and attribute, never its
+            # value and never an agency claim. Nothing is ever relabeled
+            # as player action, and no branch is fed "(none live)" (the
+            # probe-run-1 low-confidence trap).
             threads = []
-            if not live_holders:
-                # a non-carrier (Occurred) mechanic: the road is the player's
-                # own act — an honest live context, not "(none live)" (which
-                # made the real model decline low_confidence in probe run 1)
+            if any(isinstance(a, _Occurred) and _pos for a, _pos in _pairs):
                 threads.append("the road is the player's own act — the deed "
                                "remains open to attempt in the world as it "
                                "stands")
+            for _a, _pos in _pairs:
+                if isinstance(_a, (_InFrame, _Occurred)):
+                    continue
+                _ent = getattr(_a, "entity", None)
+                if not _ent:
+                    continue
+                try:
+                    _en = str(live_reads.state(_ent, "name")
+                              or _ent.split(":", 1)[-1].replace("_", " "))
+                except Exception:  # noqa: BLE001
+                    _en = _ent.split(":", 1)[-1].replace("_", " ")
+                threads.append(
+                    f"the road turns on the standing state of {_en} "
+                    f"({getattr(_a, 'attribute', 'its state')}) — the world "
+                    f"itself can still move it")
             for _h in live_holders:
                 try:
                     _hn = str(live_reads.state(_h, "name")

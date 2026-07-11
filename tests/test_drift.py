@@ -3164,3 +3164,81 @@ def test_occurred_beat_repairs_without_carriers(world):
     rpr_prompts = [pr for pr, _sc, _t in provider.calls if "FORECLOSED" in pr]
     assert rpr_prompts and "player's own act" in rpr_prompts[0]
     assert "(none live)" not in rpr_prompts[0]
+
+
+def test_repair_threads_classify_from_the_condition_shape(world):
+    # cr fold-round on b9514c9: `not live_holders` conflated "no carriers"
+    # with "player act". The thread context now classifies from the
+    # CONDITION SHAPE: (a) pure StateIs gets a truthful world-state line and
+    # NEVER the player-act claim; (b) Not(Occurred) — the act's absence —
+    # never gets it either; (c) a mixed InFrame+Occurred shape carries BOTH
+    # the carrier line and the act line.
+    def _rpr_prompt(provider):
+        prompts = [pr for pr, _sc, _t in provider.calls if "FORECLOSED" in pr]
+        assert prompts, "repair cohort never called"
+        return prompts[0]
+
+    # (a) pure StateIs mechanic
+    arc = _dhard_arc()
+    sts = replace(arc.beats[0],
+                  achievable_via=StateIs("person:rival", "kind", "person"))
+    arc_a = replace(arc, beats=(sts,))
+    seed_arc(world, arc_a)
+    reads = _close_dhard(world, arc_a)
+    prov = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=prov, turn=5, arc=arc_a, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    pr = _rpr_prompt(prov)
+    assert "player's own act" not in pr
+    assert "standing state of" in pr and "(kind)" in pr
+    # the value never rides the thread (no leak channel)
+    assert "person)" not in pr.split("standing state of", 1)[1].split("\n")[0].replace("(kind)", "")
+
+    # (b) Not(Occurred): polarity respected — no player-act claim
+    from construct.arc.conditions import Not as _Not
+    noc = replace(arc.beats[0], beat_id="beat:quiet",
+                  achievable_via=_Not(Occurred("event:alarm")))
+    arc_b = replace(arc, beats=(noc,), climax_ready_beats=("beat:quiet",))
+    world.porcelain.ingest_structured(beat_to_items(noc, "arc:main"), frame=PLOT)
+    _a, closed, _r = beat_pass(world, arc_b, reads, turn=6)
+    assert closed == ["beat:quiet"]
+    prov_b = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace_b = TurnTrace(turn=7)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace_b,
+               provider=prov_b, turn=7, arc=arc_b, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace_b.repairs == [("beat:quiet", "beat:quiet_r1", "replace")]
+    assert "player's own act" not in _rpr_prompt(prov_b)
+
+
+
+def test_repair_threads_mixed_shape_carries_both_contexts(world):
+    # (c) of the shape classification: a mixed InFrame+Occurred mechanic's
+    # repair prompt carries BOTH the live carrier line and the player-act
+    # line (its own world: the (a)/(b) phases spend the per-arc budget).
+    from construct.arc.conditions import AllOf as _AllOf
+    arc = _dhard_arc()
+    mixed = replace(arc.beats[0],
+                    achievable_via=_AllOf((
+                        InFrame(f"knows:{PLAYER}", "fact:secret", "culprit",
+                                "person:rival"),
+                        Occurred("event:confrontation"))))
+    arc_c = replace(arc, beats=(mixed,))
+    seed_arc(world, arc_c)
+    _stage_clerk(world)
+    reads = _close_dhard(world, arc_c)
+    prov_c = StubProvider([{"hook": "a road", "confidence": 0.9}])
+    trace_c = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace_c,
+               provider=prov_c, turn=5, arc=arc_c, cast=_dhard_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace_c.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    pr_c = [pr for pr, _sc, _t in prov_c.calls if "FORECLOSED" in pr][0]
+    assert "player's own act" in pr_c            # the positive Occurred half
+    assert "presently at" in pr_c                # the live carrier half
