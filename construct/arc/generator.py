@@ -75,6 +75,12 @@ ROUTINE_EVENT_KINDS: frozenset[str] = frozenset({
     # "first-time kind" or ripple source on their own (a same-turn relocation
     # must not itself wake the opportunistic generator).
     "relocation_receipt", "relocate_declined",
+    # DRIFT-HANDLING D2 (§3 R3 point 4): moment_missed IS routine — excluded
+    # from BOTH the first-time-kind and causal-ripple signals; its consequence
+    # FACT rows are the felt surface, and generator feedback is the honest
+    # indirect channel (spine-touch when the player later acts on an affected
+    # NPC). absence_declined is decline telemetry, same footing as the rest.
+    "moment_missed", "absence_declined",
 })
 
 #: Diegetic-minute quiet threshold for the ambient trigger (§C, P2c).

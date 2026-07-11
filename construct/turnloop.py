@@ -697,6 +697,9 @@ class TurnTrace:
     drift: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, class) classified this turn (D-SOFT only)
     relocations: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, new_staging) committed this turn
     relocate_directive: str = ""  # DRIFT-HANDLING D1 debug: the sanitized staging line (mirrors `nudge`)
+    absence_consequences: list = field(default_factory=list)  # DRIFT-HANDLING D2: (moment_event_id, committed_row_count) this turn
+    absence_callback: str = ""  # DRIFT-HANDLING D2 debug: the sanitized deferred callback line
+    callbacks: list = field(default_factory=list)  # DRIFT-HANDLING D2: callback entities SURFACED into the briefing this turn
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -2217,30 +2220,53 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 npcs: list[str], horizon: float | None, minutes_now: float | None,
                 rung: Rung | None, fuel: list[str] | None = None,
                 spines: dict[str, str] | None = None) -> None:
-    """DRIFT-HANDLING.md D1 (§4): R2 relocate-the-beat for D-SOFT beats on the
-    MAIN arc ONLY — side-arc drift responses are OUT OF SCOPE this slice (D2/D3
-    extend the classifier and repair machinery; a side arc simply never drifts
-    in D1). Placed after `beat_pass` (this turn's closures are known) and
-    BEFORE the main-arc lifecycle read — for D1 that only matters
-    structurally (no closures/repairs exist yet), but keeps the ordering the
-    later slices need. At most ONE drift response per turn (the generator's
-    one-mint-per-turn discipline). `fuel` is the turn's precomputed
-    `salient_moments` lines and `spines` the present NPCs' drive/fear texts —
-    both assembled ONCE in `run_turn` and shared with the DM generator (cr
-    finding 1b: never duplicated, never left empty when available).
-    `trace.drift` records CLASSIFICATION (every classified beat, before
-    response selection); `trace.relocations` records success only (cr
-    finding 4). Fail-open: any error logs and leaves the world quiet — a
+    """DRIFT-HANDLING.md §4: the drift step, MAIN arc only (side arcs are
+    D3's). Placed after `beat_pass` (this turn's closures are known) and
+    BEFORE the main-arc lifecycle read (a same-turn closure must get its
+    response before a terminal/fallout escapes). At most ONE drift response
+    per turn. D1 = R2 relocate for D-SOFT; D2 adds CLOSURE classification
+    (the witness-based D-MISSED/D-HARD read, §2) and R3 absence-consequence
+    for D-MISSED — response selection order: closures FIRST (the world moved
+    on — land the consequence), then D-SOFT relocation. `fuel`/`spines` are
+    the turn's shared salience assembly (cr D1 finding 1b). `trace.drift`
+    records CLASSIFICATION (every classified beat, before response
+    selection); `trace.relocations`/`trace.absence_consequences` record
+    success only. Fail-open: any error logs and leaves the world quiet — a
     drift pass never breaks a turn."""
     try:
+        if trace.clocks_fired or trace.beats_achieved or trace.reveals:
+            # This turn ALREADY developed (cr D1 finding 2): the development-
+            # ledger write for beats/clocks lands AFTER this pass, so the stale
+            # baseline would misread a developing turn as quiet. Suppression
+            # precedes CLASSIFICATION (cr-accepted semantics) — a clock firing
+            # this turn classifies on the NEXT quiet turn, not this one.
+            return
+        # ---- D2 (§2 + §3 R3): closed REQUIRED beats classify by their witness;
+        # a D-MISSED closure (clock-caused, proven) gets the absence-consequence
+        # response ONCE. Classification does not need the D-SOFT gates (rung /
+        # quiet) — the closure already happened; the gates license PRESSURE,
+        # not the reading of an accomplished fact.
+        for b in arc.beats:
+            if b.weight is not Weight.REQUIRED:
+                continue
+            if live_reads.state(b.beat_id, "status", frame=PLOT) != "closed":
+                continue
+            if drift.moment_receipt(live_reads, b.beat_id):
+                continue  # once per beat (§3 R3) — already processed
+            witness = drift.read_closure_witness(live_reads, b.beat_id)
+            cls = drift.classify_closure(witness)
+            trace.drift.append((b.beat_id, cls))
+            if cls != "D-MISSED":
+                continue  # D-HARD is D3's (repair) — classified, recorded, no response
+            if _absence_beat(world, p, live_reads=live_reads, trace=trace,
+                             provider=provider, turn=turn, arc=arc, cast=cast,
+                             scene=scene, npcs=npcs, horizon=horizon,
+                             minutes_now=minutes_now, beat=b,
+                             witness=witness or {}, spines=spines or {}):
+                return  # one drift response per turn (§3)
+        # ---- D1 (§3 R2): D-SOFT relocation, gated on rung + diegetic quiet.
         if not cast:
             return  # R2's carrier concept needs a cast blob — no cast, no relocation target
-        if trace.clocks_fired or trace.beats_achieved or trace.reveals:
-            # This turn ALREADY developed (cr finding 2): the development-ledger
-            # write for beats/clocks lands AFTER this pass (the generator block),
-            # so the stale baseline would misread a developing turn as quiet —
-            # a turn with a fired clock or an achieved beat is never drift.
-            return
         pending_required = [
             b.beat_id for b in arc.beats
             if b.weight is Weight.REQUIRED
@@ -2259,7 +2285,7 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         targets = {t["beat_id"]: t for t in beat_delivery_targets(arc.beats)}
         for d in drifts:
             if d.cls != "D-SOFT":
-                continue  # D-MISSED/D-HARD are D2's — drift_state never emits them in D1 anyway
+                continue  # closures were handled above; drift_state emits D-SOFT only
             if drift.relocation_receipt(live_reads, d.beat_id) is not None:
                 continue  # one relocation per beat (§3 R2 step 4) — try the next drifted beat
             target = targets.get(d.beat_id)
@@ -2272,6 +2298,171 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 return  # one drift response per turn (§3)
     except Exception:  # noqa: BLE001 — drift is opportunistic; never break the turn
         logger.warning("drift pass skipped", exc_info=True)
+
+
+def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
+                  provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
+                  npcs: list[str], horizon: float | None, minutes_now: float | None,
+                  beat: Any, witness: dict, spines: dict[str, str]) -> bool:
+    """DRIFT-HANDLING.md §3 R3: the missed moment becomes TRUE canon — the
+    emit_fallout doorway discipline. The event graph, exactly (cr-shaped):
+    an `event:moment_missed_<slug>` row set (kind + patient=the staged scene)
+    PLUS an explicit event-entity `caused_by` ROW to the exact fired clock
+    event from the witness (Cx 117 — item-level caused_by is not surfaced by
+    `events()`); consequence FACT rows (1-2, LAPSE-facts unless the closing
+    clock carries an authored `on_expiry` note — the §2 occurrence rule),
+    referent-checked against an explicit allowlist (a model row naming any
+    other id is discarded — no conjuring), committed WITH item-level
+    `caused_by` for the situation lens; and the DURABLE callback
+    (pending → surfaced, literal-typed `affected`). Ordering per the D1
+    review discipline: the moment event is receipt-CONFIRMED before anything
+    depends on it; the trace fields are set before fallible bookkeeping;
+    every later write is individually fail-open. Returns True iff the
+    response committed (the caller stops — one drift response per turn)."""
+    beat_id = beat.beat_id
+    slug = beat_id.split(":", 1)[-1]
+    # The staged scene: where the delivery was authored to land — the holder's
+    # place (the D1 carrier logic), falling back to the current scene.
+    staged_scene = ""
+    holder_ids: list[str] = []
+    holder_nodes: list = []
+    try:
+        targets = {t["beat_id"]: t for t in beat_delivery_targets(arc.beats)}
+        target = targets.get(beat_id)
+        if target is not None and cast:
+            _citer = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
+            fact_key = (target.get("entity"), target.get("attribute"), target.get("value"))
+            holder_nodes = [n for _nid, n in _citer
+                            for c in (getattr(n, "holds_clues", ()) or ())
+                            if c.surface_fact == fact_key]
+            holder_ids = [n.node_id for n in holder_nodes]
+        if holder_ids:
+            # the staged scene: canon locate head, else the AUTHORED cast
+            # location (the D1 carrier fallback) — NEVER the current scene
+            # first (that would make the callback instantly self-surfacing).
+            try:
+                _chain = p.locate(holder_ids[0], as_of=horizon)
+                staged_scene = _chain[0] if _chain else ""
+            except Exception:  # noqa: BLE001
+                staged_scene = ""
+            if not staged_scene:
+                staged_scene = str(getattr(holder_nodes[0], "location", "") or "")
+    except Exception:  # noqa: BLE001 — an unknown staging is still a lapse
+        target = None
+    staged_scene = staged_scene or (scene or "")
+    if not staged_scene:
+        drift.record_absence_declined(world, turn, beat_id, "no_staged_scene")
+        return False
+    # The occurrence license (§2): only an AUTHORED on_expiry note on the
+    # closing clock permits occurrence-facts; the witness names the clock.
+    clock_ids = [l.get("clock_id") for l in (witness.get("true_leaves") or [])
+                 if l.get("kind") == "ClockFired" and l.get("clock_id")]
+    on_expiry = ""
+    for cid in clock_ids:
+        note = drift.read_on_expiry(live_reads, str(cid))
+        if note:
+            on_expiry = note
+            break
+    firing = (witness.get("firing_events") or [None])[0]
+    # The cohort: informed, never licensing — every returned row is
+    # referent-checked against this explicit allowlist (no conjuring).
+    allowed_ids = ({staged_scene} | set(holder_ids) | set(npcs)
+                   | ({scene} if scene else set()) | {arc.protagonist})
+    if target is not None and target.get("entity"):
+        allowed_ids.add(str(target["entity"]))
+    spine_lines = [f"{hid}" + (f" — {spines[hid]}" if spines.get(hid) else "")
+                   for hid in (holder_ids + [n for n in npcs if n not in holder_ids])]
+    try:
+        pick = cohorts.absence_consequence(
+            provider, target or {"entity": beat_id, "attribute": "delivery"},
+            staged_scene, sorted(allowed_ids), spine_lines, on_expiry,
+            arc.protagonist)
+        trace.cohort_calls.append("absence_consequence:cheap")
+    except ProviderError as exc:
+        trace.dropped_cohorts.append(f"absence_consequence ({exc})")
+        drift.record_absence_declined(world, turn, beat_id, "cohort_error")
+        return False
+    try:
+        confidence = float(pick.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < _RELOCATE_CONFIDENCE_MIN:
+        trace.dropped_cohorts.append("absence_consequence (low confidence)")
+        drift.record_absence_declined(world, turn, beat_id, "low_confidence")
+        return False
+    from construct.arc.generator import _sanitize_hook
+    callback_line = _sanitize_hook(str(pick.get("callback_line") or ""))
+    rows_in = [r for r in (pick.get("rows") or []) if isinstance(r, dict)]
+    kept_rows = [r for r in rows_in
+                 if str(r.get("entity")) in allowed_ids
+                 and r.get("attribute") and r.get("value") is not None][:2]
+    dropped = len(rows_in) - len(kept_rows)
+    if dropped:
+        trace.dropped_cohorts.append(f"absence rows ({dropped} off-allowlist)")
+    if not kept_rows and not callback_line:
+        drift.record_absence_declined(world, turn, beat_id, "nothing_grounded")
+        return False
+    # ---- COMMIT 1: the moment event — receipt-CONFIRMED before anything
+    # depends on it (the caused_by anchor for lens + consequence rows).
+    moment_id = f"event:moment_missed_{slug}"
+    event_rows = [
+        {"entity": moment_id, "attribute": "kind", "value": "moment_missed",
+         "valid_from": turn_time(turn)},
+        {"entity": moment_id, "attribute": "patient", "value": staged_scene,
+         "value_type": "entity", "valid_from": turn_time(turn)},
+    ]
+    if firing:
+        # the explicit EVENT-ENTITY causality row (Cx 117): events().caused_by
+        # surfaces only this shape, never item-level metadata.
+        event_rows.append({"entity": moment_id, "attribute": "caused_by",
+                           "value": str(firing), "value_type": "entity",
+                           "valid_from": turn_time(turn)})
+    receipt = p.ingest_structured(event_rows, classify="rules")
+    confirmed, _ = confirmed_batch(event_rows, _receipt_rows(receipt),
+                                   cap=len(event_rows))
+    if not any(c["entity"] == moment_id and c["attribute"] == "kind"
+               for c in confirmed):
+        trace.dropped_cohorts.append("absence event (unconfirmed)")
+        drift.record_absence_declined(world, turn, beat_id, "event_unconfirmed")
+        return False  # nothing durable happened — decline whole, retry later
+    # The CONFIRMED event licenses the response: trace first (the D1 review
+    # discipline — fallible bookkeeping below never erases a licensed surface).
+    trace.absence_consequences.append((moment_id, len(kept_rows)))
+    trace.absence_callback = callback_line  # debug surface; the DELIVERY is the deferred callback
+    # ---- COMMIT 2: consequence FACT rows, item-level caused_by → the lens.
+    if kept_rows:
+        try:
+            p.ingest_structured([
+                {"entity": str(r["entity"]), "attribute": str(r["attribute"]),
+                 "value": str(r["value"]), "caused_by": moment_id,
+                 "valid_from": turn_time(turn)}
+                for r in kept_rows], classify="rules")
+        except Exception:  # noqa: BLE001 — the event stands; fewer felt surfaces
+            logger.warning("absence consequence rows failed", exc_info=True)
+            trace.dropped_cohorts.append("absence consequence rows failed")
+    # ---- COMMIT 3: the durable callback (pending → surfaced on touch).
+    if callback_line:
+        try:
+            affected = [staged_scene] + holder_ids
+            world.porcelain.ingest_structured(
+                drift.callback_rows(beat_id, affected, callback_line,
+                                    moment_id, turn), frame=SESSION)
+        except Exception:  # noqa: BLE001 — consequences stand; no deferred callback
+            logger.warning("absence callback write failed", exc_info=True)
+            trace.dropped_cohorts.append("absence callback failed")
+    # ---- Bookkeeping, individually fail-open (D1 finding-3 discipline).
+    try:
+        drift.mark_moment(world, beat_id, moment_id, turn)
+    except Exception:  # noqa: BLE001 — rare re-process acceptable; silence is not
+        logger.warning("mark_moment failed (response stands)", exc_info=True)
+        trace.dropped_cohorts.append("mark_moment failed")
+    if minutes_now is not None:
+        try:
+            _mark_development(world, minutes_now, turn)
+        except Exception:  # noqa: BLE001
+            logger.warning("_mark_development (absence) failed", exc_info=True)
+            trace.dropped_cohorts.append("_mark_development (absence) failed")
+    return True
 
 
 def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
@@ -5734,6 +5925,31 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # commit (or no move needed at all) — presence truth already moved, so this
         # directive can never contradict canon.
         briefing_parts.append(f"\n{trace.relocate_directive}")
+    # ---- DRIFT-HANDLING D2 (§3 R3 point 3): DEFERRED consequence callbacks —
+    # a pending callback surfaces the turn the player TOUCHES its affected
+    # people/places (the newspaper-front-page ruling: felt on contact, never an
+    # announcement), then supersedes to `surfaced` (once-only). At most ONE per
+    # turn (proportion). Fail-open: a failed scan/status write costs at worst a
+    # rare repeat — never the turn, and never a silent disappearance.
+    try:
+        _touch = ({scene} if scene else set()) | set(npcs or [])
+        for _cb in drift.pending_callbacks(world, as_of=_h):
+            if not (_touch & set(_cb["affected"])):
+                continue
+            briefing_parts.append(
+                f"\nCONSEQUENCE CALLBACK (weave in diegetically as something FELT "
+                f"now that the player is among those it touched — never an "
+                f"announcement): {_cb['directive']}")
+            trace.callbacks.append(_cb["entity"])
+            try:
+                drift.mark_callback_surfaced(world, _cb["entity"], turn)
+            except Exception:  # noqa: BLE001 — a rare repeat beats a vanish
+                logger.warning("callback status write failed (may resurface)",
+                               exc_info=True)
+                trace.dropped_cohorts.append("callback status write failed")
+            break  # one callback per turn
+    except Exception:  # noqa: BLE001 — callbacks are opportunistic
+        logger.warning("callback scan skipped", exc_info=True)
     if _grounding_runway and not (trace.clocks_fired or trace.beats_achieved
                                   or trace.terminal or trace.concluded):
         # ...unless a hand-authored turn-1 clock/beat/terminal genuinely fired — then the story

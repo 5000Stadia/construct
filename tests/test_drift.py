@@ -803,3 +803,433 @@ def test_world_tick_skipped_move_row_not_reported_as_moved(world):
                 live_reads=PorcelainWorldReads(world), minutes_now=200.0)
     assert "person:maud:moved" not in trace.world_tick     # unconfirmed → not reported
     assert trace.world_tick == ["person:cray:sent_word"]
+
+
+# ============================================================================
+# 4. D2 — the closure-witness contract, classifier, occurrence rule, R3
+# ============================================================================
+
+from construct.arc.conditions import (  # noqa: E402
+    AllOf, AnyOf, AtLeast, BeatAchieved, ClockFired, EventRow, Not, StateIs,
+)
+from construct.arc.drift import (  # noqa: E402
+    classify_closure, closure_witness_of, on_expiry_items, read_closure_witness,
+    read_on_expiry,
+)
+from construct.arc.executor import PLOT, beat_pass, turn_time  # noqa: E402
+from construct.turnloop import _absence_beat  # noqa: E402
+
+
+class _WitnessReads:
+    """Just enough WorldReads for witness-walk unit tests: StateIs (entities +
+    state), ClockFired (clock_fired events), BeatAchieved (plot status)."""
+
+    def __init__(self, *, entities=(), state=None, firings=()):
+        self._entities = set(entities)
+        self._state = dict(state or {})
+        self._firings = list(firings)  # (clock_id, at, event_id)
+
+    def has_entity(self, eid):
+        return eid in self._entities
+
+    def state(self, entity, attribute, *, frame="canon"):
+        return self._state.get((entity, attribute))
+
+    def events(self, *, kind=None, frame="canon", **_kw):
+        return [EventRow(event_id=e, kind="clock_fired", agents=(c,), at=at)
+                for (c, at, e) in self._firings]
+
+
+def _fired(clock="clock:deadline", at=5, eid="event:clock_deadline_5"):
+    return (clock, at, eid)
+
+
+def test_witness_anyof_clock_only_branch_is_clock_caused():
+    # AnyOf(clock TRUE, state FALSE): the clock branch alone decided — forcing
+    # clocks FALSE flips the whole expr -> clock_caused, firing event captured.
+    reads = _WitnessReads(entities={"person:x"},
+                          state={("person:x", "role"): "librarian"},
+                          firings=[_fired()])
+    expr = AnyOf((ClockFired("clock:deadline"), StateIs("person:x", "role", "dead")))
+    w = closure_witness_of(expr, reads, turn=7)
+    assert w["clock_caused"] is True
+    assert w["firing_events"] == ["event:clock_deadline_5"]
+    assert [l["kind"] for l in w["true_leaves"]] == ["ClockFired"]
+    assert w["unknown_leaves"] == []
+    assert classify_closure(w) == "D-MISSED"
+
+
+def test_witness_mixed_anyof_world_state_sufficed_is_not_clock_caused():
+    # AnyOf(clock TRUE, state TRUE): with clocks forced FALSE the state half
+    # still closes it — the clock was incidental -> D-HARD (cr/spec: mixed
+    # compound where the world-state half sufficed).
+    reads = _WitnessReads(entities={"person:x"},
+                          state={("person:x", "role"): "dead"},
+                          firings=[_fired()])
+    expr = AnyOf((ClockFired("clock:deadline"), StateIs("person:x", "role", "dead")))
+    w = closure_witness_of(expr, reads, turn=7)
+    assert {l["kind"] for l in w["true_leaves"]} == {"ClockFired", "StateIs"}
+    assert w["clock_caused"] is False
+    assert classify_closure(w) == "D-HARD"
+
+
+def test_witness_allof_records_all_leaves_and_clock_is_necessary():
+    reads = _WitnessReads(entities={"person:x"},
+                          state={("person:x", "role"): "dead"},
+                          firings=[_fired()])
+    expr = AllOf((ClockFired("clock:deadline"), StateIs("person:x", "role", "dead")))
+    w = closure_witness_of(expr, reads, turn=7)
+    assert len(w["true_leaves"]) == 2          # AllOf: all leaves
+    assert w["clock_caused"] is True           # remove the clock -> AllOf fails
+    assert classify_closure(w) == "D-MISSED"
+
+
+def test_witness_atleast_records_satisfied_leaves():
+    reads = _WitnessReads(entities={"person:x", "person:y"},
+                          state={("person:x", "role"): "dead",
+                                 ("person:y", "role"): "alive"},
+                          firings=[_fired()])
+    expr = AtLeast(2, (ClockFired("clock:deadline"),
+                       StateIs("person:x", "role", "dead"),
+                       StateIs("person:y", "role", "dead")))
+    w = closure_witness_of(expr, reads, turn=7)
+    assert len(w["true_leaves"]) == 2          # the satisfied pair, not the FALSE leaf
+    assert w["clock_caused"] is True           # without the clock only 1 of 2
+    assert classify_closure(w) == "D-MISSED"
+
+
+def test_witness_not_and_unknown_atoms():
+    # Not(BeatAchieved FALSE) is TRUE: the child leaf records under its OWN
+    # truth (FALSE -> in neither bucket). An UNKNOWN StateIs (missing entity)
+    # lands in unknown_leaves and drops classification to D-HARD.
+    reads = _WitnessReads(entities=set(), state={}, firings=[_fired()])
+    expr = AllOf((Not(BeatAchieved("beat:x")),
+                  ClockFired("clock:deadline"),
+                  StateIs("person:ghost", "role", "dead")))
+    w = closure_witness_of(expr, reads, turn=7)
+    assert [l["kind"] for l in w["unknown_leaves"]] == ["StateIs"]
+    assert classify_closure(w) == "D-HARD"     # UNKNOWN on the path -> conservative
+
+
+def test_witness_repeated_clock_selects_threshold_crossing_firing():
+    # ClockFired(n=2) with three firings: the CAUSAL event is the 2nd by
+    # (time, id) — never an arbitrary match (cr r3 point 4).
+    reads = _WitnessReads(firings=[
+        ("clock:deadline", 9, "event:f3"),
+        ("clock:deadline", 3, "event:f1"),
+        ("clock:deadline", 5, "event:f2"),
+    ])
+    expr = ClockFired("clock:deadline", n=2)
+    w = closure_witness_of(expr, reads, turn=7)
+    assert w["firing_events"] == ["event:f2"]
+    assert classify_closure(w) == "D-MISSED"
+
+
+def test_classifier_conservative_defaults():
+    assert classify_closure(None) == "D-HARD"                     # pre-contract
+    assert classify_closure({}) == "D-HARD"
+    assert classify_closure({"true_leaves": [], "unknown_leaves": [],
+                             "clock_caused": False, "firing_events": []}) == "D-HARD"
+    assert classify_closure({"true_leaves": [{"kind": "ClockFired"}],
+                             "unknown_leaves": [], "clock_caused": True,
+                             "firing_events": []}) == "D-HARD"    # no captured firing
+
+
+def test_beat_pass_writes_the_witness_on_closure(world):
+    # The REAL beat_pass: a required beat whose unreachable_if is a fired clock
+    # closes AND persists a parseable witness (clock-caused, firing captured).
+    arc = make_arc()
+    beat = replace(arc.beats[0], unreachable_if=ClockFired("clock:escalate"))
+    arc = replace(arc, beats=(beat,))
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "event:clock_escalate_3", "attribute": "kind",
+         "value": "clock_fired", "valid_from": turn_time(3)},
+        {"entity": "event:clock_escalate_3", "attribute": "agent",
+         "value": "clock:escalate", "value_type": "entity",
+         "valid_from": turn_time(3)},
+    ], frame=PLOT)
+    reads = PorcelainWorldReads(world)
+    _achieved, closed, _rev = beat_pass(world, arc, reads, turn=4)
+    assert closed == ["beat:discover"]
+    w = read_closure_witness(reads, "beat:discover")
+    assert w is not None and w["clock_caused"] is True
+    assert w["firing_events"] == ["event:clock_escalate_3"]
+    assert classify_closure(w) == "D-MISSED"
+
+
+def test_on_expiry_round_trip(world):
+    world.porcelain.ingest_structured(on_expiry_items(
+        "clock:deadline", "the vote proceeded without you"), frame=PLOT)
+    reads = PorcelainWorldReads(world)
+    assert read_on_expiry(reads, "clock:deadline") == "the vote proceeded without you"
+    assert read_on_expiry(reads, "clock:other") is None
+
+
+def test_moment_receipt_and_callback_row_contracts():
+    reads = _FakeReads()
+    w = _FakeWorld(reads)
+    assert drift.moment_receipt(reads, "beat:discover") is False
+    drift.mark_moment(w, "beat:discover", "event:moment_missed_discover", turn=5)
+    assert drift.moment_receipt(reads, "beat:discover") is True
+    rows = drift.callback_rows("beat:discover", ["place:mill", "person:aldous"],
+                               "the ledgers went unread", "event:moment_missed_discover",
+                               turn=5)
+    affected = next(r for r in rows if r["attribute"] == "affected")
+    assert affected["value_type"] == "literal"      # cr: pinned literal typing
+    assert next(r for r in rows if r["attribute"] == "status")["value"] == "pending"
+
+
+def test_pending_callbacks_all_or_empty_parse(world):
+    from construct.arc.executor import SESSION
+    reads_turn = turn_time(3)
+    world.porcelain.ingest_structured(
+        drift.callback_rows("beat:good", ["place:mill"], "felt line",
+                            "event:moment_missed_good", 3), frame=SESSION)
+    # a malformed sibling: affected is not JSON — must be SKIPPED, never crash
+    world.porcelain.ingest_structured([
+        {"entity": "callback:moment_missed_bad", "attribute": "affected",
+         "value": "not json", "value_type": "literal", "valid_from": reads_turn},
+        {"entity": "callback:moment_missed_bad", "attribute": "directive",
+         "value": "x", "valid_from": reads_turn},
+        {"entity": "callback:moment_missed_bad", "attribute": "status",
+         "value": "pending", "valid_from": reads_turn},
+    ], frame=SESSION)
+    cbs = drift.pending_callbacks(world)
+    assert [c["entity"] for c in cbs] == ["callback:moment_missed_good"]
+    assert cbs[0]["affected"] == ["place:mill"]
+    drift.mark_callback_surfaced(world, "callback:moment_missed_good", 4)
+    assert drift.pending_callbacks(world) == []     # once-only by supersession
+
+
+def _closed_with_witness(world, arc):
+    """Close the required beat via the REAL beat_pass under a fired clock."""
+    world.porcelain.ingest_structured([
+        {"entity": "event:clock_escalate_3", "attribute": "kind",
+         "value": "clock_fired", "valid_from": turn_time(3)},
+        {"entity": "event:clock_escalate_3", "attribute": "agent",
+         "value": "clock:escalate", "value_type": "entity",
+         "valid_from": turn_time(3)},
+    ], frame=PLOT)
+    reads = PorcelainWorldReads(world)
+    _a, closed, _r = beat_pass(world, arc, reads, turn=4)
+    assert closed == [arc.beats[0].beat_id]
+    return reads
+
+
+def _absence_arc():
+    arc = make_arc()
+    beat = replace(arc.beats[0], unreachable_if=ClockFired("clock:escalate"))
+    return replace(arc, beats=(beat,))
+
+
+def _absence_cast() -> dict:
+    return {
+        "person:aldous": CastNode(
+            node_id="person:aldous",
+            holds_clues=(Clue(clue_id="clue:ledger", pillar_id="pillar:main",
+                              surface_fact=("fact:secret", "culprit", "person:rival")),),
+            location="place:flat",
+        ),
+    }
+
+
+def test_absence_beat_commits_event_consequences_and_callback(world):
+    arc = _absence_arc()
+    seed_arc(world, arc)
+    reads = _closed_with_witness(world, arc)
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([
+        {"rows": [{"entity": "person:aldous", "attribute": "standing_with_assessor",
+                   "value": "soured — the window closed unanswered"}],
+         "callback_line": "Aldous's patience has thinned since the ledgers went unread.",
+         "confidence": 0.9},
+    ])
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_absence_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert ("beat:discover", "D-MISSED") in trace.drift
+    assert trace.absence_consequences and trace.absence_consequences[0][1] == 1
+    # the moment event is durable, with the explicit caused_by ROW to the firing
+    evs = PorcelainWorldReads(world).events(kind="moment_missed")
+    assert len(evs) == 1 and "event:clock_escalate_3" in evs[0].caused_by
+    # the consequence row landed with item-level caused_by (served truth)
+    val = world.porcelain.state("person:aldous", "standing_with_assessor")
+    assert val["status"] == "known"
+    # the callback is pending and target-matched to the staged scene + holder
+    cbs = drift.pending_callbacks(world)
+    assert cbs and set(cbs[0]["affected"]) >= {"person:aldous"}
+    # once per beat: a second pass classifies nothing and re-fires nothing
+    trace2 = TurnTrace(turn=6)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace2,
+               provider=StubProvider([]), turn=6, arc=arc, cast=_absence_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace2.drift == [] and trace2.absence_consequences == []
+
+
+def test_absence_rows_off_allowlist_are_discarded(world):
+    # No conjuring (the D1 finding-1 guard class): a consequence row naming an
+    # id outside the explicit allowlist is dropped; the grounded row commits.
+    arc = _absence_arc()
+    seed_arc(world, arc)
+    reads = _closed_with_witness(world, arc)
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([
+        {"rows": [{"entity": "person:invented", "attribute": "mood", "value": "x"},
+                  {"entity": "person:aldous", "attribute": "patience", "value": "thin"}],
+         "callback_line": "word of the unread ledgers is getting around",
+         "confidence": 0.9},
+    ])
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_absence_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.absence_consequences[0][1] == 1        # one kept, one discarded
+    assert not PorcelainWorldReads(world).has_entity("person:invented")
+    assert any("off-allowlist" in d for d in trace.dropped_cohorts)
+
+
+def test_absence_low_confidence_declines_whole(world):
+    arc = _absence_arc()
+    seed_arc(world, arc)
+    reads = _closed_with_witness(world, arc)
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([
+        {"rows": [], "callback_line": "", "confidence": 0.1},
+    ])
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_absence_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert ("beat:discover", "D-MISSED") in trace.drift  # classified…
+    assert trace.absence_consequences == []              # …but no response
+    assert not PorcelainWorldReads(world).events(kind="moment_missed")
+    assert drift.pending_callbacks(world) == []
+    # a decline is telemetry, not a lock: the beat retries next turn
+    assert drift.moment_receipt(reads, "beat:discover") is False
+
+
+def test_absence_occurrence_rule_in_the_prompt(world):
+    # §2: without an authored on_expiry the prompt FORBIDS occurrence claims;
+    # with one, the note (and only it) is licensed.
+    arc = _absence_arc()
+    seed_arc(world, arc)
+    reads = _closed_with_witness(world, arc)
+    provider = StubProvider([
+        {"rows": [], "callback_line": "x", "confidence": 0.9},
+    ])
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_absence_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    prompt = provider.calls[0][0]
+    assert "NO authored outcome exists" in prompt
+    # now with the annotation (fresh world state: new beat id via a fresh arc
+    # is overkill — a second closed beat isn't needed; assert the WITH-note
+    # branch at the cohort layer directly)
+    p2 = StubProvider([{"rows": [], "callback_line": "x", "confidence": 0.9}])
+    import construct.cohorts as cohorts
+    cohorts.absence_consequence(p2, {"entity": "fact:x", "attribute": "culprit"},
+                                "place:mill", ["place:mill"], [],
+                                "the vote proceeded without you", PROTAGONIST)
+    assert "AUTHORED OUTCOME" in p2.calls[0][0]
+    assert "the vote proceeded without you" in p2.calls[0][0]
+
+
+def test_moment_missed_is_routine_for_salience():
+    from construct.arc.generator import ROUTINE_EVENT_KINDS, salient_moments
+    assert "moment_missed" in ROUTINE_EVENT_KINDS
+    assert "absence_declined" in ROUTINE_EVENT_KINDS
+    ev = EventRow(event_id="event:moment_missed_x", kind="moment_missed",
+                  caused_by=("event:clock_fired_x",), at=9)
+    assert salient_moments([], [ev], set(), set()) == []   # wakes nothing alone
+
+
+def test_run_turn_missed_moment_full_arc_suppress_classify_surface_once(world):
+    # The D2 spec oracle end-to-end through REAL turns: (A) the deadline clock
+    # fires and closes the beat — that turn is SUPPRESSED (no classification);
+    # (B) the next quiet turn classifies D-MISSED and commits the moment event,
+    # consequence row, and pending callback; (C) the turn the player is among
+    # the affected, the callback SURFACES into the briefing, once; (D) never
+    # again.
+    from construct.arc.executor import SESSION as _SESSION, turn_time
+    arc = make_arc()
+    beat = replace(arc.beats[0], unreachable_if=ClockFired("clock:escalate"))
+    arc = replace(arc, beats=(beat,))
+    seed_arc(world, arc)
+    # four quiet turns banked: TurnsQuiet(4) fires clock:escalate on turn 5.
+    world.porcelain.ingest_structured([
+        {"entity": f"event:turn_{i}", "attribute": "kind", "value": "turn",
+         "valid_from": turn_time(i)} for i in range(1, 5)
+    ], frame=_SESSION)
+    world._extractions.extend([{"items": []}] * 8)
+    # ---- (A) the firing/closing turn: suppressed.
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The hour slips past; somewhere a door goes unknocked."},
+    ])
+    rA = run_turn(world, arc, provider, "I wait and think.", turn=5,
+                  cast=_absence_cast())
+    assert "clock:escalate" in rA.trace.clocks_fired
+    assert "beat:discover" in rA.trace.beats_closed
+    assert rA.trace.drift == []                            # suppression precedes classification
+    # ---- (B) the next quiet turn: classify D-MISSED, commit the response.
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"rows": [{"entity": "person:aldous", "attribute": "patience",
+                   "value": "worn thin by the unread ledgers"}],
+         "callback_line": "Aldous has been asking after the assessor who never came.",
+         "confidence": 0.9},
+        {"prose": "The evening settles."},
+    ])
+    rB = run_turn(world, arc, provider, "I sit with my notes.", turn=6,
+                  cast=_absence_cast())
+    assert ("beat:discover", "D-MISSED") in rB.trace.drift
+    assert rB.trace.absence_consequences
+    assert rB.trace.callbacks == []                        # nobody affected is here yet
+    # ---- (C) the touch turn: Aldous arrives in the scene — the callback surfaces.
+    world.porcelain.ingest_structured([
+        {"entity": "person:aldous", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:aldous", "attribute": "name", "value": "Aldous"},
+        {"entity": "person:aldous", "attribute": "in", "value": SCENE,
+         "value_type": "entity", "valid_from": turn_time(6)},
+    ])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "Aldous is here, and something unsaid hangs about him."},
+    ])
+    import construct.turnloop as tl
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+    try:
+        rC = run_turn(world, arc, provider, "I look about the room.", turn=7,
+                      cast=_absence_cast())
+    finally:
+        mp.undo()
+    assert rC.trace.callbacks == ["callback:moment_missed_discover"]
+    assert "CONSEQUENCE CALLBACK" in rC.trace.briefing
+    assert "asking after the assessor" in rC.trace.briefing
+    # ---- (D) once-only: the same touch never re-surfaces it.
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "The room holds its quiet."},
+    ])
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+    try:
+        rD = run_turn(world, arc, provider, "I look about once more.", turn=8,
+                      cast=_absence_cast())
+    finally:
+        mp.undo()
+    assert rD.trace.callbacks == []
+    assert "CONSEQUENCE CALLBACK" not in rD.trace.briefing

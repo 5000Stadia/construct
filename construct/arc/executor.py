@@ -200,10 +200,26 @@ def beat_pass(world: Any, arc: Arc, reads: Any,
             continue
         if beat.unreachable_if is not None and \
                 evaluate(beat.unreachable_if, reads) is Truth.TRUE:
-            world.porcelain.ingest_structured([
+            rows = [
                 {"entity": beat.beat_id, "attribute": "status", "value": "closed",
                  "valid_from": turn_time(turn)},
-            ], frame=PLOT)
+            ]
+            # DRIFT-HANDLING.md §2 (D2): the CLOSURE WITNESS — what actually
+            # evaluated TRUE at close time (deciding leaves per shape, UNKNOWNs,
+            # the exact causal clock-firing event id, the clock-necessity
+            # verdict), captured against the SAME reads that closed the beat.
+            # Fail-open: a witness failure never blocks the close — an absent
+            # witness classifies D-HARD downstream, the conservative default.
+            try:
+                from construct.arc.drift import closure_witness_of
+                witness = closure_witness_of(beat.unreachable_if, reads, turn)
+                rows.append({"entity": beat.beat_id, "attribute": "closure_witness",
+                             "value": json.dumps(witness),
+                             "valid_from": turn_time(turn)})
+            except Exception:  # noqa: BLE001 — the close stands; D-HARD covers it
+                logger.warning("closure witness failed for %s (classifies D-HARD)",
+                               beat.beat_id, exc_info=True)
+            world.porcelain.ingest_structured(rows, frame=PLOT)
             closed.append(beat.beat_id)
             logger.warning("beat closed (unreachable): %s — repair is post-v1; "
                            "the refusal clock backstops", beat.beat_id)

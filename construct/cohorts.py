@@ -3066,6 +3066,70 @@ def relocate_pick(provider: Provider, target: dict, holder: str, scene: str,
         RELOCATE_SCHEMA, tier="cheap", task="rlc")
 
 
+#: DRIFT-HANDLING.md §3 R3 — the absence-consequence cohort's output schema:
+#: 1-2 concrete world-facts (camera-facts: what a witness at the staged scene
+#: could have RECORDED), a one-line callback directive for when the player next
+#: touches the affected people/places, and a confidence the caller declines on.
+ABSENCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "rows": {"type": "array", "maxItems": 2,
+                 "description": "1-2 concrete world-facts the lapse establishes — "
+                                "entity/attribute/value, entities ONLY from the ids "
+                                "given (never invent an id)",
+                 "items": {"type": "object",
+                           "properties": {"entity": {"type": "string"},
+                                          "attribute": {"type": "string"},
+                                          "value": {"type": "string"}},
+                           "required": ["entity", "attribute", "value"]}},
+        "callback_line": {"type": "string",
+                          "description": "ONE line for the narrator to weave in when "
+                                         "the player next touches the affected people "
+                                         "or places — a felt consequence, never an "
+                                         "announcement"},
+        "confidence": {"type": "number",
+                       "description": "0.0-1.0 — how grounded these consequences are; "
+                                      "LOW if the lapse establishes nothing concrete"},
+    },
+    "required": ["rows", "callback_line", "confidence"],
+}
+
+
+def absence_consequence(provider: Provider, target: dict, staged_scene: str,
+                        known_ids: list[str], spines: list[str],
+                        on_expiry: str, protagonist: str) -> dict:
+    """DRIFT-HANDLING.md §3 R3 + §2's occurrence rule: the missed moment's
+    consequences. `target` carries only the mechanic's entity/attribute (never
+    the hidden value — concealment). THE OCCURRENCE RULE IS BINDING: a fired
+    deadline proves only that the WINDOW closed. Without an authored
+    `on_expiry` note (empty string here), the rows must be LAPSE-facts — the
+    opportunity passing, the absence being noticed — never a claim that the
+    staged moment itself HAPPENED. The caller referent-checks every returned
+    row against canon (this prompt informs, it never licenses)."""
+    _spines = "\n".join(f"- {s}" for s in spines) or "(no one of note)"
+    _ids = ", ".join(known_ids)
+    _occ = (f"\nAUTHORED OUTCOME (this, and only this, may be asserted as having "
+            f"HAPPENED): {on_expiry}\n" if on_expiry else
+            "\nNO authored outcome exists: the moment's window closed, nothing "
+            "more is known — every fact must be a LAPSE (the chance passed, the "
+            "absence was noted), NEVER a claim about what happened instead.\n")
+    return complete_sync(provider,
+        f"A story moment the player never attended has EXPIRED — its window closed "
+        f"while they were elsewhere. THE MECHANIC that was staged there (only WHAT "
+        f"kind of fact; never invent or reveal its value):\n"
+        f"  {target.get('entity', '')} · {target.get('attribute', '')}\n\n"
+        f"WHERE IT WAS STAGED: {staged_scene}\n"
+        f"WHO WAS POSITIONED TO CARE:\n{_spines}\n"
+        f"{_occ}\n"
+        f"ENTITIES YOU MAY REFERENCE (rows using ANY other id are discarded): {_ids}\n\n"
+        f"{player_constraint(protagonist)}\n\n"
+        f"Give 1-2 CAMERA-FACTS — concrete, minor is fine, FELT is the point ('the "
+        f"seat was noted empty', 'the window closed unanswered') — and ONE callback "
+        f"line for when the player next crosses the affected people or places. If "
+        f"the lapse establishes nothing concrete, say so with LOW confidence.",
+        ABSENCE_SCHEMA, tier="cheap", task="abs")
+
+
 def weave_pick(provider: Provider, scene: str, cards: list[str], floor_debt: list[str],
                momentum: str, protagonist: str) -> dict:
     """The story-governance call (CARD-WEAVING.md / Cx 039): given the live scene + the
