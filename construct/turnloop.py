@@ -802,18 +802,19 @@ def _partition_cast_moves(
     *, scene: str | None, scene_name: str = "",
 ) -> tuple[list[dict], list[dict], list[tuple[str, str, str]]]:
     """CAST-MOVES.md §1: classify each canonicalized `in` row's `ResolutionOutcome` into a
-    BOUND MOVE (both sides bound; destination folds to a `place`) or an UNBOUND EXIT (subject
+    BOUND MOVE (both sides bound; destination prefix `place:`) or an UNBOUND EXIT (subject
     folds to a canon `person`; destination dropped, bound to a NON-place, or an ambiguous
-    restatement of the current scene) movement candidate. `outcomes[i]` corresponds to
-    `canon_rows[i]` (the exact list `resolve_rows` was called over) — the row_index correlation
-    the legacy global receipt tuple can't give (CAST-MOVES.md §1, cr r3/r4).
+    restatement of the current scene) movement candidate. `outcome.row_index` addresses the
+    row within `canon_rows` (the exact list `resolve_rows` was called over) — the per-row
+    correlation the legacy global receipt tuple can't give (CAST-MOVES.md §1, cr r3/r4).
 
-    "Folded kind" is read off the RESOLVED id's own kind-PREFIX (`place:`/`person:`/`obj:`), not
-    a canon `kind` FACT — that attribute is a free-text descriptive noun ("room", "inn", "the
-    family physician"), never a type tag (resolve.py's own `_kind_ok`/`_match_one` type
-    discipline is prefix-based for exactly this reason). `same_as` never merges across a
-    type-prefix namespace (Entity Authority binds same-kind-prefix only, resolve.py:216-219), so
-    a resolved id's prefix is stable through any fold.
+    The id-PREFIX here is only the CLASSIFICATION signal (which candidate SHAPE a row takes —
+    the same prefix-typing discipline as resolve.py's `_kind_ok`/`_match_one`; the canon `kind`
+    FACT is a free-text descriptive noun like "room"/"inn", never a type tag). It is NOT the
+    spec's rule-3 verification: the RESOLVED HEAD must additionally qualify as a place at the
+    play horizon — a raw frame-fact id may be a `same_as` alias and a future-only place has no
+    head at `_h` — which `_run_cast_moves_lane` re-verifies against the identity-resolved
+    horizon-bound canon place roster before any bound move is licensed.
 
     Returns `(resolved_rows_minus_move_rows, candidates, guard_drops)`: licensed BOUND MOVE
     rows are pulled OUT of `resolved_rows` here (they never re-enter ordinary promotion,
@@ -825,8 +826,12 @@ def _partition_cast_moves(
 
     candidates: list[dict] = []
     guard_drops: list[tuple[str, str, str]] = []
-    for i, outcome in enumerate(outcomes):
-        row = canon_rows[i] if i < len(canon_rows) else None
+    for outcome in outcomes:
+        # address the input row by the outcome's OWN correlation key, never the enumerate
+        # position — the record declares which row it describes (cr: collector contiguity
+        # is resolve_rows' contract, but the consumer must not silently depend on it).
+        idx = outcome.row_index
+        row = canon_rows[idx] if 0 <= idx < len(canon_rows) else None
         if not isinstance(row, dict) or row.get("attribute") != "in":
             continue
         if outcome.subject_outcome != "bound":
@@ -870,6 +875,7 @@ def _run_cast_moves_lane(
     p: Any, *, live_reads: "PorcelainWorldReads", trace: "TurnTrace", turn: int,
     protagonist: str, scene: str | None, present: Callable[[str], bool],
     engaged_this_turn: frozenset, candidates: list[dict],
+    horizon: float | None = None,
 ) -> None:
     """CAST-MOVES.md §2-§4: the five-rule stagecraft gate over `candidates`
     (`_partition_cast_moves`'s output), then commit. Licensed BOUND MOVE rows go DIRECT to
@@ -877,11 +883,84 @@ def _run_cast_moves_lane(
     event writes only after its `in` row is RECEIPT-CONFIRMED (`confirmed_batch` discipline,
     §4) and carries a PREDETERMINED id the `in` row's item-level `caused_by` references (the
     re-entry-coherence lever); an UNBOUND EXIT has no move row to gate on and writes its event
-    directly. Mutates `trace.cast_moves` (committed) / `trace.cast_move_drops` (reason-tagged);
-    an engine skip receipt is telemetry, not error (PB) — `merged_self_edge` is a known benign
-    reason (a same_as fold after a place merge, not authored drift)."""
-    licensed: list[dict] = []
+    directly — but the EVENT batch is receipt-confirmed too (fail-open ingest returns an empty
+    receipt without raising; an unconfirmed event changed nothing durable and must not be
+    reported committed). Mutates `trace.cast_moves` (committed) / `trace.cast_move_drops`
+    (reason-tagged); an engine skip receipt is telemetry, not error (PB) — `merged_self_edge`
+    is a known benign reason (a same_as fold after a place merge, not authored drift).
+
+    Every spatial/identity read here is horizon-bound (`as_of=horizon` = the play horizon `_h`
+    — AS-OF-PLAY-HORIZON, CAST-MOVES.md rules 3/4): destination placeness reads the
+    identity-resolved place roster at `_h` (never the raw id prefix — a raw frame-fact id may
+    be a `same_as` alias, and a future-only place has no head at `_h`), and destination-within-
+    scene matches `_present`'s containment semantics (scene head after fold, or the scene head
+    on the destination's `locate` chain) so a move between CHILD places of the current scene is
+    an arrival-class no-departure, never a false `departed_scene`."""
+    # ---- Per-person normalization (one narrated intent per person per turn): exact
+    # duplicate candidates collapse to ONE commit (duplicate move rows would double the
+    # event triples); CONFLICTING candidates for one person (two destinations, or a bound
+    # move beside an unbound exit) fail CLOSED — both could receipt-confirm and mint a
+    # same-valid-time location conflict, and the lane has no basis to pick a winner.
+    by_person: dict[str, list[dict]] = {}
+    person_order: list[str] = []
     for cand in candidates:
+        if cand["person"] not in by_person:
+            person_order.append(cand["person"])
+        by_person.setdefault(cand["person"], []).append(cand)
+    normalized: list[dict] = []
+    for person in person_order:
+        cands = by_person[person]
+        if len({(c["kind"], c.get("destination")) for c in cands}) == 1:
+            normalized.append(cands[0])
+        else:
+            trace.cast_move_drops.append((person, "", "ambiguous_multiple_moves"))
+
+    # ---- Horizon-bound identity/placeness reads (porcelain-backed, cached per id).
+    # `facts(entity=…)` serves the whole identity-closure's rows, so the closure-id set
+    # contains the HEAD's id whenever `eid` is a same_as alias of it — the one fold test
+    # expressible on the porcelain without reaching into the engine registry.
+    _closure_cache: dict[str, frozenset] = {}
+
+    def _closure_ids(eid: str) -> frozenset:
+        if eid not in _closure_cache:
+            try:
+                ids = {str(f.get("entity")) for f in p.facts(
+                    "canon", entity=eid, as_of=horizon)}
+            except Exception:  # noqa: BLE001 — a failed read proves nothing
+                ids = set()
+            _closure_cache[eid] = frozenset(ids | {eid})
+        return _closure_cache[eid]
+
+    _place_roster: frozenset | None = None
+
+    def _head_is_place(dest: str) -> bool:
+        """Rule 3's re-verify: the destination's RESOLVED HEAD reads as a place at `_h` —
+        membership (via the identity closure) in the horizon-bound, identity-resolved
+        canon place roster. A future-only place (no visible rows at `_h`) fails."""
+        nonlocal _place_roster
+        if _place_roster is None:
+            try:
+                _place_roster = frozenset(p.entities("canon", prefix="place:",
+                                                     as_of=horizon))
+            except Exception:  # noqa: BLE001 — no roster proves nothing
+                _place_roster = frozenset()
+        return bool(_closure_ids(dest) & _place_roster)
+
+    def _dest_in_scene(dest: str | None) -> bool:
+        """Destination-within-scene, matching `_present`'s spatial semantics: the scene
+        head itself (or a same_as alias of it — closure fold), or a place nested WITHIN
+        the scene (the scene head on the destination's horizon-bound locate chain)."""
+        if not dest or not scene:
+            return False
+        if scene in _closure_ids(dest):
+            return True
+        try:
+            return scene in (p.locate(dest, as_of=horizon) or [])
+        except Exception:  # noqa: BLE001 — a failed walk proves nothing
+            return False
+
+    licensed: list[dict] = []
+    for cand in normalized:
         person, destination = cand["person"], cand.get("destination")
         is_bound = cand["kind"] == "bound_move"
         if person == protagonist:  # rule 1 — never the protagonist (structural-absence)
@@ -890,8 +969,14 @@ def _run_cast_moves_lane(
         if live_reads.state(person, "accompanying") == protagonist:  # rule 2 — never a companion
             trace.cast_move_drops.append((person, destination or "", "companion"))
             continue
+        if is_bound and not _head_is_place(str(destination)):
+            # rule 3 — an unknown destination is REJECTED, never minted (test bars 6/10:
+            # a future-stamped kind row beyond `_h` cannot license, and a raw prefix is
+            # not placeness).
+            trace.cast_move_drops.append((person, destination or "", "unknown_destination"))
+            continue
         origin_here = present(person)
-        dest_here = is_bound and destination == scene
+        dest_here = is_bound and _dest_in_scene(destination)
         if not origin_here and not dest_here:  # rule 4 — must touch the CURRENT scene
             trace.cast_move_drops.append((person, destination or "", "remote"))
             continue
@@ -901,8 +986,6 @@ def _run_cast_moves_lane(
         if departure and person in engaged_this_turn:
             trace.cast_move_drops.append((person, destination or "", "engaged_this_turn"))
             continue
-        if not departure and not is_bound:
-            continue  # an unbound exit with no on-scene origin already failed rule 4 above
         licensed.append({"kind": cand["kind"], "person": person,
                          "destination": destination, "departure": departure})
     if not licensed:
@@ -929,13 +1012,22 @@ def _run_cast_moves_lane(
         for s in (getattr(receipt, "skipped", None) or []):
             trace.cast_move_drops.append(
                 (s.get("entity"), s.get("value"), f"engine_skip:{s.get('reason')}"))
-        confirmed, _ = confirmed_batch(move_rows, _receipt_rows(receipt))
+        # cap sized to the batch: the default 60-row promote cap is a generator-fuel
+        # bound, not a confirmation bound — truncation here would falsely report a
+        # committed move unconfirmed.
+        confirmed, _ = confirmed_batch(move_rows, _receipt_rows(receipt),
+                                       cap=len(move_rows))
         confirmed_persons = {c["entity"] for c in confirmed}
 
     # ---- EVENTS (§4 receipt-gated sequencing): a `departed_scene` event for every
     # RECEIPT-CONFIRMED bound departure + every licensed unbound exit (no move row to gate on
     # — the event alone is what was licensed). A structurally skipped move writes NO event.
+    # The event batch is itself receipt-confirmed below: an UNBOUND EXIT counts committed
+    # only on a confirmed event (its event IS its only durable effect); a BOUND departure's
+    # move stays committed even if its second-stage event fails, but the failure is recorded
+    # (`event_unconfirmed`) rather than silently claiming the complete pair. No retry.
     event_rows: list[dict] = []
+    event_report: dict[str, tuple[str, str, str, bool]] = {}  # ev -> (kind, person, dest, move_counted)
     for c in licensed:
         person, destination = c["person"], c["destination"]
         if c["kind"] == "bound_move":
@@ -946,8 +1038,12 @@ def _run_cast_moves_lane(
             if person not in confirmed_persons:
                 continue  # structurally skipped — no event, no negative presence
             ev = departure_events[person]
+            # the MOVE is durably committed regardless of the event write below.
+            trace.cast_moves.append(("bound_move", person, destination or ""))
+            event_report[ev] = ("bound_move", person, destination or "", True)
         else:
             ev = f"event:departed_{person.split(':', 1)[-1]}_{turn}"
+            event_report[ev] = ("unbound_exit", person, "", False)
         event_rows += [
             {"entity": ev, "attribute": "kind", "value": "departed_scene",
              "valid_from": turn_time(turn)},
@@ -956,9 +1052,18 @@ def _run_cast_moves_lane(
             {"entity": ev, "attribute": "patient", "value": scene,
              "value_type": "entity", "valid_from": turn_time(turn)},
         ]
-        trace.cast_moves.append((c["kind"], person, destination or ""))
     if event_rows:
-        p.ingest_structured(event_rows, classify="rules")
+        ev_receipt = p.ingest_structured(event_rows, classify="rules")
+        ev_confirmed, _ = confirmed_batch(event_rows, _receipt_rows(ev_receipt),
+                                          cap=len(event_rows))  # never truncate (see above)
+        ev_keys = {(r["entity"], r["attribute"]) for r in ev_confirmed}
+        for ev, (kind, person, dest, move_counted) in event_report.items():
+            if all((ev, a) in ev_keys for a in ("kind", "agent", "patient")):
+                if not move_counted:  # the unbound exit's event is its whole commit
+                    trace.cast_moves.append((kind, person, dest))
+            else:
+                trace.cast_move_drops.append(
+                    (person, dest, "event_unconfirmed"))
 
 
 def _snap_or_empty(p: Any, scope: list[str], frame: str = "canon",
@@ -5401,7 +5506,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     _run_cast_moves_lane(
                         p, live_reads=live_reads, trace=trace, turn=turn,
                         protagonist=arc.protagonist, scene=scene, present=_present,
-                        engaged_this_turn=_engaged_this_turn, candidates=_cast_candidates)
+                        engaged_this_turn=_engaged_this_turn, candidates=_cast_candidates,
+                        horizon=_h)
                 staged = _receipt_rows(p.ingest_structured(
                     _resolved, frame=_PROPOSED, classify="defer"))
         except Exception as exc:  # noqa: BLE001
