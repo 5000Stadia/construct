@@ -107,25 +107,35 @@ class Session:
         # game.continue_episode on a CONCLUDE→CONTINUE) over the shared, build-time scenario meta
         # (Cx 191): the live reopen reloads the stale scenario .meta.json, so without this EP2 would
         # cold-open with EP1's scope (the old cast + any polluted aliases). Mirrors the entry_epoch fix.
+        _slot_scope_loaded = False
         try:
             _slot_scope = PorcelainWorldReads(self._world).state(
                 "session:episode", "arc_scope", frame="session:main")
             if _slot_scope:
                 self._scope = json.loads(_slot_scope) if isinstance(_slot_scope, str) else _slot_scope
+                _slot_scope_loaded = True
         except Exception:
             logger.exception("episode scope read failed; falling back to scenario meta")
-        # DRIFT D3 (cr re-review blocker 5): the beat-DERIVED subset of scope,
-        # tracked separately so a committed repair can SUBTRACT superseded-only
-        # referents (never independently-played scope) before adding the live
-        # set. Baselined against the live beat overlay at open.
+        # DRIFT D3 (cr re-review rounds 2-4): scope provenance needs THREE
+        # sets at open — the SEALED beat baseline (what build-time scope's
+        # beat-derived portion was, so subtraction classifies the persisted
+        # scope correctly), the LIVE beat overlay at the play horizon (what
+        # the beats reference NOW, after any persisted repairs), and the
+        # independent origins (computed after the cast loads, below). A
+        # restart with a persisted supersession must open with the OLD
+        # referent gone and the replacement present — never wait for the
+        # next repair to refresh (cr round-4 blocker 2).
         self._beat_scope: set[str] = set()
+        _sealed_beat_scope: set[str] = set()
         try:
             from construct.arc.executor import arc_entities as _ae
             _reads0 = PorcelainWorldReads(self._world, horizon=self._horizon())
             for _a in [self._arc] + list(self._side_arcs or []):
-                self._beat_scope |= _ae(_a, _reads0)
+                _sealed_beat_scope |= _ae(_a)          # sealed (no reads)
+                self._beat_scope |= _ae(_a, _reads0)   # live overlay
         except Exception:
             logger.exception("beat-scope baseline failed; removal disabled until refresh")
+        self._sealed_beat_scope = _sealed_beat_scope
         self._mode = meta.get("mode", "pure")
         # The PLAYER's chosen experience (session-zero interview) overrides the
         # scenario's authored default. Three states:
@@ -187,18 +197,44 @@ class Session:
                 self._cast = {n.node_id: n for n in _nodes}
             except Exception:  # a bad cast blob must never break the session
                 self._cast = {}
-        # DRIFT D3 (cr round-3 blocker 4): NON-BEAT scope provenance, tracked
+        # DRIFT D3 (cr rounds 3-4): NON-BEAT scope provenance, tracked
         # explicitly — never inferred by subtracting one set from a merged
-        # set. At open: everything in the persisted scope beyond the beat
-        # baseline, PLUS the origins we positively know are independent (the
-        # cast roster, the protagonist). Reshape/hook additions join via
-        # `_reload_arc_portfolio`'s extra_scope. `_refresh_beat_scope`
-        # rebuilds scope as independent ∪ live-beat, so an entity owned by
-        # BOTH an old beat and the cast survives that beat's supersession.
+        # set. At open: everything in the persisted scope beyond the SEALED
+        # beat baseline (the persisted scope is build-time truth, so the
+        # sealed set — not the live overlay — is what its beat-derived
+        # portion actually was; subtracting the LIVE set would misclassify
+        # a superseded-only old referent as independent, cr round-4 blocker
+        # 2), PLUS the origins we positively know are independent (the cast
+        # roster, the protagonist, and any persisted reshape/hook extras
+        # from prior sessions). Then _scope is REBUILT immediately as
+        # independent ∪ live-beat — a restart opens on the repaired truth,
+        # never on stale build scope.
         self._independent_scope: set[str] = (
-            (set(self._scope or []) - self._beat_scope)
+            (set(self._scope or []) - getattr(self, "_sealed_beat_scope", set()))
             | set(self._cast or {})
             | {self._arc.protagonist})
+        try:
+            _extra_raw = PorcelainWorldReads(self._world).state(
+                "session:scope", "independent_extra", frame="session:main")
+            if _extra_raw:
+                self._independent_scope |= set(
+                    json.loads(_extra_raw) if isinstance(_extra_raw, str)
+                    else _extra_raw)
+        except Exception:
+            logger.exception("persisted independent-scope read failed; continuing without")
+        # The rebuild is skipped when a per-slot EPISODE scope loaded: on a
+        # CONCLUDE→CONTINUE the slot row is re-authored against the whole
+        # world and REPLACES provenance wholesale (Cx 191 — EP2 must not
+        # cold-open with EP1's cast); it is authoritative verbatim, and the
+        # next repaired turn's refresh re-derives from it normally.
+        if self._scope is not None and not _slot_scope_loaded:
+            try:
+                _reads1 = PorcelainWorldReads(self._world, horizon=self._horizon())
+                self._scope = sorted(
+                    e for e in (self._independent_scope | self._beat_scope)
+                    if _reads1.has_entity(e))
+            except Exception:
+                logger.exception("open-time scope rebuild failed; keeping persisted scope")
         # The scenario entry epoch (obs #3 half 3): the live-play time origin, ABOVE every
         # pre-play valid_from. Re-established on the executor contextvar at every turn so
         # turn_time (staging supersession + pacing fold) sits on the entry axis. Absent →
@@ -1269,6 +1305,15 @@ class Session:
         """The most recently planned SceneImage (fresh/cached), or None."""
         return getattr(self, "_last_image", None)
 
+    def _read_independent_extra(self) -> list:
+        """The persisted reshape/hook independent-scope extras (round 4)."""
+        try:
+            raw = PorcelainWorldReads(self._world).state(
+                "session:scope", "independent_extra", frame="session:main")
+            return list(json.loads(raw)) if isinstance(raw, str) else list(raw or [])
+        except Exception:  # noqa: BLE001
+            return []
+
     def _refresh_beat_scope(self) -> None:
         """DRIFT D3 (cr blockers 3 / 5 / round-3 4): a committed repair
         changed the live beat set; rebuild the session scope from tracked
@@ -1308,6 +1353,20 @@ class Session:
             self._independent_scope = (
                 set(getattr(self, "_independent_scope", set()))
                 | set(extra_scope or []))
+            if extra_scope:
+                try:  # restart-durable independent provenance (cr round 4)
+                    from construct.arc.executor import turn_time as _tt
+                    self._world.porcelain.ingest_structured([
+                        {"entity": "session:scope",
+                         "attribute": "independent_extra",
+                         "value": json.dumps(sorted(
+                             set(extra_scope)
+                             | set(self._read_independent_extra()))),
+                         "value_type": "literal",
+                         "valid_from": _tt(next_turn_number(self._world))},
+                    ], frame="session:main")
+                except Exception:
+                    logger.exception("independent-scope persist failed (in-memory set stands)")
             scope = self._independent_scope | self._beat_scope
             self._scope = sorted(e for e in scope if reads.has_entity(e))
             logger.info("session arc reloaded after replan: main=%s (+%d reshape entities)",

@@ -2786,18 +2786,19 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     # static clue ownership is authored solvability, not a live road): an
     # InFrame beat re-mints only when some cast holder of the exact clue
     # (a) still EXISTS in live canon, (b) is LOCATABLE (a containment chain
-    # resolves — the runtime half), and (c) is NOT an entity a TRUE leaf of
-    # the closure witness named (the world-state that killed the road cannot
-    # itself prove the alternative road — the dead rival can't carry the
-    # clue past his own death). No live channel → decline; never a zombie
-    # mint. `Occurred` beats stay walkable by the player act itself.
+    # resolves — the runtime half), and (c) is NOT one of the closure
+    # witness's DRIVING entities — the polarity-aware set of entities whose
+    # leaves PROVED the closure, whatever their sign (cr round 4: a TRUE
+    # `Not(StateIs(...))` closure is driven by its FALSE child leaf; the
+    # world-state that killed the road cannot itself prove the alternative
+    # road, so the dead rival can't carry the clue past his own death). No
+    # live channel → decline; never a zombie mint. `Occurred` beats stay
+    # walkable by the player act itself.
     from construct.arc.conditions import InFrame as _InFrame, atoms_of as _atoms_of
     _atoms = [a for a in _atoms_of(beat.achievable_via)
               if isinstance(a, _InFrame)]
     if _atoms:
-        _invalidated = {l.get("entity")
-                        for l in (witness or {}).get("true_leaves", [])
-                        if l.get("entity")}
+        _invalidated = set((witness or {}).get("driving_entities") or [])
 
         def _live_channel(nid: str) -> bool:
             if nid in _invalidated:

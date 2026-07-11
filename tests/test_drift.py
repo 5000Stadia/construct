@@ -2758,3 +2758,94 @@ def test_side_failure_when_verdict_is_never_held(world, monkeypatch):
     assert "beat:sidegoal" in r.trace.beats_closed
     assert "arc:side" in r.trace.arc_fallout
     assert stored_lifecycle(reads, side) == "lost"
+
+
+def test_not_shaped_witness_invalidates_the_driving_holder(world):
+    # cr round-4 blocker 1: a TRUE `Not(StateIs(...))` closure is driven by
+    # its FALSE child leaf — polarity-aware `driving_entities` must carry
+    # that entity, and walkability must reject it as a carrier, exactly as
+    # in the plain dead-holder case.
+    base = _dhard_arc()
+    beat = replace(base.beats[0],
+                   unreachable_if=Not(StateIs("person:rival", "alive", "true")))
+    arc = replace(base, beats=(beat,))
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "place:flat", "attribute": "kind", "value": "place",
+         "timeless": True},
+        {"entity": "person:rival", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:rival", "attribute": "in", "value": "place:flat",
+         "value_type": "entity", "valid_from": turn_time(1)},
+        {"entity": "person:rival", "attribute": "alive", "value": "false"},
+    ])
+    reads = PorcelainWorldReads(world)
+    _a, closed, _r = beat_pass(world, arc, reads, turn=4)
+    assert closed == ["beat:discover"]
+    w = drift.read_closure_witness(reads, "beat:discover")
+    assert w["true_leaves"] == []                          # the Not shape
+    assert w["driving_entities"] == ["person:rival"]       # polarity-aware
+    # rival exists, is locatable, and is the sole static holder — and still
+    # cannot license the repair: he is what PROVED the closure.
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=StubProvider([]), turn=5, arc=arc,
+               cast=_rival_cast(), scene=SCENE, npcs=[], horizon=None,
+               minutes_now=None, rung=None, fuel=[], spines={})
+    assert trace.repairs == []
+    reasons = {r.value for e in reads.events(kind="repair_declined",
+                                             frame=SESSION)
+               for r in reads.frame_rows(SESSION, entity=e.event_id)
+               if r.attribute == "reason"}
+    assert "no_delivery_channel" in reasons
+
+
+def test_session_reopen_rebuilds_scope_from_the_live_overlay(tmp_path):
+    # cr round-4 blocker 2: a FRESH Session over a world with a persisted
+    # supersession must open with the superseded-only referent GONE and the
+    # replacement referent PRESENT — before the first resumed turn, without
+    # waiting for a later repair to refresh.
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    from construct.session import Session
+    rule = rule_classifier_fallback()
+
+    def _mk(path):
+        return World(path, world_id="w:d3s", model=StubModel(
+            fallback=lambda pr, sc: rule(pr, sc)
+            if pr.startswith("Classify the lifetime") else {"items": []}),
+            stance="fiction", title="D3S")
+
+    path = tmp_path / "d3s.world"
+    w1 = _mk(path)
+    w1.ingestor.cursor.advance(1.0)
+    base = make_arc()
+    only = replace(base.beats[0],
+                   achievable_via=InFrame(f"knows:{PLAYER}", "fact:old",
+                                          "route", "true"))
+    arc = replace(base, beats=(only,))
+    seed_arc(w1, arc)
+    w1.porcelain.ingest_structured([
+        {"entity": "fact:old", "attribute": "kind", "value": "fact",
+         "timeless": True},
+        {"entity": "fact:new", "attribute": "kind", "value": "fact",
+         "timeless": True},
+        {"entity": "place:study", "attribute": "kind", "value": "place",
+         "timeless": True},
+    ])
+    repl = Beat("beat:discover_r1", Phase.CLIMAX, Weight.REQUIRED,
+                achievable_via=InFrame(f"knows:{PLAYER}", "fact:new",
+                                       "route", "true"))
+    w1.porcelain.ingest_structured(beat_to_items(repl, "arc:main"))
+    _supersede(w1, "arc:main", "discover", "beat:discover_r1")
+    w1.close()
+    w2 = _mk(path)
+    try:
+        # build-time meta scope still carries the OLD referent (stale truth)
+        meta = {"arc_scope": ["fact:old", "place:study", PLAYER]}
+        s = Session("d3s", w2, arc, meta, StubProvider([]), "player:test")
+        assert "fact:new" in (s._scope or [])       # replacement entered at open
+        assert "fact:old" not in (s._scope or [])   # superseded-only left at open
+        assert "place:study" in (s._scope or [])    # independent scope survived
+    finally:
+        w2.close()

@@ -336,6 +336,49 @@ def _evaluate_clocks_false(expr: Expr, reads: Any) -> Truth:
     return evaluate(expr, reads)
 
 
+def _driving_entities(expr: Expr, reads: Any, want: Truth) -> set[str]:
+    """The entities whose leaves PARTICIPATE IN PROVING `evaluate(expr) is
+    want` — polarity-aware (cr round-4 blocker 1: a TRUE `Not(StateIs(...))`
+    closure is driven by its FALSE child leaf; unioning all false leaves
+    would over-invalidate compound shapes where many FALSE branches are
+    non-deciding). Shape semantics mirror the witness walker's:
+
+    - Not flips the wanted polarity onto its child;
+    - AllOf proving TRUE: every operand participates; proving FALSE: only
+      the FALSE operands (the deciders);
+    - AnyOf proving TRUE: only the TRUE operands; proving FALSE: every
+      operand (all had to be false);
+    - AtLeast proving TRUE: the satisfied operands; proving FALSE: the
+      unsatisfied ones.
+
+    Returns the addressed entities of the participating atoms; empty when
+    the expression does not in fact evaluate to `want`."""
+    flip = {Truth.TRUE: Truth.FALSE, Truth.FALSE: Truth.TRUE}
+    if isinstance(expr, Not):
+        return _driving_entities(expr.operand, reads, flip.get(want, want))
+    if isinstance(expr, (AllOf, AnyOf, AtLeast)):
+        out: set[str] = set()
+        for op in expr.operands:
+            v = evaluate(op, reads)
+            if isinstance(expr, AllOf):
+                take = (want is Truth.TRUE) or (v is Truth.FALSE)
+            elif isinstance(expr, AnyOf):
+                take = (want is Truth.FALSE) or (v is Truth.TRUE)
+            else:  # AtLeast
+                take = v is want
+            if take:
+                # in every take-branch the child's contributing verdict IS
+                # the wanted polarity (AllOf-TRUE: all children TRUE;
+                # AllOf-FALSE: the FALSE deciders; AnyOf mirrored; AtLeast
+                # by construction) — so the want passes through unchanged.
+                out |= _driving_entities(op, reads, want)
+        return out
+    # atom: participates iff it actually evaluates to the wanted polarity
+    if evaluate(expr, reads) is want and getattr(expr, "entity", None):
+        return {expr.entity}
+    return set()
+
+
 def closure_witness_of(unreachable_if: Expr, reads: Any, turn: int) -> dict:
     """The closure witness (§2), computed AT CLOSE TIME against the SAME reads
     that closed the beat — later classification never re-evaluates a moved
@@ -355,6 +398,12 @@ def closure_witness_of(unreachable_if: Expr, reads: Any, turn: int) -> dict:
         "true_leaves": out_true,
         "unknown_leaves": out_unknown,
         "false_leaves": out_false,
+        # the polarity-aware invalidation set (cr round-4 blocker 1): the
+        # entities whose leaves PROVED the closure, whatever their sign —
+        # a dead holder cannot carry the clue past his own death even when
+        # his death registered as a FALSE leaf under a Not.
+        "driving_entities": sorted(
+            _driving_entities(unreachable_if, reads, Truth.TRUE)),
         "clock_caused": clock_caused,
         "firing_events": [l["firing_event"] for l in out_true
                           if l.get("kind") == "ClockFired"

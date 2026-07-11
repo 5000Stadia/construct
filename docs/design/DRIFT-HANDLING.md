@@ -353,11 +353,18 @@ becomes literally true:
    channel exists — some cast holder of the exact clue that (a) still
    EXISTS in live canon, (b) is LOCATABLE (a containment chain resolves —
    the runtime half; the static cast blob supplies only the authored
-   half), and (c) is NOT an entity named by a TRUE leaf of the closure
-   witness (the world-state that killed the road cannot itself prove the
+   half), and (c) is NOT one of the witness's `driving_entities` — the
+   POLARITY-AWARE set persisted at close time of the entities whose leaves
+   PROVED the closure, whatever their sign (cr round 4: a TRUE
+   `Not(StateIs(...))` closure is driven by its FALSE child leaf; a naive
+   true-leaf read misses it, and a naive all-false-leaves union
+   over-invalidates compound shapes whose FALSE branches were
+   non-deciding. Shape semantics: Not flips the wanted polarity; AllOf
+   proving TRUE takes every operand, proving FALSE only the FALSE
+   deciders; AnyOf mirrored; AtLeast the operands matching the wanted
+   polarity). The world-state that killed the road cannot itself prove the
    alternative road — a dead holder cannot carry the clue past his own
-   death; witness leaves persist the atom's `entity` for exactly this
-   read). No live channel → `no_delivery_channel` decline; the refusal
+   death, whichever way his death was written. No live channel → `no_delivery_channel` decline; the refusal
    clock is the designed backstop for a story that cannot move — an
    unwalkable re-mint would be an IMMORTAL PENDING beat no machinery could
    ever close, so it is never minted. `Occurred` beats stay walkable by
@@ -420,13 +427,20 @@ becomes literally true:
        cast delivery-target assembly (`beat_delivery_targets`);
      * authoring-only (sealed reads stay): build/seal-time serialization
        and lint over the authored arc.
-     **Live `Session` scope refreshes after a committed repair** (shape
-     settled across cr re-review rounds 2-3): the Session tracks NON-BEAT
-     scope PROVENANCE explicitly — `_independent_scope` = the open scope
-     beyond the beat baseline ∪ the cast roster ∪ the protagonist, grown
-     by reshape/hook `extra_scope` — and on a repaired turn rebuilds scope
-     as `independent ∪ live-beat` (at the play horizon), never by
-     subtracting one set from a merged set. Replacement-only referents
+     **Live `Session` scope refreshes after a committed repair AND at
+     OPEN** (shape settled across cr re-review rounds 2-4): the Session
+     tracks NON-BEAT scope PROVENANCE explicitly — `_independent_scope` =
+     the persisted open scope beyond the SEALED beat baseline (the sealed
+     set, never the live overlay: persisted scope is build-time truth, so
+     subtracting the live set would misclassify a superseded-only old
+     referent as independent) ∪ the cast roster ∪ the protagonist ∪ the
+     restart-durable reshape/hook extras (persisted as a
+     `session:scope/independent_extra` row) — and rebuilds scope as
+     `independent ∪ live-beat` (at the play horizon) BOTH at open and on
+     every repaired turn, never by subtracting one set from a merged set.
+     A restart over a persisted supersession therefore opens with the old
+     referent gone and the replacement present before the first resumed
+     turn. Replacement-only referents
      ENTER, superseded-only referents LEAVE, and an entity owned by BOTH
      an old beat and an independent source (a cast member) SURVIVES that
      beat's supersession — provenance decides, pinned by an overlap
