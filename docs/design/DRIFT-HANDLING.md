@@ -1,16 +1,16 @@
 # Drift Handling — when the player leaves the road (spec)
 
-**Status:** SPEC r4 — cx r1 RED folded in r2 (`<d645fd14…>`); cr r2 RED
-folded in r3 (`<13680dcb…>`); cr r3 RED (`<9f215bcb…>`: points 4/6/7 GREEN,
-5 materially closed) FOLDED here: the FULL runtime `arc.beats` consumer
-sweep with Session-scope refresh after repair (§3 R4); the additive
-per-beat serializer pair `beat_to_items`/`beat_from_reads` replacing the
-contradictory whole-arc emitters (§3 R4); callback `affected` pinned
-`value_type="literal"` with all-or-empty parse + real-adapter restart
-oracle (§3 R3); `BeatAchieved` arc context via the beat's persisted
-`part_of` row; `ClockFired(n)` causal firing = the horizon-visible
-threshold-crossing event ordered by time then id (§2). For cr re-review,
-then phased build. The founder's captured
+**Status:** **GREEN r4 (cr `<4e9e05ea…>`, 2026-07-11, commit 25a85dc) —
+phased build AUTHORIZED.** Review chain: cx r1 RED folded in r2
+(`<d645fd14…>`); cr r2 RED folded in r3 (`<13680dcb…>`); cr r3 RED folded
+in r4 (`<9f215bcb…>`: runtime consumer sweep + Session-scope refresh,
+additive `beat_to_items`/`beat_from_reads`, literal-typed callback
+`affected`, BeatAchieved `part_of` arc context, deterministic
+`ClockFired(n)` causal firing). cr phasing ruling: **D1 independent, may
+start** (serialized behind the #80 turnloop landing — one integration
+owner); D2 spec-ready; slice cadence kept (build → cr review → live test
+per slice); D3 code review checks the consumer sweep call-site-by-call-site.
+The founder's captured
 4-part design (2026-06-22, extended 2026-06-24 with relocate-the-beat): *"If
 the player ignores the established call to action, GENTLE nudges back to the
 primary narrative help — nothing heavy-handed. If I skip the important meeting
