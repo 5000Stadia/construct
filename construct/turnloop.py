@@ -6270,8 +6270,21 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             except Exception:  # noqa: BLE001
                 pass
         present_lines = []
+        from construct.arc.executor import person_can_act as _brief_can_act
         for n in npcs:
             nm = str(canon_table.get((n, "name")) or _human_entity(n))
+            # NARRATOR LIVENESS (task #8, the D3 acceptance finding): the
+            # authority layer already refuses a settled-dead person every
+            # delivery/action channel, but the scene brief still listed them
+            # as an interlocutor and the narrator improvised their dialogue.
+            # Same shared predicate; the BODY stays present — it is a fact of
+            # the scene — but it can never speak or act.
+            if not _brief_can_act(live_reads, n):
+                present_lines.append(
+                    f"the body of {nm}: DEAD — present as a body only. The "
+                    f"dead do not speak, move, gesture, or answer; render "
+                    f"the body's stillness and the room around it.")
+                continue
             # CAST IDENTITY (#87): the authored pronouns ride the presence line so the
             # narration can never drift a character's gender between scenes.
             _pn = canon_table.get((n, "pronouns"))

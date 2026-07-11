@@ -3100,3 +3100,39 @@ def test_continuation_scope_excludes_retained_past_arcs(tmp_path):
         assert "fact:stale_meta_only" not in (s._scope or [])
     finally:
         w2.close()
+
+
+def test_dead_present_npc_briefs_as_a_body_not_an_interlocutor(world):
+    # Task #8 (the D3 acceptance finding): the authority layer held while
+    # the NARRATOR improvised a dead man's dialogue — the scene brief now
+    # surfaces liveness through the same shared predicate. The body is
+    # still present (a fact of the scene); it is never an interlocutor.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": "person:witness", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:witness", "attribute": "name", "value": "Marlow"},
+        {"entity": "person:witness", "attribute": "in", "value": SCENE,
+         "value_type": "entity", "valid_from": turn_time(1)},
+        {"entity": "person:witness", "attribute": "alive", "value": "false"},
+    ])
+    cast = {"person:witness": CastNode(node_id="person:witness",
+                                       location=SCENE, holds_clues=())}
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The room is quiet around the covered shape."},
+    ])
+    import construct.turnloop as tl
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+    try:
+        r = run_turn(world, arc, provider, "I look around the room.",
+                     turn=2, cast=cast, generate=False)
+    finally:
+        mp.undo()
+    assert "the body of Marlow" in r.trace.briefing
+    assert "DEAD — present as a body only" in r.trace.briefing
+    assert "Marlow: present, silent for now" not in r.trace.briefing
