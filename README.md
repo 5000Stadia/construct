@@ -178,7 +178,9 @@ The project is **design-first**: 60 design documents, each recording a decision,
 | Scene imagery (per-location AI illustration) | Live | Oil-painting style; regenerates only when the scene truly changes |
 | Telegram / Discord / CLI / REPL transports | Live | One session API; outbound-only, no inbound exposure |
 | Multi-player shared worlds | Designed, not built | [Design notes](docs/design/) — shared-world observer semantics to be worked jointly with the substrate |
-| Narrator-authored NPC movement (the narration seam) | Specified, gated | The highest-leverage known gap; named in the synthesis doc |
+| Narrator-authored NPC movement (the CAST-MOVES lane) | Live | Narrated arrivals/departures become canon presence truth through five stagecraft rules (never the player, never a bound companion, no minted places, scene-touching only, engaged cast can't vanish mid-conversation); receipt-confirmed commits; fail-closed against ambiguous prose — live-accepted |
+| Journey-price anchoring (route precedent) | Live | The first pricing of a route is its canon precedent — the same road costs the same time in both directions, forever; receipt-confirmed durability with a settle backstop |
+| Drift handling (relocate-the-beat, absence-consequence, path repair) | Specified (GREEN), building | The founder's four-part design; D1 (relocate) next |
 
 ---
 

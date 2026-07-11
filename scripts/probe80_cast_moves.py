@@ -183,17 +183,22 @@ def main() -> None:
 
     all_moves: list = []
     all_drops: list = []
-    # T1 invites the off-scene mover IN (no present-NPC engagement conflict: Garrick is
-    # not in the room). T2 dismisses Edda BY NAME — she is ENGAGED this turn, so a
-    # same-turn narrated exit must DROP (rule 5, visible in telemetry). T3 is passive —
-    # the established exit is now unengaged and licenses.
+    # The four agreed bar-11 probes (cr <f8409447…>/<9b9d5c06…>): T1 = clean arrival
+    # via the origin-restatement tie-break; T2 = stay-by-hearth negative (present cast
+    # texture must mint NO departure); T3 = rule-5 engaged-dismissal drop; T4 = the
+    # lone-passive departure (two other NPCs present, Edda unengaged) — a bound exit to
+    # the canon well house tracks, a wholly novel destination is the ACCEPTED false
+    # negative (telemetry, no event).
     for i, (move, label) in enumerate([
         ("I call toward the yard door: 'Come in out of the cold, man!'",
-         "T1: invite the arrival"),
-        ("I tell Edda she needn't wait up on my account — the fire will see me through.",
-         "T2: dismiss Edda by name (engaged — a same-turn exit must drop)"),
-        ("I turn to Nan and ask whether the kettle is still warm.",
-         "T3: engage NAN only — Edda's established exit may now license"),
+         "T1: invite the arrival (tie-break probe)"),
+        ("I sit back and watch the fire a while.",
+         "T2: stay-by-hearth negative (no false departures)"),
+        ("I bid Edda goodnight: 'Go on to the well house before the frost thickens — "
+         "I'll manage the fire.'",
+         "T3: firm send-off (engaged — same-turn exit must drop)"),
+        ("I turn my chair to the fire and let the household get on with its night.",
+         "T4: fully passive — Edda's exit may now license"),
     ], start=1):
         r = _turn(s, move, label)
         all_moves.extend(getattr(r.trace, "cast_moves", []) or [])

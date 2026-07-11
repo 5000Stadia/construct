@@ -50,6 +50,13 @@ narrator's briefing; free-text writes pass one Entity Authority seam.
   fallout-as-canon, and the opportunistic DM that mints side arcs from
   fallout, the player's committed delta (salience-gated), or diegetic
   quiet, behind six guards + dramatic right-of-way.
+- [docs/design/CAST-MOVES.md](docs/design/CAST-MOVES.md): the licensed
+  narration-seam movement lane — narrated arrivals/departures become canon
+  presence truth through five stagecraft rules, receipt-confirmed commits,
+  fail-closed against ambiguous prose.
+- [docs/design/DRIFT-HANDLING.md](docs/design/DRIFT-HANDLING.md): when the
+  player leaves the road — relocate-the-beat, absence-consequence,
+  alternative-path repair, gentle nudge tuning (spec GREEN, building).
 - [docs/design/REMEMBRANCER.md](docs/design/REMEMBRANCER.md): the player's
   own memory as a turn participant + player-authored retcon with
   contradiction quarantine.
