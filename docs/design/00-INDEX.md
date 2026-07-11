@@ -3,7 +3,7 @@
 The Construct is a design-first project: every substantive mechanism was specified on
 paper, adversarially reviewed, and only then built — and each document below records
 the decision, the live failure or founder finding that motivated it, and how it
-shipped. This index groups the 58 documents by layer. **Bold** entries are the
+shipped. This index groups the 63 documents by layer. **Bold** entries are the
 recommended spine for a first read.
 
 ## Start here
@@ -45,6 +45,7 @@ recommended spine for a first read.
 | [EXTRACTION-AND-DISCOVERY.md](EXTRACTION-AND-DISCOVERY.md) | How prose becomes structured fact, and how off-scene people are discovered then visited. |
 | [EXAMINE-CHANNEL.md](EXAMINE-CHANNEL.md) | Close inspection as an evidence channel: object-held clues surface into the player's frame, earned. |
 | [WORLD-TICK.md](WORLD-TICK.md) | The world moves without you: off-screen cast deltas, committed through the doorway, discovered rather than narrated. |
+| [CAST-MOVES.md](CAST-MOVES.md) | The licensed narration-seam movement lane: narrated on-screen arrivals/departures become canon presence truth under five stagecraft rules. |
 | [WORLD-CHANGING-AGENCY.md](WORLD-CHANGING-AGENCY.md) | Earned "miraculous" agency: reshaping settled canon (revive the dead) through a judged, sanctioned channel — the arc adapts. |
 
 ## The arc layer (the drama engine)
@@ -59,6 +60,7 @@ recommended spine for a first read.
 | [DEATH-TESTAMENT.md](DEATH-TESTAMENT.md) | Death as staged permanence: per-chapter policy, the warning before the kill, the testament epilogue, no next chapter. |
 | [EPISODIC-CONTINUATION.md](EPISODIC-CONTINUATION.md) | Conclude → continue: consequences as canon events, settled history never re-opened, personal threads honored. |
 | [LIVING-WORLD-GENERATOR.md](LIVING-WORLD-GENERATOR.md) · [LIVING-WORLD-GENERATOR-P2.md](LIVING-WORLD-GENERATOR-P2.md) | The regenerative arc engine: side-arc lifecycle, fallout as canon consequence, the opportunistic generator. |
+| [DRIFT-HANDLING.md](DRIFT-HANDLING.md) | When the player leaves the road: relocate-the-beat, absence-consequence, alternative-path repair, gentle nudge tuning — the founder's four-part drift design. |
 | [WIN-LOSS-CONDITIONS.md](WIN-LOSS-CONDITIONS.md) · [GAUGE-PRIMITIVE.md](GAUGE-PRIMITIVE.md) · [DIEGETIC-TIME.md](DIEGETIC-TIME.md) | Authored stakes: failure conditions, numeric gauges as live drama, in-world time as the only clock. |
 
 ## Character & knowledge
