@@ -73,7 +73,9 @@ from construct.arc.generator import (
     salient_moments,
     window_events,
 )
-from construct.arc.grammar import Arc, Phase, Weight
+from construct.arc.grammar import Arc, Phase, Rung, Weight
+from construct.arc import drift
+from construct.cast import beat_delivery_targets
 from construct.pins import resolve_active_pins
 from construct.provider import Provider, ProviderError
 
@@ -692,6 +694,9 @@ class TurnTrace:
     reshape_entities: list = field(default_factory=list)  # visible committed reshape entity ids (carried into next-turn scope)
     timings: dict = field(default_factory=dict)  # per-section wall-clock (s) this turn — optimization surface
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
+    drift: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, class) classified this turn (D-SOFT only)
+    relocations: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, new_staging) committed this turn
+    relocate_directive: str = ""  # DRIFT-HANDLING D1 debug: the sanitized staging line (mirrors `nudge`)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -1816,6 +1821,116 @@ _TICK_FLOOR_MIN = 30.0
 _TICK_MAX_MEMBERS = 2
 
 
+# ---- the shared carrier-move surface (DRIFT-HANDLING.md §3 R2 step 3) -----
+# Extracted from `_world_tick`'s low-level move so `_world_tick`'s autonomous
+# off-screen cohort AND R2's targeted relocation (`_relocate_beat`, below)
+# commit a person's `in` row through the SAME two layers instead of each
+# hand-rolling its own guards. `_world_tick` never changes ITS behavior here
+# (same anchored set, same "never into the player's scene" rule) — only the
+# common guard logic moves into `validate_carrier_move`.
+
+@dataclass(frozen=True)
+class CarrierMovePolicy:
+    """The explicit policy `validate_carrier_move`/`commit_carrier_move` require
+    (§3 R2 step 3) — split by MODE because world-tick's autonomous cohort and
+    R2's targeted relocation want OPPOSITE destination rules, so one
+    undifferentiated signature would conflate incompatible rules (cr r2
+    blocker 4): `mode="world_tick"` REQUIRES `dest != scene` (an autonomous
+    tick can never target the player's own scene — that's presence's job);
+    `mode="relocate"` REQUIRES `dest == scene` (R2 exists ONLY to move a
+    carrier INTO the player's current scene)."""
+
+    mode: str  # "world_tick" | "relocate"
+    scene: str | None       # the player's CURRENT scene
+    protagonist: str
+    companions: frozenset = frozenset()  # ids standing-accompanying the protagonist (explicit input, never an implied read)
+    anchored: frozenset = frozenset()    # ids this policy's caller forbids moving (explicit input, never an implied read)
+    horizon: float | None = None         # as-of coordinate for the destination place-fold read
+
+
+@dataclass(frozen=True)
+class CarrierMoveResult:
+    """The validate/commit verdict for one person's carrier move under a
+    `CarrierMovePolicy`. `ok` is the GUARD verdict (never even attempted an
+    ingest when False); `confirmed` is the receipt-CONFIRMED truth (only
+    meaningful when `ok`); `reason` is the guard/skip name for telemetry."""
+
+    ok: bool
+    confirmed: bool = False
+    reason: str = ""
+
+
+def _dest_folds_to_place(reads: Any, dest: str, *, as_of: float | None) -> bool:
+    """The destination's resolved HEAD reads as a place as-of `as_of` — the
+    same identity-closure membership test the #80 lane's `_head_is_place`
+    proves (CAST-MOVES.md rule 3), reused here so a future-only place (no
+    visible rows at the horizon) or a bare id guess is rejected, never
+    accepted on the raw id prefix alone."""
+    try:
+        roster = frozenset(reads.entities("canon", prefix="place:", as_of=as_of))
+    except Exception:  # noqa: BLE001 — no roster proves nothing
+        return False
+    closure = {dest}
+    try:
+        closure |= {str(f.get("entity")) for f in reads.facts("canon", entity=dest, as_of=as_of)}
+    except Exception:  # noqa: BLE001 — a failed closure read proves nothing beyond `dest` itself
+        pass
+    return bool(closure & roster)
+
+
+def validate_carrier_move(reads: Any, person: str, dest: str,
+                          policy: CarrierMovePolicy) -> CarrierMoveResult:
+    """The COMMON carrier-move guards (§3 R2 step 3): never the protagonist;
+    never a bound companion (`policy.companions`); never an id in
+    `policy.anchored`; the destination must bind and FOLD to a place as-of
+    `policy.horizon`. PLUS the mode's own destination rule (see
+    `CarrierMovePolicy`). `reads` is a raw porcelain-shaped reader (needs
+    `.entities()`/`.facts()` for the place-fold closure — `world.porcelain`,
+    not the narrower `PorcelainWorldReads` adapter)."""
+    if person == policy.protagonist:
+        return CarrierMoveResult(ok=False, reason="protagonist")
+    if person in policy.companions:
+        return CarrierMoveResult(ok=False, reason="companion")
+    if person in policy.anchored:
+        return CarrierMoveResult(ok=False, reason="anchored")
+    if not dest:
+        return CarrierMoveResult(ok=False, reason="no_destination")
+    if policy.mode == "world_tick" and dest == policy.scene:
+        return CarrierMoveResult(ok=False, reason="world_tick_into_scene")
+    if policy.mode == "relocate" and dest != policy.scene:
+        return CarrierMoveResult(ok=False, reason="relocate_off_scene")
+    if not _dest_folds_to_place(reads, dest, as_of=policy.horizon):
+        return CarrierMoveResult(ok=False, reason="future_horizon_destination")
+    return CarrierMoveResult(ok=True)
+
+
+def commit_carrier_move(world: Any, person: str, dest: str, turn: int,
+                        policy: CarrierMovePolicy) -> CarrierMoveResult:
+    """Validate, then the canon `in`-row commit, then receipt CONFIRMATION
+    under the `confirmed_batch` discipline (§3 R2 step 3): the move is
+    confirmed ONLY when its exact (entity, attribute) key appears in the
+    ingest receipt — never merely because `ingest_structured` returned. Self-
+    contained fail-open (mirrors, but does not depend on, the turn's own
+    `_FailOpenIngest` wrapper — this surface is meant to be callable outside
+    a live turn too): an ingest raise is logged and reported `confirmed=False`,
+    never propagated. Callers MUST treat `confirmed=False` as a WHOLE decline
+    — no briefing directive, no relocation receipt (§3 R2 step 3)."""
+    verdict = validate_carrier_move(world.porcelain, person, dest, policy)
+    if not verdict.ok:
+        return verdict
+    row = {"entity": person, "attribute": "in", "value": dest,
+          "value_type": "entity", "valid_from": turn_time(turn)}
+    try:
+        receipt = world.porcelain.ingest_structured([row], classify="rules")
+    except Exception:  # noqa: BLE001 — fail-open, the #89 climax-shield discipline
+        logger.error("carrier move commit failed (%s -> %s)", person, dest, exc_info=True)
+        return CarrierMoveResult(ok=True, confirmed=False, reason="ingest_failed")
+    confirmed, _ = confirmed_batch([row], _receipt_rows(receipt), cap=1)
+    if not confirmed:
+        return CarrierMoveResult(ok=True, confirmed=False, reason="unconfirmed")
+    return CarrierMoveResult(ok=True, confirmed=True)
+
+
 def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: int, *,
                 cast: Any, npcs: list, entry_scene: str | None, scene: str | None,
                 live_reads: Any, minutes_now: float | None) -> None:
@@ -1944,6 +2059,14 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         _member_ids = {m for m, _w, _s in members}
         _done: set[str] = set()
         rows: list[dict] = []
+        # DRIFT-HANDLING D1 (§3 R2 step 3): the shared carrier-move guard surface.
+        # `companions=frozenset()` preserves existing behavior — a standing
+        # companion is always physically WITH the player and therefore already
+        # excluded from `members` above (the `nid in (npcs or [])` present-cast
+        # filter), so world-tick never had a companion concept to check.
+        _tick_policy = CarrierMovePolicy(
+            mode="world_tick", scene=scene, protagonist=arc.protagonist,
+            companions=frozenset(), anchored=frozenset(_anchored), horizon=None)
         for t in (verdict.get("ticks") or []):
             mid = str((t or {}).get("member") or "")
             kind = str((t or {}).get("kind") or "")
@@ -1956,9 +2079,12 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
             _done.add(mid)
             if kind == "moved":
                 dest = str(t.get("moves_to") or "")
-                if mid in _anchored or dest not in _valid_places or dest == scene:
-                    logger.info("world tick move for %s dropped (%s)", mid,
-                                "anchored" if mid in _anchored else "bad destination")
+                if dest not in _valid_places:
+                    logger.info("world tick move for %s dropped (bad destination)", mid)
+                    continue
+                _verdict = validate_carrier_move(world.porcelain, mid, dest, _tick_policy)
+                if not _verdict.ok:
+                    logger.info("world tick move for %s dropped (%s)", mid, _verdict.reason)
                     continue
                 rows.append({"entity": mid, "attribute": "in", "value": dest,
                              "value_type": "entity", "valid_from": turn_time(turn)})
@@ -2007,6 +2133,139 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
     except Exception:  # noqa: BLE001 — the tick is opportunistic; never break settle
         logger.warning("world tick skipped", exc_info=True)
         trace.dropped_cohorts.append("world_tick")
+
+
+#: DRIFT-HANDLING D1 (§3 R2 step 2): decline `relocate_pick` below this confidence
+#: — relocation must feel inevitable, not conjured. The spec leaves the number
+#: unpinned ("decline on low confidence"); tune with live-test data (§7 D1 note).
+_RELOCATE_CONFIDENCE_MIN = 0.5
+
+
+def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
+                provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
+                npcs: list[str], horizon: float | None, minutes_now: float | None,
+                rung: Rung | None) -> None:
+    """DRIFT-HANDLING.md D1 (§4): R2 relocate-the-beat for D-SOFT beats on the
+    MAIN arc ONLY — side-arc drift responses are OUT OF SCOPE this slice (D2/D3
+    extend the classifier and repair machinery; a side arc simply never drifts
+    in D1). Placed after `beat_pass` (this turn's closures are known) and
+    BEFORE the main-arc lifecycle read — for D1 that only matters
+    structurally (no closures/repairs exist yet), but keeps the ordering the
+    later slices need. At most ONE drift response per turn (the generator's
+    one-mint-per-turn discipline). Fail-open: any error logs and leaves the
+    world quiet — a drift pass never breaks a turn."""
+    try:
+        if not cast:
+            return  # R2's carrier concept needs a cast blob — no cast, no relocation target
+        pending_required = [
+            b.beat_id for b in arc.beats
+            if b.weight is Weight.REQUIRED
+            and live_reads.state(b.beat_id, "status", frame=PLOT) in (None, "pending")
+        ]
+        if not pending_required or minutes_now is None:
+            return  # no diegetic clock → no honest quiet gate → no drift (turns are free)
+        last_dev = _last_development_min(world, live_reads, minutes_now, turn)
+        quiet_minutes = max(0.0, minutes_now - last_dev)
+        drifts = drift.drift_state(pending_required, rung, quiet_minutes)
+        if not drifts:
+            return
+        targets = {t["beat_id"]: t for t in beat_delivery_targets(arc.beats)}
+        for d in drifts:
+            if d.cls != "D-SOFT":
+                continue  # D-MISSED/D-HARD are D2's — drift_state never emits them in D1 anyway
+            if drift.relocation_receipt(live_reads, d.beat_id) is not None:
+                continue  # one relocation per beat (§3 R2 step 4) — try the next drifted beat
+            target = targets.get(d.beat_id)
+            if target is None:
+                continue  # not an InFrame beat — R2 has no delivery target to relocate
+            if _relocate_beat(world, p, live_reads=live_reads, trace=trace, provider=provider,
+                              turn=turn, arc=arc, cast=cast, scene=scene, npcs=npcs,
+                              horizon=horizon, minutes_now=minutes_now, target=target):
+                return  # one drift response per turn (§3)
+    except Exception:  # noqa: BLE001 — drift is opportunistic; never break the turn
+        logger.warning("drift pass skipped", exc_info=True)
+
+
+def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
+                   provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
+                   npcs: list[str], horizon: float | None, minutes_now: float | None,
+                   target: dict) -> bool:
+    """DRIFT-HANDLING.md §3 R2 steps 2-4: pick a staging via `relocate_pick`
+    (decline on low confidence), move the carrier through the shared
+    carrier-move surface (`mode="relocate"`) IF it must travel, then — ONLY
+    after a confirmed commit (or no move needed at all) — write the
+    relocation receipt and hand back the sanitized briefing directive on
+    `trace.relocate_directive`. An invalid/unconfirmed/declined attempt
+    produces NO directive and NO relocation receipt (only a `relocate_declined`
+    telemetry receipt) — the response declines WHOLE. Returns True iff a
+    relocation was committed (the caller stops there — one drift response
+    per turn)."""
+    if not scene:
+        return False
+    beat_id = target["beat_id"]
+    # The carrier: whoever HOLDS a clue whose surface_fact matches this delivery
+    # target — the SAME cast-blob mapping `_world_tick`'s `_anchored` set and the
+    # ask-candidates assembly already use (holds_clues / surface_fact, cast.py).
+    _citer = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
+    _nodes = list(_citer)
+    fact_key = (target.get("entity"), target.get("attribute"), target.get("value"))
+    holders = [n for _nid, n in _nodes
+              for c in (getattr(n, "holds_clues", ()) or ())
+              if c.surface_fact == fact_key]
+    if not holders:
+        drift.record_relocate_declined(world, turn, beat_id, "no_carrier")
+        return False  # no carrier — the mechanic can't travel (R4's province, D3)
+    present_ids = set(npcs)
+    carrier_node = next((n for n in holders if n.node_id in present_ids), holders[0])
+    try:
+        _chain = p.locate(carrier_node.node_id, as_of=horizon)
+        old_staging = _chain[0] if _chain else (getattr(carrier_node, "location", "") or "")
+    except Exception:  # noqa: BLE001 — a failed locate is not a hazard, just an unknown origin
+        old_staging = getattr(carrier_node, "location", "") or ""
+    present_lines = [n.node_id for _nid, n in _nodes if n.node_id in present_ids]
+    try:
+        pick = cohorts.relocate_pick(provider, target, scene, present_lines, [], arc.protagonist)
+        trace.cohort_calls.append("relocate_pick:cheap")
+    except ProviderError as exc:
+        trace.dropped_cohorts.append(f"relocate_pick ({exc})")
+        drift.record_relocate_declined(world, turn, beat_id, "cohort_error")
+        return False
+    try:
+        confidence = float(pick.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < _RELOCATE_CONFIDENCE_MIN:
+        trace.dropped_cohorts.append("relocate_pick (low confidence)")
+        drift.record_relocate_declined(world, turn, beat_id, "low_confidence")
+        return False
+    from construct.arc.generator import _sanitize_hook
+    staging_line = _sanitize_hook(str(pick.get("staging_line") or ""))
+    if not staging_line:
+        trace.dropped_cohorts.append("relocate_pick (sanitized empty)")
+        drift.record_relocate_declined(world, turn, beat_id, "sanitized_empty")
+        return False
+    carrier = str(pick.get("carrier") or carrier_node.node_id)
+    if carrier not in present_ids:
+        # The carrier must travel — commit BEFORE the directive (§3 R2 step 3):
+        # presence truth moves first, so the narrated arrival matches canon.
+        _companions = frozenset(
+            n for n in (carrier,)
+            if live_reads.state(n, "accompanying") == arc.protagonist)
+        policy = CarrierMovePolicy(mode="relocate", scene=scene, protagonist=arc.protagonist,
+                                   companions=_companions, anchored=frozenset(), horizon=horizon)
+        result = commit_carrier_move(world, carrier, scene, turn, policy)
+        if not result.confirmed:
+            trace.dropped_cohorts.append(f"relocate commit ({result.reason})")
+            drift.record_relocate_declined(world, turn, beat_id, result.reason or "unconfirmed")
+            return False  # invalid/unconfirmed move → NO directive, NO receipt (§3 R2 step 3)
+    trace.drift.append((beat_id, "D-SOFT"))
+    trace.relocations.append((beat_id, scene))
+    drift.mark_relocation(world, beat_id, old_staging, scene, turn)
+    _mark_development(world, minutes_now, turn)
+    trace.relocate_directive = (
+        f"RELOCATION (render diegetically — the mechanic arrives HERE now; never "
+        f"announce it as arranged, never reveal more than the moment): {staging_line}")
+    return True
 
 
 def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
@@ -4097,6 +4356,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         trace.beats_closed += sa_closed
         trace.reveals += sa_rev
 
+    # ---- DRIFT-HANDLING D1 (§4): AFTER beat_pass (this turn's closures known),
+    # BEFORE the main-arc lifecycle read below — a same-turn closure of a
+    # required beat must get its response before a terminal/fallout escapes.
+    # Side arcs are OUT OF SCOPE this slice (D1 §7 note above `_drift_pass`).
+    # `rung` here is a SEPARATE sustained-quiet read (`drift.rung_from_counters`)
+    # from the turn's own pacing `rung` (computed later, after `diff` exists,
+    # itself after the lifecycle read this step must precede) — see
+    # construct/arc/drift.py's `rung_from_counters` docstring.
+    _drift_minutes = float(_clock.minutes) if _clock else None
+    _drift_rung = drift.rung_from_counters(counters_from_session(live_reads, arc))
+    _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
+               turn=turn, arc=arc, cast=cast, scene=scene, npcs=npcs,
+               horizon=_h, minutes_now=_drift_minutes, rung=_drift_rung)
+
     # ---- PINNED AWARENESS (PINNED-AWARENESS spec; reviews 060/062/063) ---
     # One awareness coordinate for the WHOLE assembly (Kernos 060 #2 / Cx #2):
     # region ancestry (the turn's current chain), the scene's present entities,
@@ -4690,24 +4963,40 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     nudge_directive = None
     # Card weaving (CARD-WEAVING.md) SUBSUMES the legacy thread-nudge for cast worlds (Cx
     # 039 #2) — don't double-fire. The nudge remains for pillar/cast-less worlds.
-    if rung and threads and not cast and not _grounding_runway:
+    # DRIFT-HANDLING D1 R1 tuning (§3 R1): the diegetic cadence gate (NUDGE_QUIET_MIN,
+    # deliberately distinct from RELOCATE_QUIET_MIN — cr r2 oracle gap 7) reads off the
+    # SAME `_clock.minutes` the ambient trigger uses; no clock → never suppressed (turns
+    # are free — a clockless world simply keeps its pre-D1 nudge cadence).
+    _nudge_minutes = float(_clock.minutes) if _clock else None
+    if rung and threads and not cast and not _grounding_runway \
+            and not drift.nudge_suppressed(live_reads, _nudge_minutes):
+        _excl_thread = drift.last_nudge_thread(live_reads)
         try:
             with _phase(trace, "nudge"):
                 pick = cohorts.nudge_pick(provider, rung.value, threads,
-                                          "\n".join(scene_lines), arc.protagonist)
+                                          "\n".join(scene_lines), arc.protagonist,
+                                          exclude=_excl_thread or "")
                 trace.cohort_calls.append("nudge_pick:cheap")
                 # Deterministic player-boundary guard (letter 025): a
                 # directive that names the protagonist is re-asked once,
                 # then DROPPED (fail-open) — pressure, never puppetry.
                 if names_protagonist(pick["directive"], arc.protagonist):
                     pick = cohorts.nudge_pick(provider, rung.value, threads,
-                                              "\n".join(scene_lines), arc.protagonist)
+                                              "\n".join(scene_lines), arc.protagonist,
+                                              exclude=_excl_thread or "")
                     trace.cohort_calls.append("nudge_pick:cheap(re-ask)")
             if names_protagonist(pick["directive"], arc.protagonist):
                 trace.dropped_cohorts.append("nudge (named the protagonist twice)")
+            elif _excl_thread and pick.get("thread") == _excl_thread:
+                # No re-preach (§3 R1 point 1): the SAME thread twice running — drop it,
+                # never re-preach an unchanged situation (proportion ruling). A prompt
+                # instruction alone is not a guarantee; this is the hard structural guard.
+                trace.dropped_cohorts.append("nudge (repeated thread)")
             else:
                 nudge_directive = pick["directive"]
                 trace.nudge = nudge_directive
+                if _nudge_minutes is not None:
+                    drift.mark_nudge(world, str(pick.get("thread") or ""), _nudge_minutes, turn)
         except ProviderError as exc:
             trace.dropped_cohorts.append(f"nudge_pick ({exc})")
 
@@ -5317,6 +5606,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "them is going there or sending word, never their sudden appearance.")
     if nudge_directive:
         briefing_parts.append(f"\nPACING DIRECTIVE (weave in diegetically): {nudge_directive}")
+    if trace.relocate_directive:
+        # DRIFT-HANDLING D1 (§3 R2 step 3): emitted ONLY after a confirmed carrier-move
+        # commit (or no move needed at all) — presence truth already moved, so this
+        # directive can never contradict canon.
+        briefing_parts.append(f"\n{trace.relocate_directive}")
     if _grounding_runway and not (trace.clocks_fired or trace.beats_achieved
                                   or trace.terminal or trace.concluded):
         # ...unless a hand-authored turn-1 clock/beat/terminal genuinely fired — then the story

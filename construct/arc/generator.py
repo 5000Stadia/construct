@@ -70,6 +70,11 @@ ROUTINE_EVENT_KINDS: frozenset[str] = frozenset({
     "turn", "player_action", "arc_touch", "arc_terminal", "arc_won",
     "arc_lost", "generation_attempt", "generation_declined", "conclusion",
     "commitment", "seal_incoherence",
+    # DRIFT-HANDLING D1 (§5): the relocation receipt/decline are host bookkeeping,
+    # same footing as generation_attempt/generation_declined — never a salient
+    # "first-time kind" or ripple source on their own (a same-turn relocation
+    # must not itself wake the opportunistic generator).
+    "relocation_receipt", "relocate_declined",
 })
 
 #: Diegetic-minute quiet threshold for the ambient trigger (§C, P2c).

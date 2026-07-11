@@ -2979,12 +2979,20 @@ def world_tick(provider: Provider, members: list, places: list, elapsed_note: st
 
 
 def nudge_pick(provider: Provider, rung: str, threads: list[str], scene: str,
-               protagonist: str) -> dict:
+               protagonist: str, exclude: str = "") -> dict:
+    """`exclude` (DRIFT-HANDLING.md §3 R1 point 1, no re-preach): the thread
+    surfaced by the LAST nudge, if any — the caller still hard-guards the
+    returned `thread` against it (a prompt instruction is not a guarantee),
+    but naming it here lets the model route toward a DIFFERENT thread instead
+    of just re-picking and getting dropped."""
+    _excl = (f"\n\nDO NOT pick this thread again — it was surfaced last time and nothing "
+             f"has changed about it (an unchanged situation earns no fresh tableau): "
+             f"{exclude!r}" if exclude else "")
     return complete_sync(provider,
         f"You are a story navigator. Escalation rung: {rung}.\n"
         f"Unwalked story threads (the player has not seen these):\n"
         + "\n".join(f"- {t}" for t in threads)
-        + f"\n\nCURRENT SCENE:\n{scene}\n\n{player_constraint(protagonist)}\n\n"
+        + f"\n\nCURRENT SCENE:\n{scene}\n\n{player_constraint(protagonist)}{_excl}\n\n"
         f"RULE OF COOL — pick the ONE thread that is BOTH the most interesting AND the most "
         f"RELEVANT to what the player is engaging in this scene (route by what their attention "
         f"is on; nudge toward the richest thread that logically connects to it). Never nudge "
@@ -2994,6 +3002,59 @@ def nudge_pick(provider: Provider, rung: str, threads: list[str], scene: str,
         f"to leave, surface a record) — never what the player does, says, feels, or decides. "
         f"Pressure, not puppetry.",
         NUDGE_SCHEMA, tier="cheap", task="ndg")
+
+
+#: DRIFT-HANDLING.md §3 R2 step 2 — the relocate cohort's output schema, the
+#: `nudge_pick` shape (a pick + a confidence): the CARRIER (who delivers the
+#: mechanic here), the STAGING LINE (how it arrives, diegetically), and a
+#: confidence the caller declines on when low (relocation must feel
+#: inevitable, not conjured).
+RELOCATE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "carrier": {"type": "string",
+                    "description": "the person id who delivers the mechanic here — the "
+                                   "original holder if they can plausibly be here, or "
+                                   "one of PRESENT verbatim"},
+        "staging_line": {"type": "string",
+                         "description": "ONE line: HOW the mechanic arrives at the "
+                                        "player's current scene, diegetically — never "
+                                        "the hidden answer itself, only the moment"},
+        "confidence": {"type": "number",
+                       "description": "0.0-1.0 — how inevitable this staging feels; "
+                                      "LOW if nothing here plausibly carries it"},
+    },
+    "required": ["carrier", "staging_line", "confidence"],
+}
+
+
+def relocate_pick(provider: Provider, target: dict, scene: str, present: list[str],
+                  fuel: list[str], protagonist: str) -> dict:
+    """DRIFT-HANDLING.md §3 R2 step 2: a beat IS its plot mechanic, decoupled from
+    its staging (founder principle) — this proposes WHERE/HOW the beat's delivery
+    target arrives at the player's CURRENT scene. `target` carries only the fact's
+    entity/attribute (the mechanic's SHAPE), never its value (the hidden answer —
+    concealment guard: the carrier may only ever say what interviewing would
+    reveal, never handed the answer directly here). `fuel` is the turn's
+    `salient_moments` read ('what just changed + who is positioned to care' — the
+    exact read the LWG P2 spec reserved for this consumer)."""
+    _fuel = "\n".join(f"- {f}" for f in fuel) or "(nothing notably salient this turn)"
+    _present = "\n".join(f"- {p}" for p in present) or "(no one of note present)"
+    return complete_sync(provider,
+        f"A story thread has stalled — the player hasn't reached a development that "
+        f"needs to happen. THE MECHANIC (what must land here — this names only WHAT "
+        f"kind of fact, never the answer; do not invent or reveal a value for it):\n"
+        f"  {target.get('entity', '')} · {target.get('attribute', '')}\n\n"
+        f"THE PLAYER'S CURRENT SCENE: {scene}\n\n"
+        f"PRESENT (who could plausibly carry this here):\n{_present}\n\n"
+        f"WHAT JUST HAPPENED (fuel for why NOW, not before):\n{_fuel}\n\n"
+        f"{player_constraint(protagonist)}\n\n"
+        f"Propose the CARRIER — a present person if the fiction plausibly puts them "
+        f"here, else the original holder (who will need to travel) — and ONE staging "
+        f"line for how the mechanic arrives HERE, inevitable rather than conjured "
+        f"(the moment, never the answer). If nothing here plausibly carries it, say so "
+        f"with a LOW confidence rather than forcing it.",
+        RELOCATE_SCHEMA, tier="cheap", task="rlc")
 
 
 def weave_pick(provider: Provider, scene: str, cards: list[str], floor_debt: list[str],
