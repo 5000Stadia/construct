@@ -1,16 +1,16 @@
 # Drift Handling — when the player leaves the road (spec)
 
-**Status:** SPEC r3 — cx r1 RED (`<d645fd14…>`, six contract gaps) FOLDED in
-r2; cr r2 full-review RED (`<13680dcb…>`, four blockers + witness precision
-+ two oracle gaps) FOLDED here: the canonical supersession RESOLVER
-redirecting membership, the climax id tuple, AND `BeatAchieved` evaluation
-(§3 R4); reads-backed overlay for `arc_cache`/live-arc coherence (§3 R4);
-the durable callback pending/consumed contract (§3 R3); the carrier-move
-policy split with receipt confirmation (§3 R2); witness per-shape semantics
-+ exact clock-firing event id + the `clock:<id>/on_expiry` home (§2); the
-call-order spy oracle (§4); the two-constant nudge/drift cadence (§3 R1).
-For cr re-review, then phased build (task number TBD; the headline design
-item after LWG P2). The founder's captured
+**Status:** SPEC r4 — cx r1 RED folded in r2 (`<d645fd14…>`); cr r2 RED
+folded in r3 (`<13680dcb…>`); cr r3 RED (`<9f215bcb…>`: points 4/6/7 GREEN,
+5 materially closed) FOLDED here: the FULL runtime `arc.beats` consumer
+sweep with Session-scope refresh after repair (§3 R4); the additive
+per-beat serializer pair `beat_to_items`/`beat_from_reads` replacing the
+contradictory whole-arc emitters (§3 R4); callback `affected` pinned
+`value_type="literal"` with all-or-empty parse + real-adapter restart
+oracle (§3 R3); `BeatAchieved` arc context via the beat's persisted
+`part_of` row; `ClockFired(n)` causal firing = the horizon-visible
+threshold-crossing event ordered by time then id (§2). For cr re-review,
+then phased build. The founder's captured
 4-part design (2026-06-22, extended 2026-06-24 with relocate-the-beat): *"If
 the player ignores the established call to action, GENTLE nudges back to the
 primary narrative help — nothing heavy-handed. If I skip the important meeting
@@ -104,7 +104,10 @@ witness of the closing evaluation:
 - **for each TRUE `ClockFired` leaf, the exact causal clock-firing EVENT id
   captured at evaluation time** (not just the atom's clock id) — so
   `moment_missed.caused_by` can never select the wrong firing of a
-  repeated/multiple clock;
+  repeated/multiple clock. For `ClockFired(n)` (threshold shapes), the
+  causal firing is DEFINED as the horizon-visible event that made the
+  threshold true, ordered by event time then id — never an arbitrary
+  matching event (cr r3 point 4);
 - per-shape semantics, pinned by unit test: `AnyOf` records the TRUE
   branch leaves; `AllOf` records all leaves; `AtLeast(n)` records the
   satisfied leaves; `Not` records the negated subtree's evaluation;
@@ -282,14 +285,19 @@ contradictory and promised a salience path that does not exist):
    delay, and a bare event encodes no target matching or once-only rule):
    `drift_pass` persists a callback row set in `session:` —
    `callback:moment_missed_<slug>` with `affected` (JSON id list: the
-   staged scene + its cast), `directive` (sanitized), `status=pending`,
-   `caused_by` = the moment_missed event, `valid_from=turn_time(turn)`.
+   staged scene + its cast, **pinned `value_type="literal"`** — cr r3
+   blocker 3: untyped JSON is identity-classified/reconciled by arc IO and
+   can be silently dropped at scale, leaving status/directive alive but the
+   target match gone; the read side is an all-or-empty validated parse),
+   `directive` (sanitized), `status=pending`, `caused_by` = the
+   moment_missed event, `valid_from=turn_time(turn)`.
    Briefing assembly scans PENDING callbacks each turn (horizon-safe
    `frame_facts` read as-of `_h`); when the current scene or present cast
    intersects `affected`, the directive surfaces THAT turn
    (newspaper-front-page ruling: minor is fine, FELT is the point — never
    an announcement) and `status` is superseded to `surfaced` — once-only by
-   construction. Tests: delayed touch AFTER restart surfaces exactly once;
+   construction. Tests: delayed touch AFTER restart surfaces exactly once —
+   through the REAL ingestor and read adapter, not a fake fold (cr r3);
    unrelated scenes stay silent; a surfaced callback never re-fires. There
    is NO reliance on a caused_by reader over fact rows — none exists.
 4. **`moment_missed` IS routine.** It joins `ROUTINE_EVENT_KINDS` (host
@@ -325,8 +333,18 @@ becomes literally true:
    a COMPLETE graph-membership contract per cr r2 blockers 1-2).** The
    monotonic-membership shape that fixed the portfolio (#111) applied to
    beats:
-   - the replacement beat's items + index rows commit into `plot:` (the
-     `arc_to_items`/`index_items` per-beat shapes);
+   - the replacement beat commits via a NEW additive per-beat pair (cr r3
+     blocker 2 — today `arc_to_items(arc)` emits the WHOLE arc and
+     `index_items(arc)` REWRITES the whole `beat_index`; no per-beat
+     serializer exists, so citing them contradicted the never-rewrite
+     rule): `beat_to_items(replacement, arc_id)` emits ONLY the new beat's
+     rows into `plot:`, and `beat_from_reads(reads, beat_id)` materializes
+     a `Beat` from them. The supersession row's target id is the DISCOVERY
+     pointer; the sealed `beat_index` is never written. `active_beats`
+     materializes replacements through `beat_from_reads` on BOTH load paths
+     (frame reconstruction and legacy `arc_cache`), including same-turn
+     use. Pinned: committing a replacement re-emits NO unrelated
+     beat/status/index rows;
    - one **supersession row** — `arc:<arc_id>` /
      `beat_superseded_<old_beat_slug>` = `<new_beat_id>`,
      `valid_from=turn_time(turn)` — the durable pointer. The sealed
@@ -347,7 +365,27 @@ becomes literally true:
        rewritten);
      * **`BeatAchieved` evaluation** — the condition evaluator resolves the
        referenced id before reading status, so a downstream
-       `achievable_via=BeatAchieved(old)` observes the replacement.
+       `achievable_via=BeatAchieved(old)` observes the replacement. **Arc
+       context (cr r3 point 4):** `BeatAchieved` carries no arc_id and
+       `evaluate()` has no arc context — the evaluator derives the arc from
+       the referenced beat's persisted `part_of` row (a defined lookup, not
+       an ad-hoc global scan), threaded via the resolver parameter.
+   - **The FULL runtime consumer sweep (cr r3 blocker 1 — the three
+     enumerated consumers were not enough; direct `arc.beats` reads exist
+     across the host).** D3 classifies EVERY `arc.beats` reader and routes
+     the RUNTIME ones through `active_beats`/the resolver:
+     * runtime, must resolve: `current_phase` (reads-aware),
+       `arc_protected_keys`, `arc_entities`, the turnloop pin-progress
+       read, `_world_tick` protected expressions, generator preflight,
+       Session concealment/scope assembly, the remembrancer's beat reads,
+       cast delivery-target assembly (`beat_delivery_targets`);
+     * authoring-only (sealed reads stay): build/seal-time serialization
+       and lint over the authored arc.
+     **Live `Session` scope refreshes after a committed repair** — the
+     replacement route's referents must enter `_scope` the same turn, or
+     the repaired route is persisted yet unrenderable. Oracles:
+     replacement-only referents become scoped AND protected;
+     superseded-only referents stop driving phase, protection, and scope.
    - **Cache/restart coherence (cr blocker 2):** supersessions are NEVER
      baked into an `Arc` object — the sealed arc stays immutable and the
      overlay is READS-BACKED at the resolver/accessor layer. That makes the
