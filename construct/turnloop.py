@@ -701,6 +701,8 @@ class TurnTrace:
     absence_consequences: list = field(default_factory=list)  # DRIFT-HANDLING D2: (moment_event_id, committed_row_count) this turn
     absence_callback: str = ""  # DRIFT-HANDLING D2 debug: the sanitized deferred callback line
     callbacks: list = field(default_factory=list)  # DRIFT-HANDLING D2: callback entities SURFACED into the briefing this turn
+    repairs: list = field(default_factory=list)  # DRIFT-HANDLING D3: (old_beat_id, new_beat_id, mode) committed this turn
+    repair_directive: str = ""  # DRIFT-HANDLING D3 debug: the sanitized new-route hook
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -2253,18 +2255,24 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 continue
             if live_reads.state(b.beat_id, "status", frame=PLOT) != "closed":
                 continue
-            if drift.moment_receipt(live_reads, b.beat_id):
-                continue  # once per beat (§3 R3) — already processed
             witness = drift.read_closure_witness(live_reads, b.beat_id)
             cls = drift.classify_closure(witness)
             trace.drift.append((b.beat_id, cls))
-            if cls != "D-MISSED":
-                continue  # D-HARD is D3's (repair) — classified, recorded, no response
-            if _absence_beat(world, p, live_reads=live_reads, trace=trace,
-                             provider=provider, turn=turn, arc=arc, cast=cast,
-                             scene=scene, npcs=npcs, horizon=horizon,
-                             minutes_now=minutes_now, beat=b,
-                             witness=witness or {}, spines=spines or {}):
+            if cls == "D-MISSED" and not drift.moment_receipt(live_reads, b.beat_id):
+                # R3 first (§3: the consequence lands before the road adapts).
+                if _absence_beat(world, p, live_reads=live_reads, trace=trace,
+                                 provider=provider, turn=turn, arc=arc, cast=cast,
+                                 scene=scene, npcs=npcs, horizon=horizon,
+                                 minutes_now=minutes_now, beat=b,
+                                 witness=witness or {}, spines=spines or {}):
+                    return  # one drift response per turn (§3)
+                continue  # R3 declined — retry it before any repair of this beat
+            # D-HARD, or D-MISSED whose consequence already landed → R4 (§3):
+            # re-open when the mechanic can travel, else a replacement route.
+            if _repair_beat(world, p, live_reads=live_reads, trace=trace,
+                            provider=provider, turn=turn, arc=arc, cast=cast,
+                            scene=scene, npcs=npcs, horizon=horizon,
+                            minutes_now=minutes_now, beat=b, cls=cls):
                 return  # one drift response per turn (§3)
         # ---- D1 (§3 R2): D-SOFT relocation, gated on rung + diegetic quiet.
         if not cast:
@@ -2676,6 +2684,155 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     except Exception:  # noqa: BLE001 — fail-open; the directive stands
         logger.warning("_mark_development (relocation) failed", exc_info=True)
         trace.dropped_cohorts.append("_mark_development (relocation) failed")
+    return True
+
+
+def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
+                 provider: Any, turn: int, arc: Arc, cast: Any, scene: str | None,
+                 npcs: list[str], horizon: float | None, minutes_now: float | None,
+                 beat: Any, cls: str) -> bool:
+    """DRIFT-HANDLING.md §3 R4: the alternative path. Budget-gated
+    (REPAIR_BUDGET per arc; a committed repair — replace OR re-open — spends
+    one; at zero this declines `budget_exhausted` and `_repair_exhausted`
+    completes the incompletable rule). Two modes:
+
+    RE-OPEN (D-MISSED whose consequence landed, when the mechanic can still
+    travel — it has a delivery target with a licensed carrier): the closed
+    `status` row is superseded back to `pending` (receipt-CONFIRMED — the
+    re-open IS the repair), charged, and the ordinary D-SOFT machinery
+    re-stages it on later turns (one machinery, composed — never a second
+    relocation path here).
+
+    REPLACE (D-HARD, or an untravelable D-MISSED): the `repair_arc` cohort
+    proposes ONE compact route in the generate_arc beat mold; the HOST builds
+    the Beat (the dead beat's phase + weight inherited, a fresh `_rN` id, the
+    condition from `_beat_expr`'s exact shapes), hard-gates it (player_learns
+    referents allowlisted; `lint_post_repair`'s novelty check against live
+    canon), commits `beat_to_items` + the supersession pointer as ONE
+    receipt-CONFIRMED batch, and only then sets the trace/directive and
+    charges the budget. Declines are telemetry, never a lock."""
+    beat_id = beat.beat_id
+    spent = drift.repair_spent(live_reads, arc.arc_id)
+    if spent >= drift.REPAIR_BUDGET:
+        drift.record_repair_declined(world, turn, beat_id, "budget_exhausted")
+        return False
+    # ---- RE-OPEN: the D-MISSED pairing (§3 R2 step 5 / R4).
+    if cls == "D-MISSED":
+        targets = {t["beat_id"]: t
+                   for t in beat_delivery_targets(active_beats(live_reads, arc))}
+        target = targets.get(beat_id)
+        holders: list = []
+        if target is not None and cast:
+            _citer = cast.items() if hasattr(cast, "items") else [(n.node_id, n) for n in cast]
+            fact_key = (target.get("entity"), target.get("attribute"), target.get("value"))
+            holders = [n for _nid, n in _citer
+                       for c in (getattr(n, "holds_clues", ()) or ())
+                       if c.surface_fact == fact_key]
+        if holders:
+            reopen_row = [{"entity": beat_id, "attribute": "status",
+                           "value": "pending", "valid_from": turn_time(turn)}]
+            try:
+                receipt = world.porcelain.ingest_structured(reopen_row, frame=PLOT)
+                ok = bool(confirmed_batch(reopen_row, _receipt_rows(receipt), cap=1)[0])
+            except Exception:  # noqa: BLE001
+                ok = False
+            if not ok:
+                drift.record_repair_declined(world, turn, beat_id, "reopen_unconfirmed")
+                return False
+            trace.repairs.append((beat_id, beat_id, "reopen"))
+            try:
+                drift.mark_repair(world, arc.arc_id, beat_id, beat_id, "reopen", turn)
+            except Exception:  # noqa: BLE001 — the re-open stands; budget may undercount
+                logger.warning("mark_repair (reopen) failed", exc_info=True)
+                trace.dropped_cohorts.append("mark_repair (reopen) failed")
+            if minutes_now is not None:
+                try:
+                    _mark_development(world, minutes_now, turn)
+                except Exception:  # noqa: BLE001
+                    trace.dropped_cohorts.append("_mark_development (repair) failed")
+            return True
+        # no travelable mechanic — fall through to REPLACE.
+    # ---- REPLACE: a new route to the same destination.
+    dest_desc = (f"{getattr(beat.achievable_via, 'entity', beat_id)} · "
+                 f"{getattr(beat.achievable_via, 'attribute', 'delivery')}")
+    known = sorted(({scene} if scene else set()) | set(npcs)
+                   | {n.node_id for n in
+                      (cast.values() if hasattr(cast, 'values') else cast or [])}
+                   | ({getattr(beat.achievable_via, 'entity', None)} - {None}))
+    try:
+        threads = []  # live threads are optional enrichment; keep the call lean in D3
+        pick = cohorts.repair_arc(provider, beat_id, dest_desc, known, threads,
+                                  arc.protagonist)
+        trace.cohort_calls.append("repair_arc:cheap")
+    except ProviderError as exc:
+        trace.dropped_cohorts.append(f"repair_arc ({exc})")
+        drift.record_repair_declined(world, turn, beat_id, "cohort_error")
+        return False
+    try:
+        confidence = float(pick.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence < _RELOCATE_CONFIDENCE_MIN:
+        drift.record_repair_declined(world, turn, beat_id, "low_confidence")
+        return False
+    from construct.arc.generator import _sanitize_hook
+    hook = _sanitize_hook(str(pick.get("hook") or ""))
+    kind = str(pick.get("kind") or "")
+    entity = str(pick.get("entity") or "")
+    if not hook or not entity or kind not in ("player_learns", "event_occurs"):
+        drift.record_repair_declined(world, turn, beat_id, "nothing_grounded")
+        return False
+    if kind == "player_learns":
+        if entity not in known:
+            drift.record_repair_declined(world, turn, beat_id, "unlicensed_referent")
+            return False
+        from construct.arc.conditions import InFrame
+        cond = InFrame(f"knows:{arc.protagonist}",
+                       entity, str(pick.get("attribute") or ""),
+                       str(pick.get("value") or ""))
+    else:
+        from construct.arc.conditions import Occurred
+        cond = Occurred(re.sub(r"[^a-z0-9_]+", "_", entity.lower()).strip("_") or "x")
+    slug = beat_id.split(":", 1)[-1]
+    new_id = f"beat:{slug}_r{spent + 1}"
+    from construct.arc.grammar import Beat as _Beat
+    replacement = _Beat(new_id, beat.phase, beat.weight, achievable_via=cond)
+    from construct.arc.lint import lint_post_repair
+    findings = lint_post_repair([replacement], live_reads)
+    if findings:
+        drift.record_repair_declined(
+            world, turn, beat_id, f"lint:{findings[0].rule}")
+        return False
+    from construct.arc.io import beat_to_items
+    rows = beat_to_items(replacement, arc.arc_id) + [
+        {"entity": arc.arc_id, "attribute": f"beat_superseded_{slug}",
+         "value": new_id, "valid_from": turn_time(turn), "frame": PLOT},
+    ]
+    try:
+        receipt = world.porcelain.ingest_structured(rows)
+        confirmed, _ = confirmed_batch(rows, _receipt_rows(receipt), cap=len(rows))
+        ok = len(confirmed) == len(rows)
+    except Exception:  # noqa: BLE001
+        ok = False
+    if not ok:
+        drift.record_repair_declined(world, turn, beat_id, "commit_unconfirmed")
+        return False
+    # the CONFIRMED replacement licenses the response (the D1 discipline):
+    # trace + directive first, then individually fail-open bookkeeping.
+    trace.repairs.append((beat_id, new_id, "replace"))
+    trace.repair_directive = (
+        f"A NEW ROAD OPENS (render diegetically — the route arrives in the "
+        f"world's own voice, never as an announcement): {hook}")
+    try:
+        drift.mark_repair(world, arc.arc_id, beat_id, new_id, "replace", turn)
+    except Exception:  # noqa: BLE001
+        logger.warning("mark_repair failed (repair stands)", exc_info=True)
+        trace.dropped_cohorts.append("mark_repair failed")
+    if minutes_now is not None:
+        try:
+            _mark_development(world, minutes_now, turn)
+        except Exception:  # noqa: BLE001
+            trace.dropped_cohorts.append("_mark_development (repair) failed")
     return True
 
 
@@ -6006,6 +6163,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "them is going there or sending word, never their sudden appearance.")
     if nudge_directive:
         briefing_parts.append(f"\nPACING DIRECTIVE (weave in diegetically): {nudge_directive}")
+    if trace.repair_directive:
+        # DRIFT-HANDLING D3 (§3 R4): emitted ONLY after the replacement batch
+        # receipt-confirmed — the new route exists in plot truth before the
+        # narrator seeds it.
+        briefing_parts.append(f"\n{trace.repair_directive}")
     if trace.relocate_directive:
         # DRIFT-HANDLING D1 (§3 R2 step 3): emitted ONLY after a confirmed carrier-move
         # commit (or no move needed at all) — presence truth already moved, so this

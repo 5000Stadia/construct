@@ -3130,6 +3130,61 @@ def absence_consequence(provider: Provider, target: dict, staged_scene: str,
         ABSENCE_SCHEMA, tier="cheap", task="abs")
 
 
+#: DRIFT-HANDLING.md §3 R4 — the repair cohort's output schema (the
+#: generate_arc beat mold, ONE beat): the host inherits the dead beat's phase
+#: and weight, builds the condition itself from this compact proposal, and
+#: gates everything through lint_post_repair + the known-ids allowlist.
+REPAIR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "kind": {"type": "string", "enum": ["player_learns", "event_occurs"],
+                 "description": "the replacement mechanic's class — player_learns: "
+                                "a fact entering the player frame; event_occurs: a "
+                                "world event the player can cause/witness"},
+        "entity": {"type": "string",
+                   "description": "player_learns: a fact/entity id from AVAILABLE "
+                                  "IDS; event_occurs: a short event kind slug"},
+        "attribute": {"type": "string", "description": "player_learns only; else ''"},
+        "value": {"type": "string", "description": "player_learns only; else ''"},
+        "hook": {"type": "string",
+                 "description": "ONE diegetic sentence the narrator can render as "
+                                "the NEW route opening in the scene — concrete, in "
+                                "the world's voice, never a system announcement, no "
+                                "entity ids"},
+        "confidence": {"type": "number",
+                       "description": "0.0-1.0 — how grounded this route is; LOW if "
+                                      "no honest route survives"},
+    },
+    "required": ["kind", "entity", "attribute", "value", "hook", "confidence"],
+}
+
+
+def repair_arc(provider: Provider, dead_beat: str, destination: str,
+               known_ids: list[str], threads: list[str], protagonist: str) -> dict:
+    """DRIFT-HANDLING.md §3 R4 step 2: propose ONE replacement route to the
+    SAME narrative destination after a path was foreclosed. The host inherits
+    phase/weight from the dead beat, constructs the condition, and hard-gates
+    the proposal (lint_post_repair's novelty check + the allowlist) — this
+    prompt informs, it never licenses."""
+    _ids = ", ".join(known_ids)
+    _threads = "\n".join(f"- {t}" for t in threads) or "(none live)"
+    return complete_sync(provider,
+        f"A story path has been FORECLOSED — the route died, the destination must "
+        f"not: propose ONE new way the story can still reach it.\n\n"
+        f"THE DEAD ROUTE (what was foreclosed — never resurrect its trigger): "
+        f"{dead_beat}\n"
+        f"THE DESTINATION (what the story still turns on — the mechanic's shape, "
+        f"never invent or reveal a hidden value): {destination}\n\n"
+        f"LIVE THREADS (what the road could run through now):\n{_threads}\n\n"
+        f"AVAILABLE IDS (a player_learns proposal referencing ANY other id is "
+        f"discarded): {_ids}\n\n"
+        f"{player_constraint(protagonist)}\n\n"
+        f"Propose the replacement mechanic + ONE hook line for how the new route "
+        f"OPENS — inevitable, grounded in what survives, never a reset of what "
+        f"died. If no honest route survives, say so with LOW confidence.",
+        REPAIR_SCHEMA, tier="cheap", task="rpr")
+
+
 def weave_pick(provider: Provider, scene: str, cards: list[str], floor_debt: list[str],
                momentum: str, protagonist: str) -> dict:
     """The story-governance call (CARD-WEAVING.md / Cx 039): given the live scene + the

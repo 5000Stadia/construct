@@ -1059,13 +1059,19 @@ def test_absence_beat_commits_event_consequences_and_callback(world):
     # the callback is pending and target-matched to the staged scene + holder
     cbs = drift.pending_callbacks(world)
     assert cbs and set(cbs[0]["affected"]) >= {"person:aldous"}
-    # once per beat: a second pass classifies nothing and re-fires nothing
+    # once per beat for R3 — a second pass never re-fires the absence; under
+    # D3 the receipted D-MISSED beat composes forward into R4's RE-OPEN (the
+    # mechanic can travel: the holder still exists), charging the budget.
     trace2 = TurnTrace(turn=6)
     _drift_pass(world, world.porcelain, live_reads=reads, trace=trace2,
                provider=StubProvider([]), turn=6, arc=arc, cast=_absence_cast(),
                scene=SCENE, npcs=[], horizon=None, minutes_now=None,
                rung=None, fuel=[], spines={})
-    assert trace2.drift == [] and trace2.absence_consequences == []
+    assert trace2.absence_consequences == []              # R3 fired once, ever
+    assert trace2.repairs == [("beat:discover", "beat:discover", "reopen")]
+    assert world.porcelain.state("beat:discover", "status",
+                                 frame=PLOT)["fact"]["value"] == "pending"
+    assert drift.repair_spent(reads, "arc:main") == 1
 
 
 def test_absence_all_unauthorized_subjects_decline_whole(world):
@@ -1883,3 +1889,134 @@ def test_unmaterializable_replacement_fails_open_to_the_sealed_beat(world):
     _supersede(world, "arc:main", "discover", "beat:ghost")  # no rows for beat:ghost
     live = [b.beat_id for b in active_beats(PorcelainWorldReads(world), arc)]
     assert live == ["beat:discover"]                       # never crash, never vanish
+
+
+# ============================================================================
+# 6. D3 stage 2 — the repair pass (replace / re-open / budget / call order)
+# ============================================================================
+
+def _dhard_arc():
+    """A required beat foreclosed by WORLD-STATE (no clock): D-HARD."""
+    arc = make_arc()
+    beat = replace(arc.beats[0],
+                   unreachable_if=StateIs("person:rival", "role", "dead"))
+    return replace(arc, beats=(beat,))
+
+
+def _close_dhard(world, arc):
+    world.porcelain.ingest_structured([
+        {"entity": "person:rival", "attribute": "role", "value": "dead"},
+    ])
+    reads = PorcelainWorldReads(world)
+    _a, closed, _r = beat_pass(world, arc, reads, turn=4)
+    assert closed == [arc.beats[0].beat_id]
+    return reads
+
+
+def test_repair_replace_commits_supersession_and_directive(world):
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([
+        {"kind": "player_learns", "entity": "fact:secret", "attribute": "culprit",
+         "value": "person:rival",
+         "hook": "A clerk from the assizes arrives asking after the same shortfall.",
+         "confidence": 0.9},
+    ])
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert ("beat:discover", "D-HARD") in trace.drift
+    assert trace.repairs == [("beat:discover", "beat:discover_r1", "replace")]
+    assert "clerk from the assizes" in trace.repair_directive
+    # the replacement is live through every structural read
+    live = [b.beat_id for b in active_beats(reads, arc)]
+    assert live == ["beat:discover_r1"]
+    from construct.arc.executor import _required_unreachable
+    assert not _required_unreachable(reads, arc)          # repaired, not foreclosed
+    assert drift.repair_spent(reads, "arc:main") == 1
+    # achieving the REPLACEMENT satisfies the old climax tuple
+    world.porcelain.ingest_structured([
+        {"entity": "beat:discover_r1", "attribute": "status", "value": "achieved",
+         "valid_from": turn_time(6)}], frame=PLOT)
+    assert climax_ready(reads, arc)
+
+
+def test_repair_unlicensed_referent_and_lint_novelty_decline(world):
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    for stub, reason_frag in (
+        ({"kind": "player_learns", "entity": "fact:invented", "attribute": "x",
+          "value": "y", "hook": "a road", "confidence": 0.9}, "unlicensed"),
+        # low confidence declines before any commit
+        ({"kind": "player_learns", "entity": "fact:secret", "attribute": "culprit",
+          "value": "person:rival", "hook": "a road", "confidence": 0.1}, "low"),
+    ):
+        trace = TurnTrace(turn=5)
+        _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+                   provider=StubProvider([stub]), turn=5, arc=arc,
+                   cast=_rival_cast(), scene=SCENE, npcs=[], horizon=None,
+                   minutes_now=None, rung=None, fuel=[], spines={})
+        assert trace.repairs == [], stub
+        assert drift.repair_spent(reads, "arc:main") == 0
+    live = [b.beat_id for b in active_beats(reads, arc)]
+    assert live == ["beat:discover"]                      # nothing superseded
+
+
+def test_repair_budget_exhaustion_completes_incompletable(world):
+    from construct.arc.executor import arc_lifecycle
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    # spend the whole budget on other repairs (append the charge events directly)
+    drift.mark_repair(world, "arc:main", "beat:x", "beat:x_r1", "replace", 3)
+    drift.mark_repair(world, "arc:main", "beat:y", "beat:y_r1", "replace", 4)
+    assert drift.repair_spent(reads, "arc:main") == drift.REPAIR_BUDGET
+    trace = TurnTrace(turn=5)
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=StubProvider([]), turn=5, arc=arc, cast=_rival_cast(),
+               scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.repairs == []                            # budget_exhausted decline
+    # the incompletable rule completes: required-unreachable AND repair-exhausted
+    assert arc_lifecycle(reads, arc) == "incompletable"
+
+
+def test_repair_budget_remaining_is_never_incompletable(world):
+    from construct.arc.executor import arc_lifecycle
+    arc = _dhard_arc()
+    seed_arc(world, arc)
+    reads = _close_dhard(world, arc)
+    # closed, refusal armed, budget untouched → NOT incompletable (the hard rule)
+    assert arc_lifecycle(reads, arc) == "active"
+
+
+def test_call_order_drift_before_lifecycle_and_fallout(world, monkeypatch):
+    # the cr-required CALL-ORDER spy: within run_turn, _drift_pass runs BEFORE
+    # the main-arc lifecycle read and any fallout emission.
+    import construct.turnloop as tl
+    order: list[str] = []
+    real_drift, real_life = tl._drift_pass, tl.arc_lifecycle
+    monkeypatch.setattr(tl, "_drift_pass",
+                        lambda *a, **k: (order.append("drift"), real_drift(*a, **k))[1])
+    monkeypatch.setattr(tl, "arc_lifecycle",
+                        lambda *a, **k: (order.append("lifecycle"), real_life(*a, **k))[1])
+    real_fallout = tl.emit_fallout
+    monkeypatch.setattr(tl, "emit_fallout",
+                        lambda *a, **k: (order.append("fallout"), real_fallout(*a, **k))[1])
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The room holds its quiet."},
+    ])
+    run_turn(world, arc, provider, "I wait.", turn=2, cast=_rival_cast())
+    assert "drift" in order and "lifecycle" in order
+    assert order.index("drift") < order.index("lifecycle")
+    if "fallout" in order:
+        assert order.index("drift") < order.index("fallout")

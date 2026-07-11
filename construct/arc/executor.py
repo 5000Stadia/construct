@@ -608,14 +608,19 @@ def _required_unreachable(reads: Any, arc: Arc) -> bool:
 
 
 def _repair_exhausted(reads: Any, arc: Arc) -> bool:
-    """Is repair exhausted? **P1 operationalization:** no repair generator exists
-    yet, so "exhausted" == the universal refusal backstop has fired. A freshly-
-    closed required beat with the refusal clock still ARMED is therefore NOT
-    incompletable — the hard rule (PB letter 072 §5): incompletable is repair-
-    exhausted, never first-unreachable. Reserve a `repair_budget` counter here
-    for P2's repair attempts."""
+    """Is repair exhausted? DRIFT-HANDLING D3 completes the P1 reservation:
+    exhausted == the universal refusal backstop has fired, OR the arc's
+    repair BUDGET is spent (committed replace/re-open repairs counted off the
+    `repair_committed` session events). A freshly-closed required beat with
+    budget remaining and the refusal armed is NOT incompletable — the hard
+    rule (PB letter 072 §5): incompletable is repair-EXHAUSTED, never
+    first-unreachable. Note `_required_unreachable` (above) already sees only
+    UNREPAIRED closures — a superseded/reopened beat left the closed set."""
     from construct.arc.conditions import ClockFired
-    return evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE
+    if evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE:
+        return True
+    from construct.arc.drift import REPAIR_BUDGET, repair_spent
+    return repair_spent(reads, arc.arc_id) >= REPAIR_BUDGET
 
 
 def _cancelled(reads: Any, arc: Arc) -> bool:

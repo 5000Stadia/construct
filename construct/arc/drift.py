@@ -523,3 +523,61 @@ def record_relocate_declined(world: Any, turn: int, beat_id: str, reason: str) -
          "valid_from": turn_time(turn)},
     ], frame=SESSION)
     logger.info("drift relocation declined (turn %d, beat %s): %s", turn, beat_id, reason)
+
+
+# ---- D3: the repair budget + receipts (§3 R4) -------------------------------
+
+#: The per-arc repair budget (§3 R4 point 4): committed repairs (replacement
+#: OR re-open) each spend one; at zero the D-HARD/D-MISSED responses decline
+#: `budget_exhausted` and `_repair_exhausted` completes the incompletable rule.
+REPAIR_BUDGET: int = 2
+
+
+def repair_spent(reads: Any, arc_id: str) -> int:
+    """Committed repairs charged against `arc_id` — counted off the
+    `repair_committed` SESSION events (the generator receipt discipline; an
+    event count is append-only truth, never a mutable counter row)."""
+    try:
+        return sum(1 for e in reads.events(kind="repair_committed", frame=SESSION)
+                   if arc_id in e.agents)
+    except Exception:  # noqa: BLE001 — an unreadable ledger spends nothing
+        return 0
+
+
+def mark_repair(world: Any, arc_id: str, beat_id: str, new_beat_id: str,
+                mode: str, turn: int) -> None:
+    """The `repair_committed` charge (§5): one SESSION event per committed
+    repair — `mode` is "replace" (a new beat superseded in) or "reopen" (the
+    D-MISSED pairing: the closed status superseded back to pending)."""
+    slug = beat_id.split(":", 1)[-1]
+    eid = f"event:repair_committed_{slug}_{turn}"
+    world.porcelain.ingest_structured([
+        {"entity": eid, "attribute": "kind", "value": "repair_committed",
+         "valid_from": turn_time(turn)},
+        {"entity": eid, "attribute": "agent", "value": arc_id,
+         "value_type": "entity", "valid_from": turn_time(turn)},
+        {"entity": eid, "attribute": "beat", "value": beat_id,
+         "valid_from": turn_time(turn)},
+        {"entity": eid, "attribute": "replacement", "value": new_beat_id,
+         "valid_from": turn_time(turn)},
+        {"entity": eid, "attribute": "mode", "value": mode,
+         "valid_from": turn_time(turn)},
+    ], frame=SESSION)
+    logger.info("drift repair committed (%s): %s -> %s (arc %s, turn %d)",
+                mode, beat_id, new_beat_id, arc_id, turn)
+
+
+def record_repair_declined(world: Any, turn: int, beat_id: str, reason: str) -> None:
+    """§5 telemetry: the `repair_declined` session receipt — telemetry, never
+    a lock (only a COMMITTED repair spends budget or supersedes anything)."""
+    slug = beat_id.split(":", 1)[-1]
+    eid = f"event:repair_declined_{slug}_{turn}"
+    world.porcelain.ingest_structured([
+        {"entity": eid, "attribute": "kind", "value": "repair_declined",
+         "valid_from": turn_time(turn)},
+        {"entity": eid, "attribute": "beat", "value": beat_id,
+         "valid_from": turn_time(turn)},
+        {"entity": eid, "attribute": "reason", "value": reason,
+         "valid_from": turn_time(turn)},
+    ], frame=SESSION)
+    logger.info("drift repair declined (turn %d, beat %s): %s", turn, beat_id, reason)

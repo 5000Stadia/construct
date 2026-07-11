@@ -81,6 +81,8 @@ ROUTINE_EVENT_KINDS: frozenset[str] = frozenset({
     # indirect channel (spine-touch when the player later acts on an affected
     # NPC). absence_declined is decline telemetry, same footing as the rest.
     "moment_missed", "absence_declined",
+    # DRIFT-HANDLING D3 (§5): repair receipts are host bookkeeping too.
+    "repair_committed", "repair_declined",
 })
 
 #: Diegetic-minute quiet threshold for the ambient trigger (§C, P2c).
