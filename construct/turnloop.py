@@ -657,6 +657,7 @@ class TurnTrace:
     distance_unknown: str = ""  # #101 inversion: "place:a->place:b" when the map can't prove a local move
     deliberating: str = ""      # #102: the journey held for the player's own weighing (founder-shaped)
     journey_est: int = -1       # #102: a pre-commit elapsed estimate to reuse (never re-priced)
+    journey_priceable: bool = False  # #113: the reused estimate is a TRAVEL price (minutes>0, no jump) — safe for the settle durability backstop
     same_place: bool = False    # a synonym for the current room bound already-here — no move, no time charge
     commitment: str = ""        # the player's conclusory commitment this turn (if any)
     commitment_grade: str = ""  # vindicated|partial|wrong|pyrrhic — graded outcome (epilogue flavor)
@@ -1168,17 +1169,25 @@ def _stored_route_price(world: Any, a: str | None, b: str) -> int:
     return -1
 
 
-def _store_route_price(world: Any, a: str | None, b: str, minutes: int, turn: int) -> None:
-    """Persist the a↔b price as this world's travel precedent (#113)."""
+def _store_route_price(world: Any, a: str | None, b: str, minutes: int, turn: int) -> bool:
+    """Persist the a↔b price as this world's travel precedent (#113). Returns True ONLY
+    when the ingest receipt CONFIRMS the exact `session:journey_price`/key row — fail-open
+    ingest returns an empty/partial receipt without raising (cr code review: an unconfirmed
+    store treated as persistence leaves a turn that LOOKS anchored but re-prices later; the
+    settle durability backstop retries a failed pre-commit store once)."""
+    key = _route_price_key(a, b)
     try:
-        world.porcelain.ingest_structured([{
-            "entity": "session:journey_price", "attribute": _route_price_key(a, b),
+        receipt = world.porcelain.ingest_structured([{
+            "entity": "session:journey_price", "attribute": key,
             "value": json.dumps({"o": a or "", "d": b, "est": int(minutes),
                                  "turn": turn}),
             "value_type": "literal", "valid_from": turn_time(turn),
         }], frame=SESSION, classify="batch")
+        return any(r.get("entity") == "session:journey_price" and r.get("attribute") == key
+                   for r in _receipt_rows(receipt))
     except Exception:  # noqa: BLE001 — anchoring is best-effort
         logger.debug("route-price store failed", exc_info=True)
+        return False
 
 
 def _route_price_evidence(world: Any, limit: int = 5) -> str:
@@ -2156,6 +2165,7 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
             # NOT a move for time purposes — and the input's own move VERBS would still
             # hit the 6-minute bucket, so the no-op bucket is FORCED, not inferred.
             _moved = trace.movement_status in ("clear", "obscured")
+            _journey_priceable = False  # #113: is THIS turn's est a storable travel price?
             if trace.same_place:
                 est = {"advance_minutes": 1}
             elif trace.distance_unknown:
@@ -2165,10 +2175,15 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                 # re-priced across the story either.
                 if trace.journey_est >= 0:
                     est = {"advance_minutes": trace.journey_est}
+                    # the reuse path lost the original jump fields (an int on the trace);
+                    # the PRICEABLE bit carried alongside is the proof "no jump, minutes>0"
+                    # (cr: a generic backstop must not poison a route with a jump estimate).
+                    _journey_priceable = trace.journey_priceable
                 else:
                     _o, _, _d = trace.distance_unknown.partition("->")
                     _p_min = _stored_route_price(world, _o, _d)
                     est = {"advance_minutes": _p_min} if _p_min >= 0 else None
+                    # stored-price reuse needs no backstop: durability is proven by the read.
             else:
                 est = deterministic_elapsed(player_input, moved=_moved)
             if est is None:
@@ -2181,16 +2196,24 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                     route_evidence=(_route_price_evidence(world)
                                     if trace.distance_unknown else ""))
                 trace.cohort_calls.append("estimate_elapsed")
-                # first pricing = the route's precedent (#113); a wait/jump estimate
-                # (phase jump, day skip, zero minutes) is NOT a travel price.
-                _mins = int(est.get("advance_minutes") or 0)
-                if (trace.distance_unknown and _mins > 0
-                        and not est.get("jump_to_phase")
-                        and not est.get("jump_days")):
-                    _o, _, _d = trace.distance_unknown.partition("->")
-                    _store_route_price(world, _o, _d, _mins, trace.turn)
+                # a wait/jump estimate (phase jump, day skip, zero minutes) is NOT a
+                # travel price (#113 poison guard) — full dict in hand, checkable here.
+                _journey_priceable = (trace.distance_unknown != ""
+                                      and int(est.get("advance_minutes") or 0) > 0
+                                      and not est.get("jump_to_phase")
+                                      and not est.get("jump_days"))
             else:
                 trace.cohort_calls.append("time_estimate:deterministic")
+            # ---- #113 durability BACKSTOP (cr code review): the route price must exist
+            # as a RECEIPT-CONFIRMED row, not merely a non-raising store — a fail-open
+            # pre-commit store leaves journey_est set (so this settle deliberately never
+            # re-prices) yet no durable precedent. Store-if-absent, once, only when the
+            # est source is proven travel-priceable.
+            if trace.distance_unknown and _journey_priceable:
+                _o, _, _d = trace.distance_unknown.partition("->")
+                if _stored_route_price(world, _o, _d) < 0:
+                    _store_route_price(world, _o, _d,
+                                       int(est.get("advance_minutes") or 0), trace.turn)
         trace.time_advanced = delta_from_estimate(clock, est)
         commit_elapsed(world, trace.time_advanced)
     except Exception as exc:  # noqa: BLE001 — time never sinks a turn
@@ -2645,13 +2668,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             from construct.adapter import frame_facts as _ff
             for _r in _ff(world, SESSION, entity="session:journey_accept",
                           attribute=_key):
-                trace.journey_est = int(json.loads(str(_r.value)).get("est", -1))
+                _acc = json.loads(str(_r.value))
+                trace.journey_est = int(_acc.get("est", -1))
+                # #113: the marker carries the PRICEABLE bit (absent on pre-fix
+                # markers = False, conservative) so the settle backstop can prove
+                # "no jump" for a cross-turn reuse.
+                trace.journey_priceable = bool(_acc.get("priceable", False))
                 return False
         except Exception:  # noqa: BLE001
             pass
         # #113: an already-priced route reuses its canon precedent — the same
         # journey never prices twice ACROSS story beats (180-vs-20 drift fix).
         _est_min = _stored_route_price(world, pre_scene, _dest_key)
+        _priceable = False  # a stored price is already durable — backstop no-op
         if _est_min >= 0:
             trace.cohort_calls.append("time_estimate:route_price")
         else:
@@ -2669,14 +2698,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 trace.cohort_calls.append("estimate_elapsed:precommit")
             except Exception:  # noqa: BLE001 — estimation failure never blocks movement
                 return False
-            if _est_min > 0 and not _est.get("jump_to_phase") and not _est.get("jump_days"):
+            _priceable = (_est_min > 0 and not _est.get("jump_to_phase")
+                          and not _est.get("jump_days"))
+            if _priceable:
+                # best-effort here; the settle durability backstop retries once if
+                # this store fails open (unconfirmed receipt) — #113, cr code review.
                 _store_route_price(world, pre_scene, _dest_key, _est_min, turn)
         if _est_min < _delib_deadline[0]:
             trace.journey_est = _est_min  # fits the budget — commit, reuse the price
+            trace.journey_priceable = _priceable
             return False
         p.ingest_structured([{  # the one-warning marker carries the cached estimate
             "entity": "session:journey_accept", "attribute": _key,
-            "value": json.dumps({"est": _est_min, "turn": turn}),
+            "value": json.dumps({"est": _est_min, "turn": turn,
+                                 "priceable": _priceable}),
             "value_type": "literal", "valid_from": turn_time(turn),
         }], frame=SESSION, classify="batch")
         trace.movement_status = "deliberating"

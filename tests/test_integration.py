@@ -6500,6 +6500,110 @@ def test_route_price_key_is_symmetric_fixed_digest():
     assert a.startswith("jprice_") and len(a) == len("jprice_") + 20
 
 
+def test_store_route_price_returns_receipt_confirmation(world):
+    # #113 cr blocker: a non-raising ingest is NOT persistence — the store must
+    # receipt-confirm the exact session:journey_price/key row.
+    from construct.turnloop import _store_route_price, _stored_route_price
+
+    assert _store_route_price(world, "place:a", "place:b", 45, 2) is True
+    assert _stored_route_price(world, "place:b", "place:a") == 45
+
+    class _EmptyReceipt:
+        def to_dict(self):
+            return {"rows": []}
+
+    class _FailOpenPorcelain:
+        def __init__(self, real):
+            self._real = real
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+        def ingest_structured(self, rows, **kw):
+            return _EmptyReceipt()  # fail-open: nothing lands, nothing raises
+
+    class _WorldProxy:
+        def __init__(self, real):
+            self._real = real
+            self.porcelain = _FailOpenPorcelain(real.porcelain)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    assert _store_route_price(_WorldProxy(world), "place:x", "place:y", 60, 2) is False
+    assert _stored_route_price(world, "place:x", "place:y") == -1
+
+
+def test_route_price_settle_backstop_retries_failed_precommit_store(world):
+    # #113 cr blocker regression: the pre-commit store fails OPEN (empty receipt) while
+    # trace.journey_est is set — without the settle durability backstop the turn LOOKS
+    # anchored but leaves no durable row and the next crossing re-prices. The backstop
+    # must land the row within the same turn.
+    arc = _deadline_arc(threshold=500.0)
+    seed_arc(world, arc)
+    _hall_world(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+
+    real_ingest = world.porcelain.ingest_structured
+    failed: list = []
+
+    class _EmptyReceipt:
+        def to_dict(self):
+            return {"rows": []}
+
+    def _flaky_ingest(rows, **kw):
+        rows = list(rows)
+        if (not failed and rows
+                and rows[0].get("entity") == "session:journey_price"):
+            failed.append(True)  # the FIRST price store fails open, all else is real
+            return _EmptyReceipt()
+        return real_ingest(rows, **kw)
+
+    world.porcelain.ingest_structured = _flaky_ingest
+    try:
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "the consulting room in the village",
+             "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+             "commitment": ""},
+            {"verdict": "new", "match": ""},
+            {"advance_minutes": 75, "jump_to_phase": "", "jump_days": 0,
+             "reason": "a night walk"},                       # pre-commit estimate
+            {"prose": "You go down to the village through the rain."},
+        ])
+        result = run_turn(world, arc, provider,
+                          "I go to the consulting room in the village.",
+                          turn=2, scope=[PLAYER, "place:parlor"])
+    finally:
+        world.porcelain.ingest_structured = real_ingest
+    assert failed, "the flaky store never triggered — test is vacuous"
+    assert result.trace.time_advanced == 75
+    from construct.turnloop import _stored_route_price
+    assert _stored_route_price(world, "place:parlor", "place:consulting_room") == 75
+
+
+def test_route_price_never_stored_from_jump_estimate(world):
+    # #113 cr guard: a positive-minutes-PLUS-jump estimate is never stored as a travel
+    # price from the settle site — the jump fields are the disqualifier, not just zero
+    # minutes (the poison-guard oracle).
+    arc = make_arc()
+    seed_arc(world, arc)
+    _hall_world(world)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "the consulting room in the village",
+         "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
+         "commitment": ""},
+        {"verdict": "new", "match": ""},
+        {"prose": "You ride through the dusk to the village."},
+        {"advance_minutes": 90, "jump_to_phase": "dusk", "jump_days": 0,
+         "reason": "rides until dusk"},                       # minutes AND a jump
+    ])
+    run_turn(world, arc, provider, "I ride to the consulting room until dusk.",
+             turn=2, scope=[PLAYER, "place:parlor"])
+    from construct.turnloop import _stored_route_price
+    assert _stored_route_price(world, "place:parlor", "place:consulting_room") == -1
+
+
 def test_route_price_reused_across_turns_and_directions(world):
     # #113: the first pricing of a route becomes its canon precedent; the RETURN
     # trip prices deterministically from the stored row — zero model calls (the
