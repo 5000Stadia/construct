@@ -205,14 +205,14 @@ def _turn(s, move: str, label: str):
 
 def main() -> None:
     _log("=" * 70)
-    _log("PROBE D1 — DRIFT relocate-the-beat live acceptance (spec §7 D1)")
+    _log("PROBE D2 — DRIFT absence-consequence live acceptance (spec §7 D2)")
     _log("=" * 70)
     _author()
 
     from construct.session import Session
     from construct.provider import CodexProvider
 
-    s = Session.open(NAME, provider=CodexProvider(), player_id="probe_d1", fresh=True)
+    s = Session.open(NAME, provider=CodexProvider(), player_id="probe_d2", fresh=True)
     p = s._world.porcelain  # probe-only reach
 
     def _where(pid: str) -> str:
@@ -234,7 +234,7 @@ def main() -> None:
          "T5: unrelated engagement (no touch — silent)"),
         ("I finally walk down to the wet mill.", "T6: the walk"),
         ("I look about the mill for the miller.",
-         "T7: the touch turn (the callback surfaces)"),
+         "T7: post-touch (no re-fire; the callback surfaced on the walk turn)"),
     ]
     surfaced_turn = None
     committed_turn = None
