@@ -2455,9 +2455,12 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     # the deferred callback DIRECTIVE, host-built: names only the lapse (and,
     # when licensed, the authored outcome verbatim) — never model prose.
     _who = " and ".join(_display(x) for x in subjects)
+    # NB no claim about WHERE the player was (cr r5 blocker 2): D-MISSED
+    # proves the window closed clock-caused — it never proves the player was
+    # elsewhere (they may have stood in the staged scene as it expired).
     callback_line = (
-        f"the appointed moment at {_swhere} passed unmet while they were "
-        f"elsewhere; {_who} registered the absence."
+        f"the appointed moment at {_swhere} passed unmet; {_who} registered "
+        f"the absence."
         + (f" What became of it (authored): {on_expiry}" if on_expiry else
            " Only the lapse is known — never assert what happened instead."))
     # ---- COMMIT 1: the moment event — receipt-CONFIRMED before anything
@@ -2498,7 +2501,11 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                                          cap=len(fact_rows))
     except Exception:  # noqa: BLE001
         f_confirmed = []
-    if not f_confirmed:
+    if len(f_confirmed) != len(fact_rows):
+        # the COMPLETE set or nothing (cr r5 blocker 1): a partial confirm can
+        # silently lose a selected subject's predicate or the licensed
+        # authored outcome while the beat locks — the same complete-set
+        # discipline the event and callback batches already carry.
         trace.dropped_cohorts.append("absence consequences (unconfirmed)")
         drift.record_absence_declined(world, turn, beat_id,
                                       "consequences_unconfirmed")

@@ -1663,3 +1663,86 @@ def test_absence_restart_oracle_surfaces_after_reopen_once(tmp_path):
         assert "CONSEQUENCE CALLBACK" not in r3.trace.briefing
     finally:
         w2.close()
+
+
+def test_absence_partial_fact_receipt_declines_and_stays_retryable(world):
+    # cr r5 blocker 1 (reproduced): the fact set confirms COMPLETE or not at
+    # all — (a) a dropped subject row and (b) a dropped licensed outcome each
+    # decline whole, unlocked, retryable.
+    from construct.arc.executor import PLOT as _PLOT
+    for drop_attr in ("noted_absence", "missed_moment_outcome"):
+        arc = _absence_arc()
+        # fresh world per case: build inline (the fixture is function-scoped)
+        import tempfile, pathlib
+        from patternbuffer import World
+        from patternbuffer.testing import StubModel, rule_classifier_fallback
+        rule = rule_classifier_fallback()
+        w = World(pathlib.Path(tempfile.mkdtemp()) / "t.world", world_id="w:t",
+                  model=StubModel(fallback=lambda pr, sc: rule(pr, sc)
+                                  if pr.startswith("Classify the lifetime")
+                                  else {"items": []}),
+                  stance="fiction", title="T")
+        w.ingestor.cursor.advance(1.0)
+        w.ingest_structured([
+            {"entity": "place:flat", "attribute": "kind", "value": "room",
+             "timeless": True},
+            {"entity": PLAYER, "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:witness", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:witness", "attribute": "in", "value": "place:flat",
+             "value_type": "entity"},
+        ])
+        seed_arc(w, arc)
+        w.porcelain.ingest_structured(on_expiry_items(
+            "clock:escalate", "the ledgers were sealed unread"), frame=PLOT)
+        reads = _closed_with_witness(w, arc)
+        cast = dict(_absence_cast())
+        cast["person:witness"] = CastNode(node_id="person:witness",
+                                          holds_clues=(), location="place:flat")
+        # doctor: genuinely strip ONE row kind from the fact batch's receipt
+        doctored = _ReceiptDoctor(
+            w.porcelain,
+            match=lambda rows: any(r.get("attribute") in
+                                   ("noted_absence", "missed_moment_outcome")
+                                   for r in rows),
+            doctor=lambda rr, _d=drop_attr: [
+                r for r in rr if r.get("attribute") != _d][:2])
+        trace = TurnTrace(turn=5)
+        provider = StubProvider([
+            {"subjects": ["person:aldous", "person:witness"], "confidence": 0.9},
+        ])
+        _drift_pass(w, doctored, live_reads=reads, trace=trace,
+                   provider=provider, turn=5, arc=arc, cast=cast,
+                   scene=SCENE, npcs=[], horizon=None, minutes_now=None,
+                   rung=None, fuel=[], spines={})
+        assert trace.absence_consequences == [], drop_attr
+        assert drift.moment_receipt(reads, "beat:discover") is False, drop_attr
+        assert any("consequences (unconfirmed)" in d
+                   for d in trace.dropped_cohorts), drop_attr
+        w.close()
+
+
+def test_absence_same_scene_closure_never_claims_player_was_elsewhere(world):
+    # cr r5 blocker 2 (reproduced): the player may have stood IN the staged
+    # scene as the window expired — the directive and predicates carry NO
+    # location claim about the player.
+    arc = _absence_arc()
+    seed_arc(world, arc)
+    reads = _closed_with_witness(world, arc)
+    trace = TurnTrace(turn=5)
+    provider = StubProvider([
+        {"subjects": ["person:aldous"], "confidence": 0.9},
+    ])
+    # scene == staged_scene: the player is AT place:flat when it classifies.
+    _drift_pass(world, world.porcelain, live_reads=reads, trace=trace,
+               provider=provider, turn=5, arc=arc, cast=_absence_cast(),
+               scene="place:flat", npcs=[], horizon=None, minutes_now=None,
+               rung=None, fuel=[], spines={})
+    assert trace.absence_consequences
+    cbs = drift.pending_callbacks(world)
+    assert cbs
+    assert "elsewhere" not in cbs[0]["directive"]
+    assert "passed unmet" in cbs[0]["directive"]
+    val = world.porcelain.state("person:aldous", "noted_absence")
+    assert "elsewhere" not in str(val["fact"]["value"])
