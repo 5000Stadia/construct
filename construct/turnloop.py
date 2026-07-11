@@ -5919,6 +5919,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         briefing_parts.append(
             f"THE TIME (render its FEEL — light, sounds, who is about — never as a "
             f"clock): {trace.time_now}\n")
+    # THE LOCATION ANCHOR (task #10, critic campaign 2026-07-11 run 2,
+    # verified): canon had committed a move three turns earlier, yet the
+    # narrator re-placed the scene in the prior room ("There is no yard
+    # gate in the briefing room"). The WHERE gets the same explicit force
+    # the PRESENT CHARACTERS block gives the WHO — one line, every turn.
+    _scene_nm = str(canon_table.get((scene, "name")) or "") if scene else ""
+    if _scene_nm:
+        briefing_parts.append(
+            f"YOU ARE AT: {_scene_nm}. The scene is HERE and only here — if "
+            f"earlier exchanges happened in another room, that place is "
+            f"BEHIND you now; never re-place this scene, its doors, or its "
+            f"furniture in an earlier location. Travel that was narrated "
+            f"has happened.\n")
     briefing_parts += [
         # The narrator never sees internal frame ids — only the scene as it stands.
         "THE SCENE RIGHT NOW (what is true and present here):",

@@ -3504,3 +3504,27 @@ def test_walkability_atleast_and_not_composites(world):
     ok2, carriers2 = tl._walkable_route(_AnyOf((other, missing)), True,
                                         live_map, lambda _n: True)
     assert ok2 and carriers2 == {"person:clerk"}
+
+
+def test_briefing_carries_the_location_anchor(world):
+    # Task #10 (critic campaign run-2 verified finding): the briefing pins
+    # WHERE with the same force as WHO — the anchor names the current
+    # scene and forbids re-placing it in an earlier room.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": SCENE, "attribute": "kind", "value": "place",
+         "timeless": True},
+        {"entity": SCENE, "attribute": "name", "value": "the study",
+         "timeless": True},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The study holds its quiet."},
+    ])
+    r = run_turn(world, arc, provider, "I look around.", turn=2,
+                 generate=False)
+    assert "YOU ARE AT: the study." in r.trace.briefing
+    assert "never re-place this scene" in r.trace.briefing
