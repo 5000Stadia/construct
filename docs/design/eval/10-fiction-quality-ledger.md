@@ -160,6 +160,22 @@ honestly declined the re-mint as impossible. Both declines were the
 machinery telling the truth about bad inputs — the failure modes read as
 DESIGNED. Run 3: 16/16.
 
+## 2026-07-11 — Milestone critic campaign re-run (bodycase ×2, post-drift)
+Logs: `logs/critic-standard-bodycase-1783780877.md` / `critic-offpath-bodycase-1783783304.md`
+
+**Grade: A− (standard: A; offpath: B+)**
+
+Standard run: 18 turns, zero critic findings — the strongest clean run the
+harness has produced; the case prose is specific, presence holds, nothing
+repeats. Offpath run: the tangent (courting Nell into a market venture)
+was SERVED, not stonewalled — she came with a route, names, and terms of
+her own; the case kept knocking without railroading. One verified breaker:
+the turn-8 narrator re-placed the scene in the briefing room three turns
+after canon committed Bluegate Yard (details + task #10 in
+09-critic-campaign.md). Both chapter-2 legs failed for non-fiction reasons
+(one transport error; one no-conclusion run shape) — the ch2 seam remains
+untested this campaign; carry it into the next.
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from

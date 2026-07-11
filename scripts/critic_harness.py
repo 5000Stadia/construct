@@ -4,7 +4,7 @@ accuracy breakers, and filing its own /feedback when one genuinely lands.
 
 Differences from play_harness.py:
 - The move call returns {input, feedback}: `feedback` is EMPTY unless the agent was
-  genuinely pulled out of the story; a non-empty note is written to dev_inbox/ in the
+  genuinely pulled out of the story; a non-empty note is written to logs/critic/ in the
   SAME format the live /feedback command produces (note + last few turns), tagged
   `critic`, so the operator triages them through the one pipeline.
 - The primer teaches critique CALIBRATION: breakage vs taste, and citing the exact
@@ -146,7 +146,10 @@ _SCHEMA = {
 }
 
 prov = CodexProvider()
-FB_DIR = Path("dev_inbox")
+# logs/critic/, NOT dev_inbox/ — the legacy channel is RETIRED (AgentPost
+# migration directive); critic feedback is an operator-triage artifact and
+# lives with the run logs.
+FB_DIR = Path("logs/critic")
 
 
 def player_move(story_tail: str, stance: str, ch2: bool = False) -> dict:

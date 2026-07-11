@@ -254,3 +254,44 @@ in-band and the session recovered cleanly next turn (resilience: PASS).
 - The founder's milestone: **off-path play is a WIN** — both tangent runs stayed
   cohesive AND engaging (texture in run 4, drama in run 5), with the authored story
   weaving through the player's chosen path at natural seams, never railroading.
+
+
+---
+
+# Milestone re-run — 2026-07-11 (post-drift-program)
+
+Per the fiction-quality ledger's cadence: the campaign re-ran after the
+drift program (D1+D2+D3) closed. Two runs, both bodycase, real
+CodexProvider, harness output now under `logs/critic/` (dev_inbox retired).
+
+| Run | Mode | Turns | Filed | Verified |
+|---|---|---|---|---|
+| 1 (`logs/critic-standard-bodycase-1783780877.md`) | standard | 18 | 0 | — |
+| 2 (`logs/critic-offpath-bodycase-1783783304.md`) | offpath | 18 | 1 | 1 REAL |
+
+**Run 1 — zero findings in 18 turns.** The critic followed the case end to
+end and was never pulled out of the story: no continuity, presence,
+identity, or repetition breaks filed. (The original 2026-07-02 campaign
+triaged 5 fixes from 5 runs; the accumulated feature work has landed.)
+One non-fiction note: the chapter-2 transition leg died on a transport
+error (Codex stream ended without output) — infrastructure, not craft.
+
+**Run 2 — one finding, VERIFIED REAL against engine truth.** Turn 7's
+prose narrated the journey Bureau → Bluegate Yard; canon committed it
+(`person:clara_vale in place:bluegate_yard`, valid_from 1005, holding
+through turn 12). Turn 8's prose then asserted "There is no yard gate in
+the briefing room, only the bureau door" — the NARRATOR re-placed the
+scene three turns behind committed canon while the engine state was
+correct throughout. Class: narrator scene-grounding regression — the same
+family as the #80 ledger's room-identity drift (then a watch item, now
+reproduced under adversarial play, 1 occurrence in 36 turns). Filed as
+task #10: harden the briefing's scene-grounding line (the presence block
+pins WHO is here; the WHERE line needs the same force — "you are AT
+<place>; never re-place the scene elsewhere").
+
+**Campaign verdict:** the world holds under both schedules. The offpath
+run is the stronger signal: the critic courted Nell Carter INTO the case's
+own texture (market routes, the warehouse scales) and the world made the
+tangent rich rather than stonewalling — the improvisation north star
+behaving. One narrator-craft defect, zero engine defects, zero authority
+leaks.
