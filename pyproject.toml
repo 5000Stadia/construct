@@ -4,6 +4,7 @@ version = "0.0.1"
 description = "A text construct: persistent interactive fiction hosted on the pattern-buffer engine"
 requires-python = ">=3.11"
 dependencies = [
+    "pbuffer>=0.2",       # the pattern-buffer engine (module: patternbuffer)
     "httpx>=0.27",
     "jsonschema>=4.21",
 ]
