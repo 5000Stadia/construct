@@ -1678,3 +1678,37 @@ class TestTerminalRepl:
                    out=lambda *a: printed.append(" ".join(str(x) for x in a)))
         blob = "\n".join(printed)
         assert "Stepped out" in blob or "construct projector" in blob.lower()
+
+    def test_frozen_time_events_each_get_distinct_processed_and_outbox_rows(
+            self, tmp_path, monkeypatch):
+        # cr blocker on c5f6aa25: wall-time ids collided under fast input and
+        # the single ignored retry shadowed an event's outbox row. FROZEN
+        # time across 3 events (auto-claim, /play, one turn): every handled
+        # event must own a DISTINCT processed id and its own outbox rows —
+        # printed prose alone proves nothing.
+        from construct import repl
+        import construct.repl as repl_mod
+        monkeypatch.setattr(repl_mod.time, "time", lambda: 1_000_000.0)
+        reg = tmp_path / "reg.sqlite"
+        answers = iter(["/play", "I step inside"])
+
+        def _input(_prompt=""):
+            try:
+                return next(answers)
+            except StopIteration:
+                raise EOFError
+
+        printed: list[str] = []
+        repl.serve(reg, session_factory=_Factory(), input_fn=_input,
+                   out=lambda *a: printed.append(" ".join(str(x) for x in a)))
+        conn = registry.connect(reg)
+        processed = [r[0] for r in conn.execute(
+            "SELECT update_id FROM processed WHERE platform='cli' "
+            "ORDER BY update_id")]
+        assert len(processed) == 3                        # one per event
+        assert len(set(processed)) == 3                   # all distinct
+        outbox_ids = [r[0] for r in conn.execute(
+            "SELECT DISTINCT update_id FROM outbox WHERE platform='cli' "
+            "ORDER BY update_id")]
+        assert outbox_ids == processed                    # every event replied durably
+        assert "narrated<I step inside>" in "\n".join(printed)

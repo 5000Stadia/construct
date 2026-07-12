@@ -63,11 +63,18 @@ def serve(registry_path, *, session_factory=None,
                          notify=_notify, photo=_photo)
     ext = getpass.getuser() or "local"
 
+    _next_uid = [int(time.time() * 1000)]
+
     def _turn(text: str) -> None:
-        uid = int(time.time() * 1000)
-        if not registry.claim_update(conn, PLATFORM, uid):
+        # Exactly-once ids (cr: wall-time collides under fast/piped input and
+        # a single ignored retry silently shadowed the event's outbox row):
+        # a session-local monotonic counter, advanced UNTIL the claim
+        # actually succeeds — every handled event owns a distinct processed
+        # id and outbox row, same durable sequence as the other transports.
+        uid = max(_next_uid[0], int(time.time() * 1000))
+        while not registry.claim_update(conn, PLATFORM, uid):
             uid += 1
-            registry.claim_update(conn, PLATFORM, uid)
+        _next_uid[0] = uid + 1
         ev = InboundEvent(platform=PLATFORM, external_id=ext, chat_id=ext,
                           text=text, update_ids=(uid,))
         outbound = core.handle(ev, now=time.time())
