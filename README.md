@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/i
 construct start                 # the same conversational entry your phone gets
 ```
 
-You land at the projector's welcome — the world shelf, or describe a new world and it's shaped with you in conversation. Type what you do, line after line. Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
+You land at the projector's welcome — the world shelf, or describe a new world and it's shaped with you in conversation. Type what you do, line after line. (Each new scene gets an AI-painted image — the terminal can only print a path to it, so for the full experience with **embedded scene imagery, Telegram or Discord is the recommended way to play**.) Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
 
 ### Make your own world
 
