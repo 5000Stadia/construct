@@ -102,25 +102,41 @@ Worlds are built, not hand-coded: drop any prose document in and it becomes a pl
 
 ---
 
-## Quick start
+## Quick Start
 
-```bash
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e .
-
-construct start                 # guided menu: pick a world, make a character, play
-construct play bodycase         # or jump straight into The Rain in Bluegate Yard
+```sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/install.sh | sh
 ```
 
-Type what you do, line after line. Every turn is saved; bare `construct play` resumes. `--debug` shows each turn's receipts — every write the turn committed, and why.
+### Start playing
 
-```bash
-construct import path/to/your-story.md          # any .txt/.md becomes a playable world
+```sh
+construct start                 # guided: pick a world, make a character, play
+```
+
+Type what you do, line after line. Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
+
+### Make your own world
+
+```sh
+construct import path/to/your-story.md     # any .txt/.md becomes a playable world
 construct new --interview "a drowned harbor town with a harbor-master's secret"
-construct turn bodycase "I look around." --debug # one-shot form for scripting/tests
 ```
 
-**Play from your phone:** Telegram (`construct setup telegram`, then `construct telegram`) or Discord ([docs/DISCORD.md](docs/DISCORD.md)) — both outbound-only transports (no port, no tunnel), thin clients over the same session API:
+### Play from your phone
+
+```sh
+construct setup telegram        # one-time: paste a bot token from @BotFather
+construct telegram              # the transport runs until you stop it
+```
+
+Keep it running after you close the terminal:
+
+```sh
+nohup construct telegram >> ~/.construct-telegram.log 2>&1 &
+```
+
+Discord works the same way ([docs/DISCORD.md](docs/DISCORD.md)). Both are outbound-only transports — no port, no tunnel — thin clients over the same session API:
 
 ```python
 from construct import Session
@@ -129,7 +145,7 @@ print(s.turn("I look around.").prose)
 s.close()
 ```
 
-Bring any LLM behind the provider interface; ships with a zero-marginal-cost ChatGPT-subscription default.
+Bring any LLM behind the provider interface; ships with a zero-marginal-cost ChatGPT-subscription default. Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
 
 ---
 
