@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/i
 construct start                 # the same conversational entry your phone gets
 ```
 
-You land at the projector's welcome — the world shelf, or describe a new world and it's shaped with you in conversation. Type what you do, line after line. (Each new scene gets an AI-painted image — the terminal can only print a path to it, so for the full experience with **embedded scene imagery, Telegram or Discord is the recommended way to play**.) Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
+You land at the projector's welcome — the world shelf, or describe a new world and it's shaped with you in conversation. Type what you do, line after line. (Each new scene gets an AI-painted image — the terminal can only print a path to it, so for the full experience with embedded scene imagery, **Telegram is the recommended way to play — and the easiest to set up** (two commands, below); Discord works too.) Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
 
 ### Make your own world
 
@@ -37,10 +37,12 @@ construct import path/to/your-story.md     # any .txt/.md becomes a playable wor
 construct new --interview "a drowned harbor town with a harbor-master's secret"
 ```
 
-### Play from your phone
+### Play from your phone (recommended — full scene imagery)
+
+Telegram is the easiest: message [@BotFather](https://t.me/botfather) for a free bot token (takes a minute), then:
 
 ```sh
-construct setup telegram        # one-time: paste a bot token from @BotFather
+construct setup telegram        # one-time: paste the token
 construct telegram              # the transport runs until you stop it
 ```
 
