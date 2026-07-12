@@ -671,6 +671,7 @@ class TurnTrace:
     conclusion_shape: str = ""  # OUTCOME_SHAPE from pillar coverage (the EFFECT — STORY-SHAPES §0a)
     conclusion_basis: str = ""  # one-line why, for the epilogue + debug surface
     learned_clues: list = field(default_factory=list)  # clue ids surfaced into the player frame this turn
+    present_homonyms: list = field(default_factory=list)  # (display_name, [ids]) — same-named cast CO-PRESENT this turn (the park-forever tripwire; telemetry only)
     discovered: list = field(default_factory=list)  # off-scene cast ids whose whereabouts the player learned this turn
     adapted: list = field(default_factory=list)  # (lane, pillar_id) the make-it-real doorway applied this turn (NARRATION-DISCIPLINE)
     weave_decision: str = ""    # story-governance: let_run|pepper_hook|deliver_card (CARD-WEAVING)
@@ -6442,6 +6443,23 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # player by their own agreement — a companion, not a bystander. Surfaced so the render
         # gives them living texture: they react, notice, and may interject unprompted.
         _companions = set(trace.npcs_joined)
+        # THE HOMONYM TRIPWIRE (founder, 2026-07-12 — the park-forever
+        # trigger made observable): two same-named cast CO-PRESENT is the
+        # rare event the background-homonym park waits on, and the narrator
+        # would resolve it silently rather than report it. Telemetry only —
+        # zero prompt weight, zero narrative effect; fires the ledger/triage
+        # review that builds the "known for X" epithet against a real scene.
+        _by_name: dict = {}
+        for _hn in npcs:
+            _nm = str(canon_table.get((_hn, "name")) or "").strip().lower()
+            if _nm:
+                _by_name.setdefault(_nm, []).append(_hn)
+        for _nm, _ids in _by_name.items():
+            if len(_ids) > 1:
+                trace.present_homonyms.append((_nm, sorted(_ids)))
+                logger.warning("present homonyms in scene %s: %r share the "
+                               "display name %r (the park-forever tripwire)",
+                               scene, sorted(_ids), _nm)
         for n in npcs:
             if n in _companions:
                 continue

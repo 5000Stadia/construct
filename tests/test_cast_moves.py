@@ -1371,3 +1371,39 @@ def test_classify_failure_keeps_sole_npc_protection(world):
     assert any(d[0] == "person:edda" and d[2] == "engaged_this_turn"
                for d in r.trace.cast_move_drops)
     assert world.porcelain.locate("person:edda")[0] == "place:study"
+
+
+def test_present_homonym_tripwire(world):
+    # The park-forever tripwire (founder, 2026-07-12): two same-named cast
+    # CO-PRESENT trips telemetry — trace only, zero narrative effect. The
+    # background-homonym identity question stays parked; this makes its
+    # trigger observable.
+    from tests.test_integration import make_arc, run_turn, seed_arc
+    arc = make_arc()
+    seed_arc(world, arc)
+    _seed_person(world, "person:lysa", "Lysa", "place:study")
+    _seed_person(world, "person:lysa_fen", "Lysa", "place:study")
+    _seed_person(world, "person:sef", "Sef", "place:study")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    import construct.turnloop as tl
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+    try:
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+            {"prose": "The room holds three figures."},
+        ])
+        r = run_turn(world, arc, provider, "I look around.", turn=2,
+                     generate=False)
+    finally:
+        mp.undo()
+    assert r.trace.present_homonyms == [("lysa", ["person:lysa", "person:lysa_fen"])]
+    # zero narrative effect: the briefing carries no homonym machinery
+    assert "homonym" not in r.trace.briefing.lower()
+    # distinct names → silent
+    world2_names_ok = [n for n, _ids in r.trace.present_homonyms]
+    assert "sef" not in world2_names_ok
