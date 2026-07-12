@@ -16,6 +16,53 @@ Step into a book, or a world built from one conversation. Put something in a dra
 
 ---
 
+## Quick Start
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/install.sh | sh
+```
+
+### Start playing
+
+```sh
+construct start                 # guided: pick a world, make a character, play
+```
+
+Type what you do, line after line. Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
+
+### Make your own world
+
+```sh
+construct import path/to/your-story.md     # any .txt/.md becomes a playable world
+construct new --interview "a drowned harbor town with a harbor-master's secret"
+```
+
+### Play from your phone
+
+```sh
+construct setup telegram        # one-time: paste a bot token from @BotFather
+construct telegram              # the transport runs until you stop it
+```
+
+Keep it running after you close the terminal:
+
+```sh
+nohup construct telegram >> ~/.construct-telegram.log 2>&1 &
+```
+
+Discord works the same way ([docs/DISCORD.md](docs/DISCORD.md)). Both are outbound-only transports — no port, no tunnel — thin clients over the same session API:
+
+```python
+from construct import Session
+s = Session.open("bodycase", player_id="me")
+print(s.turn("I look around.").prose)
+s.close()
+```
+
+Bring any LLM behind the provider interface; ships with a zero-marginal-cost ChatGPT-subscription default. Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
+
+---
+
 ## The research question
 
 Interactive fiction has always had to pick a failure. Hand-authored worlds are rich but rigid — every path pre-written. LLM-generated worlds are free but amnesiac — they contradict themselves within twenty turns, invent doors that were never there, and forget the spoon you set down. The failure isn't a model-quality problem; it's an **architecture** problem: the same context window is being asked to be the world's memory, its referee, and its voice.
@@ -99,53 +146,6 @@ The engine was built through a **multi-agent adversarial review loop**: every su
 The shipped example, ***The Rain in Bluegate Yard*** — a complete original Victorian murder mystery (London, 1888; a dock messenger dead in Bluegate Yard; a plain-clothes bureau racing the Met) — plays end-to-end on a real model: grounded cold open, earned clue trail, companion texture, a staged conclusion scene, a consequence-bearing epilogue, and a next chapter grown from the wake of the first. Three further worlds (a dark-fantasy pilgrimage, an undersea survival thriller, a country-house death) exercise the other genre shapes.
 
 Worlds are built, not hand-coded: drop any prose document in and it becomes a playable world, or build one live from a one-line brief through the session-zero interview.
-
----
-
-## Quick Start
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/install.sh | sh
-```
-
-### Start playing
-
-```sh
-construct start                 # guided: pick a world, make a character, play
-```
-
-Type what you do, line after line. Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
-
-### Make your own world
-
-```sh
-construct import path/to/your-story.md     # any .txt/.md becomes a playable world
-construct new --interview "a drowned harbor town with a harbor-master's secret"
-```
-
-### Play from your phone
-
-```sh
-construct setup telegram        # one-time: paste a bot token from @BotFather
-construct telegram              # the transport runs until you stop it
-```
-
-Keep it running after you close the terminal:
-
-```sh
-nohup construct telegram >> ~/.construct-telegram.log 2>&1 &
-```
-
-Discord works the same way ([docs/DISCORD.md](docs/DISCORD.md)). Both are outbound-only transports — no port, no tunnel — thin clients over the same session API:
-
-```python
-from construct import Session
-s = Session.open("bodycase", player_id="me")
-print(s.turn("I look around.").prose)
-s.close()
-```
-
-Bring any LLM behind the provider interface; ships with a zero-marginal-cost ChatGPT-subscription default. Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
 
 ---
 
