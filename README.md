@@ -25,10 +25,10 @@ curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/i
 ### Start playing
 
 ```sh
-construct start                 # guided: pick a world, make a character, play
+construct start                 # the same conversational entry your phone gets
 ```
 
-Type what you do, line after line. Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
+You land at the projector's welcome — the world shelf, or describe a new world and it's shaped with you in conversation. Type what you do, line after line. Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
 
 ### Make your own world
 

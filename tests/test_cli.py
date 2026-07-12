@@ -118,7 +118,7 @@ def test_start_menu_routes_to_generate(monkeypatch, capsys):
         return 0
 
     monkeypatch.setattr(cli, "_cmd_new", _fake_new)
-    rc = main(["start"])
+    rc = main(["start", "--classic"])
     assert rc == 0
     ns = captured["ns"]
     assert ns.generate == "a noir harbor" and ns.name == "myworld"
@@ -176,6 +176,6 @@ def test_start_menu_play_with_empty_library_is_loud(monkeypatch, capsys, tmp_pat
     monkeypatch.chdir(tmp_path)
     (tmp_path / "worlds").mkdir()
     monkeypatch.setattr("builtins.input", lambda _p="": "1")  # play, but nothing exists
-    rc = main(["start"])
+    rc = main(["start", "--classic"])
     assert rc == 2
     assert "No worlds yet" in capsys.readouterr().err

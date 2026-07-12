@@ -58,6 +58,9 @@ class _FakeSession:
     def note_wish(self, text):
         self.wishes = getattr(self, "wishes", []) + [text]
 
+    def take_pending_image(self):
+        return None  # photo-channel transports (telegram, the terminal) poll this
+
     def concealed_truths(self):
         return "REVEAL twist: the rival is secretly the brother"
 
@@ -1629,3 +1632,49 @@ class TestBuildRetry:
         assert "couldn't quite stabilize" in out.chunks[0]
         # never repointed at a built world — still on the invite's scenario (Atrium)
         assert registry.scenario_for(conn, "telegram", "rt2") == "anchor"
+
+
+# ---- the terminal transport: construct start = the phone entry -------------
+
+class TestTerminalRepl:
+    def test_first_contact_auto_claims_and_shows_the_welcome_shelf(self, tmp_path):
+        # `construct start` (repl.serve): first contact mints+claims silently
+        # THROUGH the ordinary claim path — the first output is the genuine
+        # welcome (greeting + world shelf), then a turn plays, then EOF exits
+        # with the saved line. Same TransportCore as Telegram/loopback.
+        from construct import repl
+        reg = tmp_path / "reg.sqlite"
+        printed: list[str] = []
+        answers = iter(["/play", "I step inside"])
+
+        def _input(_prompt=""):
+            try:
+                return next(answers)
+            except StopIteration:
+                raise EOFError
+
+        f = _Factory()
+        import construct.repl as repl_mod
+        # session factory rides through TransportCore exactly as loopback's
+        repl_mod.serve(reg, session_factory=f, input_fn=_input,
+                       out=lambda *a: printed.append(" ".join(str(x) for x in a)))
+        blob = "\n".join(printed)
+        assert "construct projector" in blob.lower()      # the genuine welcome
+        assert "OPENING:" in blob                          # /play opened a world
+        assert "narrated<I step inside>" in blob           # the turn ran the core
+        assert "Saved — pick it back up" in blob           # the exit line
+
+    def test_returning_player_reenters_at_the_menu(self, tmp_path):
+        from construct import repl
+        reg = tmp_path / "reg.sqlite"
+        f = _Factory()
+        # visit once (auto-claim), quit immediately
+        repl.serve(reg, session_factory=f,
+                   input_fn=lambda _p="": (_ for _ in ()).throw(EOFError()),
+                   out=lambda *a: None)
+        printed: list[str] = []
+        repl.serve(reg, session_factory=f,
+                   input_fn=lambda _p="": (_ for _ in ()).throw(EOFError()),
+                   out=lambda *a: printed.append(" ".join(str(x) for x in a)))
+        blob = "\n".join(printed)
+        assert "Stepped out" in blob or "construct projector" in blob.lower()

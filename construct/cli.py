@@ -72,8 +72,12 @@ def build_parser() -> argparse.ArgumentParser:
                                          "Construct to load/create/import a setting")
     shell.add_argument("--debug", action="store_true")
 
-    sub.add_parser("start", help="guided session-zero menu: pick a world "
-                                 "(play / generate / provide) and a mode")
+    start = sub.add_parser("start", help="the conversational session zero — "
+                                         "the same entry the phone transports "
+                                         "give (world shelf, build-a-world "
+                                         "interview)")
+    start.add_argument("--classic", action="store_true",
+                       help="the old two-question flag-wizard instead")
 
     play = sub.add_parser(
         "play", help="play interactively: load/resume the scenario, then a prompt loop")
@@ -257,7 +261,23 @@ def _ask(prompt: str) -> str:
 
 
 def _cmd_start(args: argparse.Namespace) -> int:
-    """The guided session-zero menu (STARTUP-ENTRY §4): two questions —
+    """Session zero. DEFAULT: the terminal transport — the same
+    conversational entry every phone player gets (the projector welcome,
+    the world shelf, natural-language picks, the build-a-world interview),
+    over the one TransportCore. `--classic` keeps the old two-question
+    flag-wizard (Kernos 063 B: every path stays reachable for scripting)."""
+    if not getattr(args, "classic", False):
+        from construct import repl
+        try:
+            repl.serve(_registry_path())
+        except KeyboardInterrupt:
+            print("\nSaved — pick it back up any time with `construct start`.")
+        return 0
+    return _cmd_start_classic(args)
+
+
+def _cmd_start_classic(args: argparse.Namespace) -> int:
+    """The pre-transport guided menu (STARTUP-ENTRY §4): two questions —
     WHICH world (play existing / generate new / provide fiction) and WHICH
     mode (win/loss or freeplay). A surface OVER the flags: it builds the
     same Namespaces and delegates to `_cmd_play`/`_cmd_new`, so every path
