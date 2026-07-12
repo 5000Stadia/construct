@@ -176,6 +176,37 @@ after canon committed Bluegate Yard (details + task #10 in
 (one transport error; one no-conclusion run shape) — the ch2 seam remains
 untested this campaign; carry it into the next.
 
+## 2026-07-12 — Chapter-2 transition leg (re-run; the carried item closed)
+Log: `logs/critic-ch2rerun-bodycase-1783896461.md` (scripts/ch2_leg_rerun.py
+against the milestone campaign's concluded run-1 world)
+
+**Grade: A**
+
+The seam the campaign owed: chapter 2 built cleanly this time (run 1's
+attempt had died on a Codex transport error, not the machinery), and the
+critic — primed with the full transition addendum — filed ZERO findings
+across the build plus six judged turns. What makes it an A rather than a
+pass: the transition's honesty and growth are both visible in the prose.
+The opening bridges with EARNED history only — "Since Bluegate Yard, the
+Bureau has trusted you with active work" reflects the actual arc, a
+front-office slip on the earlier matter lies "marked settled" exactly as
+far as it was, and the messenger case is honestly "still a live weight on
+the table" (no false closure claimed — the precise failure the addendum
+hunts). The hook is fresh and physical (Nell's split lip; the brass token
+STITCHED INTO HER SHAWL — the very token chapter 1 chased, now carrying
+new danger), cast continuity is exact (Nell/Reed/Maud each in character;
+Reed taking orders "cleanly, without argument"), and the new chapter is
+its own case growing FROM chapter 1's threads (Jonas's accusations,
+Crane's boy asking what brass fetches) rather than a re-tread wearing new
+names — the "coherent but thin" bar untripped. The homonym tripwire,
+armed since 991feee, stayed silent throughout.
+
+Felt off: nothing filed; one operator watch-item — the ch2 opening seats
+the player back in the briefing room by default (the natural home base,
+and honest here), but a second consecutive continuation opening in the
+same room would start to read as formula; vary the re-entry staging when
+episode 3+ machinery is ever exercised.
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from
