@@ -568,16 +568,28 @@ def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatc
         {"entity": "place:roof", "attribute": "kind", "value": "room", "timeless": True},
         {"entity": PLAYER, "attribute": "in", "value": "place:office", "valid_from": 1000.4},
         {"entity": PLAYER, "attribute": "in", "value": "place:roof", "valid_from": 1005.0},
-        # WORLD-GROWTH G3: a grown region card — the continuation author
-        # must READ it (chapter ten remembers chapter two)
-        {"entity": "region:gullwash", "attribute": "kind", "value": "region",
-         "timeless": True},
-        {"entity": "region:gullwash", "attribute": "style",
+        # WORLD-GROWTH G3: grown region cards — the continuation author
+        # must READ them, and the ACTIVE territory (the terminal chain's
+        # card) must survive the bounded set even when lexically LAST
+        # behind nine older cards (cr G3 r2)
+        {"entity": "region:z_gullwash", "attribute": "kind",
+         "value": "region", "timeless": True},
+        {"entity": "region:z_gullwash", "attribute": "style",
          "value": "a smugglers' shore that trusts work over names",
          "valid_from": 1004.0},
-        {"entity": "region:gullwash", "attribute": "origin",
+        {"entity": "region:z_gullwash", "attribute": "origin",
          "value": "I row out past the mole at dusk.", "valid_from": 1004.0},
-    ])
+        # the terminal scene sits INSIDE the active card
+        {"entity": "place:roof", "attribute": "in",
+         "value": "region:z_gullwash", "value_type": "entity",
+         "valid_from": 1004.5},
+    ] + [row for i in range(9) for row in (
+        {"entity": f"region:a{i}", "attribute": "kind", "value": "region",
+         "timeless": True},
+        {"entity": f"region:a{i}", "attribute": "style",
+         "value": f"an older grown march, number {i}",
+         "valid_from": 1003.0},
+    )])
     w.porcelain.ingest_structured([
         {"entity": "event:turn_0", "attribute": "kind", "value": "turn", "valid_from": 1000.0},
         {"entity": "event:turn_5", "attribute": "kind", "value": "turn", "valid_from": 1005.0},
@@ -658,11 +670,12 @@ def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatc
         _gen = next(p_ for (p_, _s2, _t2) in _door.calls if task_of(p_) == "gen")
         assert "CLOSED HISTORY" in _gen and "never re-opened" in _gen.lower()
         # WORLD-GROWTH G3: the grown territory's memory feeds the author —
-        # style AND the founding act, verbatim
+        # style AND the founding act, verbatim; and the ACTIVE territory
+        # (lexically last, 9 older cards ahead) is structurally first
         assert "GROWN TERRITORY" in _gen
+        assert "region:z_gullwash" in _gen
         assert "smugglers' shore that trusts work over names" in _gen
         assert "I row out past the mole at dusk." in _gen
-        assert "region:gullwash" in _gen
         # #96 S2: the bridge surfaced the consequence callback + wrote its receipt
         assert "A CONSEQUENCE CALLBACK" in meta["continuation_intro"]
         assert "word of who found it travels" in meta["continuation_intro"]

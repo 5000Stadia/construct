@@ -2633,9 +2633,23 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # chapter's author verbatim.
         _region_lines: list[str] = []
         try:
-            for _rid in known_ids:
-                if not _rid.startswith("region:"):
-                    continue
+            # RELEVANCE IS STRUCTURAL (cr G3 r2): the protagonist's CURRENT
+            # (terminal) ancestry's cards enter the bounded set FIRST — the
+            # active territory can never be truncated away by older cards'
+            # lexical order; remaining slots fill deterministically.
+            _here_regions: list[str] = []
+            try:
+                _here_regions = [
+                    str(c) for c in
+                    (world.porcelain.locate(prior_main.protagonist
+                                            if prior_main else "") or [])
+                    if str(c).startswith("region:")]
+            except Exception:  # noqa: BLE001 — fall back to the flat order
+                pass
+            _ordered = _here_regions + [
+                r for r in known_ids
+                if r.startswith("region:") and r not in _here_regions]
+            for _rid in _ordered[:8]:
                 _rst = reads.state(_rid, "style")
                 _ror = reads.state(_rid, "origin")
                 if isinstance(_rst, str) and _rst.strip():
@@ -2643,7 +2657,6 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                         f"- {_rid}: {_rst.strip()}"
                         + (f' (founded when the player: "{_ror.strip()}")'
                            if isinstance(_ror, str) and _ror.strip() else ""))
-            _region_lines = _region_lines[:8]
         except Exception:  # noqa: BLE001 — territory memory is enrichment
             logger.exception("region-card read failed (continuing)")
         # The continuation prompt poses the founder's two questions so the next case is callback-aware,
