@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC r6 — every finding through cr's r4 review folded (r1 six; adoption + its executable shape; companions/ancestry/corrections; the proposal-failure minimal contract); awaiting cr re-review
+**Status:** SPEC GREEN (cr r6, <92a037e8…>, 2026-07-13) — build-authorized; PRE-G1 DEPENDENCY: the PB atomic-activation consult (in flight). cr's binding reading: the one-generative-act budget includes the tangent-author call; technical failure receipts stay outside canon.
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
