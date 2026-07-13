@@ -848,3 +848,6 @@ def test_generative_slot_claims_once_at_invocation():
         GenerativeSlot().claim(None)
     with _pt.raises(ValueError):
         GenerativeSlot().claim("   ")   # a diagnostic label, not whitespace
+    padded = GenerativeSlot()
+    assert padded.claim(" assessor ") is True
+    assert padded.claimed_by == "assessor"   # stored clean (cr nonblocking)

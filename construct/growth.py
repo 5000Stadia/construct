@@ -739,6 +739,7 @@ class GenerativeSlot:
         if type(actor) is not str or not actor.strip():
             raise ValueError("generative slot: actor must be a nonempty "
                              f"label, got {actor!r}")
+        actor = actor.strip()   # labels are diagnostics — store them clean
         if self.claimed_by:
             self.refused.append(actor)
             return False
