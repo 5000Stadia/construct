@@ -1628,3 +1628,135 @@ def test_wired_growth_success_excludes_the_lwg_that_turn(tmp_path,
         assert provider.gen_called          # the branch CAN run
     finally:
         w.close()
+
+
+def test_wired_existence_authority_failure_seams(tmp_path, monkeypatch):
+    # cr re-review 1: the _exists read (has_entity) is inside the
+    # fail-closed boundary — a failure declines, never escapes the turn
+    from construct.adapter import PorcelainWorldReads
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        real = PorcelainWorldReads.has_entity
+
+        def _boom(self, entity):
+            if entity == "place:north_road":
+                raise RuntimeError("existence authority down")
+            return real(self, entity)
+        monkeypatch.setattr(PorcelainWorldReads, "has_entity", _boom)
+        provider = StubProvider([_classify(), _good()])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:identity_unavailable"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+
+def test_wired_dismissal_rides_the_atomic_chunk(tmp_path, monkeypatch):
+    # cr re-review 2: the dismissal state the companion exclusion depended
+    # on commits IN the activation set — one atomic outcome, never a
+    # fail-open flush after the move
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+
+    def _seed(w):
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:reed", "attribute": "accompanying",
+             "value": "person:you", "value_type": "entity"},
+        ])
+
+    # (a) SUCCESS: the accompanying-supersede row is INSIDE the atomic
+    # items; no separate dismissal batch follows
+    w = _wired_world(tmp_path / "ok")
+    try:
+        _seed(w)
+        seen: list = []
+
+        def _fake(porcelain, items):
+            seen.append(list(items))
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        provider = StubProvider(
+            [_classify(npcs_dismissed=["npc_0"]), _good()]
+            + [{"prose": "The waypost takes shape."}] * 6)
+        r = run_turn(w, _wired_arc(), provider,
+                     "Reed, go home. I keep moving away.", turn=1)
+        assert r.trace.growth.startswith("activated:")
+        assert len(seen) == 1
+        atomic_keys = {(i.get("entity"), i.get("attribute"), i.get("value"))
+                       for i in seen[0]}
+        assert ("person:reed", "accompanying", "") in atomic_keys
+        assert r.trace.npcs_departed == ["person:reed"]
+        assert w.porcelain.state("person:reed", "accompanying")["fact"][
+            "value"] == ""
+        assert (w.porcelain.locate("person:reed") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+    # (b) FAULT: the whole set aborts → NOTHING moved, NOTHING dismissed,
+    # no false departure receipt — one honest seam
+    w = _wired_world(tmp_path / "fault")
+    try:
+        _seed(w)
+        monkeypatch.setattr(
+            growth_mod, "activate_chunk",
+            lambda porcelain, items: growth_mod.ActivationResult(
+                ok=False, reason="engine_abort:injected"))
+        provider = StubProvider([_classify(npcs_dismissed=["npc_0"]),
+                                 _good()])
+        r = run_turn(w, _wired_arc(), provider,
+                     "Reed, go home. I keep moving away.", turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "engine_abort:injected"
+        assert r.trace.npcs_departed == []
+        assert w.porcelain.state("person:reed", "accompanying")["fact"][
+            "value"] == "person:you"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+
+def test_wired_vocabulary_authority_failure_never_shrinks_the_screen(
+        tmp_path, monkeypatch):
+    # cr re-review 3: an unreadable protected read is a technical decline —
+    # the exact leak attempt (the Rival Crossing over a broken culprit
+    # read) must never activate
+    from construct.adapter import PorcelainWorldReads
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        real = PorcelainWorldReads.state
+
+        def _state(self, entity, attribute, **kw):
+            if entity == "fact:secret" and attribute == "culprit":
+                raise RuntimeError("protected authority down")
+            return real(self, entity, attribute, **kw)
+        monkeypatch.setattr(PorcelainWorldReads, "state", _state)
+        g = _good()
+        g["place"]["name"] = "the Rival Crossing"
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:concealment_unavailable"
+        assert w.porcelain.state("place:the_rival_crossing",
+                                 "kind")["status"] != "known"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()

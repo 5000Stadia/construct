@@ -223,16 +223,24 @@ def _concealed_move_vocab(arc: Arc, reads: Any) -> set[str]:
     return secret
 
 
+class GrowthVocabUnavailable(Exception):
+    """A protected-vocabulary authority read failed — the forbidden set
+    cannot be known, so growth must DECLINE (cr wiring re-review 3: an
+    unreadable protected key must never SHRINK the vocabulary; the
+    fail-open legacy guards keep their own semantics, this builder is
+    growth's and is strict)."""
+
+
 def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
     """The FULL growth concealment vocabulary (cr wiring blocker 5): the
     gate contract requires the arc's protected/concealed vocabulary WHOLE
     — key/attribute tokens ("culprit"), every protected entity's slug and
     name/alias/title, protected VALUES, and each referenced answer
-    entity's own names. Union of the take-guard's total vocabulary, the
-    move-guard's referenced-answer names, and the concealed-token
-    machinery. Over-breadth here declines a retryable proposal — the
-    correct cost; leaking the hidden answer into permanent canon is the
-    unpayable one."""
+    entity's own names. Over-breadth here declines a retryable proposal —
+    the correct cost; leaking the hidden answer into permanent canon is
+    the unpayable one. EVERY authority read is fail-closed: an exception
+    raises GrowthVocabUnavailable (technical decline upstream), never an
+    empty contribution."""
     from construct.arc.executor import concealed_tokens
     secret: set[str] = set()
     keys = arc_protected_keys(arc, reads)
@@ -242,11 +250,24 @@ def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
         for attr in (a, "name", "alias", "aliases", "title"):
             try:
                 val = reads.state(e, attr)
-            except Exception:
-                val = None
+            except Exception as exc:
+                raise GrowthVocabUnavailable(f"{e}.{attr}: {exc}") from exc
             if isinstance(val, str):
                 secret |= _secret_word_set(val)
-    secret |= _concealed_move_vocab(arc, reads)   # referenced answers' names
+        # the referenced-answer entity's own names (the move-guard's
+        # vocabulary, read strictly here)
+        try:
+            val = reads.state(e, a)
+        except Exception as exc:
+            raise GrowthVocabUnavailable(f"{e}.{a}: {exc}") from exc
+        if isinstance(val, str) and re.match(r"^[a-z_]+:[a-z0-9_]+$", val):
+            secret |= _secret_word_set(val.split(":", 1)[-1])
+            try:
+                nm = reads.state(val, "name")
+            except Exception as exc:
+                raise GrowthVocabUnavailable(f"{val}.name: {exc}") from exc
+            if isinstance(nm, str):
+                secret |= _secret_word_set(nm)
     secret |= concealed_tokens(keys)              # entity/attr distinctives
     return secret
 
@@ -283,6 +304,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
                     moves_open: bool, seeks_encounter: bool,
                     reshape_attempt: bool = False,
                     dismissed: list | None = None,
+                    staged: list | None = None,
                     pipeline_miss: bool, pre_chain: list, turn: int,
                     gen_slot: Any, style: str, laws: str) -> bool:
     """The WORLD-GROWTH G1 invocation (docs/design/WORLD-GROWTH.md §3/§5
@@ -375,7 +397,12 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         trace.growth = "declined:provider_error"
         return False
 
-    vocab = _growth_concealed_vocab(arc, live_reads)
+    try:
+        vocab = _growth_concealed_vocab(arc, live_reads)
+    except GrowthVocabUnavailable as exc:
+        logger.warning("growth concealment vocabulary unreadable: %s", exc)
+        trace.growth = "declined:concealment_unavailable"
+        return False
     prop, why = growth_mod.validated_proposal(
         raw, mode="place", n_ancestry_options=len(ancestry_ids),
         leaks=lambda text: bool(vocab & _secret_word_set(text)))
@@ -443,7 +470,10 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     companions = [c for c in companions if c not in set(dismissed or ())]
 
     def _exists(eid: str) -> bool:
-        return bool(live_reads.has_entity(eid))
+        try:
+            return bool(live_reads.has_entity(eid))
+        except Exception as exc:  # the existence authority IS an identity
+            raise _IdentityUnavailable(str(exc)) from exc  # authority
 
     try:
         chunk, why = growth_mod.assemble_chunk(
@@ -459,13 +489,30 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         trace.growth = f"declined:{why}"
         return False
 
+    # DISMISSAL COHERENCE (cr wiring re-review 2): the dismissal state the
+    # companion exclusion depended on rides the SAME atomic set — a
+    # post-activation fail-open flush could otherwise leave Reed excluded
+    # from the move yet still accompanying (a false receipt). Consumed
+    # here; the gate's flush no longer owns it on success, and a seam
+    # drops it with everything else.
+    _dis_rows: list = []
+    _dis_at = -1
+    for _i, (_lbl, _rows) in enumerate(staged or []):
+        if _lbl == "dismissals":
+            _dis_rows, _dis_at = list(_rows), _i
+            break
+
     # ATOMIC activation — the RAW porcelain, never the fail-open turn
     # wrapper (an abort must be SEEN; the adaptor fails closed on
     # non-atomic engines before writing anything).
-    result = growth_mod.activate_chunk(world.porcelain, list(chunk.items))
+    result = growth_mod.activate_chunk(world.porcelain,
+                                       list(chunk.items) + _dis_rows)
     if not result.ok:
         trace.growth = result.reason
         return False
+    if _dis_at >= 0:
+        staged.pop(_dis_at)   # committed with the chunk — the flush must
+        trace.npcs_departed = list(dismissed or [])  # not double-write
     trace.growth = f"activated:{chunk.place_id}"
     trace.growth_retry = False
     trace.growth_moved = [arc.protagonist, *companions]
@@ -4596,6 +4643,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                seeks_encounter=seeks_encounter,
                                reshape_attempt=reshape_attempt,
                                dismissed=dismissed_ids,
+                               staged=_growth_staged,
                                pipeline_miss=True, pre_chain=pre_chain,
                                turn=turn, gen_slot=_gen_slot, style=style,
                                laws=_laws_full) and trace.growth_retry:
@@ -4610,11 +4658,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 receipt_rows = _receipt_rows(
                     p.ingest_structured(_rows, classify="batch"))
             else:
-                p.ingest_structured(_rows, classify="batch")
-                trace.npcs_departed = list(dismissed_ids)
-                logger.info("player dismissed %s from %s (departed_scene "
-                            "events, deferred commit)", dismissed_ids,
-                            _entry_scene)
+                receipt = p.ingest_structured(_rows, classify="batch")
+                confirmed, _ = confirmed_batch(_rows, _receipt_rows(receipt),
+                                               cap=len(_rows))
+                if len(confirmed) == len(_rows):
+                    trace.npcs_departed = list(dismissed_ids)
+                    logger.info("player dismissed %s from %s (departed_scene "
+                                "events, deferred commit)", dismissed_ids,
+                                _entry_scene)
+                else:
+                    logger.warning("deferred dismissal only partially "
+                                   "confirmed (%d/%d) — departure NOT "
+                                   "receipted", len(confirmed), len(_rows))
+                    trace.dropped_cohorts.append("deferred_dismissals "
+                                                 "(unconfirmed)")
         except Exception as exc:  # noqa: BLE001 — same policy as inline
             logger.warning("deferred %s commit failed: %s", _lbl, exc)
             trace.dropped_cohorts.append(f"deferred_{_lbl} ({exc})")
