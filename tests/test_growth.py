@@ -1862,3 +1862,94 @@ def test_wired_superseded_aliases_still_conceal(tmp_path, monkeypatch):
             == "place:north_road"
     finally:
         w.close()
+
+
+def test_wired_identity_vocabulary_is_horizon_bound(tmp_path, monkeypatch):
+    # cr r6: as-of coherence cuts BOTH ways — a superseded alias conceals
+    # at every later horizon, but a FUTURE-aftermath alias must not shrink
+    # present growth
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([{"entity": "person:rival", "attribute": "alias",
+                              "value": "the Red Jack", "valid_from": 100.0}])
+        w.ingest_structured([{"entity": "person:rival", "attribute": "alias",
+                              "value": "the Future Falcon",
+                              "valid_from": 500.0}])
+
+        def _fake(porcelain, items):
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+
+        # at h=150: the durable old alias conceals...
+        g = _good()
+        g["place"]["name"] = "the Red Jack Crossing"
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1, horizon=150.0)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:unlicensed:place.name_concealed"
+        # ...and the FUTURE alias does not (growth proceeds to activation)
+        g = _good()
+        g["place"]["name"] = "the Future Falcon Crossing"
+        provider = StubProvider(
+            [_classify(), g] + [{"prose": "The crossing takes shape."}] * 6)
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1, horizon=150.0)
+        assert r.trace.growth == "activated:place:the_future_falcon_crossing"
+
+        # after the later horizon BOTH conceal (fresh world so the
+        # activated crossing doesn't muddy the probe)
+    finally:
+        w.close()
+    w = _wired_world(tmp_path / "late")
+    try:
+        w.ingest_structured([{"entity": "person:rival", "attribute": "alias",
+                              "value": "the Red Jack", "valid_from": 100.0}])
+        w.ingest_structured([{"entity": "person:rival", "attribute": "alias",
+                              "value": "the Future Falcon",
+                              "valid_from": 500.0}])
+        monkeypatch.setattr(
+            growth_mod, "activate_chunk",
+            lambda porcelain, items: growth_mod.ActivationResult(
+                ok=True, receipts=("r",)))
+        for leaked in ("the Red Jack Crossing", "the Future Falcon Crossing"):
+            g = _good()
+            g["place"]["name"] = leaked
+            provider = StubProvider([_classify(), g])
+            r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                         turn=1, horizon=550.0)
+            assert r.prose == _GROWTH_SEAM, leaked
+            assert r.trace.growth == \
+                "declined:unlicensed:place.name_concealed", leaked
+    finally:
+        w.close()
+
+
+def test_wired_identity_log_enumeration_failure_seams(tmp_path, monkeypatch):
+    # cr r6: the identity-log read is inside the fail-closed boundary
+    from construct.adapter import PorcelainWorldReads
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        real = PorcelainWorldReads.frame_rows
+
+        def _boom(self, frame, **kw):
+            if kw.get("entity") == "person:rival":
+                raise RuntimeError("identity log down")
+            return real(self, frame, **kw)
+        monkeypatch.setattr(PorcelainWorldReads, "frame_rows", _boom)
+        provider = StubProvider([_classify(), _good()])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:concealment_unavailable"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()

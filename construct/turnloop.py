@@ -241,7 +241,6 @@ def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
     the unpayable one. EVERY authority read is fail-closed: an exception
     raises GrowthVocabUnavailable (technical decline upstream), never an
     empty contribution."""
-    from construct.adapter import frame_facts
     from construct.arc.executor import concealed_tokens
     secret: set[str] = set()
     try:
@@ -251,13 +250,15 @@ def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
             from exc
 
     def _identity_words(entity: str) -> set[str]:
-        """EVERY durable identity value the entity has ever registered —
-        the full canon assertion log, not the folded point state (cr r5:
-        alias accrual is durable identity; a superseded alias still names
-        the hidden answer). Over-inclusion is the safe direction."""
+        """EVERY durable identity value the entity has registered UP TO
+        THE PLAY HORIZON — the horizon-bound assertion log via
+        reads.frame_rows, never a bare head scan (cr r6: a superseded
+        alias still names the hidden answer, but a FUTURE-aftermath alias
+        must not shrink present growth — as-of coherence is load-bearing
+        in both directions)."""
         out: set[str] = set()
         try:
-            for f in frame_facts(reads._world, "canon", entity=entity):
+            for f in reads.frame_rows("canon", entity=entity):
                 if f.attribute in ("name", "alias", "aliases", "title") \
                         and isinstance(f.value, str):
                     out |= _secret_word_set(f.value)
