@@ -277,3 +277,54 @@ def test_moves_open_contract_covers_prospective_first_x():
     assert "prospective" in desc
     assert "FALSE for any CONCRETE named" in desc # concrete → false side
     assert "'the first tavern I see'" not in desc.split("FALSE")[1]         if "FALSE" in desc else True              # first-X never a FALSE example
+
+
+def test_validated_proposal_authority_and_shape():
+    from construct.growth import validated_proposal as vp
+    good = {"assessment": "The road connects farm country to the market town;"
+                          " a farmer with a caravan fits.",
+            "confidence": 0.85,
+            "place": {"name": "the Willow Ford waypost", "identity":
+                      "a plank shelter where carters water their teams",
+                      "parent_index": 1},
+            "encounter": {"name": "Gregor Bund", "role": "a husky farmer",
+                          "drive": "sell the season's grain well",
+                          "doing": "walking his caravan to market",
+                          "companion": {"name": "Kip", "kind": "dog",
+                                        "bond": "his road companion"}},
+            "texture": ["a weather-worn signpost", "wheel ruts in the clay"]}
+    p, why = vp(good, mode="place", n_ancestry_options=3)
+    assert why == "" and p.place["parent_index"] == 1
+    assert p.encounter["companion"]["name"] == "Kip"
+    # AUTHORITY: id-shaped display strings decline (the model naming entities)
+    bad = dict(good, place=dict(good["place"], name="place:willow_ford"))
+    assert vp(bad, mode="place", n_ancestry_options=3)[1] == "unlicensed:id_shaped_name"
+    # parent_index outside the host-supplied options declines
+    bad2 = dict(good, place=dict(good["place"], parent_index=7))
+    assert vp(bad2, mode="place", n_ancestry_options=3)[1] == \
+        "unlicensed:parent_index_out_of_range"
+    # mode contracts: encounter mode requires the person; place mode the place
+    assert vp({"assessment": "x", "confidence": 0.9},
+              mode="encounter", n_ancestry_options=1)[1] == \
+        "malformed:encounter_required"
+    assert vp({"assessment": "x", "confidence": 0.9},
+              mode="place", n_ancestry_options=1)[1] == "malformed:place_required"
+    # texture bounded to 3 and id-screened
+    lots = dict(good, texture=["a", "b", "c", "d"])
+    p2, _ = vp(lots, mode="place", n_ancestry_options=3)
+    assert len(p2.texture) == 3
+    # malformed confidence declines
+    assert vp(dict(good, confidence="high"), mode="place",
+              n_ancestry_options=3)[1] == "malformed:confidence"
+
+
+def test_assessor_schema_is_id_free_and_lints():
+    # the schema itself carries the authority contract: display-words
+    # language present, and the preflight lints it (the *_SCHEMA audit
+    # already sweeps it — this pins the intent locally too)
+    from construct.cohorts import ASSESSOR_SCHEMA
+    from construct.provider import lint_schema
+    lint_schema(ASSESSOR_SCHEMA, path="ASSESSOR_SCHEMA")
+    blob = str(ASSESSOR_SCHEMA)
+    assert "NEVER an id" in blob or "never an id" in blob
+    assert "parent_index" in blob                 # choose-among-options only

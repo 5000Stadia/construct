@@ -3104,6 +3104,127 @@ def relocate_pick(provider: Provider, target: dict, holder: str, scene: str,
 #: 1-2 concrete world-facts (camera-facts: what a witness at the staged scene
 #: could have RECORDED), a one-line callback directive for when the player next
 #: touches the affected people/places, and a confidence the caller declines on.
+#: WORLD-GROWTH §3 — the Assessor's output schema (G1/G2). The founder's
+#: reasoning chain as a contract: assess FROM established context, propose
+#: DISPLAY FIELDS ONLY — no ids, no entity references; the HOST allocates
+#: every id, picks nothing up from prose, and builds every row. The region
+#: parent is chosen AMONG HOST-SHAPED OPTIONS (an index into the supplied
+#: ancestry list), never named freely — the D2/D3 authority discipline.
+ASSESSOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "assessment": {"type": "string",
+                       "description": "your reasoning, 2-4 plain sentences: is this "
+                                      "route traveled? by whom, and why HERE, given "
+                                      "what the roads connect and the world's ways? "
+                                      "Cite the established facts you reasoned from. "
+                                      "Kept as an audit receipt — never rendered."},
+        "place": {"type": "object",
+                  "description": "at most ONE new place, proportionate to the walk "
+                                 "(a waypost, a farmstead, a ferry landing — never a "
+                                 "city); omit the property entirely in encounter mode "
+                                 "when no new place is needed",
+                  "properties": {
+                      "name": {"type": "string",
+                               "description": "the place's natural display name "
+                                              "('the Willow Ford waypost') — plain "
+                                              "words, NEVER an id or slug"},
+                      "identity": {"type": "string",
+                                   "description": "ONE line of what this place IS — "
+                                                  "its function and character"},
+                      "parent_index": {"type": "integer",
+                                       "description": "which REGION OPTION (by listed "
+                                                      "index) contains this place — "
+                                                      "you may only choose among the "
+                                                      "options given"},
+                  },
+                  "required": ["name", "identity", "parent_index"]},
+        "encounter": {"type": "object",
+                      "description": "at most ONE person or small group met on the "
+                                     "way; REQUIRED in encounter mode, omit in place "
+                                     "mode unless someone plainly belongs here",
+                      "properties": {
+                          "name": {"type": "string",
+                                   "description": "their name, plain words, never an id"},
+                          "role": {"type": "string",
+                                   "description": "who they are ('a husky farmer "
+                                                  "hauling goods to market')"},
+                          "drive": {"type": "string",
+                                    "description": "what they want, one line"},
+                          "doing": {"type": "string",
+                                    "description": "what they are doing on THIS road "
+                                                   "right now, and why it fits the "
+                                                   "route (from your assessment)"},
+                          "companion": {"type": "object",
+                                        "description": "at most one companion or "
+                                                       "animal with them; omit if none",
+                                        "properties": {
+                                            "name": {"type": "string"},
+                                            "kind": {"type": "string",
+                                                     "description": "'person' or the "
+                                                                    "animal ('dog')"},
+                                            "bond": {"type": "string",
+                                                     "description": "one line of the "
+                                                                    "relationship"},
+                                        },
+                                        "required": ["name", "kind", "bond"]},
+                      },
+                      "required": ["name", "role", "drive", "doing"]},
+        "texture": {"type": "array", "items": {"type": "string"}, "maxItems": 3,
+                    "description": "1-3 plain furnishing facts for the arrival "
+                                   "(weather-worn signpost, the smell of tar) — "
+                                   "concrete, never plot-suggestive"},
+        "confidence": {"type": "number",
+                       "description": "0.0-1.0 — how honestly this growth fits HERE "
+                                      "given the established context; LOW only when "
+                                      "the world you were shown offers no honest "
+                                      "material (your low is a proposal failure, "
+                                      "never proof of emptiness)"},
+    },
+    "required": ["assessment", "confidence"],
+}
+
+
+def assessor_propose(provider: Provider, *, mode: str, intent: str,
+                     here_name: str, ancestry_options: list[str],
+                     connections: str, style: str, laws: str,
+                     threads: list[str], clock_line: str,
+                     protagonist: str) -> dict:
+    """WORLD-GROWTH §3 — the Assessor call. Inputs are HOST-ASSEMBLED,
+    truth-only, and FRAME-BOUNDED to canon + player-visible facts (the
+    hidden plot frame is structurally absent — growth is plot-blind).
+    `ancestry_options` are display lines for the region choices, indexed;
+    the model may only choose among them. Main-tier: the assessment chain
+    is planning-class reasoning, at most once per turn (the invocation
+    claims the turn's one generative slot — the caller's arbitration)."""
+    _opts = "\n".join(f"  [{i}] {o}" for i, o in enumerate(ancestry_options)) \
+        or "  [0] the wider world"
+    _thr = "\n".join(f"- {t}" for t in threads) or "(none pressing)"
+    want = ("a PERSON met on the way (the encounter is the point; a new "
+            "place only if the meeting needs one)" if mode == "encounter"
+            else "a PLACE to arrive at (an encounter only if someone "
+                 "plainly belongs there)")
+    _conn = connections or ("(nothing is authored past here — that is a "
+                            "fact about the MAP, not proof of emptiness)")
+    return complete_sync(provider,
+        f"The player has walked off the authored map, and the world must GROW "
+        f"where they walk — one proportionate step, reasoned from what is "
+        f"already true. Think like the world: is this way traveled? by whom? "
+        f"what would honestly be here?\n\n"
+        f"WHERE THEY ARE LEAVING FROM: {here_name}\n"
+        f"KNOWN ROUTES AND WHAT THEY CONNECT: {_conn}\n"
+        f"REGION OPTIONS for any new place's parent (choose by index ONLY):\n{_opts}\n"
+        f"THE WORLD'S WAYS (style/laws — texture must fit): {style} {laws}\n"
+        f"THE HOUR: {clock_line}\n"
+        f"LIVE THREADS (player-visible only):\n{_thr}\n"
+        f"THE PLAYER'S COMMITTED INTENT: {intent}\n\n"
+        f"PROPOSE {want}. Names in plain words (never ids). Proportionate to "
+        f"one step of travel. {player_constraint(protagonist)}\n"
+        f"If the shown world truly offers no honest material, say so with LOW "
+        f"confidence.",
+        ASSESSOR_SCHEMA, tier="main", task="gro")
+
+
 ABSENCE_SCHEMA = {
     "type": "object",
     "properties": {

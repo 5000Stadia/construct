@@ -190,3 +190,98 @@ def growth_eligibility(*, kind: str, committed: bool, moves_open: bool,
     if moves_open is True:
         return "place"
     return None
+
+
+#: Display fields must be PLAIN WORDS — an id/slug-shaped string in a model
+#: proposal is an authority escape (the model naming entities). The host
+#: allocates every id; a proposal that tries is declined, not repaired.
+_ID_SHAPED = __import__("re").compile(r"^[a-z_]+:[a-z0-9_]+$|[{}<>`]")
+
+
+@dataclass(frozen=True)
+class GrowthProposal:
+    """The VALIDATED Assessor proposal — display fields only, host-checked;
+    the row-assembly step (its own piece) turns this into ordered items
+    with host-allocated ids."""
+
+    assessment: str
+    confidence: float
+    place: dict | None = None       # {name, identity, parent_index}
+    encounter: dict | None = None   # {name, role, drive, doing, companion?}
+    texture: tuple = ()
+
+
+def validated_proposal(raw: dict, *, mode: str,
+                       n_ancestry_options: int) -> tuple["GrowthProposal | None", str]:
+    """The host gate over the Assessor's output (spec §3): returns
+    (proposal, "") or (None, reason). Structural checks only — plausibility
+    was the model's job; AUTHORITY is checked here: no id-shaped display
+    strings anywhere, parent_index strictly within the host-supplied
+    options, encounter present when the mode demands it, texture bounded,
+    confidence a real number. Every decline is retryable telemetry for the
+    caller (the proposal-failure minimal contract)."""
+    if not isinstance(raw, dict):
+        return None, "malformed:not_object"
+    assessment = str(raw.get("assessment") or "").strip()
+    if not assessment:
+        return None, "malformed:no_assessment"
+    try:
+        confidence = float(raw.get("confidence"))
+    except (TypeError, ValueError):
+        return None, "malformed:confidence"
+
+    def _clean(obj, fields) -> tuple[dict | None, str]:
+        if obj is None:
+            return None, ""
+        if not isinstance(obj, dict):
+            return None, "malformed:not_object"
+        out = {}
+        for f in fields:
+            v = str(obj.get(f) or "").strip()
+            if not v:
+                return None, f"malformed:missing_{f}"
+            if _ID_SHAPED.search(v):
+                return None, f"unlicensed:id_shaped_{f}"
+            out[f] = v
+        return out, ""
+
+    place_raw = raw.get("place")
+    place = None
+    if place_raw is not None:
+        place, why = _clean(place_raw, ("name", "identity"))
+        if place is None:
+            return None, why or "malformed:place"
+        try:
+            pi = int(place_raw.get("parent_index"))
+        except (TypeError, ValueError):
+            return None, "malformed:parent_index"
+        if not (0 <= pi < max(1, n_ancestry_options)):
+            return None, "unlicensed:parent_index_out_of_range"
+        place["parent_index"] = pi
+
+    enc_raw = raw.get("encounter")
+    encounter = None
+    if enc_raw is not None:
+        encounter, why = _clean(enc_raw, ("name", "role", "drive", "doing"))
+        if encounter is None:
+            return None, why or "malformed:encounter"
+        comp_raw = enc_raw.get("companion")
+        if comp_raw is not None:
+            comp, why = _clean(comp_raw, ("name", "kind", "bond"))
+            if comp is None:
+                return None, why or "malformed:companion"
+            encounter["companion"] = comp
+
+    if mode == "encounter" and encounter is None:
+        return None, "malformed:encounter_required"
+    if mode == "place" and place is None:
+        return None, "malformed:place_required"
+
+    texture = tuple(str(t).strip() for t in (raw.get("texture") or ())
+                    if str(t).strip())[:3]
+    for t in texture:
+        if _ID_SHAPED.search(t):
+            return None, "unlicensed:id_shaped_texture"
+    return GrowthProposal(assessment=assessment, confidence=confidence,
+                          place=place, encounter=encounter,
+                          texture=texture), ""
