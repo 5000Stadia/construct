@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC r5 — r1 (six) + addendum (adoption) + r2-review (companions, ancestry, corrections) + r3-review (adoption's executable shape: declares_tangent_aim, the tangent-author path, atomic adoption activation) all folded; awaiting cr re-review
+**Status:** SPEC r6 — every finding through cr's r4 review folded (r1 six; adoption + its executable shape; companions/ancestry/corrections; the proposal-failure minimal contract); awaiting cr re-review
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -174,14 +174,30 @@ advances ONLY after successful activation, from the pre-move origin to
 the activated destination; a torn or declined proposal advances neither
 the clock nor any cached route price.
 
-**THE PROPOSAL-FAILURE RESULT (r4 — the player-visible same-turn
-contract):** on an ELIGIBLE frontier whose proposal fails (model LOW,
-invalid fields, lint), the host retries ONCE in-turn; if still failing,
-the turn renders CONTINUED TRAVEL — the road goes on, no arrival claimed,
-no emptiness asserted — the journey stays open (next turn re-triggers
-eligibility fresh), the failure receipts loudly, and the diegetic clock
-advances only ordinary turn time, never the priced journey. The action is
-never silently consumed into diegetic emptiness.
+**THE PROPOSAL-FAILURE RESULT (r6 — cr's minimal contract, adopted
+whole; the r4 draft narrated an uncommitted state and metered
+incoherently):** on an ELIGIBLE frontier whose proposal fails
+semantically (model LOW, invalid fields, lint decline), there is NO
+in-turn semantic retry — the invocation claimed the turn's one generative
+act and a semantic failure ends it (a TRANSPORT retry inside one
+generation stays invisible, as everywhere else). The failure: (a)
+receipts loudly as a TECHNICAL event; (b) commits NO world change — no
+growth rows, no protagonist or companion displacement, and NO clock or
+route-price aging (host/model failure never ages the world; time moves
+only when canon journey state actually lands); (c) surfaces as an honest
+NON-DIEGETIC retry seam (the transports' existing "that turn hit an
+error — try again" pattern), never as diegetic prose — rendering travel
+or emptiness over an uncommitted state is exactly the prose/canon
+divergence this program exists to kill; (d) leaves the action free to
+retry fresh next turn (eligibility re-evaluates from scratch).
+FAILURE ORACLES, pinned per mode — LOW, invalid fields, lint decline,
+provider error, and failure on a world whose prior turn also failed: no
+growth rows, no displacement, no clock/route-price change, exactly one
+failure receipt, and no diegetic emptiness assertion. (If sustained
+in-fiction travel across multi-turn proposal failures ever proves
+necessary, that is a SEPARATE future surface — a real committed
+journey/transit entity with its own location, pricing, reopen, and
+completion semantics — deliberately out of this program's scope.)
 
 **Then the ordinary machinery takes over:** the move commits (canon
 displaces — the Ironhold defect dies here), the scene stages, the
