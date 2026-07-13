@@ -151,7 +151,7 @@ def strict_flag(value) -> bool:
 #: FORBID growth; the answered states forbid it because the world already
 #: spoke: resolved / ambiguous / blocked / undiscovered / same_place /
 #: fixture.
-PIPELINE_MISS = "miss" 
+PIPELINE_MISS = "miss"
 
 
 def growth_eligibility(*, kind: str, committed: bool, moves_open: bool,
