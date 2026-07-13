@@ -540,13 +540,16 @@ def test_every_row_carries_an_explicit_temporal_coordinate():
         stamped = r.get("valid_from") == 5000.0
         assert timeless != stamped, r
     row = {(r["entity"], r["attribute"]): r for r in chunk.items}
-    # the classification itself: who-they-ARE is timeless, the encounter's
-    # now-facts are acquired at the turn horizon
-    for a in ("kind", "name", "role", "drive"):
+    # the classification itself (cr re-review 1): ONLY identity/structure
+    # is timeless under PB's whole-history contract; role/drive/bond/
+    # description are standing-but-ACQUIRED — their earliest supported
+    # point is this growth horizon
+    for a in ("kind", "name"):
         assert row[(chunk.person_id, a)].get("timeless") is True
-    assert row[(chunk.person_id, "doing")]["valid_from"] == 5000.0
-    assert row[(chunk.person_id, "in")]["valid_from"] == 5000.0
-    assert row[(chunk.companion_id, "bond")].get("timeless") is True
+    for a in ("role", "drive", "doing", "in"):
+        assert row[(chunk.person_id, a)]["valid_from"] == 5000.0
+    assert row[(chunk.companion_id, "bond")]["valid_from"] == 5000.0
+    assert row[(chunk.place_id, "description")]["valid_from"] == 5000.0
 
 
 def test_assembled_rows_land_at_the_horizon_not_the_cursor(tmp_path):
@@ -586,11 +589,28 @@ def test_assembled_rows_land_at_the_horizon_not_the_cursor(tmp_path):
     assert w.porcelain.state("person:you", "in", as_of=5000.5)["fact"][
         "value"] == pid
     assert w.porcelain.state(pid, "description", as_of=4999.0)[
-        "status"] == "known"          # constitutive: timeless
+        "status"] != "known"          # acquired: ABSENT before growth
+    assert w.porcelain.state(pid, "description", as_of=5000.5)[
+        "status"] == "known"
+    assert w.porcelain.state(chunk.person_id, "role", as_of=4999.0)[
+        "status"] != "known"
+    assert w.porcelain.state(chunk.person_id, "role", as_of=5000.5)[
+        "fact"]["value"] == "a husky farmer"
+    assert w.porcelain.state(pid, "name", as_of=4999.0)[
+        "status"] == "known"          # identity/structure: timeless
     # one stored edge, walkable both ways
     fwd = w.porcelain.path("place:north_road", pid, as_of=5000.5)
     rev = w.porcelain.path(pid, "place:north_road", as_of=5000.5)
     assert fwd and rev and fwd == list(reversed(rev))
+
+
+def test_assembly_accepts_the_exact_representable_edge():
+    # 2**53 IS exact in the float coordinate; its successor is rejected
+    # above (host-bug oracle) — adjacent accepted chunks can never collide
+    chunk, why = _assemble(_good_prop(), at=2**53)
+    assert why == ""
+    assert any(r["attribute"].startswith("detail_9007199254740992")
+               for r in chunk.items)
 
 
 def test_assembly_texture_keys_are_disjoint_across_chunks():
@@ -744,6 +764,9 @@ def test_assembly_host_bugs_raise():
         dict(identity=None),
         dict(identity=lambda k, n: "new"),           # malformed decision
         dict(identity=lambda k, n: ("maybe", "")),
+        dict(identity=lambda k, n: ("new", None)),       # second slot exact
+        dict(identity=lambda k, n: ("new", "person:reed")),
+        dict(identity=lambda k, n: ("ambiguous", "person:reed")),
         dict(origin="north road"),
         dict(origin="place:"),                       # frozen grammar: empty local
         dict(origin="place:Elsewhere"),              # frozen grammar: case
@@ -759,6 +782,8 @@ def test_assembly_host_bugs_raise():
         dict(at=float("nan")),
         dict(at=True),
         dict(at=-5.0),
+        dict(at=2**53 + 1),      # not exactly representable — would collide
+        dict(at=10**400),        # OverflowError normalized to ValueError
         dict(mode="wander"),
         dict(ancestry_options=[]),                   # place proposed, no list
         dict(ancestry_options=["place:a"]),          # not canon

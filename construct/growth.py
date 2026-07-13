@@ -483,11 +483,13 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
       already walkable both ways, and ending it later ends the passage
       whole (two rows would be two independent assertions for one logical
       edge — route failure could then not be represented coherently);
-    - every row carries an EXPLICIT temporal coordinate — constitutive
-      facts (kind, name, description, role, drive, bond) are `timeless`;
-      acquired facts (containment, passage, moves, `doing`, `accompanying`,
-      texture) are stamped `valid_from=at`. Nothing rides the engine's
-      mutable cursor;
+    - every row carries an EXPLICIT temporal coordinate — only true
+      identity/structure (kind, name) is `timeless` (PB's contract: true
+      across the world's WHOLE history); everything acquired — description,
+      role, drive, bond (standing-but-acquired, like PB's own occupation
+      example), containment, passage, moves, `doing`, `accompanying`,
+      texture — is stamped `valid_from=at`: its earliest supported point
+      IS this growth horizon. Nothing rides the engine's mutable cursor;
     - the protagonist AND every standing companion move in the same set;
     - the encounter person is ANCHORED (`in` the grown place, else the
       origin — never prose-only), their companion bonded via
@@ -535,21 +537,37 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
     if len(set(companions)) != len(companions) or protagonist in companions:
         raise ValueError("growth assembly: companions must be unique and "
                          "must not include the protagonist")
-    if type(at) not in (int, float) or isinstance(at, bool) \
-            or not _math.isfinite(float(at)) or float(at) < 0:
+    if type(at) not in (int, float) or isinstance(at, bool):
         raise ValueError(f"growth assembly: at must be a finite non-negative "
                          f"time, got {at!r}")
-    at = float(at)
+    try:
+        _f = float(at)
+    except OverflowError:
+        raise ValueError(f"growth assembly: at {at!r} exceeds the engine's "
+                         "float coordinate") from None
+    if not _math.isfinite(_f) or _f < 0 or _f != at:
+        # _f != at catches ints the float coordinate cannot represent
+        # EXACTLY (2**53+1 → 2**53): a lossy coordinate would let two
+        # accepted chunks collide on one texture key
+        raise ValueError(f"growth assembly: at must be a finite non-negative "
+                         f"time exactly representable in the engine's float "
+                         f"coordinate, got {at!r}")
+    at = _f
 
     def _decision(kind: str, name: str, path: str) -> tuple[str, str]:
         out = identity(kind, name)
         if (type(out) not in (tuple, list) or len(out) != 2
-                or out[0] not in ("new", "bound", "ambiguous")):
+                or out[0] not in ("new", "bound", "ambiguous")
+                or type(out[1]) is not str):
             raise ValueError(f"growth assembly: identity returned {out!r} — "
                              "must be (new|bound|ambiguous, id_or_empty)")
         outcome, bound = out[0], out[1]
         if outcome == "bound":
             _canon(bound, f"{kind}:", f"{path} bound identity")
+        elif bound != "":
+            raise ValueError(f"growth assembly: identity returned "
+                             f"({outcome!r}, {bound!r}) — the second slot "
+                             "must be \"\" unless bound (host bug)")
         return outcome, bound
 
     taken: set = set()
@@ -586,7 +604,7 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                 {"entity": place_id, "attribute": "name",
                  "value": prop.place["name"], "timeless": True},
                 {"entity": place_id, "attribute": "description",
-                 "value": prop.place["identity"], "timeless": True},
+                 "value": prop.place["identity"], "valid_from": at},
             ]
             containment = [_entity_row(place_id, "in",
                                        ancestry_options[pi], at)]
@@ -611,9 +629,9 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
             {"entity": person_id, "attribute": "name",
              "value": prop.encounter["name"], "timeless": True},
             {"entity": person_id, "attribute": "role",
-             "value": prop.encounter["role"], "timeless": True},
+             "value": prop.encounter["role"], "valid_from": at},
             {"entity": person_id, "attribute": "drive",
-             "value": prop.encounter["drive"], "timeless": True},
+             "value": prop.encounter["drive"], "valid_from": at},
             {"entity": person_id, "attribute": "doing",
              "value": prop.encounter["doing"], "valid_from": at},
             _entity_row(person_id, "in", anchor, at),
@@ -636,7 +654,7 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                 {"entity": companion_id, "attribute": "name",
                  "value": comp["name"], "timeless": True},
                 {"entity": companion_id, "attribute": "bond",
-                 "value": comp["bond"], "timeless": True},
+                 "value": comp["bond"], "valid_from": at},
                 _entity_row(companion_id, "in", anchor, at),
                 _entity_row(companion_id, "accompanying", person_id, at),
             ]
