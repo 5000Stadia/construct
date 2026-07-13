@@ -230,7 +230,7 @@ def _field(obj: dict, path: str, key: str, leaks) -> tuple[str | None, str]:
         return None, f"malformed:{path}.{key}_length"
     if _ID_TOKEN.search(v):
         return None, f"unlicensed:{path}.{key}_id"
-    if leaks is not None and leaks(v):
+    if leaks(v):
         return None, f"unlicensed:{path}.{key}_concealed"
     return v, ""
 
@@ -248,14 +248,20 @@ def _clean(obj, path: str, fields: tuple, leaks) -> tuple[dict | None, str]:
 
 
 def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
-                       leaks=None, min_confidence: float = 0.35
+                       leaks, min_confidence: float = 0.35
                        ) -> tuple["GrowthProposal | None", str]:
     """The host gate over the Assessor's output (spec §3; cr piece-3
     hardening). Structural AUTHORITY checks — plausibility was the model's
     job: id tokens anywhere in any persisted field decline; every field is
     screened by the HOST-SUPPLIED concealment predicate (`leaks`, built
     from the arc's protected/concealed vocabulary — the model never sees
-    the hidden words, the host applies them); parent_index must be exactly
+    the hidden words, the host applies them). `leaks` is REQUIRED with no
+    permissive default: this boundary fails closed, and a genuinely
+    vocabulary-free arc must say so explicitly (`lambda text: False`).
+    The host-gate parameters themselves are validated — a malformed gate
+    (NaN/None/bool threshold, bool/float option count, non-callable
+    predicate) is a HOST bug and raises ValueError rather than quietly
+    defeating the invariants. parent_index must be exactly
     an int strictly inside the host option count (no fallback option — the
     host names a wider-world option explicitly if legal); mode must be
     exactly place|encounter; texture is a real list of 1-3 exact strings
@@ -265,6 +271,21 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
     `proposal:low_confidence` — LOW never emerges as an accepted proposal
     for a later caller to forget. Every decline is a stable
     field-qualified retryable reason."""
+    import math
+    if not callable(leaks):
+        raise ValueError("growth gate: leaks must be a callable predicate "
+                         "(pass `lambda text: False` for a vocabulary-free "
+                         "arc — concealment screening is never optional)")
+    if type(n_ancestry_options) is not int:
+        raise ValueError("growth gate: n_ancestry_options must be an exact "
+                         f"int, got {type(n_ancestry_options).__name__}")
+    if type(min_confidence) not in (int, float) \
+            or isinstance(min_confidence, bool) \
+            or not math.isfinite(float(min_confidence)) \
+            or not (0.0 <= float(min_confidence) <= 1.0):
+        raise ValueError("growth gate: min_confidence must be a finite real "
+                         f"in [0,1], got {min_confidence!r}")
+    min_confidence = float(min_confidence)
     if mode not in ("place", "encounter"):
         return None, "malformed:mode"
     if type(raw) is not dict:
@@ -275,7 +296,6 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
     assessment = assessment.strip()
 
     conf = raw.get("confidence")
-    import math
     if type(conf) not in (int, float) or isinstance(conf, bool) \
             or not math.isfinite(float(conf)) or not (0.0 <= float(conf) <= 1.0):
         return None, "malformed:confidence"
@@ -319,7 +339,7 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
         return None, "malformed:place_required"
 
     tex_raw = raw.get("texture")
-    if type(tex_raw) not in (list, tuple):
+    if type(tex_raw) is not list:
         return None, "malformed:texture_type"
     if not (1 <= len(tex_raw) <= 3):
         return None, ("malformed:texture_too_many" if len(tex_raw) > 3
@@ -333,7 +353,7 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
             return None, f"malformed:texture.{i}_length"
         if _ID_TOKEN.search(t):
             return None, f"unlicensed:texture.{i}_id"
-        if leaks is not None and leaks(t):
+        if leaks(t):
             return None, f"unlicensed:texture.{i}_concealed"
         texture.append(t)
     return GrowthProposal(assessment=assessment, confidence=confidence,

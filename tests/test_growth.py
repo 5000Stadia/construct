@@ -279,6 +279,14 @@ def test_moves_open_contract_covers_prospective_first_x():
     assert "'the first tavern I see'" not in desc.split("FALSE")[1]         if "FALSE" in desc else True              # first-X never a FALSE example
 
 
+def _vp(raw, **kw):
+    """The gate with the EXPLICIT vocabulary-free predicate — concealment
+    screening has no permissive default (cr piece-3 re-review, blocker 1)."""
+    from construct.growth import validated_proposal
+    kw.setdefault("leaks", lambda text: False)
+    return validated_proposal(raw, **kw)
+
+
 def _good():
     return {"assessment": "The road connects farm country to the market town;"
                           " a farmer with a caravan fits.",
@@ -295,8 +303,7 @@ def _good():
 
 
 def test_validated_proposal_happy_path():
-    from construct.growth import validated_proposal as vp
-    p, why = vp(_good(), mode="place", n_ancestry_options=3)
+    p, why = _vp(_good(), mode="place", n_ancestry_options=3)
     assert why == "" and p.place["parent_index"] == 1
     assert p.encounter["companion"]["name"] == "Kip"
     assert p.texture == ("a weather-worn signpost", "wheel ruts in the clay")
@@ -304,7 +311,6 @@ def test_validated_proposal_happy_path():
 
 def test_id_tokens_decline_anywhere_in_any_field():
     # cr: EMBEDDED ids must decline, in every persisted field family
-    from construct.growth import validated_proposal as vp
     g = _good()
     cases = [
         (dict(g, place=dict(g["place"], name="place:willow_ford")),
@@ -323,45 +329,43 @@ def test_id_tokens_decline_anywhere_in_any_field():
          "unlicensed:texture.1_id"),
     ]
     for raw, want in cases:
-        assert vp(raw, mode="place", n_ancestry_options=3)[1] == want, want
+        assert _vp(raw, mode="place", n_ancestry_options=3)[1] == want, want
 
 
 def test_concealment_predicate_screens_every_field():
     # the HOST-SUPPLIED leak predicate (the model never sees the vocabulary)
-    from construct.growth import validated_proposal as vp
     leaks = lambda text: "vermilion" in text.lower()
     g = _good()
     g["place"]["name"] = "the Vermilion Ford"
-    assert vp(g, mode="place", n_ancestry_options=3, leaks=leaks)[1] == \
+    assert _vp(g, mode="place", n_ancestry_options=3, leaks=leaks)[1] == \
         "unlicensed:place.name_concealed"
     g2 = _good()
     g2["texture"] = ["a vermilion pennant"]
-    assert vp(g2, mode="place", n_ancestry_options=3, leaks=leaks)[1] == \
+    assert _vp(g2, mode="place", n_ancestry_options=3, leaks=leaks)[1] == \
         "unlicensed:texture.0_concealed"
 
 
 def test_parent_and_mode_authority_closed():
-    from construct.growth import validated_proposal as vp
     g = _good()
     # exact-int only: float and bool decline as TYPE, never coerce
     for bad in (0.9, True, "1", None):
         raw = dict(g, place=dict(g["place"], parent_index=bad))
-        assert vp(raw, mode="place", n_ancestry_options=3)[1] == \
+        assert _vp(raw, mode="place", n_ancestry_options=3)[1] == \
             "malformed:place.parent_index_type", repr(bad)
     # strict range, no fallback option; zero host options forbids ANY place
     raw = dict(g, place=dict(g["place"], parent_index=7))
-    assert vp(raw, mode="place", n_ancestry_options=3)[1] == \
+    assert _vp(raw, mode="place", n_ancestry_options=3)[1] == \
         "unlicensed:place.parent_index_range"
-    assert vp(g, mode="place", n_ancestry_options=0)[1] == \
+    assert _vp(g, mode="place", n_ancestry_options=0)[1] == \
         "unlicensed:place.no_ancestry_options"
-    assert vp(g, mode="place", n_ancestry_options=-1)[1] == \
+    assert _vp(g, mode="place", n_ancestry_options=-1)[1] == \
         "unlicensed:place.no_ancestry_options"
     # unknown mode declines outright; mode contracts enforced
-    assert vp(g, mode="wander", n_ancestry_options=3)[1] == "malformed:mode"
-    assert vp({"assessment": "x", "confidence": 0.9, "texture": ["a"]},
+    assert _vp(g, mode="wander", n_ancestry_options=3)[1] == "malformed:mode"
+    assert _vp({"assessment": "x", "confidence": 0.9, "texture": ["a"]},
               mode="encounter", n_ancestry_options=1)[1] == \
         "malformed:encounter_required"
-    assert vp({"assessment": "x", "confidence": 0.9, "texture": ["a"]},
+    assert _vp({"assessment": "x", "confidence": 0.9, "texture": ["a"]},
               mode="place", n_ancestry_options=1)[1] == \
         "malformed:place_required"
     # the assessor call itself refuses unknown modes / empty options
@@ -378,42 +382,75 @@ def test_parent_and_mode_authority_closed():
 
 
 def test_exact_shapes_never_coerced_or_repaired():
-    from construct.growth import validated_proposal as vp
     g = _good()
     # list-valued name is a TYPE failure, never stringified
     raw = dict(g, place=dict(g["place"], name=["Willow Ford"]))
-    assert vp(raw, mode="place", n_ancestry_options=3)[1] == \
+    assert _vp(raw, mode="place", n_ancestry_options=3)[1] == \
         "malformed:place.name_type"
     # texture: string is not a list; 4 items DECLINE (never truncate);
     # empty/absent decline (the spec requires 1-3)
-    assert vp(dict(g, texture="road"), mode="place",
+    assert _vp(dict(g, texture="road"), mode="place",
               n_ancestry_options=3)[1] == "malformed:texture_type"
-    assert vp(dict(g, texture=["a", "b", "c", "d"]), mode="place",
+    assert _vp(dict(g, texture=["a", "b", "c", "d"]), mode="place",
               n_ancestry_options=3)[1] == "malformed:texture_too_many"
-    assert vp(dict(g, texture=[]), mode="place",
+    assert _vp(dict(g, texture=[]), mode="place",
               n_ancestry_options=3)[1] == "malformed:texture_empty"
     g2 = _good(); del g2["texture"]
-    assert vp(g2, mode="place", n_ancestry_options=3)[1] == \
+    assert _vp(g2, mode="place", n_ancestry_options=3)[1] == \
         "malformed:texture_type"
     # over-length fields decline
     raw = dict(g, place=dict(g["place"], identity="x" * 300))
-    assert vp(raw, mode="place", n_ancestry_options=3)[1] == \
+    assert _vp(raw, mode="place", n_ancestry_options=3)[1] == \
         "malformed:place.identity_length"
 
 
 def test_confidence_implements_its_contract():
-    from construct.growth import validated_proposal as vp
     g = _good()
     for bad in (float("nan"), float("inf"), -0.1, 4, True, "0.9", None):
-        assert vp(dict(g, confidence=bad), mode="place",
+        assert _vp(dict(g, confidence=bad), mode="place",
                   n_ancestry_options=3)[1] == "malformed:confidence", repr(bad)
     # LOW is a stable retryable decline, never an accepted proposal
-    assert vp(dict(g, confidence=0.2), mode="place",
+    assert _vp(dict(g, confidence=0.2), mode="place",
               n_ancestry_options=3)[1] == "proposal:low_confidence"
     # the host owns the threshold
-    p, why = vp(dict(g, confidence=0.2), mode="place",
+    p, why = _vp(dict(g, confidence=0.2), mode="place",
                 n_ancestry_options=3, min_confidence=0.1)
     assert why == "" and p.confidence == 0.2
+
+
+def test_concealment_screening_is_never_optional():
+    # cr: omission must NOT yield an accepted proposal — the predicate is
+    # a required parameter; a vocabulary-free arc says so explicitly
+    from construct.growth import validated_proposal
+    import pytest as _pt
+    with _pt.raises(TypeError):
+        validated_proposal(_good(), mode="place", n_ancestry_options=3)
+    for bad in (None, "vermilion", 0, []):
+        with _pt.raises(ValueError):
+            validated_proposal(_good(), mode="place", n_ancestry_options=3,
+                               leaks=bad)
+    p, why = validated_proposal(_good(), mode="place", n_ancestry_options=3,
+                                leaks=lambda text: False)
+    assert why == "" and p is not None
+
+
+def test_texture_must_be_a_real_list():
+    # cr: tuples are not the contract's JSON list
+    assert _vp(dict(_good(), texture=("mud",)), mode="place",
+               n_ancestry_options=3)[1] == "malformed:texture_type"
+
+
+def test_malformed_host_gate_parameters_raise():
+    # cr: host-owned does not make malformed values safe — NaN/None
+    # thresholds and bool/float counts must not defeat the invariants
+    import pytest as _pt
+    g = _good()
+    for bad in (float("nan"), None, True, -0.1, 1.5, "0.35"):
+        with _pt.raises(ValueError):
+            _vp(g, mode="place", n_ancestry_options=3, min_confidence=bad)
+    for bad in (True, 1.5, "3", None):
+        with _pt.raises(ValueError):
+            _vp(g, mode="place", n_ancestry_options=bad)
 
 
 def test_assessor_schema_is_id_free_and_lints():
