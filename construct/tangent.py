@@ -237,11 +237,23 @@ def _tangent_arc_problems(arc, *, protagonist: str, reads) -> list:
     derived = [b.beat_id for b in arc.beats]
     if len(set(derived)) != len(derived):
         return ["build: duplicate derived beat ids"]
+    # the COMPLETE built identity set (cr r4: incl. the separately stored
+    # refusal clock), each under its exact id grammar — a mutated arc_id
+    # of "arc:" must fail here, not serialize
+    import re as _re
+    all_ids = [arc.arc_id, arc.shape.shape_id, *derived,
+               *[c.clock_id for c in arc.clocks]]
+    all_ids += [arc.refusal_clock.clock_id] if arc.refusal_clock else []
+    for eid in all_ids:
+        if not _re.fullmatch(r"(arc|shape|beat|clock):[a-z0-9_]+",
+                             str(eid)):
+            return [f"build: malformed derived id {eid!r}"]
+    if len(set(all_ids)) != len(all_ids):
+        return ["build: duplicate derived ids"]
     # collisions live in the PLOT frame (arcs are plot rows, not canon) —
     # any visible row on a derived id is a collision; canon ids collide too
     try:
-        for eid in [arc.arc_id, arc.shape.shape_id, *derived,
-                    *[c.clock_id for c in arc.clocks]]:
+        for eid in all_ids:
             if reads.frame_rows("plot:main", entity=eid) \
                     or reads.has_entity(eid):
                 problems.append(f"preflight: id_collision:{eid}")
@@ -325,6 +337,9 @@ class PortfolioState:
         if type(self.retracts) is not tuple:
             raise ValueError("PortfolioState: retracts must be an exact "
                              "tuple")
+        if len(self.retracts) != 2:
+            raise ValueError("PortfolioState: exactly TWO retracts — one "
+                             "per control attribute")
         attrs = set()
         ids = []
         for pair in self.retracts:
@@ -382,8 +397,8 @@ def read_portfolio_state(reads) -> "PortfolioState | None":
         return None
 
 
-def adoption_ops(*, arc, portfolio: PortfolioState, aim: str, turn: int,
-                 at: float, reads) -> list[dict]:
+def adoption_ops(*, arc, portfolio: PortfolioState, protagonist: str,
+                 aim: str, turn: int, at: float, reads) -> list[dict]:
     """The ONE adoption unit (item 3b), as ordered typed ops for
     commit_set — built ONLY from the exact linted Arc and the VERIFIED
     portfolio (cr r2 blockers 1+2: no raw row lists, no caller-supplied
@@ -398,10 +413,14 @@ def adoption_ops(*, arc, portfolio: PortfolioState, aim: str, turn: int,
     from construct.arc import io as arc_io
     if type(arc) is not Arc:
         raise ValueError("adoption ops: arc must be the exact linted Arc")
-    # THE LINT IS RERUN HERE (cr r3 blocker 2): the exact type proves
-    # nothing about content — a dataclasses.replace() mutation of a once-
-    # linted arc must be refused at the envelope's door
-    problems = _tangent_arc_problems(arc, protagonist=arc.protagonist,
+    if type(protagonist) is not str \
+            or not protagonist.startswith("person:"):
+        raise ValueError(f"adoption ops: protagonist must be the player's "
+                         f"person id, got {protagonist!r}")
+    # THE LINT IS RERUN HERE (cr r3 blocker 2) against the EXPECTED player
+    # (cr r4: arc.protagonist as its own expectation was tautological —
+    # a replace(protagonist=person:other) mutation must refuse)
+    problems = _tangent_arc_problems(arc, protagonist=protagonist,
                                      reads=reads)
     if problems:
         raise ValueError(f"adoption ops: arc fails the tangent contract: "
@@ -409,6 +428,15 @@ def adoption_ops(*, arc, portfolio: PortfolioState, aim: str, turn: int,
     if type(portfolio) is not PortfolioState:
         raise ValueError("adoption ops: portfolio must be the verified "
                          "PortfolioState")
+    # THE ENVELOPE-DOOR RE-READ (cr r4 blocker 1): tagging is assertion,
+    # not verification — the supplied state must EQUAL the fresh
+    # horizon-bound read, or unrelated assertion ids could retract live
+    # rows while both manifests stay visible
+    fresh = read_portfolio_state(reads)
+    if fresh != portfolio:
+        raise ValueError("adoption ops: the supplied portfolio state does "
+                         "not match the live horizon-bound read — stale or "
+                         "forged state never reaches the envelope")
     new_main_id = arc.arc_id
     old_main_id = portfolio.main_arc
     if new_main_id == old_main_id or new_main_id in portfolio.arc_ids:

@@ -325,7 +325,8 @@ def test_adoption_ops_from_verified_state_and_reconstruction(tmp_path):
             _proposal(), protagonist="person:you", arc_id="arc:tangent_9",
             reads=reads)
         assert problems == []
-        ops = adoption_ops(arc=arc, portfolio=state, aim="a life aboard",
+        ops = adoption_ops(arc=arc, portfolio=state,
+                           protagonist="person:you", aim="a life aboard",
                            turn=9, at=1009.0, reads=reads)
         # retracts first, covering every located control row
         assert [o["op"] for o in ops[:len(state.retracts)]] == \
@@ -365,9 +366,11 @@ def test_adoption_ops_from_verified_state_and_reconstruction(tmp_path):
         # arc already in the portfolio, blank aim, bad turn/at
         with _pt.raises(ValueError):
             adoption_ops(arc="arc:tangent_9", portfolio=state,
+                         protagonist="person:you",
                          aim="x", turn=9, at=1009.0, reads=reads)
         with _pt.raises(ValueError):
             adoption_ops(arc=arc, portfolio={"main_arc": "arc:main_case"},
+                         protagonist="person:you",
                          aim="x", turn=9, at=1009.0, reads=reads)
         old_arc, _ = build_tangent_arc(
             _proposal(), protagonist="person:you",
@@ -377,18 +380,43 @@ def test_adoption_ops_from_verified_state_and_reconstruction(tmp_path):
             main_arc="arc:main_case",
             retracts=(("arc_ids", "a-1"), ("main_arc", "a-2")))
         with _pt.raises(ValueError):     # already a member — never re-adopt
-            adoption_ops(arc=old_arc, portfolio=dup_state, aim="x",
+            adoption_ops(arc=old_arc, portfolio=dup_state,
+                         protagonist="person:you", aim="x",
                          turn=9, at=1009.0, reads=reads)
         # a MUTATED exact-type Arc is refused at the envelope's door
         # (cr r3 blocker 2: type proves nothing about content)
         import dataclasses as _dc
         gutted = _dc.replace(arc, beats=())
         with _pt.raises(ValueError):
-            adoption_ops(arc=gutted, portfolio=state, aim="a life aboard",
+            adoption_ops(arc=gutted, portfolio=state,
+                         protagonist="person:you", aim="a life aboard",
+                         turn=9, at=1009.0, reads=reads)
+        # cr r4 blocker 2: the player binds INDEPENDENTLY — a protagonist
+        # swap to an existing person refuses; so does a gutted arc id
+        swapped = _dc.replace(arc, protagonist="person:sefa")
+        with _pt.raises(ValueError):
+            adoption_ops(arc=swapped, portfolio=state,
+                         protagonist="person:you", aim="a life aboard",
+                         turn=9, at=1009.0, reads=reads)
+        blank_id = _dc.replace(arc, arc_id="arc:")
+        with _pt.raises(ValueError):
+            adoption_ops(arc=blank_id, portfolio=state,
+                         protagonist="person:you", aim="a life aboard",
+                         turn=9, at=1009.0, reads=reads)
+        # cr r4 blocker 1: a well-shaped state with UNRELATED existing ids
+        # refuses at the door (the fresh re-read equality)
+        forged = PortfolioState(
+            arc_ids=state.arc_ids, main_arc=state.main_arc,
+            retracts=(("arc_ids", "a:9998"), ("main_arc", "a:9999")))
+        with _pt.raises(ValueError):
+            adoption_ops(arc=arc, portfolio=forged,
+                         protagonist="person:you", aim="a life aboard",
                          turn=9, at=1009.0, reads=reads)
         for kw in (dict(aim="   "), dict(turn=-1), dict(turn=True),
-                   dict(at=float("nan")), dict(at=2**53 + 1)):
-            base = dict(arc=arc, portfolio=state, aim="a life aboard",
+                   dict(at=float("nan")), dict(at=2**53 + 1),
+                   dict(protagonist="you")):
+            base = dict(arc=arc, portfolio=state,
+                        protagonist="person:you", aim="a life aboard",
                         turn=9, at=1009.0, reads=reads)
             base.update(kw)
             with _pt.raises(ValueError):
@@ -423,7 +451,9 @@ def test_portfolio_state_is_verified_or_absent(tmp_path):
                dict(retracts=(("arc_ids", "a-1"),
                               ("main_arc", None))),    # None id
                dict(retracts=(("other", "a-1"),
-                              ("main_arc", "a-2")))):  # unknown attr
+                              ("main_arc", "a-2"))),   # unknown attr
+               dict(retracts=(("arc_ids", "a-1"), ("main_arc", "a-2"),
+                              ("arc_ids", "a-3")))):   # exactly TWO
         base = dict(good)
         base.update(kw)
         with _pt.raises(ValueError):
@@ -469,6 +499,16 @@ def test_build_tangent_arc_ids_and_reload(tmp_path):
                                           arc_id="arc:taken", reads=reads)
         assert bad is None and \
             "preflight: id_collision:arc:taken" in problems
+        # cr r4 blocker 3: the separately stored REFUSAL clock is in the
+        # collision set too
+        w.porcelain.ingest_structured([
+            {"entity": "clock:refusal_tangent_77", "attribute": "kind",
+             "value": "clock", "frame": "plot:main"}], frame="plot:main")
+        bad, problems = build_tangent_arc(
+            _proposal(), protagonist="person:you",
+            arc_id="arc:tangent_77", reads=reads)
+        assert bad is None and \
+            "preflight: id_collision:clock:refusal_tangent_77" in problems
         # SERIALIZE/RELOAD: the built arc round-trips whole
         arc, problems = build_tangent_arc(
             _proposal(), protagonist="person:you", arc_id="arc:tangent_9",
