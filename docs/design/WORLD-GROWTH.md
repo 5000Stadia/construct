@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC r3 — r1's six blockers + the r2-addendum tangent-adoption blocker folded; awaiting cr re-review
+**Status:** SPEC r4 — r1 (six) + addendum (tangent adoption) + r2-review (standing companions, region ancestry, three coherence corrections) all folded; awaiting cr re-review
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -66,11 +66,17 @@ doorway — the resolve seam with generated provenance:
 | Story material | LWG P1/P2 — regenerative/opportunistic/ambient mints (hidden `plot:`) | pacing/fallout triggers |
 | A first-mention STUB | the resolve seam's proper-name gate (`resolve.py`) — narration may mint a minimal stub for a proper-named new person/place | first proper-named mention in prose |
 
-**The prose-stub boundary (r2, cr blocker 4):** the first-mention channel
-stays — it is the robot-vacuum gate itself — but its ceiling is now named:
-narration may create only a MINIMAL, NON-PRESENT, NON-CONNECTED stub
-(kind + name). Only Growth may add actionable geography (`in`,
-`connects_to`), encounter PRESENCE, or movement. Identity authority is
+**The prose-stub boundary (r2 blocker 4; sharpened r4):** the
+first-mention channel stays — it is the robot-vacuum gate itself — with
+its ceiling stated exactly: narration may create a MINIMAL, NON-PRESENT,
+NON-CONNECTED stub — kind + name + bounded IDENTITY descriptors (a
+person's role/title remain legal; they describe who someone is, not where
+anything stands). `place.in` is REMOVED from this channel: containment is
+actionable geography and belongs to Growth alone, as do `connects_to`,
+encounter PRESENCE, and movement. Place analogue of the Gregor oracle:
+prose-only "the Vermilion Vault" can at most stub it — no containment,
+no connection, no travel until Growth (or an authored path) builds the
+road. Identity authority is
 global and host-owned for both channels: the model proposes display
 fields; the HOST allocates collision-free ids, binds to unique existing
 identities where they exist, and declines ambiguity. Oracle: prose-only
@@ -155,16 +161,35 @@ Mechanism decision: an ENGINE-SIDE atomic ingest/activation primitive,
 taken to PB as a shape consult BEFORE the G1 build (the collaboration
 model: an engine gap is a PB letter, never a local workaround); if PB
 declines, the specified fallback is staging-world copy/swap with session
-reopen. Required oracle either way: fault injection at EVERY row boundary
-— the entire chunk is visible, or none of it is. Journey time prices and
+reopen. THE COMPANION POSTCONDITION (r4): the atomic set includes not only a
+GENERATED companion but ALL STANDING companions selected at the PRE-MOVE
+horizon (`accompanying == protagonist`): after any accepted grown
+transition, each remains accompanying AND co-located with the
+protagonist — or none of the move/growth set becomes visible (today's
+separate fail-open companion batch is precisely the torn-set risk).
+Required oracle either way: fault injection at EVERY row boundary —
+including the standing-companion rows, not only generated Kip — the
+entire chunk is visible, or none of it is. Journey time prices and
 advances ONLY after successful activation, from the pre-move origin to
 the activated destination; a torn or declined proposal advances neither
 the clock nor any cached route price.
 
+**THE PROPOSAL-FAILURE RESULT (r4 — the player-visible same-turn
+contract):** on an ELIGIBLE frontier whose proposal fails (model LOW,
+invalid fields, lint), the host retries ONCE in-turn; if still failing,
+the turn renders CONTINUED TRAVEL — the road goes on, no arrival claimed,
+no emptiness asserted — the journey stays open (next turn re-triggers
+eligibility fresh), the failure receipts loudly, and the diegetic clock
+advances only ordinary turn time, never the priced journey. The action is
+never silently consumed into diegetic emptiness.
+
 **Then the ordinary machinery takes over:** the move commits (canon
-displaces — the Ironhold defect dies here), the scene stages, `furnish_
-scene` paints on entry, the narrator renders an arrival it was BRIEFED on
-(never asked to invent), and the imagery pipeline gets a real place.
+displaces — the Ironhold defect dies here), the scene stages, the
+narrator renders an arrival it was BRIEFED on (never asked to invent),
+and the imagery pipeline gets a real place. `furnish_scene` STANDS DOWN
+for the activated place (growth owns its texture and committed a
+description; furnishing remains the owner only for places that arrive
+undescribed by other paths).
 
 ## 4. Doctrine
 
@@ -273,11 +298,19 @@ Concrete named destinations keep today's resolve/mint path untouched.
   rows: `kind=region`, `in` (parent region/world), `style` (the derived
   voice — WHY this region exists, from the assessment receipt),
   `origin` (what the player did arriving — generated provenance),
-  timeless where constitutive, `valid_from` where acquired. Reads:
-  briefing style resolves by NEAREST-ANCESTOR region walk (the existing
-  place-feel machinery's ancestry read); conclude→continue authors ch2
-  against grown territory (the hide-and-integrate case), and each later
-  chapter reads the accreted cards — chapter ten remembers chapter two.
+  timeless where constitutive, `valid_from` where acquired.
+  **THE ANCESTRY INSERTION (r4, cr blocker 3 — a card that is not an
+  ancestor governs nothing):** the card enters the containment chain by
+  an ATOMIC insertion at one horizon: `region:<slug>.in = old_parent` AND
+  `grown_place.in = region:<slug>` in the same activation set — the
+  reparent preserves route/location coherence (every prior locate chain
+  through old_parent still resolves; the region interposes, never
+  detaches). Reads: briefing style resolves by NEAREST-ANCESTOR region
+  walk (the existing place-feel machinery's ancestry read — which now
+  genuinely encounters the card); conclude→continue authors ch2 against
+  grown territory, and each later chapter reads the accreted cards —
+  chapter ten remembers chapter two. Oracles: the walk finds the card's
+  style after reopen; a later-chapter (ch3+) read still resolves it.
 - **ACCEPTANCE for the program — THE TANGENT VOYAGE (founder, 2026-07-12):**
   a rigorous ch1→ch2 run that INTENTIONALLY DRIFTS — the player leaves the
   written story to start their own, and the world must stay REAL and RICH
