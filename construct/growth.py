@@ -691,9 +691,12 @@ def no_growth_deny(*, boundary_status: str = "", no_frontier: bool = False,
 
     Deny only on AFFIRMATIVE proof — the strict_flag discipline: a fuzzy,
     missing, or truthy-but-not-True signal proves nothing, and an unproven
-    deny would be the stonewall back under a receipt. Returns a reason
-    from NO_GROWTH_DENIES, or "" (eligible — grow or retry)."""
-    if str(boundary_status) == "blocked":
+    deny would be the stonewall back under a receipt. That asymmetry cuts
+    BOTH ways (cr piece-5): malformed input passes through as no-proof,
+    never gets repaired INTO proof — the status must be the literal str
+    "blocked", not an object that merely stringifies to it. Returns a
+    reason from NO_GROWTH_DENIES, or "" (eligible — grow or retry)."""
+    if type(boundary_status) is str and boundary_status == "blocked":
         return "deny:sealed_boundary"
     if strict_flag(no_frontier):
         return "deny:no_frontier"
@@ -715,7 +718,7 @@ class GenerativeSlot:
     refused: list = field(default_factory=list)
 
     def claim(self, actor: str) -> bool:
-        if type(actor) is not str or not actor:
+        if type(actor) is not str or not actor.strip():
             raise ValueError("generative slot: actor must be a nonempty "
                              f"label, got {actor!r}")
         if self.claimed_by:

@@ -794,6 +794,14 @@ def test_no_growth_denies_only_on_affirmative_proof():
     assert no_growth_deny(no_frontier="yes") == ""
     assert no_growth_deny(no_frontier=1) == ""
     assert no_growth_deny(laws_forbid="true") == ""
+    # cr piece-5 blocker: proof is the LITERAL str — an object that merely
+    # stringifies to "blocked" is malformed input, and malformed passes
+    # through as no-proof, never repaired INTO proof
+    class LooksBlocked:
+        def __str__(self):
+            return "blocked"
+    assert no_growth_deny(boundary_status=LooksBlocked()) == ""
+    assert no_growth_deny(boundary_status=b"blocked") == ""
     # precedence is fixed and first-proof wins (stable receipts)
     assert no_growth_deny(boundary_status="blocked",
                           laws_forbid=True) == "deny:sealed_boundary"
@@ -813,3 +821,5 @@ def test_generative_slot_claims_once_at_invocation():
         slot.claim("")
     with _pt.raises(ValueError):
         GenerativeSlot().claim(None)
+    with _pt.raises(ValueError):
+        GenerativeSlot().claim("   ")   # a diagnostic label, not whitespace
