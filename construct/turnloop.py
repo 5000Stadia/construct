@@ -243,7 +243,11 @@ def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
     empty contribution."""
     from construct.arc.executor import concealed_tokens
     secret: set[str] = set()
-    keys = arc_protected_keys(arc, reads)
+    try:
+        keys = arc_protected_keys(arc, reads)
+    except Exception as exc:  # the enumeration itself is an authority read
+        raise GrowthVocabUnavailable(f"protected-key enumeration: {exc}") \
+            from exc
     for (e, a) in keys:
         secret |= _secret_word_set(a)
         secret |= _secret_word_set(e.split(":")[-1])
@@ -262,12 +266,17 @@ def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
             raise GrowthVocabUnavailable(f"{e}.{a}: {exc}") from exc
         if isinstance(val, str) and re.match(r"^[a-z_]+:[a-z0-9_]+$", val):
             secret |= _secret_word_set(val.split(":", 1)[-1])
-            try:
-                nm = reads.state(val, "name")
-            except Exception as exc:
-                raise GrowthVocabUnavailable(f"{val}.name: {exc}") from exc
-            if isinstance(nm, str):
-                secret |= _secret_word_set(nm)
+            # EVERY identity surface of the referenced answer — an alias is
+            # as much the hidden identity as the primary name (cr r4: "the
+            # Red Jack" must conceal exactly like "rival")
+            for nattr in ("name", "alias", "aliases", "title"):
+                try:
+                    nm = reads.state(val, nattr)
+                except Exception as exc:
+                    raise GrowthVocabUnavailable(
+                        f"{val}.{nattr}: {exc}") from exc
+                if isinstance(nm, str):
+                    secret |= _secret_word_set(nm)
     secret |= concealed_tokens(keys)              # entity/attr distinctives
     return secret
 

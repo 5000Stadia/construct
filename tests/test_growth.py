@@ -1760,3 +1760,66 @@ def test_wired_vocabulary_authority_failure_never_shrinks_the_screen(
             == "place:north_road"
     finally:
         w.close()
+
+
+def test_wired_referenced_answer_aliases_conceal(tmp_path, monkeypatch):
+    # cr r4: the hidden answer's ALIAS is its identity too — "the Red
+    # Jack Crossing" must decline exactly like "the Rival Crossing"
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([{"entity": "person:rival", "attribute": "alias",
+                              "value": "the Red Jack"}])
+
+        def _fake(porcelain, items):   # even a WILLING engine never sees it
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        g = _good()
+        g["place"]["name"] = "the Red Jack Crossing"
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:unlicensed:place.name_concealed"
+        assert w.porcelain.state("place:the_red_jack_crossing",
+                                 "kind")["status"] != "known"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+
+def test_wired_protected_key_enumeration_failure_seams(tmp_path,
+                                                       monkeypatch):
+    # cr r4: the enumeration itself is an authority read — a raise inside
+    # arc_protected_keys becomes the stable technical seam, never an escape
+    import construct.turnloop as tl
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        import inspect as _inspect
+        real = tl.arc_protected_keys
+
+        def _boom(arc, reads=None):
+            # fail ONLY growth's own enumeration — the legacy fail-open
+            # consumers (roster redaction, move/take guards) keep their
+            # long-standing behavior and are not under test here
+            callers = {f.function for f in _inspect.stack()[1:4]}
+            if "_growth_concealed_vocab" in callers:
+                raise RuntimeError("protected-key enumeration down")
+            return real(arc, reads)
+        monkeypatch.setattr(tl, "arc_protected_keys", _boom)
+        provider = StubProvider([_classify(), _good()])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:concealment_unavailable"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
