@@ -168,7 +168,10 @@ CLASSIFY_SCHEMA = {
                   "or deictic flight ('downstream', 'away from here', 'until I reach "
                   "somewhere no one knows me') AND prospective first-X travel toward a "
                   "place that exists only as a hope ('the first tavern I see', 'the "
-                  "first light I trust' — nothing concrete to bind). FALSE for any "
+                  "first light I trust' — nothing concrete to bind), INCLUDING "
+                  "destination-less travel-until ('I walk until I meet someone' — "
+                  "committed travel, nothing nameable: set this AND seeks_encounter). "
+                  "FALSE for any "
                   "CONCRETE named or known place ('the mill', 'Liddell's warehouse' — "
                   "those resolve or mint), for hypotheticals, questions, or staying "
                   "put. Most turns: false."},

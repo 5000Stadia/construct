@@ -4646,19 +4646,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # DESCRIBED destination the player now stands in. An INVOKED-then-failed
     # attempt is the §3 proposal-failure contract: one attempt, a technical
     # receipt, NO world/clock change, the honest non-diegetic retry seam.
-    if (seeks_encounter and kind == "action" and not moves_to
+    if (seeks_encounter and moves_open and kind == "action"
+            and not moves_to
             and not trace.movement_status and not trace.same_place):
-        # THE EMPTY-DESTINATION PIPELINE OUTCOME (G2, ruled with cr): the
-        # classify contract makes moves_to=""+seeks_encounter=True the
-        # LEGAL shape for committed travel-until with no nameable
-        # destination. The pipeline outcome is then HOST-PROVEN by
-        # construction: refer/known-place/semantic-bind take a MENTION
-        # and there is none (nothing to resolve → nothing resolved →
-        # no competing answer can exist), and the guards above prove no
-        # movement machinery answered (no status, not same-place). Every
-        # ANSWERED state — resolved, blocked, ambiguous, same_place,
-        # deliberating — leaves this False (pinned negatives), so a
-        # literal classifier true can never broaden the gate.
+        # THE DESTINATION-LESS ENCOUNTER LANE (spec §5.2, amended with
+        # cr): committed travel-until with no nameable destination. The
+        # pipeline outcome is HOST-PROVEN vacuous (no mention → nothing
+        # to resolve → no competing answer) and no movement machinery
+        # answered — but proof-by-absence must not ride ONE classifier
+        # boolean, so the lane requires the CONJUNCTION of both travel
+        # signals (moves_open ∧ seeks_encounter: the commitment read
+        # twice by distinct fields). Every ANSWERED state — resolved,
+        # blocked, ambiguous, same_place, deliberating — and every
+        # single-signal shape is pinned as NOT firing.
         _growth_miss = True
     if _growth_miss and not trace.same_place:
         if not _growth_attempt(world, p, arc, live_reads, provider, trace,

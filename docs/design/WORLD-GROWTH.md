@@ -256,7 +256,24 @@ mutation): the Assessor wakes only when ALL hold, in order —
    deliberative, OOC, or a question);
 2. the ORDINARY pipeline ran first and proved zero destination: refer /
    known-place / semantic-bind all miss — not resolved, not ambiguous,
-   not blocked, not undiscovered-gated, not same-place, not a fixture;
+   not blocked, not undiscovered-gated, not same-place, not a fixture.
+   **THE DESTINATION-LESS ENCOUNTER LANE (G2 fold, ruled with cr):**
+   committed travel-until with NO nameable destination ("I walk until I
+   run into someone") legally classifies as `moves_to=""`; the pipeline
+   then has no mention to run against, and its outcome is HOST-PROVEN
+   vacuous (nothing to resolve → nothing resolved → no competing answer
+   exists), provided no movement machinery answered (no status, not
+   same-place). Because this lane substitutes proof-by-absence for
+   proof-by-run, it must NOT ride one classifier boolean: it requires
+   the CONJUNCTION `moves_open ∧ seeks_encounter` (travel commitment
+   read twice, by two distinct fields — a single stray literal True
+   cannot open it), and its consequence bound is structural: an
+   encounter-only chunk, anchored at the origin, ZERO displacement,
+   every host gate (deny / slot / validation / identity / concealment /
+   atomic) applying whole. Accepted residual risk, stated plainly: a
+   doubly-misclassified stationary turn could mint one plausible
+   passerby on an eligible frontier — bounded, receipted, and cheaper
+   than the stonewall this program exists to kill;
 3. and the new signal fired: `moves_open` (directional/deictic travel
    with commitment) or `seeks_encounter` (travel-UNTIL-someone — a
    stationary look/question is NOT it; the distinction is pinned).
@@ -276,8 +293,12 @@ Concrete named destinations keep today's resolve/mint path untouched.
   the Ironhold probe's turns 8-10 class (flee downstream) lands somewhere
   real; canon displaces.
 - **G2 — ENCOUNTER-GROWTH:** `seeks_encounter` → Assessor → person/group
-  stub staged on the road (Gregor + Kip); NPC machinery picks them up as
-  ordinary cast (npc_turn, delivery-eligible, person_can_act).
+  stub staged on the road (Gregor + Kip); NPC machinery picks them up for
+  ordinary SCENE ACTION AND SPEECH (npc_turn, person_can_act). Grown
+  encounters carry no authored CastNode by construction, so the
+  interview-delivery lane (clue delivery) remains authored-cast-only —
+  if a grown character later needs to CARRY story material, that is the
+  arc adopting them (drift/G-A machinery), not a G2 acceptance bar.
 - **G-A — TANGENT ADOPTION (r3, cr addendum blocker; option B — the
   design the five bars mean):** growth creates geography and cast, but the
   MAIN ARC owns conclusion — without adoption, a tangent stays rich

@@ -1003,7 +1003,7 @@ def test_wired_encounter_invokes_with_no_destination(tmp_path):
         g = _good()
         del g["place"]                     # a pure meeting on the road
         provider = StubProvider([
-            _classify(moves_open=False, seeks_encounter=True, moves_to=""),
+            _classify(moves_open=True, seeks_encounter=True, moves_to=""),
             g,
         ])
         r = run_turn(w, _wired_arc(), provider,
@@ -1039,14 +1039,16 @@ def test_wired_encounter_success_comes_to_the_road(tmp_path, monkeypatch):
                "his caravan", "speaks": True,
                "intent": "greet the stranger on the road", "line_hint": ""}
         provider = StubProvider(
-            [_classify(moves_open=False, seeks_encounter=True, moves_to=""),
+            [_classify(moves_open=True, seeks_encounter=True, moves_to=""),
              g, dict(npt), dict(npt)]
             + [{"prose": "A husky farmer hails you from his caravan."}] * 4)
         r = run_turn(w, _wired_arc(), provider,
                      "I walk until I meet someone.", turn=1)
         assert r.trace.growth == "activated:person:gregor_bund"
         # the grown pair went through the ORDINARY cast engine: real
-        # npc_turn receipts, no schema drops — eligibility + delivery ran
+        # npc_turn receipts, no schema drops — scene action/speech +
+        # person_can_act (interview-delivery stays authored-cast-only:
+        # spec §6 G2 as narrowed; grown ids carry no CastNode)
         assert "npc_turn:person:gregor_bund:cheap" in r.trace.cohort_calls
         assert "npc_turn:person:kip:cheap" in r.trace.cohort_calls
         assert not [d for d in r.trace.dropped_cohorts
@@ -1084,13 +1086,14 @@ def test_wired_encounter_with_a_place_walks_there(tmp_path, monkeypatch):
                "speaks": True, "intent": "size up the newcomer",
                "line_hint": ""}
         provider = StubProvider(
-            [_classify(moves_open=False, seeks_encounter=True, moves_to=""),
+            [_classify(moves_open=True, seeks_encounter=True, moves_to=""),
              _good(), dict(npt), dict(npt)]
             + [{"prose": "The waypost, and a farmer at it."}] * 4)
         r = run_turn(w, _wired_arc(), provider,
                      "I walk until I meet someone.", turn=1)
         assert r.trace.growth == "activated:place:the_willow_ford_waypost"
         assert "npc_turn:person:gregor_bund:cheap" in r.trace.cohort_calls
+        assert "npc_turn:person:kip:cheap" in r.trace.cohort_calls
         assert not [d for d in r.trace.dropped_cohorts
                     if str(d).startswith("npc_turn:")]
         assert (w.porcelain.locate("person:you") or [None])[0] \
@@ -2058,7 +2061,7 @@ def test_wired_seek_signal_never_broadens_over_answered_states(
         w.ingest_structured([{"entity": "place:the_march",
                               "attribute": "name", "value": "the march"}])
         provider = StubProvider(
-            [_classify(moves_open=False, seeks_encounter=True,
+            [_classify(moves_open=True, seeks_encounter=True,
                        moves_to="the march")]
             + [{"prose": "You take the road up into the march."}] * 3)
         r = run_turn(w, _wired_arc(), provider,
@@ -2075,7 +2078,7 @@ def test_wired_seek_signal_never_broadens_over_answered_states(
         w.ingest_structured([{"entity": "place:north_road",
                               "attribute": "name", "value": "north road"}])
         provider = StubProvider(
-            [_classify(moves_open=False, seeks_encounter=True,
+            [_classify(moves_open=True, seeks_encounter=True,
                        moves_to="north road")]
             + [{"prose": "You pace the road you already stand on."}] * 3)
         r = run_turn(w, _wired_arc(), provider,
@@ -2097,7 +2100,7 @@ def test_wired_seek_signal_never_broadens_over_answered_states(
                 {"entity": "place:the_march", "attribute": "condition",
                  "value": "washed out"}]})
         provider = StubProvider(
-            [_classify(moves_open=False, seeks_encounter=True,
+            [_classify(moves_open=True, seeks_encounter=True,
                        moves_to="the high pass"),
              {"verdict": "existing", "match": "place:the_march"}]
             + [{"prose": "The way is washed out."}] * 3)
@@ -2116,7 +2119,7 @@ def test_wired_seek_signal_never_broadens_over_answered_states(
         w.ingest_structured([{"entity": "place:the_march",
                               "attribute": "name", "value": "the march"}])
         provider = StubProvider(
-            [_classify(moves_open=False, seeks_encounter=True,
+            [_classify(moves_open=True, seeks_encounter=True,
                        moves_to="the crossing"),
              {"verdict": "ambiguous", "match": ""}]
             + [{"prose": "Which crossing do you mean?"}] * 3)
@@ -2124,6 +2127,33 @@ def test_wired_seek_signal_never_broadens_over_answered_states(
                      "I make for the crossing until I meet someone.", turn=1)
         assert r.trace.growth == ""
         assert r.trace.movement_status == "ambiguous"
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+    # (e0) cr's exact repro: a schema-valid single-boolean false positive
+    # ("Is anyone around?" misread as seeks_encounter=True, moves_open
+    # honest False) must NOT invoke — the lane demands BOTH signals
+    w = _wired_world(tmp_path / "onebool")
+    try:
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=True, moves_to="")]
+            + [{"prose": "The road lies quiet."}] * 3)
+        r = run_turn(w, _wired_arc(), provider, "Is anyone around?", turn=1)
+        assert r.trace.growth == ""
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+    # (e1) and the mirror single signal (moves_open alone, no destination)
+    w = _wired_world(tmp_path / "openonly")
+    try:
+        provider = StubProvider(
+            [_classify(moves_open=True, seeks_encounter=False, moves_to="")]
+            + [{"prose": "You shift your weight, going nowhere yet."}] * 3)
+        r = run_turn(w, _wired_arc(), provider, "I mean to move on soon.",
+                     turn=1)
+        assert r.trace.growth == ""
         assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
     finally:
         w.close()
