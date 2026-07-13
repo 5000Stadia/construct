@@ -359,3 +359,200 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
     return GrowthProposal(assessment=assessment, confidence=confidence,
                           place=place, encounter=encounter,
                           texture=tuple(texture)), ""
+
+
+# ---------------------------------------------------------------------------
+# Piece 4 — HOST ROW ASSEMBLY (spec §3 host gates): the model proposed
+# DISPLAY FIELDS only; here the HOST allocates collision-free ids under the
+# global identity authority and builds every row of the growth chunk as one
+# HOST-BUILT BATCH in the contractual order (`ordered_chunk_items`). Nothing
+# here writes — the caller hands the items to `activate_chunk` (all-or-none).
+
+import math as _math
+import re as _re
+
+
+@dataclass(frozen=True)
+class AssembledChunk:
+    """One growth chunk, host-built and ready for atomic activation.
+    `assessment` rides along for the receipt/audit trail (doctrine 3: the
+    chunk cites its derivation) — it is NEVER a row and never rendered
+    verbatim."""
+
+    items: tuple                # ordered rows for activate_chunk
+    assessment: str
+    place_id: str = ""          # host-allocated (empty when no new place)
+    person_id: str = ""
+    companion_id: str = ""
+
+
+def _slugify(name: str) -> str:
+    return _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def _alloc(prefix: str, name: str, exists, taken: set) -> str:
+    """Collision-free id under the global identity authority: the canon
+    roster (`exists`) AND this chunk's own allocations (`taken`) — a grown
+    person and their same-named companion must not collide intra-chunk.
+    Ordinal probe, the D3 re-mint pattern."""
+    slug = _slugify(name)
+    if not slug:
+        return ""
+    cand = f"{prefix}:{slug}"
+    n = 1
+    while cand in taken or exists(cand):
+        n += 1
+        cand = f"{prefix}:{slug}_{n}"
+    taken.add(cand)
+    return cand
+
+
+def _entity_row(entity: str, attribute: str, value: str, at: float) -> dict:
+    return {"entity": entity, "attribute": attribute, "value": value,
+            "value_type": "entity", "valid_from": at}
+
+
+def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
+                   ancestry_options: list, protagonist: str,
+                   companions: list, at: float, exists
+                   ) -> tuple["AssembledChunk | None", str]:
+    """Validated proposal → the ordered, host-built row batch.
+
+    Host-supplied truth: `origin` (the place the player walks FROM — the
+    passage's far end and the encounter anchor when no new place is grown),
+    `ancestry_options` (the SAME existing-place list whose indexes the
+    proposal was validated against — the parent is host truth, never model
+    text), `companions` (ALL standing companions selected at the pre-move
+    horizon: the §3 companion postcondition puts their moves in the SAME
+    atomic set), `at` (the turn's valid_from), `exists` (the canon roster
+    membership predicate backing id allocation).
+
+    Malformed HOST inputs raise ValueError (a host bug must fail loudly,
+    the piece-3 posture); a proposal defect that only assembly can see
+    (an unsluggable display name) DECLINES retryably. Row facts:
+    - the new place is declared (kind/name) with its `description` set to
+      the proposed identity — `furnish_scene` sees a described place and
+      STANDS DOWN (spec §3: one texture owner);
+    - containment nests it in the host-picked parent; the passage commits
+      `connects_to` BOTH WAYS (the road walked is walkable back);
+    - the protagonist AND every standing companion move in the same set;
+    - the encounter person is ANCHORED (`in` the grown place, else the
+      origin — never prose-only), their companion bonded via
+      `accompanying` (the standing presence machinery's own state);
+    - texture lands as distinct `detail_<at>_N` rows on the anchor place:
+      distinct within the chunk (same-attribute rows would supersede, and
+      three facts must not collapse to one) AND across chunks (a later
+      encounter on the same road must never supersede an earlier chunk's
+      texture — growth is canon, forever); `at` is unique per chunk
+      because one generative act per turn is the budget contract.
+    """
+    if not isinstance(prop, GrowthProposal):
+        raise ValueError("growth assembly: prop must be a GrowthProposal")
+    if mode not in ("place", "encounter"):
+        raise ValueError(f"growth assembly: unknown mode {mode!r}")
+    if not callable(exists):
+        raise ValueError("growth assembly: exists must be the canon roster "
+                         "membership predicate")
+    if type(origin) is not str or not origin.startswith("place:"):
+        raise ValueError(f"growth assembly: origin must be a place id, got "
+                         f"{origin!r}")
+    if type(protagonist) is not str or not protagonist.startswith("person:"):
+        raise ValueError("growth assembly: protagonist must be a person id, "
+                         f"got {protagonist!r}")
+    if type(companions) is not list or any(
+            type(c) is not str or not c.startswith("person:")
+            for c in companions):
+        raise ValueError("growth assembly: companions must be a list of "
+                         "person ids")
+    if type(at) not in (int, float) or isinstance(at, bool) \
+            or not _math.isfinite(float(at)) or float(at) < 0:
+        raise ValueError(f"growth assembly: at must be a finite non-negative "
+                         f"time, got {at!r}")
+    at = float(at)
+
+    taken: set = set()
+    place_rows: list[dict] = []
+    containment: list[dict] = []
+    passage: list[dict] = []
+    place_id = ""
+    if prop.place is not None:
+        if type(ancestry_options) is not list or not ancestry_options or any(
+                type(o) is not str or not o.startswith("place:")
+                for o in ancestry_options):
+            raise ValueError("growth assembly: ancestry_options must be a "
+                             "nonempty list of place ids")
+        pi = prop.place["parent_index"]
+        if not (0 <= pi < len(ancestry_options)):
+            raise ValueError("growth assembly: parent_index outside the "
+                             "supplied ancestry_options — the validation and "
+                             "assembly lists disagree (host bug)")
+        place_id = _alloc("place", prop.place["name"], exists, taken)
+        if not place_id:
+            return None, "malformed:place.name_unsluggable"
+        place_rows = [
+            {"entity": place_id, "attribute": "kind", "value": "place",
+             "timeless": True},
+            {"entity": place_id, "attribute": "name",
+             "value": prop.place["name"][:60]},
+            {"entity": place_id, "attribute": "description",
+             "value": prop.place["identity"]},
+        ]
+        containment = [_entity_row(place_id, "in", ancestry_options[pi], at)]
+        passage = [_entity_row(origin, "connects_to", place_id, at),
+                   _entity_row(place_id, "connects_to", origin, at)]
+
+    anchor = place_id or origin
+    encounter_rows: list[dict] = []
+    person_id = companion_id = ""
+    if prop.encounter is not None:
+        person_id = _alloc("person", prop.encounter["name"], exists, taken)
+        if not person_id:
+            return None, "malformed:encounter.name_unsluggable"
+        encounter_rows = [
+            {"entity": person_id, "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": person_id, "attribute": "name",
+             "value": prop.encounter["name"][:60]},
+            {"entity": person_id, "attribute": "role",
+             "value": prop.encounter["role"]},
+            {"entity": person_id, "attribute": "drive",
+             "value": prop.encounter["drive"]},
+            {"entity": person_id, "attribute": "doing",
+             "value": prop.encounter["doing"]},
+            _entity_row(person_id, "in", anchor, at),
+        ]
+        comp = prop.encounter.get("companion")
+        if comp is not None:
+            companion_id = _alloc("person", comp["name"], exists, taken)
+            if not companion_id:
+                return None, "malformed:encounter.companion.name_unsluggable"
+            encounter_rows += [
+                {"entity": companion_id, "attribute": "kind",
+                 "value": comp["kind"], "timeless": True},
+                {"entity": companion_id, "attribute": "name",
+                 "value": comp["name"][:60]},
+                {"entity": companion_id, "attribute": "bond",
+                 "value": comp["bond"]},
+                _entity_row(companion_id, "in", anchor, at),
+                _entity_row(companion_id, "accompanying", person_id, at),
+            ]
+
+    # the player's own displacement + the companion postcondition: ALL
+    # standing companions move in the SAME atomic set — a place chunk with
+    # no move is a map annotation, not a walk, so moves exist only when a
+    # new place does (an encounter comes TO the road; nobody teleports).
+    moves: list[dict] = []
+    if place_id:
+        moves = [_entity_row(protagonist, "in", place_id, at)]
+        moves += [_entity_row(c, "in", place_id, at) for c in companions]
+
+    texture = [{"entity": anchor, "attribute": f"detail_{int(at)}_{i + 1}",
+                "value": t, "valid_from": at}
+               for i, t in enumerate(prop.texture)]
+
+    items = ordered_chunk_items(place=place_rows, containment=containment,
+                                passage=passage, moves=moves,
+                                encounter=encounter_rows, texture=texture)
+    return AssembledChunk(items=tuple(items), assessment=prop.assessment,
+                          place_id=place_id, person_id=person_id,
+                          companion_id=companion_id), ""

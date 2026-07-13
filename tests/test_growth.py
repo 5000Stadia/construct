@@ -463,3 +463,126 @@ def test_assessor_schema_is_id_free_and_lints():
     blob = str(ASSESSOR_SCHEMA)
     assert "NEVER an id" in blob or "never an id" in blob
     assert "parent_index" in blob                 # choose-among-options only
+
+
+# ---- piece 4: host row assembly -------------------------------------------
+
+def _assemble(prop, **kw):
+    from construct.growth import assemble_chunk
+    kw.setdefault("mode", "place")
+    kw.setdefault("origin", "place:north_road")
+    kw.setdefault("ancestry_options",
+                  ["place:the_march", "place:greywater_vale"])
+    kw.setdefault("protagonist", "person:you")
+    kw.setdefault("companions", [])
+    kw.setdefault("at", 5000.0)
+    kw.setdefault("exists", lambda eid: False)
+    return assemble_chunk(prop, **kw)
+
+
+def _good_prop():
+    p, why = _vp(_good(), mode="place", n_ancestry_options=2)
+    assert why == ""
+    return p
+
+
+def test_assembly_builds_the_ordered_chunk():
+    chunk, why = _assemble(_good_prop(),
+                           companions=["person:reed", "person:aldous"])
+    assert why == "" and chunk.place_id == "place:the_willow_ford_waypost"
+    keys = [(r["entity"], r["attribute"]) for r in chunk.items]
+    pid = chunk.place_id
+    # declaration strictly precedes containment, passage, moves, encounter,
+    # texture — order is CONTRACTUAL under staged-prefix gating
+    assert keys.index((pid, "kind")) < keys.index((pid, "in"))
+    assert keys.index((pid, "in")) < keys.index(("place:north_road",
+                                                 "connects_to"))
+    assert keys.index((pid, "connects_to")) < keys.index(("person:you", "in"))
+    assert keys.index(("person:you", "in")) \
+        < keys.index((chunk.person_id, "kind"))
+    # the host picked the parent from ITS OWN list, never model text
+    row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    assert row[(pid, "in")]["value"] == "place:greywater_vale"
+    # the road walked is walkable BACK
+    assert row[(pid, "connects_to")]["value"] == "place:north_road"
+    # the companion postcondition: every standing companion in the SAME set
+    assert row[("person:reed", "in")]["value"] == pid
+    assert row[("person:aldous", "in")]["value"] == pid
+    # furnish stands down: the place arrives DESCRIBED
+    assert row[(pid, "description")]["value"].startswith("a plank shelter")
+    # the encounter is anchored + their companion bonded
+    assert row[(chunk.person_id, "in")]["value"] == pid
+    assert row[(chunk.companion_id, "accompanying")]["value"] \
+        == chunk.person_id
+    # texture: attributes distinct within the chunk AND across chunks (a
+    # later chunk on the same anchor must never supersede these — canon
+    # forever); keyed by the chunk's unique turn-time
+    assert row[(pid, "detail_5000_1")]["value"] == "a weather-worn signpost"
+    assert row[(pid, "detail_5000_2")]["value"] == "wheel ruts in the clay"
+    # derivation receipt rides along, never as a row
+    assert "farm country" in chunk.assessment
+    assert all(a != "assessment" for _, a in keys)
+
+
+def test_assembly_ids_are_collision_free():
+    # canon roster collision AND intra-chunk collision both ordinal-probe
+    taken = {"place:the_willow_ford_waypost", "person:gregor_bund",
+             "person:gregor_bund_2"}
+    g = _good()
+    g["encounter"]["companion"]["name"] = "Gregor Bund"  # same-named pair
+    p, why = _vp(g, mode="place", n_ancestry_options=2)
+    assert why == ""
+    chunk, why = _assemble(p, exists=lambda eid: eid in taken)
+    assert why == ""
+    assert chunk.place_id == "place:the_willow_ford_waypost_2"
+    assert chunk.person_id == "person:gregor_bund_3"
+    assert chunk.companion_id == "person:gregor_bund_4"
+
+
+def test_assembly_encounter_without_place_anchors_at_origin():
+    g = _good()
+    del g["place"]
+    p, why = _vp(g, mode="encounter", n_ancestry_options=0)
+    assert why == ""
+    chunk, why = _assemble(p, mode="encounter")
+    assert why == "" and chunk.place_id == ""
+    row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    assert row[(chunk.person_id, "in")]["value"] == "place:north_road"
+    # nobody teleports: an encounter come TO the road moves no one
+    assert ("person:you", "in") not in row
+    # growth's texture lands on the anchor
+    assert row[("place:north_road", "detail_5000_1")]["value"] \
+        == "a weather-worn signpost"
+
+
+def test_assembly_declines_unsluggable_names():
+    g = _good()
+    g["place"]["name"] = "???"
+    p, why = _vp(g, mode="place", n_ancestry_options=2)
+    assert why == ""
+    chunk, why = _assemble(p)
+    assert chunk is None and why == "malformed:place.name_unsluggable"
+
+
+def test_assembly_host_bugs_raise():
+    import pytest as _pt
+    p = _good_prop()
+    bad_calls = [
+        dict(exists=None),
+        dict(origin="north road"),
+        dict(origin=None),
+        dict(protagonist="you"),
+        dict(companions=("person:reed",)),          # exact list, not tuple
+        dict(companions=["person:reed", "reed"]),
+        dict(at=float("nan")),
+        dict(at=True),
+        dict(at=-5.0),
+        dict(mode="wander"),
+        dict(ancestry_options=[]),                   # place proposed, no list
+        dict(ancestry_options=["place:a"]),          # index 1 out of range —
+    ]                                                # validation/assembly split
+    for kw in bad_calls:
+        with _pt.raises(ValueError):
+            _assemble(p, **kw)
+    with _pt.raises(ValueError):
+        _assemble({"not": "a proposal"})
