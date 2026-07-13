@@ -1383,3 +1383,248 @@ def test_wired_success_path_with_simulated_atomic_engine(tmp_path,
         assert led
     finally:
         w.close()
+
+
+def test_wired_dismissal_wins_over_the_chunk(tmp_path, monkeypatch):
+    # cr re-review 1: a companion dismissed THIS TURN is excluded from the
+    # growth snapshot — successful activation must not carry Reed to the
+    # waypost and only then dismiss him
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:reed", "attribute": "accompanying",
+             "value": "person:you", "value_type": "entity"},
+        ])
+
+        def _fake_activate(porcelain, items):
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake_activate)
+        provider = StubProvider(
+            [_classify(npcs_dismissed=["npc_0"]), _good()]
+            + [{"prose": "The waypost takes shape."}] * 6)
+        r = run_turn(w, _wired_arc(), provider,
+                     "Reed, go home. I keep moving away.", turn=1)
+        assert r.trace.growth == "activated:place:the_willow_ford_waypost"
+        # dismissal WINS: Reed never traveled; the staged dismissal landed
+        assert (w.porcelain.locate("person:reed") or [None])[0] \
+            == "place:north_road"
+        assert w.porcelain.state("person:reed", "accompanying")["fact"][
+            "value"] == ""
+        assert r.trace.npcs_departed == ["person:reed"]
+        assert "person:reed" not in r.trace.growth_moved
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:the_willow_ford_waypost"
+    finally:
+        w.close()
+
+
+def test_wired_explicit_moved_with_not_duplicated(tmp_path, monkeypatch):
+    # cr re-review 2: an explicitly named standing companion is chunk-owned
+    # — the moved_with commit must not write a second identical in-row
+    import construct.growth as growth_mod
+    from construct.adapter import frame_facts
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:reed", "attribute": "accompanying",
+             "value": "person:you", "value_type": "entity"},
+        ])
+
+        def _fake_activate(porcelain, items):
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake_activate)
+        provider = StubProvider(
+            [_classify(moved_with=["npc_0"]), _good()]
+            + [{"prose": "The waypost takes shape."}] * 6)
+        r = run_turn(w, _wired_arc(), provider,
+                     "Reed, with me — I keep moving away.", turn=1)
+        assert r.trace.growth == "activated:place:the_willow_ford_waypost"
+        assert "person:reed" in r.trace.growth_moved
+        reed_moves = [f for f in frame_facts(w, "canon", entity="person:reed")
+                      if f.attribute == "in"
+                      and f.value == "place:the_willow_ford_waypost"]
+        assert len(reed_moves) == 1          # ONE move, ONE row
+        assert r.trace.npcs_moved_with == []  # chunk-owned, not 2b-ii's
+    finally:
+        w.close()
+
+
+def test_wired_identity_availability_covers_every_authority_read(
+        tmp_path, monkeypatch):
+    # cr re-review 3: companion-roster and exact-name reads are inside the
+    # fail-closed boundary — both end in the stable technical decline
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+
+    # (a) the companion roster read (p.entities) fails
+    w = _wired_world(tmp_path / "roster")
+    try:
+        real_entities = w.porcelain.entities
+
+        def _boom(frame, **kw):
+            if kw.get("prefix") == "person:":
+                raise RuntimeError("identity roster down")
+            return real_entities(frame, **kw)
+        monkeypatch.setattr(w.porcelain, "entities", _boom)
+        provider = StubProvider([_classify(), _good()])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:identity_unavailable"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+    # (b) an exact-name state read fails during the identity decision
+    w = _wired_world(tmp_path / "names")
+    try:
+        w.ingest_structured([{"entity": "place:north_road",
+                              "attribute": "name", "value": "north road"}])
+        from construct.adapter import PorcelainWorldReads
+        real_state = PorcelainWorldReads.state
+
+        def _state(self, entity, attribute, **kw):
+            if entity == "place:north_road" and attribute == "alias":
+                raise RuntimeError("authority state down")
+            return real_state(self, entity, attribute, **kw)
+        monkeypatch.setattr(PorcelainWorldReads, "state", _state)
+        g = _good()
+        g["place"]["name"] = "north road"     # forces the exact-name path
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:identity_unavailable"
+    finally:
+        w.close()
+
+
+def test_wired_growth_success_excludes_the_lwg_that_turn(tmp_path,
+                                                         monkeypatch):
+    # cr held the line: the cross-feature GenerativeSlot oracle end to end.
+    # Fixture: a spined bystander (drive row) + a player delta that touches
+    # him — the P2b opportunistic branch is OTHERWISE ELIGIBLE. With growth
+    # activating (fake atomic), the Assessor must be the turn's SOLE
+    # generative invocation; the negative control (no growth signal) proves
+    # the very same branch runs.
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider, task_of
+    from construct.turnloop import run_turn
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+
+    def _mk(base):
+        base.mkdir(parents=True, exist_ok=True)
+        rule = rule_classifier_fallback()
+
+        def fb(prompt, schema):
+            if prompt.startswith("Classify the lifetime"):
+                return rule(prompt, schema)
+            if prompt.startswith("Extract world-state"):
+                return {"items": [
+                    {"entity": "person:clerk", "attribute": "unsettled_by",
+                     "value": "the stranger's questions"},
+                ]}
+            return {"items": []}
+        w = World(base / "slot.world", world_id="w:slot",
+                  model=StubModel(fallback=fb), stance="fiction",
+                  title="Slot World")
+        w.ingestor.cursor.advance(1.0)
+        w.ingest_structured([
+            {"entity": "place:the_march", "attribute": "kind",
+             "value": "region", "timeless": True},
+            {"entity": "place:north_road", "attribute": "kind",
+             "value": "place", "timeless": True},
+            {"entity": "place:north_road", "attribute": "in",
+             "value": "place:the_march", "value_type": "entity"},
+            {"entity": "person:you", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:you", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:clerk", "attribute": "kind",
+             "value": "person", "timeless": True},
+            {"entity": "person:clerk", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:clerk", "attribute": "drive",
+             "value": "drive:duty"},
+            # accompanying: the chunk carries the clerk to the grown scene,
+            # so the spined subject the player touched stays PRESENT — the
+            # P2b trigger is genuinely eligible after the move
+            {"entity": "person:clerk", "attribute": "accompanying",
+             "value": "person:you", "value_type": "entity"},
+            {"entity": "fact:secret", "attribute": "kind",
+             "value": "proposition", "timeless": True},
+            {"entity": "fact:secret", "attribute": "culprit",
+             "value": "person:rival"},
+            {"entity": "person:rival", "attribute": "kind",
+             "value": "person", "timeless": True},
+        ])
+        return w
+
+    class _P(StubProvider):
+        def __init__(self, queue):
+            super().__init__(queue)
+            self.gen_called = False
+
+        async def complete(self, prompt, schema, *, tier="main",
+                           deliberate=False):
+            if task_of(prompt) == "gen":
+                self.gen_called = True
+                self.calls.append((prompt, schema, tier))
+                return {"skip": True, "reason": "quiet"}
+            return await super().complete(prompt, schema, tier=tier,
+                                          deliberate=deliberate)
+
+    def _fake_activate(porcelain, items):
+        receipt = porcelain.ingest_structured(items, classify="rules")
+        return growth_mod.ActivationResult(
+            ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+
+    # POSITIVE: growth activates → the LWG author is NOT called
+    w = _mk(tmp_path / "pos")
+    try:
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake_activate)
+        provider = _P([_classify(), _good()]
+                      + [{"prose": "The waypost takes shape."}] * 8)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I unsettle the clerk with questions and keep moving "
+                     "away.", turn=1, scope=["person:clerk"])
+        assert r.trace.growth.startswith("activated:")
+        assert not provider.gen_called
+        gro = [c for c in provider.calls if "⟦gro⟧" in c[0][:40]]
+        assert len(gro) == 1        # the sole generative invocation
+    finally:
+        w.close()
+
+    # NEGATIVE CONTROL: same fixture, no growth signal → P2b runs
+    w = _mk(tmp_path / "neg")
+    try:
+        provider = _P([_classify(moves_open=False, moves_to="")]
+                      + [{"prose": "The clerk shifts uneasily."}] * 8)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I unsettle the clerk with questions.", turn=1,
+                     scope=["person:clerk"])
+        assert r.trace.growth == ""
+        assert provider.gen_called          # the branch CAN run
+    finally:
+        w.close()

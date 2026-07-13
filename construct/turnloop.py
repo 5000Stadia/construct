@@ -282,6 +282,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
                     moves_to: str, player_input: str, kind: str,
                     moves_open: bool, seeks_encounter: bool,
                     reshape_attempt: bool = False,
+                    dismissed: list | None = None,
                     pipeline_miss: bool, pre_chain: list, turn: int,
                     gen_slot: Any, style: str, laws: str) -> bool:
     """The WORLD-GROWTH G1 invocation (docs/design/WORLD-GROWTH.md §3/§5
@@ -398,8 +399,8 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         for attr in ("name", "alias", "aliases", "title"):
             try:
                 v = live_reads.state(eid, attr)
-            except Exception:
-                continue
+            except Exception as exc:  # an unreadable authority is TECHNICAL
+                raise _IdentityUnavailable(str(exc)) from exc
             if isinstance(v, str) and v.strip():
                 out.add(v.strip().lower())
         return out
@@ -425,10 +426,21 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
             return ("ambiguous", "")
         return ("new", "")
 
-    companions = sorted(
-        n for n in p.entities("canon", prefix="person:", as_of=_growth_h)
-        if n != arc.protagonist
-        and live_reads.state(n, "accompanying") == arc.protagonist)
+    try:
+        companions = sorted(
+            n for n in p.entities("canon", prefix="person:", as_of=_growth_h)
+            if n != arc.protagonist
+            and live_reads.state(n, "accompanying") == arc.protagonist)
+    except Exception as exc:  # noqa: BLE001 — an unreadable companion
+        # snapshot is the same technical state as an unreadable identity
+        # authority: decline and seam, never guess who travels (blocker 3)
+        logger.warning("growth companion snapshot unreadable: %s", exc)
+        trace.growth = "declined:identity_unavailable"
+        return False
+    # DISMISSAL WINS (cr re-review 1): a companion the player dismissed
+    # THIS TURN must not be carried to the destination by the chunk — the
+    # staged dismissal commits after activation, so fold the intent in.
+    companions = [c for c in companions if c not in set(dismissed or ())]
 
     def _exists(eid: str) -> bool:
         return bool(live_reads.has_entity(eid))
@@ -456,6 +468,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         return False
     trace.growth = f"activated:{chunk.place_id}"
     trace.growth_retry = False
+    trace.growth_moved = [arc.protagonist, *companions]
     trace.movement_status = "clear"
     # doctrine 4: growth IS a development — the LWG ledger sees it (D-SOFT
     # must not teleport an arc carrier into the new scene on the same
@@ -941,6 +954,7 @@ class TurnTrace:
     drift: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, class) classified this turn (D-SOFT only)
     growth: str = ""  # WORLD-GROWTH G1 receipt: "activated:<place_id>" | "declined:<reason>" | "activation_unavailable" | "denied:<deny>" | "deferred:encounter" | "" (not invoked)
     growth_retry: bool = False  # an INVOKED growth attempt failed → the transport shows the non-diegetic retry seam (no world/clock change this turn)
+    growth_moved: list = field(default_factory=list)  # ids the activated chunk moved (protagonist + companions) — 2b-ii must not re-write them
     relocations: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, new_staging) committed this turn
     relocate_directive: str = ""  # DRIFT-HANDLING D1 debug: the sanitized staging line (mirrors `nudge`)
     absence_consequences: list = field(default_factory=list)  # DRIFT-HANDLING D2: (moment_event_id, committed_row_count) this turn
@@ -4581,6 +4595,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                kind=kind, moves_open=moves_open,
                                seeks_encounter=seeks_encounter,
                                reshape_attempt=reshape_attempt,
+                               dismissed=dismissed_ids,
                                pipeline_miss=True, pre_chain=pre_chain,
                                turn=turn, gen_slot=_gen_slot, style=style,
                                laws=_laws_full) and trace.growth_retry:
@@ -4658,6 +4673,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     moved_with_ids.append(_pid)
             except Exception:  # noqa: BLE001 — a miss just means no standing companionship
                 pass
+    # WORLD-GROWTH (cr re-review 2): ids the activated chunk already moved
+    # are chunk-owned — the explicit moved_with commit must not re-write
+    # them at the same valid_from (one move, one row).
+    if trace.growth_moved:
+        moved_with_ids = [i for i in moved_with_ids
+                          if i not in set(trace.growth_moved)]
     if moved_with_ids and trace.movement_status in ("clear", "obscured"):
         try:
             _post_chain = p.locate(arc.protagonist, as_of=_h)
