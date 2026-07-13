@@ -158,6 +158,14 @@ def test_may_confirm_consumes_only_the_validated_value():
     assert may_confirm({"aim": "x", "declared_turn": 7,
                         "source_action": "y"}, turn=8,
                        committed=True) is False
+    # cr r3: a SUBCLASS with a bypassed __post_init__ is refused too —
+    # exact type, not isinstance
+
+    class ForgedPending(Pending):
+        def __post_init__(self):
+            pass
+    forged = ForgedPending("", True, "")
+    assert may_confirm(forged, turn=8, committed=True) is False
     for bad in (True, -1, 1.5, "8", None):
         with pytest.raises(ValueError):
             may_confirm(pending, turn=bad, committed=True)

@@ -199,6 +199,9 @@ def may_confirm(pending, *, turn: int, committed: bool) -> bool:
     invariant rechecked at THIS boundary (cr r2 blocker 2: a legitimately
     read Pending cached past its window must not confirm at turn 100)."""
     _require_turn(turn, "turn")
-    if not isinstance(pending, Pending) or committed is not True:
+    if type(pending) is not Pending or committed is not True:
+        # EXACT type only (cr r3): a subclass overriding __post_init__
+        # bypasses construction validation — no subtype may impersonate
+        # the validated value
         return False
     return 1 <= turn - pending.declared_turn <= EXPIRY_TURNS
