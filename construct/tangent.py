@@ -238,16 +238,19 @@ def _tangent_arc_problems(arc, *, protagonist: str, reads) -> list:
     if len(set(derived)) != len(derived):
         return ["build: duplicate derived beat ids"]
     # the COMPLETE built identity set (cr r4: incl. the separately stored
-    # refusal clock), each under its exact id grammar — a mutated arc_id
-    # of "arc:" must fail here, not serialize
+    # refusal clock), each under the grammar its ROLE requires (cr r5: a
+    # union regex proves only some-allowed-prefix — an arc_id of
+    # "shape:not_an_arc" would seed an unreadable main identity)
     import re as _re
-    all_ids = [arc.arc_id, arc.shape.shape_id, *derived,
-               *[c.clock_id for c in arc.clocks]]
-    all_ids += [arc.refusal_clock.clock_id] if arc.refusal_clock else []
-    for eid in all_ids:
-        if not _re.fullmatch(r"(arc|shape|beat|clock):[a-z0-9_]+",
-                             str(eid)):
-            return [f"build: malformed derived id {eid!r}"]
+    role_ids = [("arc", arc.arc_id), ("shape", arc.shape.shape_id)]
+    role_ids += [("beat", b) for b in derived]
+    role_ids += [("clock", c.clock_id) for c in arc.clocks]
+    if arc.refusal_clock:
+        role_ids.append(("clock", arc.refusal_clock.clock_id))
+    for role, eid in role_ids:
+        if not _re.fullmatch(role + r":[a-z0-9_]+", str(eid)):
+            return [f"build: malformed derived id {eid!r} (role {role})"]
+    all_ids = [eid for _, eid in role_ids]
     if len(set(all_ids)) != len(all_ids):
         return ["build: duplicate derived ids"]
     # collisions live in the PLOT frame (arcs are plot rows, not canon) —

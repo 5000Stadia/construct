@@ -403,6 +403,22 @@ def test_adoption_ops_from_verified_state_and_reconstruction(tmp_path):
             adoption_ops(arc=blank_id, portfolio=state,
                          protagonist="person:you", aim="a life aboard",
                          turn=9, at=1009.0, reads=reads)
+        # cr r5: per-ROLE grammar — a cross-prefix id refuses in every
+        # role, not merely a some-allowed-prefix union
+        for mutant in (_dc.replace(arc, arc_id="shape:not_an_arc"),
+                       _dc.replace(arc, shape=_dc.replace(
+                           arc.shape, shape_id="arc:not_a_shape")),
+                       _dc.replace(arc, beats=tuple(
+                           _dc.replace(b, beat_id="clock:not_a_beat")
+                           for b in arc.beats)),
+                       _dc.replace(arc, refusal_clock=_dc.replace(
+                           arc.refusal_clock,
+                           clock_id="beat:not_a_clock"))):
+            with _pt.raises(ValueError):
+                adoption_ops(arc=mutant, portfolio=state,
+                             protagonist="person:you",
+                             aim="a life aboard", turn=9, at=1009.0,
+                             reads=reads)
         # cr r4 blocker 1: a well-shaped state with UNRELATED existing ids
         # refuses at the door (the fresh re-read equality)
         forged = PortfolioState(
