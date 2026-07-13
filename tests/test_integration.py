@@ -2218,6 +2218,17 @@ class TestFullTurn:
              "value": "arc_won", "valid_from": 1010.0},
         ], frame="session:main")
         assert _episode_doorway(w2, PLAYER, 1000.0, 13) == "place:far_end"
+        # cr G-C r3: a NEWER nonterminal arc_* decoy must not decide —
+        # only actual arc_won/arc_lost receipts are conclusions
+        w2.porcelain.ingest_structured([
+            {"entity": "event:arc_outcome_99", "attribute": "kind",
+             "value": "arc_pending", "valid_from": 1011.0},
+            {"entity": "event:arc_outcome_99",
+             "attribute": "terminal_location",
+             "value": "place:study", "value_type": "literal",
+             "valid_from": 1011.0},
+        ], frame="session:main")
+        assert _episode_doorway(w2, PLAYER, 1000.0, 13) == "place:far_end"
         w2.porcelain.ingest_structured([
             {"entity": "event:arc_outcome_12",
              "attribute": "terminal_location",

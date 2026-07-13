@@ -2549,7 +2549,7 @@ def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
                 _receipts = [str(r.entity) for r in
                              _ffd(world, "session:main", attribute="kind")
                              if str(r.entity).startswith("event:arc_outcome_")
-                             and str(r.value).startswith("arc_")]
+                             and str(r.value) in ("arc_won", "arc_lost")]
                 if _receipts:
                     _newest = max(_receipts, key=_rcpt_turn)
                     _cap = [str(r.value) for r in
