@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC r2 — r1's six blockers folded; awaiting cr re-review
+**Status:** SPEC r3 — r1's six blockers + the r2-addendum tangent-adoption blocker folded; awaiting cr re-review
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -226,6 +226,37 @@ Concrete named destinations keep today's resolve/mint path untouched.
 - **G2 — ENCOUNTER-GROWTH:** `seeks_encounter` → Assessor → person/group
   stub staged on the road (Gregor + Kip); NPC machinery picks them up as
   ordinary cast (npc_turn, delivery-eligible, person_can_act).
+- **G-A — TANGENT ADOPTION (r3, cr addendum blocker; option B — the
+  design the five bars mean):** growth creates geography and cast, but the
+  MAIN ARC owns conclusion — without adoption, a tangent stays rich
+  forever and can never conclude on its own terms. The adoption contract:
+  1. TRIGGER — a SUSTAINED, EXPLICIT player commitment to the new life,
+     never mere movement: a commit-shaped declaration (the classifier's
+     existing `commits` machinery) naming the tangent aim, CONFIRMED by
+     continued tangent-consistent pursuit on a later turn (two-beat
+     adoption; a single line of enthusiasm adopts nothing).
+  2. THE OLD MAIN — durably DEMOTED, never silently dropped: a persisted
+     demotion row with reason (`tangent_adopted`), the arc re-entering the
+     portfolio as a SIDE arc (side arcs never terminate the scenario —
+     already true) so the old call survives as exactly the founder's
+     "distant echo."
+  3. THE TANGENT ARC — authored against the player's OWN stated aim + the
+     grown world (the LWG generator's existing authoring path), LINTED,
+     and promoted to MAIN through the portfolio-manifest machinery the
+     replan path already uses (retract + append, the world-changing-agency
+     precedent). Terminal + continuation logic read the manifest main —
+     unchanged code, new occupant.
+  4. THE PHASE BOUNDARY (bar 2, durable and restart-safe — never
+     critic-only): BEFORE adoption, R1/R2 call gently under the specified
+     cadence (the drift program's own proportion rules). AFTER adoption,
+     the demoted arc's mechanics may never re-enter as MAIN pressure: its
+     nudges/relocations run under SIDE right-of-way rules only, gated on
+     the persisted adoption row — a restart re-reads the same boundary.
+  5. Bar 3 joins the ACTIVATION CONTRACT: on every accepted grown
+     transition, companion location == protagonist location AND the
+     `accompanying` state intact, in the SAME atomic set — or none of the
+     transition commits (today's separate companion batch is exactly the
+     §3 atomicity finding).
 - **G-C — THE CONTINUATION DOORWAY (r2, cr blocker 1 — precedes G3):**
   the shipped conclude→continue deliberately relocates the protagonist to
   the PRIOR EPISODE'S OPENING place (game.py) — growth can displace ch1
@@ -272,6 +303,13 @@ Concrete named destinations keep today's resolve/mint path untouched.
      world (WHERE), with a goal series grown from what they built (GOAL
      PIVOT + SUPPORTED STYLE), the old call at most a distant echo that
      honestly reflects how ch1 left it.
+  MACHINE ORACLES FIRST (r3 — the critic judges craft only after the
+  machinery proves itself): full growth receipt + activation; canonical
+  grown location; companion co-location + `accompanying` intact; the
+  tangent main-arc identity in the manifest after adoption; a terminal
+  receipt OWNED by the tangent arc; ch2 opening at the ch1 endpoint with
+  the tangent's goal/region/style facts present. THEN the critic judges
+  richness, proportionality, and railroading.
   Vehicle: the displaced-conclusion probe extended (companion leg + the
   five bars in the critic addendum); the displaced probe's original
   three-bar form remains as the G1/G3 slice gate.
