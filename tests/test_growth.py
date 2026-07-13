@@ -2410,3 +2410,54 @@ def test_wired_region_card_governs_grown_territory(tmp_path, monkeypatch):
             st["fact"]["value"])
     finally:
         w2.close()
+
+
+def test_latency_checkpoints_cover_every_return_shape(tmp_path):
+    # cr (telemetry review): checkpoint placement has correctness
+    # semantics — every return path is bounded by a cumulative stamp
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    # (a) NORMAL path: all seven cp keys, nondecreasing
+    w = _wired_world(tmp_path / "normal")
+    try:
+        provider = StubProvider(
+            [_classify(moves_open=False, moves_to="")]
+            + [{"prose": "The road waits."}] * 3)
+        r = run_turn(w, _wired_arc(), provider, "I look around.", turn=1)
+        keys = ["cp_classified", "cp_movement_done", "cp_growth_gate_done",
+                "cp_scene_snapshot_done", "cp_salience_done",
+                "cp_drift_lifecycle_done", "cp_generator_done"]
+        vals = [r.trace.timings.get(k) for k in keys]
+        assert all(v is not None for v in vals), r.trace.timings
+        assert vals == sorted(vals)
+    finally:
+        w.close()
+    # (b) GROWTH-RETRY path: the Assessor's interval is stamped
+    w = _wired_world(tmp_path / "seam")
+    try:
+        provider = StubProvider([_classify(), _good()])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "activation_unavailable"
+        assert "cp_growth_gate_done" in r.trace.timings
+        assert r.trace.timings["cp_growth_gate_done"] >= \
+            r.trace.timings["cp_movement_done"]
+    finally:
+        w.close()
+    # (c) an early ANSWERED/DENIED path is bounded by a later stamp: the
+    # canon-strict declaration denial returns right after classification
+    w = _wired_world(tmp_path / "deny")
+    try:
+        provider = StubProvider([
+            _classify(moves_open=False, moves_to="")
+            | {"kind": "declaration"}])
+        r = run_turn(w, _wired_arc(), provider,
+                     "There is a secret door here, and always was.",
+                     turn=1, mode="pure")
+        assert "canon-strict" in r.prose
+        assert "cp_classified" in r.trace.timings
+        assert "cp_early_return" in r.trace.timings
+        assert r.trace.timings["cp_early_return"] >= \
+            r.trace.timings["cp_classified"]
+    finally:
+        w.close()

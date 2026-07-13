@@ -4148,6 +4148,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             answer = prose or "; ".join(
                 f"{f['entity']} {f['attribute']}: {f['value']}" for f in facts)
             trace.concealment_audit = "n/a (ask path, frame-scoped)"
+            _cp("early_return")
             return TurnResult(prose=answer, trace=trace)
         # Canon can't answer (e.g. "where's the closest pub?" — unestablished but
         # something this character would plainly KNOW). DON'T stonewall with "you
@@ -4178,6 +4179,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # retcon channel's guarded doorway handles it (screens, beliefs, collisions), never
         # the generic denial; it proceeds as an ordinary in-world beat.
         trace.adjudication = "denied: declarations are co-author moves; this scenario is canon-strict"
+        _cp("early_return")
         return TurnResult(
             prose="(canon-strict) This world's facts are already written — "
                   "you can act in it, but not author it. State what you DO.",
@@ -4220,6 +4222,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 {"entity": f"arch:turn_{turn}", "attribute": "prose",
                  "value": prose[:2400], "valid_from": turn_time(turn)},
             ], frame=SESSION, classify="rules")  # receipt + archive — RULES, no LM (Cx 268)
+            _cp("early_return")
             return TurnResult(prose=prose, trace=trace)
 
     # 2. Ingest the player's effect. FAIL-OPEN on a text-extraction schema violation
@@ -4866,6 +4869,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                laws=_laws_full) and trace.growth_retry:
             # the §3 seam: the STAGED pre-move mutations are dropped whole —
             # the turn never happened; everything retries together.
+            _cp("growth_gate_done")   # the Assessor's interval is REAL
             return TurnResult(prose=_GROWTH_SEAM, trace=trace, settle=None)
     # ---- WORLD-GROWTH G-A (spec §6): the two-beat tangent adoption.
     # BEAT 1 — a declaration persists/supersedes the ONE pending receipt.
