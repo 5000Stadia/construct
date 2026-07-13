@@ -63,8 +63,12 @@ CLASSIFY_SCHEMA = {
                                     "when its verb is inspection — 'I stop at the "
                                     "crossway and check the hatch' / 'at the counter, "
                                     "I listen' MOVES them there; set moves_to to that "
-                                    "place. Empty string only when the action truly "
-                                    "stays where they already are"},
+                                    "place. Empty string when the action truly "
+                                    "stays where they already are — OR when committed "
+                                    "travel has NO nameable destination at all (open "
+                                    "travel-until: 'I walk until I meet someone' — "
+                                    "moves_to stays empty and seeks_encounter carries "
+                                    "the commitment)"},
         "requires": {"type": "array", "items": {"type": "string"},
                      "description": "specific items the player claims to USE or produce "
                                     "FROM THEIR POSSESSION for THIS action NOW ('the "
@@ -171,9 +175,12 @@ CLASSIFY_SCHEMA = {
         "seeks_encounter": {"type": "boolean",
                   "description": "true ONLY for travel-UNTIL-someone — moving with the "
                   "stated aim of finding a person on the way ('I keep running down the "
-                  "road until I run into someone'). FALSE for a stationary look or "
-                  "question ('is anyone around?' — that is observation, not travel), "
-                  "and false whenever no movement is committed. Most turns: false."},
+                  "road until I run into someone'). Such travel usually has NO "
+                  "nameable destination: moves_to stays EMPTY and this flag alone "
+                  "carries the movement commitment (the legal pairing). FALSE for a "
+                  "stationary look or question ('is anyone around?' — that is "
+                  "observation, not travel), and false whenever no movement is "
+                  "committed. Most turns: false."},
         "addresses_present": {"type": "boolean",
                   "description": "true when the input SPEAKS TO or directly engages a "
                   "present person — a question, an order, a greeting, pressing them, "

@@ -331,9 +331,10 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     early-returns the non-diegetic seam — one generative act per turn,
     no in-turn semantic retry).
 
-    G1 is PLACES: an eligibility verdict of "encounter" records
-    deferred:encounter and stands down without claiming the slot (the G2
-    wiring owns it) — the ordinary no-destination flow continues.
+    Mode-aware since G2: place chunks walk the player (moves commit in
+    the set); encounter chunks come TO the road (anchored at the origin,
+    nobody teleports); an encounter may carry the place its meeting
+    needs, and then the player walked there.
     """
     from construct import growth as growth_mod
 
@@ -1008,7 +1009,7 @@ class TurnTrace:
     timings: dict = field(default_factory=dict)  # per-section wall-clock (s) this turn — optimization surface
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
     drift: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, class) classified this turn (D-SOFT only)
-    growth: str = ""  # WORLD-GROWTH G1 receipt: "activated:<place_id>" | "declined:<reason>" | "activation_unavailable" | "denied:<deny>" | "deferred:encounter" | "" (not invoked)
+    growth: str = ""  # WORLD-GROWTH receipt: "activated:<place_or_person_id>" | "declined:<reason>" | "activation_unavailable" | "denied:<deny>" | "" (not invoked)
     growth_retry: bool = False  # an INVOKED growth attempt failed → the transport shows the non-diegetic retry seam (no world/clock change this turn)
     growth_moved: list = field(default_factory=list)  # ids the activated chunk moved (protagonist + companions) — 2b-ii must not re-write them
     relocations: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, new_staging) committed this turn
@@ -4647,11 +4648,17 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # receipt, NO world/clock change, the honest non-diegetic retry seam.
     if (seeks_encounter and kind == "action" and not moves_to
             and not trace.movement_status and not trace.same_place):
-        # "I walk until I run into someone" with no stated destination:
-        # refer/known/bind had no mention to run against — zero
-        # destination is proven by absence, and only the encounter signal
-        # carries content (G2; the dst-cohort-never-called oracle pins
-        # that nothing was bypassed).
+        # THE EMPTY-DESTINATION PIPELINE OUTCOME (G2, ruled with cr): the
+        # classify contract makes moves_to=""+seeks_encounter=True the
+        # LEGAL shape for committed travel-until with no nameable
+        # destination. The pipeline outcome is then HOST-PROVEN by
+        # construction: refer/known-place/semantic-bind take a MENTION
+        # and there is none (nothing to resolve → nothing resolved →
+        # no competing answer can exist), and the guards above prove no
+        # movement machinery answered (no status, not same-place). Every
+        # ANSWERED state — resolved, blocked, ambiguous, same_place,
+        # deliberating — leaves this False (pinned negatives), so a
+        # literal classifier true can never broaden the gate.
         _growth_miss = True
     if _growth_miss and not trace.same_place:
         if not _growth_attempt(world, p, arc, live_reads, provider, trace,

@@ -1035,12 +1035,22 @@ def test_wired_encounter_success_comes_to_the_road(tmp_path, monkeypatch):
         monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
         g = _good()
         del g["place"]
+        npt = {"acts": True, "action": "hails the traveler from beside "
+               "his caravan", "speaks": True,
+               "intent": "greet the stranger on the road", "line_hint": ""}
         provider = StubProvider(
             [_classify(moves_open=False, seeks_encounter=True, moves_to=""),
-             g] + [{"prose": "A husky farmer hails you from his caravan."}] * 6)
+             g, dict(npt), dict(npt)]
+            + [{"prose": "A husky farmer hails you from his caravan."}] * 4)
         r = run_turn(w, _wired_arc(), provider,
                      "I walk until I meet someone.", turn=1)
         assert r.trace.growth == "activated:person:gregor_bund"
+        # the grown pair went through the ORDINARY cast engine: real
+        # npc_turn receipts, no schema drops — eligibility + delivery ran
+        assert "npc_turn:person:gregor_bund:cheap" in r.trace.cohort_calls
+        assert "npc_turn:person:kip:cheap" in r.trace.cohort_calls
+        assert not [d for d in r.trace.dropped_cohorts
+                    if str(d).startswith("npc_turn:")]
         assert r.trace.growth_retry is False
         assert r.trace.growth_moved == []          # nobody teleported
         assert (w.porcelain.locate("person:you") or [None])[0] \
@@ -1070,12 +1080,19 @@ def test_wired_encounter_with_a_place_walks_there(tmp_path, monkeypatch):
             return growth_mod.ActivationResult(
                 ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
         monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        npt = {"acts": True, "action": "waters his team at the trough",
+               "speaks": True, "intent": "size up the newcomer",
+               "line_hint": ""}
         provider = StubProvider(
             [_classify(moves_open=False, seeks_encounter=True, moves_to=""),
-             _good()] + [{"prose": "The waypost, and a farmer at it."}] * 6)
+             _good(), dict(npt), dict(npt)]
+            + [{"prose": "The waypost, and a farmer at it."}] * 4)
         r = run_turn(w, _wired_arc(), provider,
                      "I walk until I meet someone.", turn=1)
         assert r.trace.growth == "activated:place:the_willow_ford_waypost"
+        assert "npc_turn:person:gregor_bund:cheap" in r.trace.cohort_calls
+        assert not [d for d in r.trace.dropped_cohorts
+                    if str(d).startswith("npc_turn:")]
         assert (w.porcelain.locate("person:you") or [None])[0] \
             == "place:the_willow_ford_waypost"
         assert (w.porcelain.locate("person:gregor_bund") or [None])[0] \
@@ -2021,5 +2038,104 @@ def test_wired_identity_log_enumeration_failure_seams(tmp_path, monkeypatch):
         assert r.trace.growth == "declined:concealment_unavailable"
         assert (w.porcelain.locate("person:you") or [None])[0] \
             == "place:north_road"
+    finally:
+        w.close()
+
+
+def test_wired_seek_signal_never_broadens_over_answered_states(
+        tmp_path, monkeypatch):
+    # cr G2 blocker 2: a literal seeks_encounter=True must not fire the
+    # direct gate when the movement machinery ANSWERED — resolved,
+    # same-place, blocked, and ambiguous all stand; and a stationary look
+    # (signal false, no destination) never invokes at all
+    import construct.turnloop as tl
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+
+    # (a) RESOLVED: a known place reuses — no growth invocation
+    w = _wired_world(tmp_path / "resolved")
+    try:
+        w.ingest_structured([{"entity": "place:the_march",
+                              "attribute": "name", "value": "the march"}])
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=True,
+                       moves_to="the march")]
+            + [{"prose": "You take the road up into the march."}] * 3)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I head into the march until I meet someone.", turn=1)
+        assert r.trace.growth == ""
+        assert r.trace.movement_status == "clear"
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+    # (b) SAME-PLACE: naming the current place answers the move
+    w = _wired_world(tmp_path / "same")
+    try:
+        w.ingest_structured([{"entity": "place:north_road",
+                              "attribute": "name", "value": "north road"}])
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=True,
+                       moves_to="north road")]
+            + [{"prose": "You pace the road you already stand on."}] * 3)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I walk the north road until I meet someone.", turn=1)
+        assert r.trace.growth == ""
+        assert r.trace.same_place is True
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+    # (c) BLOCKED: a bound destination behind an obstruction answers
+    w = _wired_world(tmp_path / "blocked")
+    try:
+        w.ingest_structured([{"entity": "place:the_march",
+                              "attribute": "name", "value": "the march"}])
+        monkeypatch.setattr(
+            tl, "_route_obstruction",
+            lambda *a, **k: {"status": "blocked", "evidence": [
+                {"entity": "place:the_march", "attribute": "condition",
+                 "value": "washed out"}]})
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=True,
+                       moves_to="the high pass"),
+             {"verdict": "existing", "match": "place:the_march"}]
+            + [{"prose": "The way is washed out."}] * 3)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I take the high pass until I meet someone.", turn=1)
+        assert r.trace.growth == ""
+        assert r.trace.movement_status == "blocked"
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+    monkeypatch.undo()
+
+    # (d) AMBIGUOUS: the clarify beat answers — never a growth mint
+    w = _wired_world(tmp_path / "amb")
+    try:
+        w.ingest_structured([{"entity": "place:the_march",
+                              "attribute": "name", "value": "the march"}])
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=True,
+                       moves_to="the crossing"),
+             {"verdict": "ambiguous", "match": ""}]
+            + [{"prose": "Which crossing do you mean?"}] * 3)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I make for the crossing until I meet someone.", turn=1)
+        assert r.trace.growth == ""
+        assert r.trace.movement_status == "ambiguous"
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+    # (e) STATIONARY LOOK: no signal, no destination — never invokes
+    w = _wired_world(tmp_path / "look")
+    try:
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=False, moves_to="")]
+            + [{"prose": "The road lies empty either way."}] * 3)
+        r = run_turn(w, _wired_arc(), provider, "Is anyone around?", turn=1)
+        assert r.trace.growth == ""
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
     finally:
         w.close()
