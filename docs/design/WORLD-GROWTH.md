@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC r4 — r1 (six) + addendum (tangent adoption) + r2-review (standing companions, region ancestry, three coherence corrections) all folded; awaiting cr re-review
+**Status:** SPEC r5 — r1 (six) + addendum (adoption) + r2-review (companions, ancestry, corrections) + r3-review (adoption's executable shape: declares_tangent_aim, the tangent-author path, atomic adoption activation) all folded; awaiting cr re-review
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -255,22 +255,42 @@ Concrete named destinations keep today's resolve/mint path untouched.
   design the five bars mean):** growth creates geography and cast, but the
   MAIN ARC owns conclusion — without adoption, a tangent stays rich
   forever and can never conclude on its own terms. The adoption contract:
-  1. TRIGGER — a SUSTAINED, EXPLICIT player commitment to the new life,
-     never mere movement: a commit-shaped declaration (the classifier's
-     existing `commits` machinery) naming the tangent aim, CONFIRMED by
-     continued tangent-consistent pursuit on a later turn (two-beat
-     adoption; a single line of enthusiasm adopts nothing).
+  1. TRIGGER — a DISTINCT classify signal, never `commits` (r5, cr: the
+     conclusory-commit contract would judge/terminate the OLD main on a
+     tangent declaration): optional fail-closed fields
+     `declares_tangent_aim` + `tangent_aim`, host-gated. BEAT 1 persists a
+     PENDING-ADOPTION receipt — normalized aim, turn/horizon, the source
+     action — with explicit cancel / supersede (a newer declaration
+     replaces it) / expiry (a quiet span lapses it) semantics; reopen
+     preserves exactly ONE pending candidate; the old main REMAINS main
+     throughout. BEAT 2 confirms only by citing a LATER committed
+     action/event as tangent-consistent evidence — movement alone is
+     never sufficient, and a single line of enthusiasm adopts nothing.
   2. THE OLD MAIN — durably DEMOTED, never silently dropped: a persisted
      demotion row with reason (`tangent_adopted`), the arc re-entering the
      portfolio as a SIDE arc (side arcs never terminate the scenario —
      already true) so the old call survives as exactly the founder's
      "distant echo."
-  3. THE TANGENT ARC — authored against the player's OWN stated aim + the
-     grown world (the LWG generator's existing authoring path), LINTED,
-     and promoted to MAIN through the portfolio-manifest machinery the
-     replan path already uses (retract + append, the world-changing-agency
-     precedent). Terminal + continuation logic read the manifest main —
-     unchanged code, new occupant.
+  3. THE TANGENT ARC — authored by a DEDICATED TANGENT-AUTHOR PATH (r5,
+     cr: the LWG mint path structurally REJECTS player-protagonist arcs
+     and may not be described as usable unchanged): it reuses the
+     proposal/build/lint utilities but owns its schema and preflight —
+     protagonist is exactly the player; inputs are the persisted stated
+     aim + PLAYER-VISIBLE grown-world facts only; destination and pillars
+     concrete; hidden answers sanitized; NO portfolio row commits until
+     lint succeeds. Then promoted MAIN — terminal + continuation logic
+     read the manifest main: unchanged readers, new occupant.
+  3b. THE ADOPTION ACTIVATION (r5 — adoption is a persistence boundary
+     and the replan path's multi-step manifest swap is not atomic): the
+     set {new arc + index rows, old-main demotion reason, portfolio main
+     switch, adoption receipt} activates as ONE unit — either the atomic
+     primitive (the §3 PB consult covers this case too) or a durable
+     prepare→activate state machine whose reopen recovery
+     deterministically finishes or rolls back. Postconditions: exactly one
+     manifest main; it is fully linted and loadable; the old main remains
+     a portfolio member carrying `tangent_adopted`; the phase boundary
+     flips ONLY with the confirmed activation receipt. Fault-inject every
+     boundary.
   4. THE PHASE BOUNDARY (bar 2, durable and restart-safe — never
      critic-only): BEFORE adoption, R1/R2 call gently under the specified
      cadence (the drift program's own proportion rules). AFTER adoption,
