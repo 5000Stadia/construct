@@ -58,7 +58,10 @@ def test_pending_record_is_one_coherent_write():
     for bad in (True, -1, 1.5, "7", None):
         with pytest.raises(ValueError):
             pending_rows("aim", turn=bad, action="x", at=5007.0)
-    for bad in (float("nan"), float("inf"), -1.0, True, None, "5007"):
+    for bad in (float("nan"), float("inf"), -1.0, True, None, "5007",
+                10**1000, 2**53 + 1):
+        # incl. overflow normalized to ValueError and the exactness bound
+        # (cr r2 blocker 3 — the growth-assembly temporal boundary)
         with pytest.raises(ValueError):
             pending_rows("aim", turn=7, action="x", at=bad)
         with pytest.raises(ValueError):
@@ -120,10 +123,32 @@ def test_read_pending_requires_the_complete_validated_shape():
             read_pending(live, turn=bad)
 
 
+def test_pending_construction_is_the_validation():
+    # cr r2 blocker 1: forged instances are impossible, not unlikely
+    import pytest as _pt
+    for kw in (dict(aim=""), dict(aim="   "), dict(aim="z" * 301),
+               dict(aim=None), dict(declared_turn=True),
+               dict(declared_turn=-1), dict(declared_turn="7"),
+               dict(source_action=""), dict(source_action=None),
+               dict(source_action="w" * 301)):
+        fields = dict(aim="a life aboard", declared_turn=7,
+                      source_action="I sign on.")
+        fields.update(kw)
+        with _pt.raises(ValueError):
+            Pending(**fields)
+
+
 def test_may_confirm_consumes_only_the_validated_value():
     pending = Pending(aim="a life aboard", declared_turn=7,
                       source_action="I sign on.")
     assert may_confirm(pending, turn=8, committed=True) is True
+    # cr r2 blocker 2: the EXPIRY invariant holds at THIS boundary too —
+    # a cached live read must not confirm past its window
+    assert may_confirm(pending, turn=7 + EXPIRY_TURNS,
+                       committed=True) is True
+    assert may_confirm(pending, turn=7 + EXPIRY_TURNS + 1,
+                       committed=True) is False
+    assert may_confirm(pending, turn=100, committed=True) is False
     # a single line of enthusiasm adopts nothing: same-turn, uncommitted,
     # absent, or IMPERSONATED (a bare dict) all refuse
     assert may_confirm(pending, turn=7, committed=True) is False

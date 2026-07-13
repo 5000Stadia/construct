@@ -51,12 +51,30 @@ _MAX_AIM = 300
 
 @dataclass(frozen=True)
 class Pending:
-    """A VALIDATED pending candidate — the only shape may_confirm accepts
-    (cr piece-A blocker 2: no bare dict may impersonate a receipt)."""
+    """A VALIDATED pending candidate — the only shape may_confirm accepts,
+    and CONSTRUCTION IS THE VALIDATION (cr r2 blocker 1: a forged
+    Pending("", True, "") must be impossible, not merely unlikely): every
+    field enforces the exact, bounded contract read_pending requires."""
 
     aim: str
     declared_turn: int
     source_action: str
+
+    def __post_init__(self):
+        if type(self.aim) is not str or not self.aim.strip() \
+                or len(self.aim) > _MAX_AIM:
+            raise ValueError(f"Pending: aim must be a nonempty bounded "
+                             f"string, got {self.aim!r}")
+        if type(self.declared_turn) is not int \
+                or isinstance(self.declared_turn, bool) \
+                or self.declared_turn < 0:
+            raise ValueError(f"Pending: declared_turn must be an exact "
+                             f"non-negative int, got {self.declared_turn!r}")
+        if type(self.source_action) is not str \
+                or not self.source_action.strip() \
+                or len(self.source_action) > _MAX_AIM:
+            raise ValueError(f"Pending: source_action must be a nonempty "
+                             f"bounded string, got {self.source_action!r}")
 
 
 def _require_turn(turn, what: str) -> int:
@@ -67,11 +85,22 @@ def _require_turn(turn, what: str) -> int:
 
 
 def _require_at(at) -> float:
-    if type(at) not in (int, float) or isinstance(at, bool) \
-            or not math.isfinite(float(at)) or float(at) < 0:
+    """The growth-assembly temporal boundary, exactly (cr r2 blocker 3):
+    overflow normalizes to ValueError, and a coordinate the float cannot
+    represent EXACTLY (2**53+1) is rejected, never silently rounded."""
+    if type(at) not in (int, float) or isinstance(at, bool):
         raise ValueError(f"tangent: at must be a finite non-negative time, "
                          f"got {at!r}")
-    return float(at)
+    try:
+        f = float(at)
+    except OverflowError:
+        raise ValueError(f"tangent: at {at!r} exceeds the engine's float "
+                         "coordinate") from None
+    if not math.isfinite(f) or f < 0 or f != at:
+        raise ValueError(f"tangent: at must be a finite non-negative time "
+                         f"exactly representable in the engine's float "
+                         f"coordinate, got {at!r}")
+    return f
 
 
 def _normalize_aim(aim) -> str:
@@ -166,8 +195,10 @@ def may_confirm(pending, *, turn: int, committed: bool) -> bool:
     this gate is what makes a single line of enthusiasm structurally
     unable to adopt): a VALIDATED Pending value — nothing else is
     accepted, a bare dict cannot impersonate a receipt — a strictly
-    LATER turn, and a committed in-world action this turn."""
+    LATER turn, a committed in-world action this turn — and the EXPIRY
+    invariant rechecked at THIS boundary (cr r2 blocker 2: a legitimately
+    read Pending cached past its window must not confirm at turn 100)."""
     _require_turn(turn, "turn")
     if not isinstance(pending, Pending) or committed is not True:
         return False
-    return turn > pending.declared_turn
+    return 1 <= turn - pending.declared_turn <= EXPIRY_TURNS
