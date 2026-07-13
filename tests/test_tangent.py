@@ -659,3 +659,192 @@ def test_read_portfolio_state_is_horizon_bound_and_conflict_closed(tmp_path):
         assert read_portfolio_state(head_reads) is None   # multiplicity
     finally:
         w.close()
+
+
+# ---- piece C: the two-beat wiring on the real turn path --------------------
+
+def _wired(tmp_path):
+    import tests.test_growth as tg
+    w = tg._wired_world(tmp_path)
+    return tg, w
+
+
+def _seed_wired_portfolio(w):
+    from construct.arc import io as arc_io
+    import tests.test_growth as tg
+    arc = tg._wired_arc()
+    w.porcelain.ingest_structured(
+        arc_io.arc_to_items(arc, frame="plot:main")
+        + arc_io.index_items(arc, frame="plot:main")
+        + arc_io.portfolio_items([arc.arc_id], main_arc_id=arc.arc_id,
+                                 frame="plot:main"), frame="plot:main")
+    return arc
+
+
+def test_wired_beat1_persists_and_supersedes(tmp_path):
+    from construct.provider import StubProvider
+    from construct.tangent import read_pending
+    from construct.turnloop import run_turn
+    from construct.adapter import PorcelainWorldReads
+    tg, w = _wired(tmp_path)
+    try:
+        arc = _seed_wired_portfolio(w)
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to="",
+                         declares_tangent_aim=True,
+                         tangent_aim="a life aboard the Gullwing")]
+            + [{"prose": "The tide agrees with you."}] * 3)
+        r = run_turn(w, arc, provider, "Forget the case — I'm making a "
+                     "life on this boat.", turn=1)
+        assert r.trace.tangent == "pending:a life aboard the Gullwing"
+        reads = PorcelainWorldReads(w)
+        p1 = read_pending(reads, turn=2)
+        assert p1 is not None and p1.declared_turn == 1
+        # the turn rendered NORMALLY — a declaration is not a seam
+        assert "tide agrees" in r.prose
+        # BEAT 2 never fires on the declaration turn itself (host gate) —
+        # no confirm cohort ran
+        assert not any("⟦tgc⟧" in c[0][:40] for c in provider.calls)
+        # a NEWER declaration supersedes whole
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to="",
+                         declares_tangent_aim=True,
+                         tangent_aim="the smugglers' shore is home now")]
+            + [{"prose": "Gullwash rises off the bow."}] * 3)
+        r2 = run_turn(w, arc, provider, "No — Gullwash. That's my story.",
+                      turn=2)
+        p2 = read_pending(reads, turn=3)
+        assert p2.aim == "the smugglers' shore is home now"
+        assert p2.declared_turn == 2
+    finally:
+        w.close()
+
+
+def test_wired_beat2_fails_closed_without_the_envelope(tmp_path):
+    # the full confirm→author→adopt path on PB 0.2.0: adoption_unavailable,
+    # the pending SURVIVES, the manifest is untouched, and the ordinary
+    # action still renders (no seam — unlike growth, the action is real
+    # without the arc swap)
+    from construct.arc import io as arc_io
+    from construct.provider import StubProvider
+    from construct.tangent import pending_rows, read_pending
+    from construct.turnloop import run_turn
+    from construct.adapter import PorcelainWorldReads
+    tg, w = _wired(tmp_path)
+    try:
+        arc = _seed_wired_portfolio(w)
+        w.porcelain.ingest_structured(
+            pending_rows("a life aboard the Gullwing", turn=1,
+                         action="Forget the case.", at=1001.0),
+            frame="session:main")
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to=""),
+            {"consistent": True, "abandons": False},
+            _proposal(),
+        ] + [{"prose": "You sign the Gullwing's book."}] * 3)
+        r = run_turn(w, arc, provider, "I sign on with the Gullwing.",
+                     turn=2)
+        assert r.trace.tangent == "adoption_unavailable"
+        assert "⟦tgc⟧" in provider.calls[1][0][:40]
+        assert any("⟦tga⟧" in c[0][:40] for c in provider.calls)
+        reads = PorcelainWorldReads(w)
+        assert arc_io.main_arc_from_frame(reads) == arc.arc_id  # unmoved
+        assert read_pending(reads, turn=3) is not None          # survives
+        assert "Gullwing's book" in r.prose                     # no seam
+        assert r.trace.replanned == ""
+    finally:
+        w.close()
+
+
+def test_wired_beat2_negative_and_cancel(tmp_path):
+    from construct.provider import StubProvider
+    from construct.tangent import pending_rows, read_pending
+    from construct.turnloop import run_turn
+    from construct.adapter import PorcelainWorldReads
+    tg, w = _wired(tmp_path)
+    try:
+        arc = _seed_wired_portfolio(w)
+        w.porcelain.ingest_structured(
+            pending_rows("a life aboard the Gullwing", turn=1,
+                         action="Forget the case.", at=1001.0),
+            frame="session:main")
+        # INCONSISTENT: the deed serves the old story — pending survives,
+        # no author call, no generative slot spent on judging
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to=""),
+            {"consistent": False, "abandons": False},
+        ] + [{"prose": "The ledger keeps its secrets."}] * 3)
+        r = run_turn(w, arc, provider, "I re-examine the ledger.", turn=2)
+        assert r.trace.tangent == "declined:inconsistent"
+        assert not any("⟦tga⟧" in c[0][:40] for c in provider.calls)
+        reads = PorcelainWorldReads(w)
+        assert read_pending(reads, turn=3) is not None
+        # ABANDONS: the deed walks back — the pending cancels whole
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to=""),
+            {"consistent": False, "abandons": True},
+        ] + [{"prose": "The case pulls you back."}] * 3)
+        r = run_turn(w, arc, provider, "Enough dreaming — back to the "
+                     "case.", turn=3)
+        assert r.trace.tangent == "cancelled"
+        assert read_pending(reads, turn=4) is None
+    finally:
+        w.close()
+
+
+def test_wired_adoption_success_with_a_willing_envelope(tmp_path,
+                                                        monkeypatch):
+    # fake-envelope success: the manifest flips whole, the session reload
+    # is armed (trace.replanned — the reshape path), the narrator carries
+    # the world's YES, the receipt clears, and the old main survives
+    # demoted as a side arc
+    import construct.tangent as tangent_mod
+    from construct.arc import io as arc_io
+    from construct.provider import StubProvider
+    from construct.tangent import (ADOPTION_RECEIPT_KIND, pending_rows,
+                                   read_pending)
+    from construct.turnloop import run_turn
+    from construct.adapter import PorcelainWorldReads
+    tg, w = _wired(tmp_path)
+    try:
+        arc = _seed_wired_portfolio(w)
+        w.porcelain.ingest_structured(
+            pending_rows("a life aboard the Gullwing", turn=1,
+                         action="Forget the case.", at=1001.0),
+            frame="session:main")
+
+        real = tangent_mod.activate_adoption
+
+        def _willing(porcelain, ops):
+            for op in ops:
+                if op["op"] == "retract":
+                    porcelain.retract(op["assertion_id"], op["reason"])
+                else:
+                    item = dict(op["item"])
+                    frame = item.pop("frame", None)
+                    porcelain.ingest_structured([item], frame=frame,
+                                                classify="rules")
+            from construct.growth import ActivationResult
+            return ActivationResult(ok=True, receipts=("r",))
+        monkeypatch.setattr(tangent_mod, "activate_adoption", _willing)
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to=""),
+            {"consistent": True, "abandons": False},
+            _proposal(),
+        ] + [{"prose": "Sefa tosses you the bow line."}] * 3)
+        r = run_turn(w, arc, provider, "I sign on with the Gullwing.",
+                     turn=2)
+        assert r.trace.tangent == "adopted:arc:tangent_2"
+        assert r.trace.replanned == "arc:tangent_2"
+        assert "THE STORY TURNS" in r.trace.briefing
+        assert "bow line" in r.trace.briefing   # the hook, not a summary
+        reads = PorcelainWorldReads(w)
+        w.ingestor.cursor.advance(5000.0)
+        assert arc_io.main_arc_from_frame(reads) == "arc:tangent_2"
+        loaded = {a.arc_id for a in arc_io.portfolio_from_frame(reads)}
+        assert loaded == {arc.arc_id, "arc:tangent_2"}
+        assert reads.state(arc.arc_id, "demoted",
+                           frame="plot:main") == ADOPTION_RECEIPT_KIND
+        assert read_pending(reads, turn=3) is None    # receipt cleared
+    finally:
+        w.close()

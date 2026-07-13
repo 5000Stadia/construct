@@ -2064,6 +2064,43 @@ GEN_ARC_SCHEMA = {
 }
 
 
+TANGENT_CONFIRM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "consistent": {"type": "boolean",
+                       "description": "true ONLY when this turn's committed "
+                       "action genuinely PURSUES the declared aim — concrete "
+                       "movement of that story (signing on, casting off, "
+                       "building the thing). FALSE for mere proximity, "
+                       "conversation about it, enthusiasm, or an action that "
+                       "serves the OLD story. When in doubt: false."},
+        "abandons": {"type": "boolean",
+                     "description": "true ONLY when this action plainly "
+                     "walks AWAY from the declared aim and back to the old "
+                     "story — an explicit cancel. Most turns: false."},
+    },
+    "required": ["consistent", "abandons"],
+}
+
+
+def confirm_tangent(provider: Provider, *, aim: str, source_action: str,
+                    action: str) -> dict:
+    """WORLD-GROWTH G-A BEAT 2 — the tangent-consistency judgment. The
+    host structure around it (a live pending receipt, a strictly later
+    committed turn) already held; this call judges ONLY whether the cited
+    action is real evidence of the declared story. Cheap tier — one
+    yes/no with a walk-away channel."""
+    return complete_sync(provider,
+        f"A player earlier declared a story of their own and the world is "
+        f"deciding whether they MEAN it.\n"
+        f"THE DECLARED AIM: {aim}\n"
+        f"HOW THEY DECLARED IT: {source_action}\n"
+        f"WHAT THEY JUST DID (committed, this turn): {action}\n\n"
+        f"Movement alone is never sufficient; a single line of enthusiasm "
+        f"adopts nothing. Judge the deed.",
+        TANGENT_CONFIRM_SCHEMA, tier="cheap", task="tgc")
+
+
 def author_tangent_arc(provider: Provider, *, aim: str, protagonist: str,
                        visible_facts: str, style: str,
                        available_ids: list[str]) -> dict:

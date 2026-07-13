@@ -303,6 +303,143 @@ def _move_touches_secret(moves_to: str, arc: Arc, reads: Any) -> bool:
     return bool(secret & _secret_word_set(moves_to))
 
 
+def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
+                     provider: Provider, trace: TurnTrace, *,
+                     pending, player_input: str, turn: int,
+                     gen_slot: Any, style: str) -> None:
+    """WORLD-GROWTH G-A BEAT 2 (spec §6): judge → author → adopt. Every
+    gate is host structure; the adoption itself rides the atomic envelope
+    and FAILS CLOSED on an engine without commit_set (adoption_unavailable
+    — the ordinary action still renders, the pending receipt survives,
+    the adoption retries on a later confirming action: unlike growth, the
+    player's action here is real WITHOUT the arc swap, so no seam).
+
+    On success: trace.replanned carries the new main (the session reloads
+    the portfolio exactly as a reshape does), the narrator receives the
+    adoption directive (the world says YES), the pending receipt is
+    cleared, and the chapter title lands as presentation metadata
+    (best-effort AFTER the atomic set — display, never story structure).
+    """
+    from construct import tangent as tangent_mod
+    from construct import growth as growth_mod
+
+    # the judgment (BEAT 2's cohort) — strict on both channels
+    try:
+        with _phase(trace, "tangent_confirm"):
+            verdict = cohorts.confirm_tangent(
+                provider, aim=pending.aim,
+                source_action=pending.source_action, action=player_input)
+        trace.cohort_calls.append("confirm_tangent:cheap")
+    except Exception as exc:  # noqa: BLE001 — an unjudged beat stays pending
+        logger.warning("tangent confirm failed: %s", exc)
+        trace.tangent = "declined:provider_error"
+        return
+    if growth_mod.strict_flag(verdict.get("abandons")):
+        # the explicit cancel: the deed walked back to the old story
+        try:
+            p.ingest_structured(tangent_mod.cancel_rows(at=turn_time(turn)),
+                                frame=SESSION, classify="batch")
+            trace.tangent = "cancelled"
+            logger.info("tangent pending cancelled (the deed walked back)")
+        except Exception as exc:  # noqa: BLE001 — expiry will lapse it
+            logger.warning("tangent cancel write failed: %s", exc)
+        return
+    if not growth_mod.strict_flag(verdict.get("consistent")):
+        trace.tangent = "declined:inconsistent"
+        return
+
+    # the INVOCATION claims the turn's one generative act (spec §5 — the
+    # tangent author shares the slot with the Assessor and the LWG)
+    if not gen_slot.claim("tangent_author"):
+        trace.tangent = "declined:slot_spent"
+        return
+
+    # HOST truth: the aim + PLAYER-VISIBLE facts only (the knows frame +
+    # region cards — the hidden plot frame is structurally absent)
+    try:
+        vis_lines: list[str] = []
+        pf = _player_frame(arc)
+        for r in live_reads.frame_rows(pf)[:40]:
+            vis_lines.append(f"- {r.entity} · {r.attribute} · {r.value}")
+        for rid in sorted(
+                p.entities("canon", prefix="region:",
+                           as_of=getattr(live_reads, "_horizon", None))):
+            st = live_reads.state(rid, "style")
+            if isinstance(st, str) and st.strip():
+                vis_lines.append(f"- {rid} · style · {st.strip()}")
+        visible = "\n".join(vis_lines) or "(a world still mostly unwritten)"
+        known = sorted(
+            set(p.entities("canon", prefix="person:",
+                           as_of=getattr(live_reads, "_horizon", None)))
+            | {arc.protagonist})
+    except Exception as exc:  # noqa: BLE001 — unreadable truth = no author
+        logger.warning("tangent visible-facts assembly failed: %s", exc)
+        trace.tangent = "declined:world_unreadable"
+        return
+    try:
+        with _phase(trace, "tangent_author"):
+            proposal = cohorts.author_tangent_arc(
+                provider, aim=pending.aim, protagonist=arc.protagonist,
+                visible_facts=visible, style=style, available_ids=known)
+        trace.cohort_calls.append("author_tangent_arc:main")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("tangent author failed: %s", exc)
+        trace.tangent = "declined:provider_error"
+        return
+
+    new_id = f"arc:tangent_{turn}"
+    built, problems = tangent_mod.build_tangent_arc(
+        proposal, protagonist=arc.protagonist, arc_id=new_id,
+        reads=live_reads)
+    if built is None:
+        logger.info("tangent build declined: %s", problems[:3])
+        trace.tangent = f"declined:{problems[0] if problems else 'build'}"
+        return
+    state = tangent_mod.read_portfolio_state(live_reads)
+    if state is None:
+        trace.tangent = "declined:portfolio_unverifiable"
+        return
+    if state.main_arc != arc.arc_id:
+        trace.tangent = "declined:portfolio_drift"  # not the arc we run
+        return
+    try:
+        ops = tangent_mod.adoption_ops(
+            arc=built, portfolio=state, protagonist=arc.protagonist,
+            aim=pending.aim, turn=turn, at=turn_time(turn),
+            reads=live_reads)
+    except ValueError as exc:
+        logger.warning("adoption ops refused: %s", exc)
+        trace.tangent = "declined:ops_refused"
+        return
+    result = tangent_mod.activate_adoption(world.porcelain, ops)
+    if not result.ok:
+        trace.tangent = result.reason   # pending SURVIVES — retry later
+        return
+    trace.tangent = f"adopted:{new_id}"
+    trace.replanned = new_id            # the session reloads the portfolio
+    hook = str(proposal.get("hook") or "").strip()
+    if hook:
+        trace.tangent_directive = (
+            "THE STORY TURNS (the player declared a story of their own and "
+            "the world SAYS YES — render this arrival diegetically, in the "
+            "world's voice, never as an announcement; the old call fades "
+            "to a distant echo): " + hook)
+    # post-atomic presentation metadata + the receipt clear (best-effort:
+    # neither is story structure; expiry would lapse a surviving pending)
+    try:
+        p.ingest_structured(tangent_mod.cancel_rows(at=turn_time(turn)),
+                            frame=SESSION, classify="batch")
+        title = str(proposal.get("title") or "").strip()
+        if title:
+            p.ingest_structured([{
+                "entity": "session:episode", "attribute": "title",
+                "value": title, "valid_from": turn_time(turn)}],
+                frame=SESSION, classify="batch")
+    except Exception:  # noqa: BLE001
+        trace.dropped_cohorts.append("tangent_post_adoption bookkeeping")
+    logger.info("tangent ADOPTED: %s (%r)", new_id, pending.aim)
+
+
 #: WORLD-GROWTH G1: the non-diegetic retry seam (spec §3 proposal-failure
 #: contract clause c) — the transports' parenthesized technical voice, never
 #: prose about the world. Rendering travel or emptiness over an uncommitted
@@ -1037,6 +1174,8 @@ class TurnTrace:
     growth: str = ""  # WORLD-GROWTH receipt: "activated:<place_or_person_id>" | "declined:<reason>" | "activation_unavailable" | "denied:<deny>" | "" (not invoked)
     growth_retry: bool = False  # an INVOKED growth attempt failed → the transport shows the non-diegetic retry seam (no world/clock change this turn)
     growth_moved: list = field(default_factory=list)  # ids the activated chunk moved (protagonist + companions) — 2b-ii must not re-write them
+    tangent: str = ""  # G-A receipt: "pending:<aim>" | "adopted:<arc_id>" | "declined:<reason>" | "adoption_unavailable" | "cancelled" | "" (no tangent activity)
+    tangent_directive: str = ""  # the narrator's adoption line (the world says yes) — briefing only
     relocations: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, new_staging) committed this turn
     relocate_directive: str = ""  # DRIFT-HANDLING D1 debug: the sanitized staging line (mirrors `nudge`)
     absence_consequences: list = field(default_factory=list)  # DRIFT-HANDLING D2: (moment_event_id, committed_row_count) this turn
@@ -3796,6 +3935,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # a classify ProviderError must keep the rule-5 sole-NPC protection, never
     # unbind the name — the signal only ever RELAXES on an explicit False)
     moves_open = False        # WORLD-GROWTH G1 (cr piece-2 finding 1): the growth
+    _t_aim = ""               # G-A: the beat-1 declaration, fail-closed pre-try
     seeks_encounter = False   # signals default False BEFORE the classify try —
     # a ProviderError leaves them defined and closed; only a literal True from
     # a successful verdict (strict_flag) ever raises them
@@ -3949,6 +4089,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         recalls = bool(verdict.get("recalls"))
         declares_memory = (bool(verdict.get("declares_memory"))
                            and kind in ("action", "declaration"))
+        from construct.tangent import declaration as _t_declaration
+        _t_aim = _t_declaration(verdict, kind=kind)
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:
         kind = "action"
@@ -4704,6 +4846,35 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # the §3 seam: the STAGED pre-move mutations are dropped whole —
             # the turn never happened; everything retries together.
             return TurnResult(prose=_GROWTH_SEAM, trace=trace, settle=None)
+    # ---- WORLD-GROWTH G-A (spec §6): the two-beat tangent adoption.
+    # BEAT 1 — a declaration persists/supersedes the ONE pending receipt.
+    # BEAT 2 — a LATER committed action, judged consistent, authors the
+    # tangent arc and adopts it through the atomic envelope (fail-closed
+    # on an engine without commit_set — the G1 wiring precedent: the
+    # ordinary action still renders; the adoption retries while the
+    # receipt lives). The demoted main survives as a side arc; the phase
+    # boundary is the persisted manifest + receipt (a restart re-reads
+    # both).
+    from construct import tangent as tangent_mod
+    if _t_aim:
+        try:
+            p.ingest_structured(
+                tangent_mod.pending_rows(_t_aim, turn=turn,
+                                         action=player_input,
+                                         at=turn_time(turn)),
+                frame=SESSION, classify="batch")
+            trace.tangent = f"pending:{_t_aim}"
+            logger.info("tangent declared (beat 1): %r", _t_aim)
+        except Exception as exc:  # noqa: BLE001 — the receipt is retryable
+            logger.warning("tangent pending write failed: %s", exc)
+            trace.dropped_cohorts.append(f"tangent_pending ({exc})")
+    elif kind == "action":
+        _t_pending = tangent_mod.read_pending(live_reads, turn=turn)
+        if tangent_mod.may_confirm(_t_pending, turn=turn, committed=True):
+            _tangent_attempt(world, p, arc, live_reads, provider, trace,
+                             pending=_t_pending, player_input=player_input,
+                             turn=turn, gen_slot=_gen_slot, style=style)
+
     # every non-seam path flushes the staged pre-move mutations in their
     # original order (growth activated, growth not invoked, or no miss).
     for _lbl, _rows in _growth_staged:
@@ -7186,6 +7357,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 "hard — a wound, capture, ruin, a door slammed — in this genre's own "
                 "conventions, but it does NOT kill the player character. Make the cost "
                 "real and lasting; never a lethal beat.")
+    if trace.tangent_directive:
+        # G-A: the adoption landed this turn — the world answers the
+        # player's declared story (spec: the hook is a wiring output)
+        briefing_parts.append("\n" + trace.tangent_directive)
     if trace.reshape:
         # The act reshaped the world (committed pre-render). Tell the narrator the new
         # truth so prose matches canon; the sanctioned rows are licensed past the gate.
