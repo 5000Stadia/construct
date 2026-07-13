@@ -2166,10 +2166,10 @@ class TestFullTurn:
         assert not PorcelainWorldReads(world).has_entity("place:scene_of_the_crime")
 
     def test_episode_doorway_moves_time_and_place(self, world):
-        # #88 S4 (Cx 380 blocker): the chapter doorway is ENGINE TRUTH — time jumps to the next
-        # phase (elapsed_minutes increases) and the protagonist returns to the prior episode's
-        # OPENING place; no items are added. (This test FAILED before the 380 fix: the old leg
-        # called the clock API with wrong signatures and the fail-open swallowed it.)
+        # WORLD-GROWTH G-C (inverting #88 S4's return-to-base): time still jumps to the
+        # next phase (engine truth), but the next chapter opens WHERE THE STORY ENDED —
+        # the protagonist STAYS at the terminal scene, no relocation row is written, and
+        # no items are added.
         # NB: built with construct's attribute_default (like production seals) — the accrue
         # fold on elapsed_minutes needs the semantics hook; the plain fixture world lacks it.
         import tempfile
@@ -2199,10 +2199,17 @@ class TestFullTurn:
         _before = read_clock(w2).minutes
         door = _episode_doorway(w2, PLAYER, 1000.0, 12)
         assert read_clock(w2).minutes > _before             # TIME moved (engine truth)
-        assert door == "place:study"                        # the prior opening place
-        assert w2.porcelain.locate(PLAYER)[0] == "place:study"      # PLACE moved
+        assert door == "place:far_end"                      # WHERE THE STORY ENDED
+        assert w2.porcelain.locate(PLAYER)[0] == "place:far_end"   # nobody moved
         held = w2.porcelain.contents(PLAYER) if hasattr(w2.porcelain, "contents") else []
         assert not held                                      # ITEMS: nothing minted
+        # the CAPTURED terminal receipt outranks live locate when present
+        w2.porcelain.ingest_structured([
+            {"entity": "event:arc_outcome_12",
+             "attribute": "terminal_location",
+             "value": "place:far_end", "value_type": "literal",
+             "valid_from": 1010.0}], frame="session:main")
+        assert _episode_doorway(w2, PLAYER, 1000.0, 13) == "place:far_end"
         w2.close()
 
     def test_wrong_commitment_records_loss_even_when_frame_knows_truth(self, world):
@@ -2234,6 +2241,9 @@ class TestFullTurn:
         _shape = [(r.attribute, r.value) for r in world.buffer.visible(
             entity="event:arc_outcome_12", frame="session:main")]
         assert ("grade", "wrong") in _shape                       # the SHAPE receipt is durable
+        # WORLD-GROWTH G-C: the terminal LOCATION is captured as engine
+        # truth with the receipt — the continuation doorway opens there
+        assert ("terminal_location", "place:study") in _shape
         # S1 (#96, Cx 414): a GRADED commitment close keeps the RECKONING beat
         _nar = next(pr for (pr, _s, _t) in reversed(provider.calls) if task_of(pr) == "nar")
         assert "BEAT 1 — THE RECKONING SCENE" in _nar

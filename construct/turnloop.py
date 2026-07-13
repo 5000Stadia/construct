@@ -6102,6 +6102,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 {"entity": _rcpt, "attribute": "kind",
                  "value": f"arc_{outcome}", "valid_from": turn_time(turn)},
             ]
+            # WORLD-GROWTH G-C: the terminal LOCATION is captured as
+            # ENGINE TRUTH at conclusion — the continuation doorway opens
+            # the next chapter THERE (a displaced ending stays displaced;
+            # the old snap-to-opening was the Ironhold defect).
+            try:
+                _tloc = (p.locate(arc.protagonist, as_of=_h) or [None])[0]
+                if _tloc:
+                    _shape_rows.append(
+                        {"entity": _rcpt, "attribute": "terminal_location",
+                         "value": _tloc, "value_type": "literal",
+                         "valid_from": turn_time(turn)})
+            except Exception:  # noqa: BLE001 — the doorway falls back to locate
+                logger.warning("terminal location capture failed", exc_info=True)
             if commitment_grade:
                 _shape_rows.append({"entity": _rcpt, "attribute": "grade",
                                     "value": commitment_grade, "valid_from": turn_time(turn)})

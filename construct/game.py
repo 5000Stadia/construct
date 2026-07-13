@@ -2495,13 +2495,20 @@ def _continuation_intro(prior_title: str, prior_outcome: str, prior_arc, proposa
 
 def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
                      turn: int) -> str | None:
-    """THE EPISODE DOORWAY (#88 S4, Cx 375 blocking requirement / 380 fix): the bridge to the
-    next chapter is ENGINE TRUTH — never prompt-only prose. (i) TIME: jump to the next calendar
-    phase (the classic "by morning…" seam); (ii) PLACE: the protagonist returns to the prior
-    episode's OPENING place (their base), never left standing at the terminal scene unless that
-    WAS the base; (iii) ITEMS: adds NOTHING (possessions carry as-is). Each leg fail-open +
-    loud. Returns the doorway place (or None)."""
-    from construct.arc.executor import turn_time
+    """THE EPISODE DOORWAY (#88 S4 → WORLD-GROWTH G-C): the bridge to the
+    next chapter is ENGINE TRUTH — never prompt-only prose. (i) TIME: jump
+    to the next calendar phase (the classic "by morning…" seam);
+    (ii) PLACE — THE G-C INVARIANT: the next chapter opens WHERE THE STORY
+    ENDED. The prior shipped behavior (return to the opening base) was the
+    Ironhold defect: growth can displace chapter 1 perfectly and the
+    doorway snapped the escapee back to the prison. The terminal location
+    is read from the conclusion's own captured engine truth (the
+    arc_outcome event's `location` row), falling back to live locate; NO
+    relocation row is ever written by default — any future move away from
+    the terminal must be an explicit, caused transition delta authored by
+    its own machinery, never a silent doorway default. (iii) ITEMS: adds
+    NOTHING (possessions carry as-is). Each leg fail-open + loud. Returns
+    the doorway place (or None)."""
     door_place = None
     try:
         from construct.clock import commit_elapsed, read_clock
@@ -2521,16 +2528,33 @@ def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
         logger.warning("episode doorway time-jump skipped: %s", exc)
     try:
         if protagonist:
-            open_chain = world.porcelain.locate(protagonist, as_of=epoch + 0.5)
-            door_place = open_chain[0] if open_chain else None
+            # the conclusion's captured terminal location (engine truth,
+            # written with the arc_outcome receipt) — provenance for the
+            # G-C oracle; live locate is the fallback for legacy slots
+            captured = None
+            try:
+                from construct.adapter import frame_facts as _ffd
+                def _rcpt_turn(eid: str) -> int:
+                    try:
+                        return int(eid.rsplit("_", 1)[-1])
+                    except ValueError:
+                        return -1
+                _cand = [(str(r.entity), str(r.value)) for r in
+                         _ffd(world, "session:main",
+                              attribute="terminal_location")
+                         if str(r.entity).startswith("event:arc_outcome_")]
+                if _cand:
+                    captured = max(_cand, key=lambda c: _rcpt_turn(c[0]))[1]
+            except Exception:  # noqa: BLE001 — fall back to live locate
+                pass
             now_chain = world.porcelain.locate(protagonist)
-            if door_place and (now_chain[0] if now_chain else None) != door_place:
-                world.porcelain.ingest_structured([{
-                    "entity": protagonist, "attribute": "in", "value": door_place,
-                    "value_type": "entity", "valid_from": turn_time(turn)}])
-                logger.info("episode doorway: %s returns to %s", protagonist, door_place)
+            door_place = captured or (now_chain[0] if now_chain else None)
+            logger.info("episode doorway: the next chapter opens at %s "
+                        "(where the story ended%s)", door_place,
+                        ", captured at conclusion" if captured else
+                        ", by live locate")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("episode doorway relocation skipped: %s", exc)
+        logger.warning("episode doorway location read skipped: %s", exc)
     return door_place
 
 

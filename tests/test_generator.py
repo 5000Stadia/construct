@@ -526,10 +526,10 @@ def test_continuation_intro_bridges_endpoints_without_a_formula():
 
 
 def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatch):
-    """#88 S4 caller-level regression (Cx 382 blocker): on a PLAYED non-horizon slot with
-    entry_epoch=1000.0 and the terminal scene elsewhere, continue_episode must relocate the
-    protagonist to the ORIGINAL opening place (the raised write-epoch must not poison the
-    opening lookup) and advance diegetic time."""
+    """WORLD-GROWTH G-C (inverting the old #88 S4 return-to-base): on a PLAYED slot whose
+    story ENDED away from its opening, the continuation opens WHERE IT ENDED — the
+    protagonist stays at the terminal scene (no silent relocation row), the intro names
+    that place, the hook cast stages there, and diegetic time still advances."""
     from construct.arc import executor
     from construct.arc.executor import TURN_EPOCH, set_entry_epoch
     from construct.clock import read_clock
@@ -627,12 +627,12 @@ def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatc
                model=StubModel(fallback=lambda p, s: rule_classifier_fallback()(p, s)
                                if p.startswith("Classify the lifetime") else {"items": []}))
     try:
-        assert w2.porcelain.locate(PLAYER)[0] == "place:office"   # BACK at the opening place
-        assert read_clock(w2).minutes > 0                          # time truly advanced
-        assert "the new chapter opens at office" in meta["continuation_intro"]
+        assert w2.porcelain.locate(PLAYER)[0] == "place:roof"   # WHERE THE STORY ENDED
+        assert read_clock(w2).minutes > 0                        # time truly advanced
+        assert "the new chapter opens at roof" in meta["continuation_intro"]
         # #90: the hook witness is REAL — canon-present at the doorway place and IN the
         # episode scope (an unscoped hook person would be invisible to presence/npc turns)
-        assert w2.porcelain.locate("person:shawl_witness")[0] == "place:office"
+        assert w2.porcelain.locate("person:shawl_witness")[0] == "place:roof"
         from construct.adapter import PorcelainWorldReads as _PWR
         _sc = _PWR(w2).state("session:episode", "arc_scope", frame=SESSION)
         assert "person:shawl_witness" in json.loads(_sc)
