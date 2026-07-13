@@ -556,3 +556,65 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
     return AssembledChunk(items=tuple(items), assessment=prop.assessment,
                           place_id=place_id, person_id=person_id,
                           companion_id=companion_id), ""
+
+
+# ---------------------------------------------------------------------------
+# Piece 5 — the NO-GROWTH host check + the generative-slot budget.
+# Both are PRE-INVOCATION gates (spec §3 no-growth contract, §5 budget):
+# whether the world CAN grow here is HOST-OWNED and decided before the
+# cohort ever runs; and the Assessor INVOCATION claims the turn's ONE
+# generative slot — spanning Growth, the LWG generator chain, and the
+# future tangent author — claimed at invocation, not on success (a failed
+# proposal still consumed the world's attention).
+
+
+#: The CLOSED deny vocabulary (spec §3): each is a STRUCTURALLY PROVABLE
+#: world condition, and ONLY a host deny licenses narrated emptiness. A
+#: model LOW is never in this set — that is a retryable proposal failure.
+NO_GROWTH_DENIES = ("deny:sealed_boundary", "deny:no_frontier",
+                    "deny:laws_forbid")
+
+
+def no_growth_deny(*, boundary_status: str = "", no_frontier: bool = False,
+                   laws_forbid: bool = False) -> str:
+    """The host_deny producer. Inputs are HOST-DERIVED structural evidence
+    (the wiring assembles them from world reads/config — never from model
+    output): `boundary_status` is the origin's outward obstruction status
+    as the route machinery reports it; `no_frontier` asserts a proven
+    physical impossibility (mid-ocean without a vessel, a closed vault);
+    `laws_forbid` is the scenario's explicit authored flag.
+
+    Deny only on AFFIRMATIVE proof — the strict_flag discipline: a fuzzy,
+    missing, or truthy-but-not-True signal proves nothing, and an unproven
+    deny would be the stonewall back under a receipt. Returns a reason
+    from NO_GROWTH_DENIES, or "" (eligible — grow or retry)."""
+    if str(boundary_status) == "blocked":
+        return "deny:sealed_boundary"
+    if strict_flag(no_frontier):
+        return "deny:no_frontier"
+    if strict_flag(laws_forbid):
+        return "deny:laws_forbid"
+    return ""
+
+
+@dataclass
+class GenerativeSlot:
+    """The turn's ONE generative act (spec §5, cr's binding reading): the
+    Assessor, the LWG generator chain, and the tangent author share this
+    slot. Claim at INVOCATION — a claim is spent whether or not the act
+    succeeds. The player's explicit growth outranks ambient generation
+    simply because it runs earlier in the turn; this object only enforces
+    exclusivity and remembers who was refused (trace/receipt fuel)."""
+
+    claimed_by: str = ""
+    refused: list = field(default_factory=list)
+
+    def claim(self, actor: str) -> bool:
+        if type(actor) is not str or not actor:
+            raise ValueError("generative slot: actor must be a nonempty "
+                             f"label, got {actor!r}")
+        if self.claimed_by:
+            self.refused.append(actor)
+            return False
+        self.claimed_by = actor
+        return True

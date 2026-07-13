@@ -586,3 +586,43 @@ def test_assembly_host_bugs_raise():
             _assemble(p, **kw)
     with _pt.raises(ValueError):
         _assemble({"not": "a proposal"})
+
+
+# ---- piece 5: the no-growth host check + the generative slot --------------
+
+def test_no_growth_denies_only_on_affirmative_proof():
+    from construct.growth import NO_GROWTH_DENIES, no_growth_deny
+    # the closed vocabulary, each from its own proof
+    assert no_growth_deny(boundary_status="blocked") == "deny:sealed_boundary"
+    assert no_growth_deny(no_frontier=True) == "deny:no_frontier"
+    assert no_growth_deny(laws_forbid=True) == "deny:laws_forbid"
+    for r in ("deny:sealed_boundary", "deny:no_frontier", "deny:laws_forbid"):
+        assert r in NO_GROWTH_DENIES
+    # NO proof, NO deny — an unproven deny is the stonewall back under a
+    # receipt: fuzzy statuses, truthy-not-True flags, and absence all pass
+    assert no_growth_deny() == ""
+    assert no_growth_deny(boundary_status="clear") == ""
+    assert no_growth_deny(boundary_status="deliberating") == ""
+    assert no_growth_deny(boundary_status="unknown") == ""
+    assert no_growth_deny(no_frontier="yes") == ""
+    assert no_growth_deny(no_frontier=1) == ""
+    assert no_growth_deny(laws_forbid="true") == ""
+    # precedence is fixed and first-proof wins (stable receipts)
+    assert no_growth_deny(boundary_status="blocked",
+                          laws_forbid=True) == "deny:sealed_boundary"
+
+
+def test_generative_slot_claims_once_at_invocation():
+    import pytest as _pt
+    from construct.growth import GenerativeSlot
+    slot = GenerativeSlot()
+    assert slot.claim("assessor") is True
+    # spent WHETHER OR NOT the act succeeds — no release surface exists
+    assert slot.claim("lwg_opportunistic") is False
+    assert slot.claim("tangent_author") is False
+    assert slot.claimed_by == "assessor"
+    assert slot.refused == ["lwg_opportunistic", "tangent_author"]
+    with _pt.raises(ValueError):
+        slot.claim("")
+    with _pt.raises(ValueError):
+        GenerativeSlot().claim(None)
