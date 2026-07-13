@@ -370,7 +370,8 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     # attempt: either activation flips it back off, or the caller seams.
 
     # HOST truth assembly (frame-bounded: canon + player-visible only).
-    ancestry_ids = [c for c in pre_chain if str(c).startswith("place:")]
+    ancestry_ids = [c for c in pre_chain
+                    if str(c).startswith(("place:", "region:"))]
     if not ancestry_ids:
         trace.growth = "declined:no_ancestry"
         return False
@@ -497,7 +498,8 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         chunk, why = growth_mod.assemble_chunk(
             prop, mode=mode, origin=origin, ancestry_options=ancestry_ids,
             protagonist=arc.protagonist, companions=list(companions),
-            at=turn_time(turn), exists=_exists, identity=_identity)
+            at=turn_time(turn), exists=_exists, identity=_identity,
+            origin_action=(moves_to or player_input))
     except _IdentityUnavailable as exc:
         logger.warning("growth identity authority unreadable: %s", exc)
         trace.growth = "declined:identity_unavailable"
@@ -6436,6 +6438,28 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         briefing_parts.append(
             f"STYLE (render the grounded world in this voice — tone only, never "
             f"new facts): {style}\n")
+    # WORLD-GROWTH G3: the NEAREST-ANCESTOR region card — grown territory
+    # remembers WHY it exists (the assessment that grew it) and what the
+    # player did arriving; chapter ten reads what chapter two wrote. Two
+    # point reads, only when the scene actually sits under a card.
+    try:
+        _gregion = next((c for c in (chain or [])
+                         if str(c).startswith("region:")), None)
+        if _gregion:
+            _gstyle = live_reads.state(_gregion, "style")
+            _gorigin = live_reads.state(_gregion, "origin")
+            trace.point_reads += 2
+            if isinstance(_gstyle, str) and _gstyle.strip():
+                briefing_parts.append(
+                    "THIS TERRITORY (grown where the player walked — its "
+                    "remembered voice; texture and society follow it, "
+                    "never the abandoned map's): " + _gstyle.strip()
+                    + (f" (Its origin — the player's own act, quoted: "
+                       f"\"{_gorigin.strip()}\".)"
+                       if isinstance(_gorigin, str) and _gorigin.strip()
+                       else "") + "\n")
+    except Exception:  # noqa: BLE001 — a briefing garnish, never a gate
+        trace.dropped_cohorts.append("region_voice_read failed")
     if narrative_memory:
         briefing_parts.append(
             f"NARRATIVE MEMORY (the arc so far — standing dynamics, recurring "

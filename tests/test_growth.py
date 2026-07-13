@@ -508,8 +508,20 @@ def test_assembly_builds_the_ordered_chunk():
     assert keys.index(("person:you", "in")) \
         < keys.index((chunk.person_id, "kind"))
     row = {(r["entity"], r["attribute"]): r for r in chunk.items}
-    # the host picked the parent from ITS OWN list, never model text
-    assert row[(pid, "in")]["value"] == "place:greywater_vale"
+    # G3: first growth into UNGOVERNED territory mints the region card and
+    # the ANCESTRY INSERTION interposes it atomically — the place nests in
+    # the card, the card in the host-picked parent (never model text)
+    rid = chunk.region_id
+    assert rid.startswith("region:")
+    assert row[(pid, "in")]["value"] == rid
+    assert row[(rid, "in")]["value"] == "place:greywater_vale"
+    assert row[(rid, "kind")]["value"] == "region"
+    assert "farm country" in row[(rid, "style")]["value"]   # WHY it exists
+    # declaration precedes the insertion pair, card before place (staged-
+    # prefix order)
+    keys2 = [(r["entity"], r["attribute"]) for r in chunk.items]
+    assert keys2.index((rid, "kind")) < keys2.index((rid, "in"))
+    assert keys2.index((rid, "in")) < keys2.index((pid, "in"))
     # ONE stored edge — the lateral graph is undirected (cr ruling 7)
     assert sum(1 for _, a in keys if a == "connects_to") == 1
     assert (pid, "connects_to") not in row
@@ -528,6 +540,26 @@ def test_assembly_builds_the_ordered_chunk():
     # derivation receipt rides along, never as a row
     assert "farm country" in chunk.assessment
     assert all(a != "assessment" for _, a in keys)
+
+
+def test_assembly_accretes_no_card_under_governed_territory():
+    # G3: a region card already in the ancestry GOVERNS — later growth
+    # nests under the chain (accretion, never fragmentation)
+    g = _good()
+    g["place"]["parent_index"] = 0
+    p, why = _vp(g, mode="place", n_ancestry_options=3)
+    assert why == ""
+    canon = _CANON | {"region:the_marchlands"}
+    chunk, why = _assemble(
+        p, ancestry_options=["region:the_marchlands", "place:the_march",
+                             "place:greywater_vale"],
+        exists=lambda eid: eid in canon)
+    assert why == "" and chunk.region_id == ""
+    row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    assert row[(chunk.place_id, "in")]["value"] == "region:the_marchlands"
+    assert not any(str(r["entity"]).startswith("region:")
+                   and r["entity"] != "region:the_marchlands"
+                   for r in chunk.items)
 
 
 def test_every_row_carries_an_explicit_temporal_coordinate():
@@ -2234,3 +2266,75 @@ def test_wired_whitespace_destination_stays_inside_the_bound(tmp_path,
         assert r.trace.movement_status == ""
     finally:
         w.close()
+
+
+def test_wired_region_card_governs_grown_territory(tmp_path, monkeypatch):
+    # G3 end to end: the first growth mints the card atomically with the
+    # chunk; the chain interposes without detaching prior geography; the
+    # NEXT turn's briefing speaks the territory's remembered voice; and
+    # the card survives reopen for later chapters
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    wpath = tmp_path / "wire.world"
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+        ])
+
+        def _fake(porcelain, items):
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        npt = {"acts": True, "action": "hails the traveler", "speaks": True,
+               "intent": "greet the stranger", "line_hint": ""}
+        provider = StubProvider(
+            [_classify(), _good(), dict(npt), dict(npt)]
+            + [{"prose": "The waypost takes shape."}] * 4)
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth.startswith("activated:")
+        # the chain INTERPOSES the card — and prior geography still resolves
+        chain = w.porcelain.locate("person:you")
+        assert chain[0] == "place:the_willow_ford_waypost"
+        rid = next(c for c in chain if str(c).startswith("region:"))
+        assert "place:greywater_vale" in chain and "place:the_march" in chain
+        assert w.porcelain.locate("person:reed") == [
+            "place:north_road", "place:greywater_vale", "place:the_march"]
+        # the card's memory: WHY it exists + what the player did arriving
+        assert "farm country" in str(w.porcelain.state(rid, "style")[
+            "fact"]["value"])
+        assert "away" in str(w.porcelain.state(rid, "origin")[
+            "fact"]["value"])
+        # the NEXT turn's briefing speaks the territory's voice
+        provider2 = StubProvider(
+            [_classify(moves_open=False, moves_to=""), dict(npt), dict(npt)]
+            + [{"prose": "The farmer nods you toward the trough."}] * 4)
+        r2 = run_turn(w, _wired_arc(), provider2, "I look around.", turn=2)
+        assert "THIS TERRITORY" in r2.trace.briefing
+        assert "farm country" in r2.trace.briefing
+        # the raw action is QUOTED, never grammatically embedded
+        assert 'quoted: "away"' in r2.trace.briefing
+        assert "It began when they away" not in r2.trace.briefing
+    finally:
+        w.close()
+
+    # REOPEN (chapter-later read): the card is durable canon
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    w2 = World(wpath, world_id="w:wire", stance="fiction",
+               model=StubModel(fallback=rule_classifier_fallback()),
+               title="Growth Wiring")
+    try:
+        chain = w2.porcelain.locate("person:you")
+        rid = next(c for c in chain if str(c).startswith("region:"))
+        st = w2.porcelain.state(rid, "style")
+        assert st["status"] == "known" and "farm country" in str(
+            st["fact"]["value"])
+    finally:
+        w2.close()

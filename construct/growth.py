@@ -400,6 +400,7 @@ class AssembledChunk:
     place_id: str = ""          # host-allocated (empty when no new place)
     person_id: str = ""
     companion_id: str = ""
+    region_id: str = ""         # G3: the region card minted with this chunk
 
 
 #: The frozen id grammar every pre-existing host reference must satisfy —
@@ -436,7 +437,8 @@ def _entity_row(entity: str, attribute: str, value: str, at: float) -> dict:
 
 def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                    ancestry_options: list, protagonist: str,
-                   companions: list, at: float, exists, identity
+                   companions: list, at: float, exists, identity,
+                   origin_action: str = ""
                    ) -> tuple["AssembledChunk | None", str]:
     """Validated proposal → the ordered, host-built row batch.
 
@@ -575,12 +577,16 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
     containment: list[dict] = []
     passage: list[dict] = []
     place_id = ""
+    region_id = ""
     if prop.place is not None:
         if type(ancestry_options) is not list or not ancestry_options:
             raise ValueError("growth assembly: ancestry_options must be a "
-                             "nonempty list of place ids")
+                             "nonempty list of place/region ids")
         for o in ancestry_options:
-            _canon(o, "place:", "ancestry option")
+            if type(o) is str and o.startswith("region:"):
+                _canon(o, "region:", "ancestry option")   # G3 cards govern
+            else:
+                _canon(o, "place:", "ancestry option")
         pi = prop.place["parent_index"]
         if not (0 <= pi < len(ancestry_options)):
             raise ValueError("growth assembly: parent_index outside the "
@@ -606,8 +612,37 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                 {"entity": place_id, "attribute": "description",
                  "value": prop.place["identity"], "valid_from": at},
             ]
-            containment = [_entity_row(place_id, "in",
-                                       ancestry_options[pi], at)]
+            parent = ancestry_options[pi]
+            # G3 — THE REGION CARD (spec §6): the first growth into
+            # UNGOVERNED territory mints the region that will remember it:
+            # style = the assessment (WHY this region exists), origin =
+            # what the player did arriving. Skipped when any region card
+            # already governs the ancestry (later growth nests under it —
+            # accretion, not fragmentation). The ANCESTRY INSERTION is
+            # atomic by construction: region.in = old parent AND
+            # place.in = region ride the same activation set, so the card
+            # interposes whole or not at all (prior chains through the
+            # old parent still resolve — the region interposes, never
+            # detaches).
+            if not any(str(o).startswith("region:")
+                       for o in ancestry_options):
+                region_id = _alloc("region", prop.place["name"], exists,
+                                   taken)
+                if not region_id:
+                    return None, "malformed:place.name_unsluggable"
+                place_rows = [
+                    {"entity": region_id, "attribute": "kind",
+                     "value": "region", "timeless": True},
+                    {"entity": region_id, "attribute": "style",
+                     "value": prop.assessment, "valid_from": at},
+                ] + ([{"entity": region_id, "attribute": "origin",
+                       "value": str(origin_action)[:_MAX_FIELD],
+                       "valid_from": at}] if str(origin_action).strip()
+                     else []) + place_rows
+                containment = [_entity_row(region_id, "in", parent, at),
+                               _entity_row(place_id, "in", region_id, at)]
+            else:
+                containment = [_entity_row(place_id, "in", parent, at)]
             passage = [_entity_row(origin, "connects_to", place_id, at)]
 
     anchor = place_id or origin
@@ -678,7 +713,8 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                                 encounter=encounter_rows, texture=texture)
     return AssembledChunk(items=tuple(items), assessment=prop.assessment,
                           place_id=place_id, person_id=person_id,
-                          companion_id=companion_id), ""
+                          companion_id=companion_id,
+                          region_id=region_id), ""
 
 
 # ---------------------------------------------------------------------------
