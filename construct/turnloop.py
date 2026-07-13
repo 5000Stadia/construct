@@ -3919,6 +3919,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     _h = horizon
     live_reads = PorcelainWorldReads(world, horizon=horizon)
     trace = TurnTrace(turn=turn)
+    # LATENCY CHECKPOINTS (docs/design/eval/11): cumulative wall-clock at
+    # section boundaries — deltas between cp_* keys decompose the pre-send
+    # chain; robust to early returns, unlike section wrappers.
+    _turn_t0 = _time.perf_counter()
+
+    def _cp(name: str) -> None:
+        trace.timings[f"cp_{name}"] = round(_time.perf_counter() - _turn_t0,
+                                            2)
     # WORLD-GROWTH §5 budget: the turn's ONE generative act — the Assessor
     # claims at invocation; the LWG generator chain claims at each of its
     # own invocation sites below. Spent whether or not the act succeeds.
@@ -4107,6 +4115,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         kind = "action"
         trace.dropped_cohorts.append(f"classify ({exc})")
     trace.classified = kind
+    _cp("classified")
     # WORLD-GROWTH (cr wiring blocker 3): on a growth-SIGNAL turn every
     # pre-move mutation the §3 no-change contract would have to roll back
     # is STAGED instead of committed — the growth gate commits them
@@ -4822,6 +4831,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             logger.warning("movement destination %r did not resolve (%s); "
                            "relying on extraction", moves_to, status)
 
+    _cp("movement_done")
     # ---- WORLD-GROWTH G1 (spec §3/§5): the world grows where the player walks.
     # Invoked ONLY on the proven pipeline miss (the closed contract); commits
     # UPSTREAM, pre-render, resolve-and-commit — on success the ordinary
@@ -4924,6 +4934,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             logger.warning("deferred %s commit failed: %s", _lbl, exc)
             trace.dropped_cohorts.append(f"deferred_{_lbl} ({exc})")
 
+    _cp("growth_gate_done")
     # ---- #101 DISTANCE: THE NEARNESS INVERSION (Cx 454; founder's shape challenge) -----
     # The map is authoritative about NEARNESS, never farness. A committed move is
     # provably near when: destination shares the origin's immediate parent (siblings in
@@ -5155,6 +5166,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     canon_snap = _snap_or_empty(p, snap_scope, as_of=_h)
     canon_table = _table(canon_snap)
 
+    _cp("scene_snapshot_done")
     _mirror_rows(p, receipt_rows, player_frame, canon_table, trace, as_of=_h)
     touched = {row["entity"] for row in receipt_rows}
     if touched & arc_entities(arc, live_reads):
@@ -5926,6 +5938,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _npc_spines[_n] = "; ".join(_sp)
     _drift_minutes = float(_clock.minutes) if _clock else None
     _drift_rung = drift.rung_from_counters(counters_from_session(live_reads, arc))
+    _cp("salience_done")
     _drift_pass(world, p, live_reads=live_reads, trace=trace, provider=provider,
                turn=turn, arc=arc, cast=cast, scene=scene, npcs=npcs,
                horizon=_h, minutes_now=_drift_minutes, rung=_drift_rung,
@@ -6450,6 +6463,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         except Exception:  # noqa: BLE001
             logger.debug("_mark_development (non-mint) failed", exc_info=True)
 
+    _cp("drift_lifecycle_done")
     if generate:
         ctx = {
             "style": style,
@@ -6621,6 +6635,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if e.get("prose"):
                 beats.append(e["prose"])
         story_so_far = "\n\n".join(beats)
+    _cp("generator_done")
     briefing_parts = []
     if play_style:
         # The game-type directive (GAME-TYPES.md): WHAT KIND of game this is — what
