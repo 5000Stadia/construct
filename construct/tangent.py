@@ -183,6 +183,20 @@ def read_pending(reads, *, turn: int) -> Pending | None:
             return None
         if not (0 <= turn - declared <= EXPIRY_TURNS):
             return None  # lapsed — or declared in the player's future
+        # A CONSUMED GENERATION IS INELIGIBLE FOREVER (cr piece-C
+        # blocker 2): the durable adoption receipt marks every
+        # declaration at or before its turn as spent — a failed
+        # best-effort clear can never let the same pending adopt twice.
+        # Declarations are turn-exclusive with adoptions, so any NEWER
+        # declaration carries a strictly later turn and stays eligible.
+        for ev in reads.events(kind=ADOPTION_RECEIPT_KIND,
+                               frame="session:main"):
+            try:
+                adopted_turn = int(str(ev.event_id).rsplit("_", 1)[-1])
+            except ValueError:
+                continue
+            if declared <= adopted_turn:
+                return None
         return Pending(aim=aim.strip(), declared_turn=declared,
                        source_action=action.strip())
     except Exception:  # noqa: BLE001 — unreadable pending = no pending

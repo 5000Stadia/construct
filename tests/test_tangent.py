@@ -70,13 +70,19 @@ def test_pending_record_is_one_coherent_write():
 
 
 class _Reads:
-    def __init__(self, record):
+    def __init__(self, record, adopted_turns=()):
         self.record = record
+        self.adopted_turns = adopted_turns
 
     def state(self, entity, attribute, frame=None):
         assert (entity, attribute, frame) == (PENDING, "record",
                                               "session:main")
         return self.record
+
+    def events(self, kind=None, frame=None):
+        from types import SimpleNamespace
+        return [SimpleNamespace(event_id=f"event:tangent_adopted_{t}",
+                                kind=kind) for t in self.adopted_turns]
 
 
 def _rec(**over):
@@ -112,6 +118,13 @@ def test_read_pending_requires_the_complete_validated_shape():
             "not json",
             json.dumps(["a", "list"])):
         assert read_pending(_Reads(broken), turn=8) is None, broken
+
+    # a CONSUMED generation is ineligible forever (cr piece-C blocker 2):
+    # an adoption receipt at turn 9 spends every declaration <= 9, while a
+    # NEWER declaration stays eligible
+    assert read_pending(_Reads(_rec(), adopted_turns=(9,)), turn=10) is None
+    assert read_pending(_Reads(_rec(declared_turn=10),
+                               adopted_turns=(9,)), turn=11) is not None
 
     class _Boom:
         def state(self, *a, **k):
@@ -746,7 +759,13 @@ def test_wired_beat2_fails_closed_without_the_envelope(tmp_path):
                      turn=2)
         assert r.trace.tangent == "adoption_unavailable"
         assert "⟦tgc⟧" in provider.calls[1][0][:40]
-        assert any("⟦tga⟧" in c[0][:40] for c in provider.calls)
+        tga = [c[0] for c in provider.calls if "⟦tga⟧" in c[0][:40]]
+        assert tga
+        # cr piece-C blocker 3: the author sees ONLY the player-visible
+        # world — the hidden answer's person (canon-only) is absent; the
+        # player-frame place is present
+        assert "person:rival" not in tga[0]
+        assert "place:north_road" in tga[0]
         reads = PorcelainWorldReads(w)
         assert arc_io.main_arc_from_frame(reads) == arc.arc_id  # unmoved
         assert read_pending(reads, turn=3) is not None          # survives
@@ -838,6 +857,12 @@ def test_wired_adoption_success_with_a_willing_envelope(tmp_path,
         assert r.trace.replanned == "arc:tangent_2"
         assert "THE STORY TURNS" in r.trace.briefing
         assert "bow line" in r.trace.briefing   # the hook, not a summary
+        # SAME-TURN PHASE BOUNDARY (cr piece-C blocker 1): the demoted
+        # main's hidden destination never reaches the narrator after the
+        # adoption lands — the rest of the turn obeys the new main
+        assert "person:rival" not in r.trace.briefing
+        assert "fact:secret" not in r.trace.briefing
+        assert r.trace.drift == []              # no old-main drift pass
         reads = PorcelainWorldReads(w)
         w.ingestor.cursor.advance(5000.0)
         assert arc_io.main_arc_from_frame(reads) == "arc:tangent_2"
@@ -846,5 +871,23 @@ def test_wired_adoption_success_with_a_willing_envelope(tmp_path,
         assert reads.state(arc.arc_id, "demoted",
                            frame="plot:main") == ADOPTION_RECEIPT_KIND
         assert read_pending(reads, turn=3) is None    # receipt cleared
+        # cr piece-C blocker 2: even if the best-effort clear had FAILED,
+        # the consumed generation cannot adopt twice — restore the exact
+        # pre-adoption record (simulating the failed clear) and run the
+        # next confirming action: the receipt makes it ineligible, the
+        # confirm cohort never runs, main stays the tangent
+        w.porcelain.ingest_structured(
+            pending_rows("a life aboard the Gullwing", turn=1,
+                         action="Forget the case.", at=1001.5),
+            frame="session:main")
+        assert read_pending(reads, turn=3) is None    # consumed forever
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to="")]
+            + [{"prose": "The deck settles under you."}] * 4)
+        r2 = run_turn(w, arc, provider, "I coil the lines and make "
+                      "myself useful.", turn=3)
+        assert r2.trace.tangent == ""                 # never armed
+        assert not any("⟦tgc⟧" in c[0][:40] for c in provider.calls)
+        assert arc_io.main_arc_from_frame(reads) == "arc:tangent_2"
     finally:
         w.close()

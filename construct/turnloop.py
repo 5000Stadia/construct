@@ -306,7 +306,7 @@ def _move_touches_secret(moves_to: str, arc: Arc, reads: Any) -> bool:
 def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
                      provider: Provider, trace: TurnTrace, *,
                      pending, player_input: str, turn: int,
-                     gen_slot: Any, style: str) -> None:
+                     gen_slot: Any, style: str) -> "Arc | None":
     """WORLD-GROWTH G-A BEAT 2 (spec §6): judge → author → adopt. Every
     gate is host structure; the adoption itself rides the atomic envelope
     and FAILS CLOSED on an engine without commit_set (adoption_unavailable
@@ -333,7 +333,7 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     except Exception as exc:  # noqa: BLE001 — an unjudged beat stays pending
         logger.warning("tangent confirm failed: %s", exc)
         trace.tangent = "declined:provider_error"
-        return
+        return None
     if growth_mod.strict_flag(verdict.get("abandons")):
         # the explicit cancel: the deed walked back to the old story
         try:
@@ -343,39 +343,49 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
             logger.info("tangent pending cancelled (the deed walked back)")
         except Exception as exc:  # noqa: BLE001 — expiry will lapse it
             logger.warning("tangent cancel write failed: %s", exc)
-        return
+        return None
     if not growth_mod.strict_flag(verdict.get("consistent")):
         trace.tangent = "declined:inconsistent"
-        return
+        return None
 
     # the INVOCATION claims the turn's one generative act (spec §5 — the
     # tangent author shares the slot with the Assessor and the LWG)
     if not gen_slot.claim("tangent_author"):
         trace.tangent = "declined:slot_spent"
-        return
+        return None
 
     # HOST truth: the aim + PLAYER-VISIBLE facts only (the knows frame +
     # region cards — the hidden plot frame is structurally absent)
     try:
         vis_lines: list[str] = []
+        vis_ids: set[str] = {arc.protagonist}
         pf = _player_frame(arc)
+        _prefixes = ("person:", "place:", "obj:", "fact:", "region:")
         for r in live_reads.frame_rows(pf)[:40]:
             vis_lines.append(f"- {r.entity} · {r.attribute} · {r.value}")
+            # authorable ids DERIVE FROM THE PLAYER FRAME (cr piece-C
+            # blocker 3: a canon-only enumeration handed the hidden
+            # answer's people to the author) — row entities AND
+            # entity-valued row values
+            if str(r.entity).startswith(_prefixes):
+                vis_ids.add(str(r.entity))
+            if isinstance(r.value, str) and r.value.startswith(_prefixes):
+                vis_ids.add(r.value)
+        # region cards are sanctioned visible surfaces: the player walked
+        # them into existence
         for rid in sorted(
                 p.entities("canon", prefix="region:",
                            as_of=getattr(live_reads, "_horizon", None))):
             st = live_reads.state(rid, "style")
             if isinstance(st, str) and st.strip():
                 vis_lines.append(f"- {rid} · style · {st.strip()}")
+                vis_ids.add(rid)
         visible = "\n".join(vis_lines) or "(a world still mostly unwritten)"
-        known = sorted(
-            set(p.entities("canon", prefix="person:",
-                           as_of=getattr(live_reads, "_horizon", None)))
-            | {arc.protagonist})
+        known = sorted(vis_ids)
     except Exception as exc:  # noqa: BLE001 — unreadable truth = no author
         logger.warning("tangent visible-facts assembly failed: %s", exc)
         trace.tangent = "declined:world_unreadable"
-        return
+        return None
     try:
         with _phase(trace, "tangent_author"):
             proposal = cohorts.author_tangent_arc(
@@ -385,7 +395,7 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     except Exception as exc:  # noqa: BLE001
         logger.warning("tangent author failed: %s", exc)
         trace.tangent = "declined:provider_error"
-        return
+        return None
 
     new_id = f"arc:tangent_{turn}"
     built, problems = tangent_mod.build_tangent_arc(
@@ -394,14 +404,14 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     if built is None:
         logger.info("tangent build declined: %s", problems[:3])
         trace.tangent = f"declined:{problems[0] if problems else 'build'}"
-        return
+        return None
     state = tangent_mod.read_portfolio_state(live_reads)
     if state is None:
         trace.tangent = "declined:portfolio_unverifiable"
-        return
+        return None
     if state.main_arc != arc.arc_id:
         trace.tangent = "declined:portfolio_drift"  # not the arc we run
-        return
+        return None
     try:
         ops = tangent_mod.adoption_ops(
             arc=built, portfolio=state, protagonist=arc.protagonist,
@@ -410,11 +420,11 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     except ValueError as exc:
         logger.warning("adoption ops refused: %s", exc)
         trace.tangent = "declined:ops_refused"
-        return
+        return None
     result = tangent_mod.activate_adoption(world.porcelain, ops)
     if not result.ok:
         trace.tangent = result.reason   # pending SURVIVES — retry later
-        return
+        return None
     trace.tangent = f"adopted:{new_id}"
     trace.replanned = new_id            # the session reloads the portfolio
     hook = str(proposal.get("hook") or "").strip()
@@ -438,6 +448,7 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     except Exception:  # noqa: BLE001
         trace.dropped_cohorts.append("tangent_post_adoption bookkeeping")
     logger.info("tangent ADOPTED: %s (%r)", new_id, pending.aim)
+    return built
 
 
 #: WORLD-GROWTH G1: the non-diegetic retry seam (spec §3 proposal-failure
@@ -4871,9 +4882,21 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     elif kind == "action":
         _t_pending = tangent_mod.read_pending(live_reads, turn=turn)
         if tangent_mod.may_confirm(_t_pending, turn=turn, committed=True):
-            _tangent_attempt(world, p, arc, live_reads, provider, trace,
-                             pending=_t_pending, player_input=player_input,
-                             turn=turn, gen_slot=_gen_slot, style=style)
+            _t_new = _tangent_attempt(world, p, arc, live_reads, provider,
+                                      trace, pending=_t_pending,
+                                      player_input=player_input,
+                                      turn=turn, gen_slot=_gen_slot,
+                                      style=style)
+            if _t_new is not None:
+                # SAME-TURN PHASE BOUNDARY (cr piece-C blocker 1, the
+                # reshape precedent Cx 210/212): the rest of THIS turn —
+                # gauge/clock/beat/outcome/drift/pacing and the narrator's
+                # destination card — obeys the adopted main, never the
+                # demoted one
+                arc = _t_new
+                scope = sorted(set(
+                    e for e in arc_entities(arc, live_reads)
+                    if live_reads.has_entity(e)))
 
     # every non-seam path flushes the staged pre-move mutations in their
     # original order (growth activated, growth not invoked, or no miss).
