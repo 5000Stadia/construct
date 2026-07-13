@@ -179,8 +179,9 @@ CLASSIFY_SCHEMA = {
                   "description": "true ONLY for travel-UNTIL-someone — moving with the "
                   "stated aim of finding a person on the way ('I keep running down the "
                   "road until I run into someone'). Such travel usually has NO "
-                  "nameable destination: moves_to stays EMPTY and this flag alone "
-                  "carries the movement commitment (the legal pairing). FALSE for a "
+                  "nameable destination: moves_to stays EMPTY and the commitment is "
+                  "carried by BOTH this flag AND moves_open together (the two-signal "
+                  "conjunction — never this flag alone). FALSE for a "
                   "stationary look or question ('is anyone around?' — that is "
                   "observation, not travel), and false whenever no movement is "
                   "committed. Most turns: false."},

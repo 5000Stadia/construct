@@ -1068,10 +1068,41 @@ def test_wired_encounter_success_comes_to_the_road(tmp_path, monkeypatch):
         w.close()
 
 
-def test_wired_encounter_with_a_place_walks_there(tmp_path, monkeypatch):
-    # G2: "an encounter only if someone plainly belongs there" — when the
-    # proposal includes the place the meeting needs, the player walked to
-    # it: the move commits with the same chunk
+def test_wired_destinationless_lane_declines_a_place(tmp_path, monkeypatch):
+    # cr G2 r3: the destination-less lane's consequence bound is HOST
+    # enforced — a proposal smuggling a place through the proof-by-absence
+    # lane declines with zero displacement (even on a willing engine)
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        monkeypatch.setattr(
+            growth_mod, "activate_chunk",
+            lambda porcelain, items: growth_mod.ActivationResult(
+                ok=True, receipts=("r",)))
+        provider = StubProvider(
+            [_classify(moves_open=True, seeks_encounter=True, moves_to=""),
+             _good()])   # the proposal CARRIES a place — must not broaden
+        r = run_turn(w, _wired_arc(), provider,
+                     "I walk until I meet someone.", turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == \
+            "declined:unlicensed:place.destinationless_lane"
+        assert w.porcelain.state("place:the_willow_ford_waypost",
+                                 "kind")["status"] != "known"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+
+def test_wired_phrase_bearing_encounter_keeps_its_walk(tmp_path,
+                                                       monkeypatch):
+    # the separately justified shape: a PHRASE-BEARING encounter seek
+    # ("down the old road until I meet someone") goes through the real
+    # pipeline (G1 routing) and its chunk may carry the meeting's place —
+    # the player committed the travel, so the walk commits with the chunk
     import construct.growth as growth_mod
     from construct.provider import StubProvider
     from construct.turnloop import run_turn
@@ -1086,11 +1117,14 @@ def test_wired_encounter_with_a_place_walks_there(tmp_path, monkeypatch):
                "speaks": True, "intent": "size up the newcomer",
                "line_hint": ""}
         provider = StubProvider(
-            [_classify(moves_open=True, seeks_encounter=True, moves_to=""),
+            [_classify(moves_open=True, seeks_encounter=True,
+                       moves_to="down the old carters' track"),
+             {"verdict": "new", "match": ""},     # the pipeline RAN
              _good(), dict(npt), dict(npt)]
             + [{"prose": "The waypost, and a farmer at it."}] * 4)
         r = run_turn(w, _wired_arc(), provider,
-                     "I walk until I meet someone.", turn=1)
+                     "I go down the old carters' track until I meet "
+                     "someone.", turn=1)
         assert r.trace.growth == "activated:place:the_willow_ford_waypost"
         assert "npc_turn:person:gregor_bund:cheap" in r.trace.cohort_calls
         assert "npc_turn:person:kip:cheap" in r.trace.cohort_calls

@@ -417,6 +417,17 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         logger.info("growth proposal declined: %s", why)
         trace.growth = f"declined:{why}"
         return False
+    if mode == "encounter" and not moves_to and prop.place is not None:
+        # THE DESTINATION-LESS LANE'S CONSEQUENCE BOUND (spec §5.2, cr):
+        # proof-by-absence licenses an encounter-only chunk anchored at
+        # the origin with ZERO displacement — a model-controlled optional
+        # place must not broaden it. A phrase-bearing encounter seek
+        # (moves_to nonempty, routed through the real pipeline) keeps its
+        # separately justified place+walk behavior.
+        logger.info("growth proposal declined: destination-less lane "
+                    "carries no place")
+        trace.growth = "declined:unlicensed:place.destinationless_lane"
+        return False
 
     _growth_h = getattr(live_reads, "_horizon", None)
 
