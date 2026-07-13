@@ -286,53 +286,204 @@ def test_build_tangent_arc_forces_protagonist_and_lints(tmp_path):
         w.close()
 
 
-def test_adoption_ops_shape_and_order():
+def _seed_portfolio(w, reads):
+    from construct.arc import io as arc_io
+    from construct.tangent import build_tangent_arc
+    old, problems = build_tangent_arc(
+        _proposal(beats=[{"id": "beat:old_thread", "phase": "rising",
+                          "weight": "required", "kind": "event_occurs",
+                          "entity": "old_thread", "attribute": "",
+                          "value": ""}]),
+        protagonist="person:you", arc_id="arc:main_case", reads=reads)
+    assert problems == []
+    w.porcelain.ingest_structured(
+        arc_io.arc_to_items(old, frame="plot:main")
+        + arc_io.index_items(old, frame="plot:main")
+        + arc_io.portfolio_items(["arc:main_case"],
+                                 main_arc_id="arc:main_case",
+                                 frame="plot:main"), frame="plot:main")
+    return old
+
+
+def test_adoption_ops_from_verified_state_and_reconstruction(tmp_path):
+    # cr piece-B r2 blockers 1+2: the set is built ONLY from the exact
+    # linted Arc + the VERIFIED portfolio; success is pinned by
+    # RECONSTRUCTING the portfolio after applying the ops on a real World
     import pytest as _pt
-    from construct.tangent import ADOPTION_RECEIPT_KIND, adoption_ops
-    arc_items = [{"entity": "arc:tangent_9", "attribute": "kind",
-                  "value": "arc", "frame": "plot:main"}]
-    manifest = [{"entity": "arc:portfolio", "attribute": "main_arc",
-                 "value": "arc:tangent_9", "frame": "plot:main"}]
-    ops = adoption_ops(new_arc_items=arc_items, manifest_items=manifest,
-                       retract_ids=["a-77", "a-78"],
-                       old_main_id="arc:main", new_main_id="arc:tangent_9",
-                       aim="a life aboard", turn=9, at=1009.0)
-    kinds = [op["op"] for op in ops]
-    # retracts FIRST (the Cx 167 discipline), then asserts only
-    assert kinds[:2] == ["retract", "retract"]
-    assert set(kinds[2:]) == {"assert"}
-    assert ops[0]["assertion_id"] == "a-77" and ops[0]["reason"]
-    items = [op["item"] for op in ops if op["op"] == "assert"]
-    by = {(i["entity"], i["attribute"]): i.get("value") for i in items}
-    # the old main is DEMOTED durably, never silently dropped
-    assert by[("arc:main", "demoted")] == ADOPTION_RECEIPT_KIND
-    # the durable receipt the phase boundary reads rides the SAME set
-    ev = "event:tangent_adopted_9"
-    assert by[(ev, "kind")] == ADOPTION_RECEIPT_KIND
-    assert by[(ev, "aim")] == "a life aboard"
-    assert by[(ev, "old_main")] == "arc:main"
-    assert by[(ev, "new_main")] == "arc:tangent_9"
-    # the manifest switch is inside the set too
-    assert by[("arc:portfolio", "main_arc")] == "arc:tangent_9"
-    # host bugs raise: same-id switch, empty items, malformed retracts,
-    # blank aim, bad turn/at
-    for kw in (dict(new_main_id="arc:main"),
-               dict(old_main_id="main"),
-               dict(new_arc_items=[]),
-               dict(new_arc_items=["row"]),
-               dict(manifest_items=[]),
-               dict(retract_ids=[""]),
-               dict(retract_ids=[7]),
-               dict(aim="   "),
-               dict(turn=-1), dict(turn=True),
-               dict(at=float("nan")), dict(at=2**53 + 1)):
-        base = dict(new_arc_items=arc_items, manifest_items=manifest,
-                    retract_ids=["a-77"], old_main_id="arc:main",
-                    new_main_id="arc:tangent_9", aim="a life aboard",
-                    turn=9, at=1009.0)
+    from construct.arc import io as arc_io
+    from construct.tangent import (ADOPTION_RECEIPT_KIND, PortfolioState,
+                                   adoption_ops, build_tangent_arc,
+                                   read_portfolio_state)
+    w, reads = _world_reads(tmp_path)
+    try:
+        _seed_portfolio(w, reads)
+        state = read_portfolio_state(w)
+        assert type(state) is PortfolioState
+        assert state.main_arc == "arc:main_case"
+        assert len(state.retract_ids) >= 2      # BOTH control rows located
+        arc, problems = build_tangent_arc(
+            _proposal(), protagonist="person:you", arc_id="arc:tangent_9",
+            reads=reads)
+        assert problems == []
+        ops = adoption_ops(arc=arc, portfolio=state, aim="a life aboard",
+                           turn=9, at=1009.0)
+        # retracts first, covering every located control row
+        assert [o["op"] for o in ops[:len(state.retract_ids)]] == \
+            ["retract"] * len(state.retract_ids)
+        assert {o["assertion_id"] for o in ops
+                if o["op"] == "retract"} == set(state.retract_ids)
+        # APPLY the set the way the envelope would (retracts then asserts)
+        for op in ops:
+            if op["op"] == "retract":
+                w.porcelain.retract(op["assertion_id"], op["reason"])
+            else:
+                item = dict(op["item"])
+                frame = item.pop("frame", None)
+                w.porcelain.ingest_structured([item], frame=frame,
+                                              classify="rules")
+        # RECONSTRUCTION: exactly one loadable new main; the old main a
+        # retained member carrying the durable demotion (cursor advanced
+        # past the adoption horizon — reads are as-of)
+        w.ingestor.cursor.advance(2000.0)
+        assert arc_io.main_arc_from_frame(reads) == "arc:tangent_9"
+        loaded = {a.arc_id: a for a in arc_io.portfolio_from_frame(reads)}
+        assert set(loaded) == {"arc:main_case", "arc:tangent_9"}
+        assert loaded["arc:tangent_9"].protagonist == "person:you"
+        assert reads.state("arc:main_case", "demoted",
+                           frame="plot:main") == ADOPTION_RECEIPT_KIND
+        # the durable receipt reads through the EVENT path (the same read
+        # the piece-C phase boundary consumes)
+        evs = reads.events(kind=ADOPTION_RECEIPT_KIND, frame="session:main")
+        assert [e.event_id for e in evs] == ["event:tangent_adopted_9"]
+        ev_attrs = {r.attribute: r.value for r in w.buffer.visible(
+            entity="event:tangent_adopted_9", frame="session:main")}
+        assert ev_attrs["new_main"] == "arc:tangent_9"
+        assert ev_attrs["old_main"] == "arc:main_case"
+        assert ev_attrs["aim"] == "a life aboard"
+        # host bugs raise: a non-Arc, a dict impersonating the state, an
+        # arc already in the portfolio, blank aim, bad turn/at
+        with _pt.raises(ValueError):
+            adoption_ops(arc="arc:tangent_9", portfolio=state,
+                         aim="x", turn=9, at=1009.0)
+        with _pt.raises(ValueError):
+            adoption_ops(arc=arc, portfolio={"main_arc": "arc:main_case"},
+                         aim="x", turn=9, at=1009.0)
+        old_arc, _ = build_tangent_arc(
+            _proposal(), protagonist="person:you",
+            arc_id="arc:tangent_dup", reads=reads)
+        dup_state = PortfolioState(
+            arc_ids=("arc:main_case", "arc:tangent_dup"),
+            main_arc="arc:main_case",
+            retract_ids=("a-1", "a-2"))
+        with _pt.raises(ValueError):     # already a member — never re-adopt
+            adoption_ops(arc=old_arc, portfolio=dup_state, aim="x",
+                         turn=9, at=1009.0)
+        for kw in (dict(aim="   "), dict(turn=-1), dict(turn=True),
+                   dict(at=float("nan")), dict(at=2**53 + 1)):
+            base = dict(arc=arc, portfolio=state, aim="a life aboard",
+                        turn=9, at=1009.0)
+            base.update(kw)
+            with _pt.raises(ValueError):
+                adoption_ops(**base)
+    finally:
+        w.close()
+
+
+def test_portfolio_state_is_verified_or_absent(tmp_path):
+    # cr r2 blocker 1: no control rows located → NO adoption (never a
+    # blind retract); forged states raise at construction
+    import pytest as _pt
+    from construct.tangent import PortfolioState, read_portfolio_state
+    w, reads = _world_reads(tmp_path)
+    try:
+        assert read_portfolio_state(w) is None   # nothing seeded
+    finally:
+        w.close()
+    for kw in (dict(arc_ids=()), dict(arc_ids=("main",)),
+               dict(main_arc="arc:other"),
+               dict(retract_ids=("a-1",)),          # one row is NOT both
+               dict(retract_ids=("a-1", "a-1")),    # duplicate coverage
+               dict(retract_ids=("a-1", ""))):
+        base = dict(arc_ids=("arc:main_case",), main_arc="arc:main_case",
+                    retract_ids=("a-1", "a-2"))
         base.update(kw)
         with _pt.raises(ValueError):
-            adoption_ops(**base)
+            PortfolioState(**base)
+
+
+def test_build_tangent_arc_ids_and_reload(tmp_path):
+    # cr r2 blocker 3: exact id grammar, collision + uniqueness, and the
+    # serialize/reload oracle
+    import pytest as _pt
+    from construct.arc import io as arc_io
+    from construct.tangent import build_tangent_arc
+    w, reads = _world_reads(tmp_path)
+    try:
+        with _pt.raises(ValueError):
+            build_tangent_arc(_proposal(), protagonist="person:you",
+                              arc_id="arc:", reads=reads)
+        with _pt.raises(ValueError):
+            build_tangent_arc(_proposal(), protagonist="person:you",
+                              arc_id="arc:Tangent-9", reads=reads)
+        # duplicate beat ids decline (one persisted id, conflicting rows)
+        dup = _proposal(beats=[
+            {"id": "beat:same", "phase": "rising", "weight": "required",
+             "kind": "event_occurs", "entity": "x", "attribute": "",
+             "value": ""},
+            {"id": "beat:same", "phase": "crisis", "weight": "required",
+             "kind": "event_occurs", "entity": "y", "attribute": "",
+             "value": ""}])
+        bad, problems = build_tangent_arc(dup, protagonist="person:you",
+                                          arc_id="arc:tangent_9",
+                                          reads=reads)
+        assert bad is None and "proposal: duplicate beat ids" in problems
+        # an arc id already in the world collides
+        w.porcelain.ingest_structured([
+            {"entity": "arc:taken", "attribute": "kind", "value": "arc",
+             "timeless": True}])
+        bad, problems = build_tangent_arc(_proposal(),
+                                          protagonist="person:you",
+                                          arc_id="arc:taken", reads=reads)
+        assert bad is None and "preflight: arc_id_collision" in problems
+        # SERIALIZE/RELOAD: the built arc round-trips whole
+        arc, problems = build_tangent_arc(
+            _proposal(), protagonist="person:you", arc_id="arc:tangent_9",
+            reads=reads)
+        assert problems == []
+        w.porcelain.ingest_structured(
+            arc_io.arc_to_items(arc, frame="plot:main")
+            + arc_io.index_items(arc, frame="plot:main")
+            + arc_io.portfolio_items(["arc:tangent_9"],
+                                     main_arc_id="arc:tangent_9",
+                                     frame="plot:main"), frame="plot:main")
+        loaded = {a.arc_id: a
+                  for a in arc_io.portfolio_from_frame(reads)}
+        got = loaded["arc:tangent_9"]
+        assert got.protagonist == arc.protagonist
+        assert [b.beat_id for b in got.beats] == \
+            [b.beat_id for b in arc.beats]
+        assert got.shape.delta_type == arc.shape.delta_type
+    finally:
+        w.close()
+
+
+def test_author_tangent_arc_prompt_is_aim_and_visible_only():
+    from construct.cohorts import author_tangent_arc
+    from construct.provider import StubProvider, task_of
+    provider = StubProvider([_proposal()])
+    out = author_tangent_arc(
+        provider, aim="build a life aboard the Gullwing",
+        protagonist="person:you",
+        visible_facts="- the Gullwing, a coastal ketch\n- Sefa, her master",
+        style="salt-plain, unhurried",
+        available_ids=["person:you", "person:sefa"])
+    assert out["title"] == "The Gullwing's Own"
+    prompt = provider.calls[0][0]
+    assert task_of(prompt) == "tga"
+    assert "build a life aboard the Gullwing" in prompt
+    assert "must be EXACTLY this id): person:you" in prompt
+    assert "a coastal ketch" in prompt
+    assert "salt-plain" in prompt
 
 
 def test_activate_adoption_fails_closed_without_commit_set():
@@ -349,10 +500,26 @@ def test_activate_adoption_fails_closed_without_commit_set():
     r = activate_adoption(_NoEnvelope(), ops)
     assert isinstance(r, ActivationResult)
     assert r.ok is False and r.reason == "adoption_unavailable"
-    # malformed sets refuse before any engine call
+    # malformed sets refuse before any engine call (cr r2 blocker 4:
+    # full op SHAPES, not just the tag)
     assert activate_adoption(_NoEnvelope(), []).reason == "empty_set"
     assert activate_adoption(_NoEnvelope(),
                              [{"op": "upsert"}]).reason == "malformed_op"
+    assert activate_adoption(_NoEnvelope(),
+                             [{"op": "assert"}]).reason == "malformed_op"
+    assert activate_adoption(_NoEnvelope(), [
+        {"op": "assert", "item": {"entity": "", "attribute": "k"}}
+    ]).reason == "malformed_op"
+    assert activate_adoption(_NoEnvelope(),
+                             [{"op": "retract"}]).reason == "malformed_op"
+    assert activate_adoption(_NoEnvelope(), [
+        {"op": "retract", "assertion_id": "a-1", "reason": ""}
+    ]).reason == "malformed_op"
+    # an all-assert or all-retract set is NOT an adoption
+    assert activate_adoption(_NoEnvelope(), [ops[1]]).reason == \
+        "not_an_adoption_set"
+    assert activate_adoption(_NoEnvelope(), [ops[0]]).reason == \
+        "not_an_adoption_set"
 
     class _Willing:
         def __init__(self):

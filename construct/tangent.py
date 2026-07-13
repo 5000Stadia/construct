@@ -235,13 +235,27 @@ def build_tangent_arc(proposal, *, protagonist: str, arc_id: str, reads
     if type(protagonist) is not str or not protagonist.startswith("person:"):
         raise ValueError(f"tangent build: protagonist must be a person id, "
                          f"got {protagonist!r}")
-    if type(arc_id) is not str or not arc_id.startswith("arc:"):
-        raise ValueError(f"tangent build: arc_id must be an arc id, got "
-                         f"{arc_id!r}")
+    import re as _re
+    if type(arc_id) is not str \
+            or not _re.fullmatch(r"arc:[a-z0-9_]+", arc_id):
+        raise ValueError(f"tangent build: arc_id must satisfy the id "
+                         f"grammar arc:[a-z0-9_]+, got {arc_id!r}")
     if not isinstance(proposal, dict):
         return None, ["proposal: not a mapping"]
     proposal = dict(proposal)
     proposal["protagonist"] = protagonist   # forced, never trusted
+    # UNIQUENESS + COLLISION (cr piece-B r2 blocker 3): duplicate beat ids
+    # would serialize as one persisted beat with conflicting rows; an arc
+    # id already in the world would collide two stories
+    try:
+        if reads.has_entity(arc_id):
+            return None, ["preflight: arc_id_collision"]
+    except Exception as exc:  # noqa: BLE001 — an unreadable world is unfit
+        return None, [f"preflight: {exc}"]
+    _beat_ids = [str(b.get("id", "")) for b in proposal.get("beats", [])
+                 if isinstance(b, dict)]
+    if len(set(_beat_ids)) != len(_beat_ids):
+        return None, ["proposal: duplicate beat ids"]
     try:
         from construct.game import _build_arc
         arc = _build_arc(proposal, arc_id=arc_id)
@@ -273,35 +287,84 @@ def build_tangent_arc(proposal, *, protagonist: str, arc_id: str, reads
     return arc, []
 
 
-def adoption_ops(*, new_arc_items: list, manifest_items: list,
-                 retract_ids: list, old_main_id: str, new_main_id: str,
-                 aim: str, turn: int, at: float) -> list[dict]:
+@dataclass(frozen=True)
+class PortfolioState:
+    """The VERIFIED current portfolio (cr piece-B r2 blocker 1): both
+    constitutive control rows located with their assertion ids — the
+    adoption builder consumes only this, so an unverifiable manifest can
+    never reach the envelope."""
+
+    arc_ids: tuple
+    main_arc: str
+    retract_ids: tuple   # every visible arc_ids/main_arc assertion id
+
+    def __post_init__(self):
+        if not self.arc_ids or any(
+                type(a) is not str or not a.startswith("arc:")
+                for a in self.arc_ids):
+            raise ValueError("PortfolioState: arc_ids must be arc ids")
+        if type(self.main_arc) is not str \
+                or not self.main_arc.startswith("arc:") \
+                or self.main_arc not in self.arc_ids:
+            raise ValueError("PortfolioState: main_arc must be a member "
+                             "arc id")
+        if len(self.retract_ids) < 2 \
+                or len(set(self.retract_ids)) != len(self.retract_ids) \
+                or any(type(r) is not str or not r.strip()
+                       for r in self.retract_ids):
+            raise ValueError("PortfolioState: retract_ids must be the >=2 "
+                             "distinct assertion ids covering BOTH control "
+                             "rows")
+
+
+def read_portfolio_state(world) -> "PortfolioState | None":
+    """Locate BOTH portfolio control rows (arc_ids + main_arc) with their
+    assertion ids. Returns None when either is unlocatable — adoption
+    fails toward the ordinary story, never toward a blind retract."""
+    import json as _json
+    try:
+        from construct.adapter import frame_facts
+        rows = [r for r in frame_facts(world, "plot:main",
+                                       entity="arc:portfolio")
+                if r.attribute in ("arc_ids", "main_arc")]
+        ids_rows = [r for r in rows if r.attribute == "arc_ids"]
+        main_rows = [r for r in rows if r.attribute == "main_arc"]
+        if not ids_rows or not main_rows:
+            return None
+        arc_ids = _json.loads(str(ids_rows[-1].value))
+        main_arc = str(main_rows[-1].value)
+        return PortfolioState(
+            arc_ids=tuple(str(a) for a in arc_ids), main_arc=main_arc,
+            retract_ids=tuple(str(r.id) for r in rows))
+    except Exception:  # noqa: BLE001 — unverifiable manifest = no adoption
+        logger.warning("portfolio state read failed", exc_info=True)
+        return None
+
+
+def adoption_ops(*, arc, portfolio: PortfolioState, aim: str, turn: int,
+                 at: float) -> list[dict]:
     """The ONE adoption unit (item 3b), as ordered typed ops for
-    commit_set: retract the sealed portfolio manifest rows FIRST (the
-    Cx 167 constitutive-fold discipline), then assert the new arc + its
-    index, the old main's durable demotion (reason `tangent_adopted` —
-    never a silent drop), the replacement manifest, and the adoption
-    receipt the phase boundary reads. Any op failing aborts the whole
-    set engine-side; nothing here writes."""
-    if type(old_main_id) is not str or not old_main_id.startswith("arc:"):
-        raise ValueError(f"adoption ops: old_main_id must be an arc id, "
-                         f"got {old_main_id!r}")
-    if type(new_main_id) is not str or not new_main_id.startswith("arc:") \
-            or new_main_id == old_main_id:
-        raise ValueError(f"adoption ops: new_main_id must be a DIFFERENT "
-                         f"arc id, got {new_main_id!r}")
-    if type(new_arc_items) is not list or not new_arc_items or any(
-            not isinstance(i, dict) for i in new_arc_items):
-        raise ValueError("adoption ops: new_arc_items must be a nonempty "
-                         "list of row dicts")
-    if type(manifest_items) is not list or not manifest_items or any(
-            not isinstance(i, dict) for i in manifest_items):
-        raise ValueError("adoption ops: manifest_items must be a nonempty "
-                         "list of row dicts")
-    if type(retract_ids) is not list or any(
-            type(r) is not str or not r.strip() for r in retract_ids):
-        raise ValueError("adoption ops: retract_ids must be assertion-id "
-                         "strings")
+    commit_set — built ONLY from the exact linted Arc and the VERIFIED
+    portfolio (cr r2 blockers 1+2: no raw row lists, no caller-supplied
+    manifest): retract every visible manifest control row FIRST (the
+    Cx 167 constitutive-fold discipline), then assert the arc's own
+    serialized rows + index, the old main's durable demotion (never a
+    silent drop), the replacement manifest built HERE (the old main
+    RETAINED as a side arc by construction), and the adoption receipt
+    the phase boundary reads. Any op failing aborts the whole set
+    engine-side; nothing here writes."""
+    from construct.arc.grammar import Arc
+    from construct.arc import io as arc_io
+    if type(arc) is not Arc:
+        raise ValueError("adoption ops: arc must be the exact linted Arc")
+    if type(portfolio) is not PortfolioState:
+        raise ValueError("adoption ops: portfolio must be the verified "
+                         "PortfolioState")
+    new_main_id = arc.arc_id
+    old_main_id = portfolio.main_arc
+    if new_main_id == old_main_id or new_main_id in portfolio.arc_ids:
+        raise ValueError(f"adoption ops: {new_main_id} already in the "
+                         "portfolio — adoption mints a NEW main")
     norm_aim = _normalize_aim(aim)
     if not norm_aim:
         raise ValueError(f"adoption ops: aim must be a nonempty bounded "
@@ -312,12 +375,17 @@ def adoption_ops(*, new_arc_items: list, manifest_items: list,
     ops: list[dict] = [
         {"op": "retract", "assertion_id": rid,
          "reason": "tangent adoption: superseding the portfolio manifest"}
-        for rid in retract_ids]
+        for rid in portfolio.retract_ids]
+    new_arc_items = (arc_io.arc_to_items(arc, frame="plot:main")
+                     + arc_io.index_items(arc, frame="plot:main"))
     ops += [{"op": "assert", "item": dict(i)} for i in new_arc_items]
     ops.append({"op": "assert", "item": {
         "entity": old_main_id, "attribute": "demoted",
         "value": ADOPTION_RECEIPT_KIND, "frame": "plot:main",
         "valid_from": at}})
+    manifest_items = arc_io.portfolio_items(
+        list(portfolio.arc_ids) + [new_main_id], main_arc_id=new_main_id,
+        frame="plot:main", valid_from=at)
     ops += [{"op": "assert", "item": dict(i)} for i in manifest_items]
     for attr, value in (("kind", ADOPTION_RECEIPT_KIND), ("aim", norm_aim),
                         ("old_main", old_main_id),
@@ -339,11 +407,31 @@ def activate_adoption(p, ops: list) -> "object":
     from construct.growth import ActivationResult, _affirmative_success
     if type(ops) is not list or not ops:
         return ActivationResult(ok=False, reason="empty_set")
+    n_asserts = n_retracts = 0
     for op in ops:
-        if not isinstance(op, dict) or op.get("op") not in ("assert",
-                                                            "retract"):
+        if not isinstance(op, dict):
             return ActivationResult(ok=False, reason="malformed_op")
-    n_asserts = sum(1 for op in ops if op["op"] == "assert")
+        if op.get("op") == "assert":
+            item = op.get("item")
+            if not isinstance(item, dict) \
+                    or not str(item.get("entity", "")).strip() \
+                    or not str(item.get("attribute", "")).strip():
+                return ActivationResult(ok=False, reason="malformed_op")
+            n_asserts += 1
+        elif op.get("op") == "retract":
+            if type(op.get("assertion_id")) is not str \
+                    or not op["assertion_id"].strip() \
+                    or type(op.get("reason")) is not str \
+                    or not op["reason"].strip():
+                return ActivationResult(ok=False, reason="malformed_op")
+            n_retracts += 1
+        else:
+            return ActivationResult(ok=False, reason="malformed_op")
+    if not n_asserts or not n_retracts:
+        # adoption is MIXED by construction: the manifest supersession
+        # (retracts) and the new truth (asserts) travel together or not
+        # at all
+        return ActivationResult(ok=False, reason="not_an_adoption_set")
     if not callable(getattr(p, "commit_set", None)):
         logger.warning("adoption unavailable: engine has no commit_set "
                        "(%d ops withheld — nothing written)", len(ops))

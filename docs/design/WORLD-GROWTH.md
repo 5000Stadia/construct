@@ -324,10 +324,17 @@ Concrete named destinations keep today's resolve/mint path untouched.
      and may not be described as usable unchanged): it reuses the
      proposal/build/lint utilities but owns its schema and preflight —
      protagonist is exactly the player; inputs are the persisted stated
-     aim + PLAYER-VISIBLE grown-world facts only; destination and pillars
-     concrete; hidden answers sanitized; NO portfolio row commits until
-     lint succeeds. Then promoted MAIN — terminal + continuation logic
-     read the manifest main: unchanged readers, new occupant.
+     aim + PLAYER-VISIBLE grown-world facts only; the DESTINATION is
+     concrete (conclusion shape delta + tension + 1-2 concrete beats —
+     the SAME product contract as chapter continuations, which already
+     become mains through `_build_arc`; the pillar product is a
+     session-zero authoring surface, not an adoption one — revised with
+     cr, piece-B r2); hidden answers sanitized; NO portfolio row commits
+     until lint succeeds. The proposal's title/hook are WIRING outputs
+     (meta title + the narrator's adoption directive), exactly as the
+     continuation consumes them. Then promoted MAIN — terminal +
+     continuation logic read the manifest main: unchanged readers, new
+     occupant.
   3b. THE ADOPTION ACTIVATION (r5; mechanism updated post-ruling): the
      set {new arc + index rows, old-main demotion reason, portfolio main
      switch, adoption receipt} activates as ONE unit through the RULED
