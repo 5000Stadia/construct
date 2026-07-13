@@ -207,6 +207,47 @@ and honest here), but a second consecutive continuation opening in the
 same room would start to read as formula; vary the re-entry staging when
 episode 3+ machinery is ever exercised.
 
+## 2026-07-12 — Displaced-conclusion probe (Ironhold; founder scenario)
+Log: `logs/critic-displaced-ironhold-1783898717.md`
+(scripts/displaced_ch2_probe.py — generated prison-break world; the critic
+player primed to escape, travel FAR, settle, and conclude in a new place;
+ch2 judged on WHERE / GOAL PIVOT / SUPPORTED STYLE)
+
+**Grade: fiction B+ within its cage; CAPABILITY FAIL — the probe's actual
+finding.** Chapter 1 never displaced: the protagonist ended at
+`place:ironhold` after all eleven turns, unconcluded; the ch2 leg never ran.
+
+The mechanism chain (all evidenced in the log/stdout):
+1. Open-ended flight has NOWHERE TO LAND — the map is closed. Named-place
+   mint exists, but directional/deictic travel ("downstream", "the first
+   light I trust") fails both paths: `movement destination … did not
+   resolve (underdetermined)` and `move grant … did not take`. The resolve
+   seam's refusal to invent — correct for permanence — is fatal for
+   leaving the authored geography.
+2. Prose/canon divergence at the boundary: turn 8's narration escaped
+   (the coal-flat downstream, "the last black ring falls astern") while
+   canon never moved; later turns rubber-band to Ironhold's plot furniture
+   as the arc honestly re-serves its beats (their holders all live there).
+3. Conclusion starvation follows: the escape never registered in canon, so
+   even the win condition couldn't fire, let alone a settled-new-life
+   tangent conclusion.
+
+What read WELL: the narrator stonewalled with honest, atmospheric prose
+(no ferryman hails; the knock lands on "damp wood, not a door"; the new
+name "is taken by the water") — zero critic filings, no contradiction, no
+invention. But three consecutive turns of graceful stonewall IS the
+failure: the improvisation north star ("never stonewall") is structurally
+unachievable when the world cannot grow a place to improvise INTO.
+
+Disposition: the enabling design surface is FRONTIER-TRAVEL — the world
+growing where the player walks (the LWG's regenerative doctrine pointed at
+geography: mint a plausible next place on committed travel past the map's
+edge, style supported by region + the player's choices, with the arc
+letting go across the horizon). Founder decision pending on taking it
+through the pipeline as the next headline spec. Secondary finding: turn
+latency 400-450s on the fresh generated world (vs ~120s bodycase) — needs
+decomposition; noted against the delta-extraction park's tripwire.
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from
