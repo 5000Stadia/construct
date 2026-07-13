@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC — awaiting cr review (r1)
+**Status:** SPEC r2 — r1's six blockers folded; awaiting cr re-review
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -35,6 +35,15 @@ run:
 > the farms this direction. That sounds good — let's go with that. Gregor
 > Bund, the husky farmer. And maybe his… dog, Kip.*
 
+**The horizon this serves (founder, 2026-07-13):** *"Imagine the
+intention that spanned over 10 chapters — this becomes a grand, deep,
+multi-layered story with a rich destination."* Growth is not a one-pivot
+trick: each chapter's world, cast, and goals grow from the last (the
+conclude→continue engine already authors every next chapter against the
+ENTIRE world), so a player's self-authored tangent compounds — the boat
+becomes a trade, the trade a standing, the standing a saga. G3's region
+memory is the accretion layer that makes chapter ten remember chapter two.
+
 Three properties of that chain define the contract:
 1. **It reasons FROM established context** (what does this road connect?)
    — never from genre vapor.
@@ -55,6 +64,18 @@ doorway — the resolve seam with generated provenance:
 | Ordinary equipment | the take/equipment grant | the player claims plausible kit |
 | A NAMED new place | the move-permanence mint | the player walks to a place they name concretely |
 | Story material | LWG P1/P2 — regenerative/opportunistic/ambient mints (hidden `plot:`) | pacing/fallout triggers |
+| A first-mention STUB | the resolve seam's proper-name gate (`resolve.py`) — narration may mint a minimal stub for a proper-named new person/place | first proper-named mention in prose |
+
+**The prose-stub boundary (r2, cr blocker 4):** the first-mention channel
+stays — it is the robot-vacuum gate itself — but its ceiling is now named:
+narration may create only a MINIMAL, NON-PRESENT, NON-CONNECTED stub
+(kind + name). Only Growth may add actionable geography (`in`,
+`connects_to`), encounter PRESENCE, or movement. Identity authority is
+global and host-owned for both channels: the model proposes display
+fields; the HOST allocates collision-free ids, binds to unique existing
+identities where they exist, and declines ambiguity. Oracle: prose-only
+"Gregor Bund" can at most stub him — it cannot stage him, move anyone, or
+create a road.
 
 **The gap, exactly as the probe measured it:** open-ended, *directional*,
 or *encounter-shaped* growth has no path. "Downstream," "somewhere no one
@@ -73,11 +94,15 @@ One new cohort, THE ASSESSOR, invoked when the turn's movement/intent is
 OPEN-ENDED (classification below). Its contract mirrors the founder's
 chain and every authority lesson from the drift program:
 
-**Inputs (host-assembled, truth only):** the current place and its region
-ancestry; known connections/roads and what they connect (or the explicit
-absence — "nothing is authored past here"); the world's laws + genre
-style; the player's committed intent (flee hard / wander / seek someone);
-recent narrative threads; distance/time context from the diegetic clock.
+**Inputs (host-assembled, truth only — and FRAME-BOUNDED, cr blocker 6):**
+strictly canon + protagonist-visible facts: the current place and its
+region ancestry; known connections/roads and what they connect (frontier
+metadata — the absence of authored geography is a property of the MAP,
+never asserted as world-fact emptiness); the world's laws + genre style;
+the player's committed intent; recent PLAYER-VISIBLE threads; the diegetic
+clock. The hidden `plot:` frame, arc answers, and beat targets are
+structurally absent from the Assessor's context — growth must not be the
+arc authoring the new society to carry itself (the old veto in reverse).
 
 **Output (a PROPOSAL, never a commit) — the growth chunk:**
 - `assessment`: the reasoning chain in one short paragraph (the "is this
@@ -87,23 +112,54 @@ recent narrative threads; distance/time context from the diegetic clock.
   its `in` (region parent chosen from EXISTING ancestry), its connection
   back (the road walked);
 - `encounter`: at most ONE person/group stub — name, role, drive, what
-  they're doing here and why this road (+ optional companion/animal — Kip
-  rides free);
-- `texture`: 1-3 plain furnishing facts;
-- `confidence`: how honestly this growth fits here (LOW = the world offers
-  nothing; the host then narrates honest emptiness — an *assessed* quiet
-  is not a stonewall).
+  they're doing here and why this road — ANCHORED: every encounter gets a
+  receipt-confirmed real location at the same horizon ("on the road" is a
+  place row, never prose-only). Plus at most ONE bounded companion
+  (person or animal: kind, name, one bond line — Kip), committed in the
+  SAME atomic set, never an unbounded exception;
+- `texture`: 1-3 plain furnishing facts — OWNED BY GROWTH and committed in
+  the growth set; `furnish_scene` sees the described place and stands
+  down (one owner, no double-furnish);
+- `confidence`: the model's honesty signal about ITS OWN proposal —
+  see the no-growth contract below for what it can and cannot license.
 
 **Host gates (all structural, the D2/D3 discipline):** every entity-valued
 field validated (region parent must be existing ancestry; no new entity
 may collide with the arc's protected keys or concealed vocabulary — the
-`_take_touches_secret` family applies); the model picks among host-shaped
-options where options exist; the HOST builds every row (stubs with correct
-kinds through the ordinary gate, `classify` on, generated provenance);
-commits receipt-confirmed complete-set-or-decline; declines retryable.
-The narrator never grows the world through prose — extraction's promote
-gate stays exactly as strict; growth happens UPSTREAM, pre-render,
+`_take_touches_secret` family applies); the model proposes DISPLAY FIELDS
+only — the HOST allocates collision-free ids under the global identity
+authority and builds every row as a HOST-BUILT BATCH (r2: the
+`invent_under_canon` thunk is NOT the vehicle — it fills an aspect of an
+existing entity and cannot own new topology + identity + actor movement
+as one unit; the D3 re-mint pattern is). Declines retryable. Extraction's
+promote gate stays exactly as strict; growth happens UPSTREAM, pre-render,
 resolve-and-commit (IMPROV-AND-AUTHORITY).
+
+**THE NO-GROWTH CONTRACT (r2, cr blocker 2 — no model veto):** whether the
+world CAN grow here is HOST-OWNED, decided before the cohort ever runs,
+from an enumerated set of structurally provable deny reasons (sealed or
+impassable boundary; no physical frontier — mid-ocean without a vessel,
+a closed vault; the world's laws forbid it). Only a host deny licenses
+narrated emptiness. A model LOW on an otherwise eligible frontier is a
+RETRYABLE PROPOSAL FAILURE — telemetry, never world truth, never a
+license to narrate emptiness (that would be the stonewall back under a
+receipt). "Nothing is authored past here" is frontier metadata, not proof
+of emptiness.
+
+**THE ACTIVATION CONTRACT (r2, cr blocker 3 — atomic canon visibility):**
+a growth chunk (place + containment + passage + move + encounter +
+texture) must become visible ALL OR NONE — PB ingest is edge-granular and
+ordinary canon rows are visible immediately, so batch+receipt is not a
+transaction (the shipped move mint already exhibits the orphan risk).
+Mechanism decision: an ENGINE-SIDE atomic ingest/activation primitive,
+taken to PB as a shape consult BEFORE the G1 build (the collaboration
+model: an engine gap is a PB letter, never a local workaround); if PB
+declines, the specified fallback is staging-world copy/swap with session
+reopen. Required oracle either way: fault injection at EVERY row boundary
+— the entire chunk is visible, or none of it is. Journey time prices and
+advances ONLY after successful activation, from the pre-move origin to
+the activated destination; a torn or declined proposal advances neither
+the clock nor any cached route price.
 
 **Then the ordinary machinery takes over:** the move commits (canon
 displaces — the Ironhold defect dies here), the scene stages, `furnish_
@@ -122,30 +178,44 @@ scene` paints on entry, the narrator renders an arrival it was BRIEFED on
    displaced-probe bar): the Assessor's inputs are what make Gregor a
    farmer *because the road connects farm country to a market town* — the
    grown chunk must cite its derivation in the assessment receipt.
-4. **The arc lets go across the horizon — and then follows.** Growth must
-   not be vetoed by the story (that is the rubber-band failure), and the
-   story must not die at the border: the drift machinery (D1 relocation,
-   D3's walkability doctrine) already knows how to move mechanics through
-   carriers — a grown encounter is a legal carrier. Conclusion machinery
-   honors conclusions committed in grown territory (the displaced-probe
-   contract).
-5. **An assessed quiet is honest; a structural stonewall is not.** If the
-   Assessor says LOW confidence (mid-ocean, sealed vault), the narrator
-   renders true emptiness — but the assessment RAN, and the receipt shows
-   the world considered growing. Refusal by policy, never by absence of
-   machinery.
+4. **The arc lets go across the horizon — and follows only by its own
+   rules (r2, cr blocker 6).** Growth commits FIRST and PLOT-UNCONDITIONED
+   (the Assessor never sees the hidden frame). A grown entity is only a
+   CANDIDATE carrier: on a LATER pass, drift may test it under the
+   ordinary walkability predicate (exact delivery target; live, actable,
+   locatable holder; closure-driving exclusion) — nothing follows from
+   "person exists." Growth is marked as a DEVELOPMENT in the LWG ledger,
+   so D-SOFT cannot teleport an arc carrier into the new scene on the
+   same turn. Conclusions committed in grown territory are honored by a
+   SEPARATE terminal/continuation contract (the continuation doorway,
+   §6 G-C) — conclusion location is never carrier eligibility.
+5. **A host-denied quiet is honest; everything else grows or retries.**
+   Narrated emptiness requires a structurally provable host deny (§3's
+   no-growth contract). A model proposal failure retries; machinery
+   absence no longer exists as a state.
 
 ## 5. Triggers (classification, additive)
 
-The classify surface gains an open-ended-movement read (like
-`addresses_present`: optional field, fail-closed to today's behavior):
-- `moves_open`: directional/deictic travel with commitment ("downstream",
-  "away from here", "until I reach…") — no concrete resolvable
-  destination;
-- `seeks_encounter`: travel-until-someone ("until I run into someone",
-  "look for anyone on the road").
-Both route to the Assessor pre-move. Concrete named destinations keep
-today's resolve/mint path untouched.
+The classify surface gains an open-ended-movement read (optional fields,
+fail-closed) — but r2 makes eligibility CONJUNCTIVE AND ORDERED (cr
+blocker 5: a classifier boolean must never by itself authorize canon
+mutation): the Assessor wakes only when ALL hold, in order —
+1. the turn is an in-world, committed ACTION (not hypothetical, negated,
+   deliberative, OOC, or a question);
+2. the ORDINARY pipeline ran first and proved zero destination: refer /
+   known-place / semantic-bind all miss — not resolved, not ambiguous,
+   not blocked, not undiscovered-gated, not same-place, not a fixture;
+3. and the new signal fired: `moves_open` (directional/deictic travel
+   with commitment) or `seeks_encounter` (travel-UNTIL-someone — a
+   stationary look/question is NOT it; the distinction is pinned).
+False-positive negatives are pinned against every existing movement
+guard. THE BUDGET (resolved now, not open): the Assessor INVOCATION
+claims the turn's one generative slot — spanning Growth and the LWG
+(turnloop's generator chain cannot mint again later that turn), and the
+player's explicit growth has first claim over ambient generation. One
+generative act per turn, total, claimed at invocation rather than on
+success (a failed proposal still consumed the world's attention).
+Concrete named destinations keep today's resolve/mint path untouched.
 
 ## 6. Slices (each through the full pipeline)
 
@@ -156,10 +226,27 @@ today's resolve/mint path untouched.
 - **G2 — ENCOUNTER-GROWTH:** `seeks_encounter` → Assessor → person/group
   stub staged on the road (Gregor + Kip); NPC machinery picks them up as
   ordinary cast (npc_turn, delivery-eligible, person_can_act).
-- **G3 — REGION MEMORY & SOCIETY:** grown places accrete a region style
-  card (the "supported style" bar — the new town remembers WHY it exists
-  and what the player did arriving); conclude→continue authors ch2 against
-  grown territory (the hide-and-integrate case).
+- **G-C — THE CONTINUATION DOORWAY (r2, cr blocker 1 — precedes G3):**
+  the shipped conclude→continue deliberately relocates the protagonist to
+  the PRIOR EPISODE'S OPENING place (game.py) — growth can displace ch1
+  perfectly and ch2 still snaps the escapee back to the prison. New
+  doorway invariant: the terminal LOCATION is captured as engine truth at
+  conclusion; continuation defaults to opening THERE; any relocation away
+  requires an explicit, caused transition delta (a written row with
+  provenance, never a silent default). Structural oracle: ch2 `open_loc
+  == ch1 terminal_loc` before any prose, unless an explicit transition
+  row proves the move.
+- **G3 — REGION MEMORY & SOCIETY (the ten-chapter accretion layer):**
+  grown places accrete a REGION CARD — a concrete surface, not an
+  acceptance phrase: entity `region:<slug>` (host-allocated id) in CANON,
+  rows: `kind=region`, `in` (parent region/world), `style` (the derived
+  voice — WHY this region exists, from the assessment receipt),
+  `origin` (what the player did arriving — generated provenance),
+  timeless where constitutive, `valid_from` where acquired. Reads:
+  briefing style resolves by NEAREST-ANCESTOR region walk (the existing
+  place-feel machinery's ancestry read); conclude→continue authors ch2
+  against grown territory (the hide-and-integrate case), and each later
+  chapter reads the accreted cards — chapter ten remembers chapter two.
 - **ACCEPTANCE for the program — THE TANGENT VOYAGE (founder, 2026-07-12):**
   a rigorous ch1→ch2 run that INTENTIONALLY DRIFTS — the player leaves the
   written story to start their own, and the world must stay REAL and RICH
@@ -191,14 +278,12 @@ today's resolve/mint path untouched.
 
 ## 7. Open questions for review
 
-- The Assessor's tier (cheap vs main) and its budget interaction with the
-  one-mint-per-turn LWG discipline (proposal: growth counts as the turn's
-  mint — one generative act per turn total).
-- Whether G1's place stubs ride the existing `invent_under_canon` resolve
-  thunk (preferred — one doorway) or a host-built stub batch (the D3
-  re-mint pattern); the answer decides who owns naming.
-- Journey time: growth distance × the diegetic clock (the #113 route-price
-  machinery should price grown roads consistently).
+(r1's questions on budget, thunk-vs-batch, and journey pricing are now
+SPECIFIED in §3/§5 per cr's r1; remaining open:)
+- The Assessor's tier (proposal: main-tier — the assessment chain is
+  planning-class reasoning, and it runs at most once per turn).
+- The PB consult outcome on the atomic activation primitive (§3) — the
+  fallback is specified, but the primitive's shape is PB's to rule.
 - Latency: the Ironhold probe's 400-450s turns need decomposition before
   G1 adds a cohort to the movement path (possibly the failed-grant retry
   chains — G1 may actually REMOVE cost by replacing repeated failures with
