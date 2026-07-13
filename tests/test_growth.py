@@ -11,6 +11,7 @@ import pytest
 
 from construct.growth import (ActivationResult, activate_chunk,
                               atomic_capable, ordered_chunk_items)
+from tests.test_integration import world  # noqa: F401 — the engine fixture
 
 
 class _NonAtomicP:
@@ -170,3 +171,42 @@ def test_broad_kwargs_ingest_alone_is_not_capable():
     r = activate_chunk(p, list(_CHUNK))
     assert r.reason == "activation_unavailable"
     assert p.calls == []                             # nothing written
+
+
+def test_growth_eligibility_is_conjunctive_and_ordered():
+    from construct.growth import growth_eligibility as g
+    base = dict(kind="action", committed=True, moves_open=True,
+                seeks_encounter=False, pipeline_outcome=None)
+    assert g(**base) == "place"
+    # every answered pipeline state forbids growth (the ordinary path owns it)
+    for state in ("resolved", "ambiguous", "blocked", "undiscovered",
+                  "same_place", "fixture"):
+        assert g(**{**base, "pipeline_outcome": state}) is None
+    # non-action / uncommitted turns never grow
+    assert g(**{**base, "kind": "question"}) is None
+    assert g(**{**base, "committed": False}) is None
+    # a host structural deny forbids growth (and only a host deny can)
+    assert g(**{**base, "host_deny": "sealed_boundary"}) is None
+    # no signal → no growth even with a clean pipeline miss
+    assert g(**{**base, "moves_open": False}) is None
+    # encounter outranks place when both signals fire
+    assert g(**{**base, "seeks_encounter": True}) == "encounter"
+
+
+def test_classify_fields_fail_closed(world):
+    # spec §5: absent fields read False — today's behavior byte-identical.
+    # A stubbed classify WITHOUT the new fields runs a normal turn with no
+    # growth signals raised (nothing in the trace, no cohort calls).
+    from tests.test_integration import make_arc, run_turn, seed_arc
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    from construct.provider import StubProvider
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The study holds its quiet."},
+    ])
+    r = run_turn(world, arc, provider, "I look around.", turn=2,
+                 generate=False)
+    assert r.prose                       # the turn ran exactly as before

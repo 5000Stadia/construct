@@ -3548,6 +3548,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # absent — legacy stubs and older classify outputs keep today's
         # behavior; only an explicit False lifts the sole-NPC over-hold.
         addresses_present = bool(verdict.get("addresses_present", True))
+        # WORLD-GROWTH G1 triggers (spec §5): optional, FAIL-CLOSED — absent
+        # or malformed reads False and today's behavior is byte-identical.
+        # These alone authorize NOTHING: growth eligibility is conjunctive
+        # and ordered (growth.growth_eligibility), and its turnloop wiring
+        # is a separate reviewed slice.
+        moves_open = bool(verdict.get("moves_open", False)) and kind == "action"
+        seeks_encounter = (bool(verdict.get("seeks_encounter", False))
+                           and kind == "action")
         # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids; only action
         # turns move people; a candidate can't be both dismissed and brought along (dismissal
         # is the stronger, explicit wording — it wins the conflict).

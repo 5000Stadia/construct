@@ -158,6 +158,19 @@ CLASSIFY_SCHEMA = {
                   "page') — name that ONE specific target exactly as they referred to it. "
                   "EMPTY for a generic look-around ('glance around the room', 'look about'), "
                   "plain movement, talk, or any action not focused on inspecting one detail."},
+        "moves_open": {"type": "boolean",
+                  "description": "true ONLY for committed OPEN-ENDED travel with no "
+                  "concrete nameable destination — directional or deictic flight "
+                  "('downstream', 'away from here', 'until I reach somewhere no one "
+                  "knows me'). FALSE for movement to any named or describable place "
+                  "('the mill', 'the first tavern I see' — those resolve or mint), "
+                  "for hypotheticals, questions, or staying put. Most turns: false."},
+        "seeks_encounter": {"type": "boolean",
+                  "description": "true ONLY for travel-UNTIL-someone — moving with the "
+                  "stated aim of finding a person on the way ('I keep running down the "
+                  "road until I run into someone'). FALSE for a stationary look or "
+                  "question ('is anyone around?' — that is observation, not travel), "
+                  "and false whenever no movement is committed. Most turns: false."},
         "addresses_present": {"type": "boolean",
                   "description": "true when the input SPEAKS TO or directly engages a "
                   "present person — a question, an order, a greeting, pressing them, "

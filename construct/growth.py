@@ -134,3 +134,52 @@ def ordered_chunk_items(*, place: list[dict] | None = None,
         if part:
             out.extend(part)
     return out
+
+
+#: The ordinary movement pipeline's outcomes that FORBID growth — each is a
+#: state where the world already answered (or refused for its own reason);
+#: growth only serves the genuinely-unanswered frontier (spec §5 step 2).
+_PIPELINE_ANSWERED = frozenset({
+    "resolved",        # a real destination bound — the normal move path owns it
+    "ambiguous",       # candidates exist — disambiguation, not growth
+    "blocked",         # an in-world refusal (locked, denied) — honored
+    "undiscovered",    # the entitlement gate holds it — honored
+    "same_place",      # a restatement — nothing to grow toward
+    "fixture",         # scenery/bind target — not travel
+})
+
+
+def growth_eligibility(*, kind: str, committed: bool, moves_open: bool,
+                       seeks_encounter: bool,
+                       pipeline_outcome: str | None,
+                       host_deny: str | None = None) -> str | None:
+    """The CONJUNCTIVE, ORDERED gate (spec §5; cr: a classifier boolean must
+    never by itself authorize canon mutation). Returns the growth MODE
+    ("place" | "encounter") when every condition holds, else None:
+
+    1. an in-world, COMMITTED action turn (never hypothetical/negated/
+       deliberative/OOC/question — the caller passes `committed` from the
+       classify kind + its own guards);
+    2. the ordinary pipeline ran FIRST and proved zero destination —
+       `pipeline_outcome` None/"" means refer/known-place/semantic-bind
+       all missed; any answered state forbids growth;
+    3. the host's NO-GROWTH check found no structural deny (`host_deny`
+       is the enumerated provable reason, or None — a model opinion is
+       never one);
+    4. and a trigger signal fired (encounter outranks place when both —
+       the player's stated aim is the person, the road serves it).
+
+    Pure and explicit (the salient_moments discipline): no reads, no
+    hidden state — the turnloop wiring slice supplies every input.
+    """
+    if kind != "action" or not committed:
+        return None
+    if pipeline_outcome in _PIPELINE_ANSWERED:
+        return None
+    if host_deny:
+        return None
+    if seeks_encounter:
+        return "encounter"
+    if moves_open:
+        return "place"
+    return None
