@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC GREEN (cr r6, <92a037e8…>, 2026-07-13) — build-authorized; Consult RULED engine-side (ATOMIC-ACTIVATION-V1; pbr review + delivery pending). G1 host build ALLOWED under cr's fail-closed boundary (no non-atomic commits reachable, activation_unavailable on 0.2.0). G-A additionally blocked on the adoption-retraction surface ruling. cr's binding reading: the one-generative-act budget includes the tangent-author call; technical failure receipts stay outside canon.
+**Status:** SPEC GREEN (cr r6, <92a037e8…>, 2026-07-13) — build-authorized; Consult RULED engine-side (ATOMIC-ACTIVATION-V1; pbr review + delivery pending). G1 host build ALLOWED under cr's fail-closed boundary (no non-atomic commits reachable, activation_unavailable on 0.2.0). G-A's adoption-retraction surface RULED: commit_set(ops) mixed-operation envelope (ATOMIC-ACTIVATION-V1 r2 §C; pbr reviews r1+r2 in one round). cr's binding reading: the one-generative-act budget includes the tangent-author call; technical failure receipts stay outside canon.
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -312,15 +312,20 @@ Concrete named destinations keep today's resolve/mint path untouched.
      switch, adoption receipt} activates as ONE unit through the RULED
      ENGINE ENVELOPE ONLY (the host state-machine alternative is
      withdrawn — PB rejected host-side atomicity mechanisms outright).
-     DEPENDENCY (cr activation-delta review): the manifest switch today
-     requires RETRACTIONS of constitutive control rows, which the drafted
-     append-only `atomic=True` surface does not yet express — pbr must
-     rule either a typed mixed-operation envelope (retractions + appends,
-     atomic) or an append-only manifest representation whose fold permits
-     main-pointer supersession. G-A is dependency-blocked on that ruling;
-     its PB-side oracle uses the real operation surface: fault before/
-     after every retract/append boundary leaves the old main fully
-     readable; success leaves exactly one fully loadable new main.
+     DEPENDENCY RESOLVED (PB <d0e5199b…>, ATOMIC-ACTIVATION-V1 r2 §C):
+     the consumed surface is **`commit_set(ops)`** — one porcelain verb,
+     ordered typed ops, V1 vocabulary exactly {op:"assert", item} |
+     {op:"retract", assertion_id, reason}; each op dispatches through its
+     existing gate/authority path; any failing op aborts the whole set
+     (incl. a retract naming an unknown assertion_id); `atomic=True`
+     remains sugar for the assert-only set (growth chunks unchanged).
+     Retract is already an appended meta-assertion, so the §B envelope's
+     atomicity story covers adoption with zero change. The append-only
+     manifest alternative is REJECTED by PB (the constitutive fold
+     invariant is the Cx 167 lesson, not an obstacle). cr's oracle rides
+     the spec verbatim on the real operation surface: fault before/after
+     every boundary → old main fully readable; success → exactly one
+     fully loadable new main.
      Postconditions: exactly one manifest main; fully linted and loadable;
      the old main a portfolio member carrying `tangent_adopted`; the phase
      boundary flips ONLY with the confirmed activation receipt.
