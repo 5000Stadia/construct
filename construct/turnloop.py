@@ -223,6 +223,34 @@ def _concealed_move_vocab(arc: Arc, reads: Any) -> set[str]:
     return secret
 
 
+def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
+    """The FULL growth concealment vocabulary (cr wiring blocker 5): the
+    gate contract requires the arc's protected/concealed vocabulary WHOLE
+    — key/attribute tokens ("culprit"), every protected entity's slug and
+    name/alias/title, protected VALUES, and each referenced answer
+    entity's own names. Union of the take-guard's total vocabulary, the
+    move-guard's referenced-answer names, and the concealed-token
+    machinery. Over-breadth here declines a retryable proposal — the
+    correct cost; leaking the hidden answer into permanent canon is the
+    unpayable one."""
+    from construct.arc.executor import concealed_tokens
+    secret: set[str] = set()
+    keys = arc_protected_keys(arc, reads)
+    for (e, a) in keys:
+        secret |= _secret_word_set(a)
+        secret |= _secret_word_set(e.split(":")[-1])
+        for attr in (a, "name", "alias", "aliases", "title"):
+            try:
+                val = reads.state(e, attr)
+            except Exception:
+                val = None
+            if isinstance(val, str):
+                secret |= _secret_word_set(val)
+    secret |= _concealed_move_vocab(arc, reads)   # referenced answers' names
+    secret |= concealed_tokens(keys)              # entity/attr distinctives
+    return secret
+
+
 def _move_touches_secret(moves_to: str, arc: Arc, reads: Any) -> bool:
     """NARROW concealment guard for the MOVE-permanence mint (founder live cohesion test,
     2026-06-29). The object-take guard above tokenizes the WHOLE protected vocabulary — including
@@ -253,6 +281,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
                     provider: Provider, trace: TurnTrace, *,
                     moves_to: str, player_input: str, kind: str,
                     moves_open: bool, seeks_encounter: bool,
+                    reshape_attempt: bool = False,
                     pipeline_miss: bool, pre_chain: list, turn: int,
                     gen_slot: Any, style: str, laws: str) -> bool:
     """The WORLD-GROWTH G1 invocation (docs/design/WORLD-GROWTH.md §3/§5
@@ -277,8 +306,11 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     # The producer is wired so richer evidence drops in without reshaping
     # the gate; an EMPTY deny keeps growth eligible (never the reverse).
     mode = growth_mod.growth_eligibility(
-        kind=kind, committed=(kind == "action"), moves_open=moves_open,
-        seeks_encounter=seeks_encounter,
+        kind=kind,
+        committed=(kind == "action" and not reshape_attempt),  # a reshape
+        # turn already mutates canon on its own channel — growth stands
+        # down rather than interleave two commit protocols in one turn
+        moves_open=moves_open, seeks_encounter=seeks_encounter,
         pipeline_outcome=growth_mod.PIPELINE_MISS if pipeline_miss else None,
         host_deny=host_deny or None)
     if host_deny:
@@ -287,7 +319,12 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     if mode is None:
         return False  # not growth territory — today's behavior, unchanged
     if mode == "encounter":
-        trace.growth = "deferred:encounter"  # G2's slice; slot unclaimed
+        # G2's slice — but doctrine 5 forbids narrating emptiness over a
+        # machinery absence (cr wiring blocker 7): the honest answer is
+        # the NON-DIEGETIC seam, not "the road stays empty". Slot
+        # unclaimed (nothing generative ran).
+        trace.growth = "deferred:encounter"
+        trace.growth_retry = True
         return False
     if not pre_chain or not str(pre_chain[0]).startswith("place:"):
         trace.growth = "declined:no_origin"  # unplaced protagonist — a
@@ -337,7 +374,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         trace.growth = "declined:provider_error"
         return False
 
-    vocab = _concealed_move_vocab(arc, live_reads)
+    vocab = _growth_concealed_vocab(arc, live_reads)
     prop, why = growth_mod.validated_proposal(
         raw, mode="place", n_ancestry_options=len(ancestry_ids),
         leaks=lambda text: bool(vocab & _secret_word_set(text)))
@@ -348,22 +385,45 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
 
     _growth_h = getattr(live_reads, "_horizon", None)
 
-    # the host's global identity decision, over the horizon-bound canon
-    # rosters through the same name authority as the resolve seam.
+    # the host's global identity decision through the ENGINE's own refer
+    # authority (cr wiring blocker 4): exact primary-name and alias binds
+    # only — a shared token ("Willow Ford" vs "Willow Tavern") is NOT
+    # identity; an unreadable authority is a TECHNICAL decline, never a
+    # mint license.
+    class _IdentityUnavailable(Exception):
+        pass
+
+    def _exact_names(eid: str) -> set[str]:
+        out = set()
+        for attr in ("name", "alias", "aliases", "title"):
+            try:
+                v = live_reads.state(eid, attr)
+            except Exception:
+                continue
+            if isinstance(v, str) and v.strip():
+                out.add(v.strip().lower())
+        return out
+
     def _identity(kind_: str, name: str) -> tuple[str, str]:
+        want = name.strip().lower()
         try:
-            roster = p.entities("canon", prefix=f"{kind_}:", as_of=_growth_h)
-        except Exception:  # noqa: BLE001 — an unreadable roster binds nothing
-            roster = ()
-        low = name.strip().lower()
-        hits = [e for e in roster
-                if _names_entity(e, low, name=_disp(e))]
-        hits = list(dict.fromkeys(hits))
-        if not hits:
-            return ("new", "")
-        if len(hits) == 1:
-            return ("bound", hits[0])
-        return ("ambiguous", "")
+            res = world.refer(name, frame="canon", as_of=_growth_h)
+            status = getattr(res, "status", None)
+            target = getattr(res, "entity_id", None)
+            cands = [c for c in (getattr(res, "candidates", None) or ())
+                     if str(c).startswith(f"{kind_}:")]
+        except Exception as exc:
+            raise _IdentityUnavailable(str(exc)) from exc
+        if status == "resolved" and target \
+                and str(target).startswith(f"{kind_}:"):
+            if want in _exact_names(target):
+                return ("bound", target)
+            # resolved but INEXACT: neither identity (no exact name/alias
+            # match) nor safely new (the authority saw a relation) — decline
+            return ("ambiguous", "")
+        if cands:
+            return ("ambiguous", "")
+        return ("new", "")
 
     companions = sorted(
         n for n in p.entities("canon", prefix="person:", as_of=_growth_h)
@@ -373,10 +433,15 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     def _exists(eid: str) -> bool:
         return bool(live_reads.has_entity(eid))
 
-    chunk, why = growth_mod.assemble_chunk(
-        prop, mode="place", origin=origin, ancestry_options=ancestry_ids,
-        protagonist=arc.protagonist, companions=list(companions),
-        at=turn_time(turn), exists=_exists, identity=_identity)
+    try:
+        chunk, why = growth_mod.assemble_chunk(
+            prop, mode="place", origin=origin, ancestry_options=ancestry_ids,
+            protagonist=arc.protagonist, companions=list(companions),
+            at=turn_time(turn), exists=_exists, identity=_identity)
+    except _IdentityUnavailable as exc:
+        logger.warning("growth identity authority unreadable: %s", exc)
+        trace.growth = "declined:identity_unavailable"
+        return False
     if chunk is None:
         logger.info("growth assembly declined: %s", why)
         trace.growth = f"declined:{why}"
@@ -392,6 +457,16 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     trace.growth = f"activated:{chunk.place_id}"
     trace.growth_retry = False
     trace.movement_status = "clear"
+    # doctrine 4: growth IS a development — the LWG ledger sees it (D-SOFT
+    # must not teleport an arc carrier into the new scene on the same
+    # turn; the drift pass ALSO reads trace.growth directly, so this
+    # holds even if the ledger write fails).
+    try:
+        from construct.arc.generator import _mark_development as _md
+        from construct.clock import read_clock as _rc2
+        _md(world, float(_rc2(world).minutes), turn)
+    except Exception:  # noqa: BLE001 — the in-memory trace still suppresses
+        trace.dropped_cohorts.append("growth_mark_development failed")
     logger.info("world grew: %s (%s) — %s", chunk.place_id,
                 _disp(chunk.place_id), chunk.assessment[:120])
     return True
@@ -2428,7 +2503,12 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     success only. Fail-open: any error logs and leaves the world quiet — a
     drift pass never breaks a turn."""
     try:
-        developing = bool(trace.clocks_fired or trace.beats_achieved or trace.reveals)
+        developing = bool(trace.clocks_fired or trace.beats_achieved or trace.reveals
+                          or str(trace.growth).startswith("activated:"))
+        # ^ WORLD-GROWTH doctrine 4: a grown turn is a DEVELOPMENT — D-SOFT
+        # must not teleport an arc carrier into the new scene on the same
+        # turn. Read from the in-memory trace so the suppression holds even
+        # when the ledger write failed.
         # ---- D2 (§2 + §3 R3): closed REQUIRED beats classify by their witness;
         # a D-MISSED closure (clock-caused, proven) gets the absence-consequence
         # response ONCE. Classification does not need the D-SOFT gates (rung /
@@ -3773,6 +3853,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         kind = "action"
         trace.dropped_cohorts.append(f"classify ({exc})")
     trace.classified = kind
+    # WORLD-GROWTH (cr wiring blocker 3): on a growth-SIGNAL turn every
+    # pre-move mutation the §3 no-change contract would have to roll back
+    # is STAGED instead of committed — the growth gate commits them
+    # (original order) on every non-seam path; a seamed turn drops them
+    # whole ("nothing in the world has changed" stays true: the dismissal,
+    # the player-input facts, and the growth all retry together next
+    # turn). Ordinary turns commit inline, byte-identical. Defined after
+    # the classify except so a provider failure still leaves the signal
+    # OFF (the growth fields default False pre-try).
+    _growth_signal = moves_open or seeks_encounter
+    _growth_staged: list = []   # (label, rows) in commit order
+    _growth_miss = False  # the pipeline PROVED zero destination (refer
+    # zero-candidate + the grant refused) — the ONLY state that can
+    # license growth (closed PIPELINE_MISS contract)
     improv_query = ""  # set when an unanswerable question falls through to narration
 
     if kind == "exit":
@@ -3939,7 +4033,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                      "value": r.get("value", "")}
                     for r in (_resolved if isinstance(_resolved, list) else list(_resolved))
                 ]
-                receipt_rows = _receipt_rows(p.ingest_structured(_resolved, classify="batch"))
+                if _growth_signal:
+                    _growth_staged.append(("player_input", list(_resolved)))
+                    receipt_rows = []   # confirmed at the deferred commit
+                else:
+                    receipt_rows = _receipt_rows(
+                        p.ingest_structured(_resolved, classify="batch"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("player-input extraction failed; continuing: %s", exc)
             trace.dropped_cohorts.append(f"player_ingest ({exc})")
@@ -3970,10 +4069,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     {"entity": _did, "attribute": "accompanying", "value": "",
                      "valid_from": turn_time(turn)},
                 ]
-            p.ingest_structured(_drows, classify="batch")
-            trace.npcs_departed = list(dismissed_ids)
-            logger.info("player dismissed %s from %s (departed_scene events)",
-                        dismissed_ids, _entry_scene)
+            if _growth_signal:
+                _growth_staged.append(("dismissals", _drows))
+            else:
+                p.ingest_structured(_drows, classify="batch")
+                trace.npcs_departed = list(dismissed_ids)
+                logger.info("player dismissed %s from %s (departed_scene events)",
+                            dismissed_ids, _entry_scene)
         except Exception as exc:  # never sink the turn
             logger.warning("dismissal commit failed: %s", exc)
 
@@ -3984,9 +4086,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     Unresolved destinations fall back to whatever extraction did,
     #     loudly logged.
     _move_clarify = ""  # ambiguous destination → the world ASKS (founder: never hallucinate)
-    _growth_miss = False  # WORLD-GROWTH G1: the pipeline PROVED zero destination
-    # (refer zero-candidate + the move-permanence grant refused to mint) — the
-    # ONLY state that can license growth (closed PIPELINE_MISS contract).
+
     # ---- #102 JOURNEY DELIBERATION (Cx 457; founder-shaped 2026-07-04) -----------------
     # When a live deadline stands and a move the map can't prove local would eat the
     # remaining budget, the character's OWN MIND weighs it before a single step is
@@ -4301,8 +4401,20 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     """The improv mint (shared by the compound-container path and the
                     zero-candidate fallback) — route/passability gated inside; the
                     deliberation hold runs AFTER the grant's own passability gate
-                    (Cx 465 #2), via the callable it invokes just before minting."""
+                    (Cx 465 #2), via the callable it invokes just before minting.
+
+                    WORLD-GROWTH (cr wiring blocker 1): an OPEN/PROSPECTIVE move
+                    ("the first light I trust", "somewhere no one knows me")
+                    never reaches the legacy mint — the signal routes it to
+                    Growth, which reasons a real destination instead of
+                    slugging the player's phrase into a junk place. Concrete
+                    named moves (signal False) keep the mint unchanged."""
                     nonlocal _move_clarify
+                    if moves_open or seeks_encounter:
+                        nonlocal_miss()
+                        logger.info("open move %r routed to Growth (no legacy "
+                                    "mint)", moves_to)
+                        return
                     granted, _gseg = _grant_moved_place(
                         world, arc.protagonist, moves_to, at=turn_time(turn),
                         p=p, origin=pre_chain[0] if pre_chain else None,
@@ -4323,6 +4435,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         # state, never a growth-licensing miss
                         logger.warning("movement grant failed for %r; "
                                        "relying on extraction", moves_to)
+                    elif _gseg and _gseg.get("status") == "deliberating":
+                        # HANDLED, never a miss (cr wiring blocker 2): the
+                        # journey is held for the player's own weighing —
+                        # route-price evidence is already written; Growth must
+                        # not bypass the confirmation beat
+                        pass
                     elif granted:
                         trace.movement_status = _gseg.get("status") if _gseg else "clear"
                         if _gseg:
@@ -4462,10 +4580,29 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                moves_to=moves_to, player_input=player_input,
                                kind=kind, moves_open=moves_open,
                                seeks_encounter=seeks_encounter,
+                               reshape_attempt=reshape_attempt,
                                pipeline_miss=True, pre_chain=pre_chain,
                                turn=turn, gen_slot=_gen_slot, style=style,
                                laws=_laws_full) and trace.growth_retry:
+            # the §3 seam: the STAGED pre-move mutations are dropped whole —
+            # the turn never happened; everything retries together.
             return TurnResult(prose=_GROWTH_SEAM, trace=trace, settle=None)
+    # every non-seam path flushes the staged pre-move mutations in their
+    # original order (growth activated, growth not invoked, or no miss).
+    for _lbl, _rows in _growth_staged:
+        try:
+            if _lbl == "player_input":
+                receipt_rows = _receipt_rows(
+                    p.ingest_structured(_rows, classify="batch"))
+            else:
+                p.ingest_structured(_rows, classify="batch")
+                trace.npcs_departed = list(dismissed_ids)
+                logger.info("player dismissed %s from %s (departed_scene "
+                            "events, deferred commit)", dismissed_ids,
+                            _entry_scene)
+        except Exception as exc:  # noqa: BLE001 — same policy as inline
+            logger.warning("deferred %s commit failed: %s", _lbl, exc)
+            trace.dropped_cohorts.append(f"deferred_{_lbl} ({exc})")
 
     # ---- #101 DISTANCE: THE NEARNESS INVERSION (Cx 454; founder's shape challenge) -----
     # The map is authoritative about NEARNESS, never farness. A committed move is
@@ -4508,7 +4645,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # STANDING COMPANIONS (#82, the Reed ping-pong): every present NPC whose `accompanying`
     # state names the protagonist comes along on ANY accepted move — the standing canon state
     # decides, not this turn's wording. Dismissed-this-turn wins; already-listed skipped.
-    if trace.movement_status in ("clear", "obscured"):
+    # WORLD-GROWTH: an activated chunk already moved every standing companion
+    # in the SAME atomic set (§3 companion postcondition) — 2b-ii must not
+    # re-write them (cr wiring: the chunk owns those rows).
+    if trace.movement_status in ("clear", "obscured") \
+            and not str(trace.growth).startswith("activated:"):
         for _pid in _npc_by_oid.values():
             if _pid in moved_with_ids or _pid in dismissed_ids:
                 continue

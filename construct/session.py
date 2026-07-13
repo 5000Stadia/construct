@@ -1097,6 +1097,14 @@ class Session:
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
             return Reply(prose=f"(the turn could not complete: {exc})",
                          trace=None, ok=False)
+        if result.trace is not None and getattr(result.trace, "growth_retry", False):
+            # WORLD-GROWTH §3 proposal-failure seam — checked BEFORE every
+            # post-turn mutation (cr wiring blocker 3): no portfolio reload,
+            # no scene-image furnish, no settle. The prose is the transports'
+            # non-diegetic retry line; ok=False marks a failed turn, not
+            # fiction.
+            self._pending_settle = None
+            return Reply(prose=result.prose, trace=result.trace, ok=False)
         # WORLD-CHANGING AGENCY (Cx 215 #1): a mid-story reshape may have RE-PLANNED the main
         # arc in PB this turn. run_turn swapped only its local arc; reload the live portfolio so
         # the NEXT turn enters run_turn with the new main arc + scope, not the stale ones held
@@ -1113,11 +1121,6 @@ class Session:
         self._note_scene_image()
         # Hold the post-narrate bookkeeping; the adapter runs it post-send (see _flush_settle).
         self._pending_settle = getattr(result, "settle", None)
-        if result.trace is not None and getattr(result.trace, "growth_retry", False):
-            # WORLD-GROWTH §3 proposal-failure seam: an invoked growth attempt
-            # failed technically — the prose IS the transports' non-diegetic
-            # retry line; ok=False marks it a failed turn, not fiction.
-            return Reply(prose=result.prose, trace=result.trace, ok=False)
         return Reply(prose=result.prose, trace=result.trace,
                      ended=bool(result.trace and result.trace.terminal),
                      can_continue=not bool(

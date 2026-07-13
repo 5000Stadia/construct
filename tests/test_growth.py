@@ -857,6 +857,7 @@ def test_generative_slot_claims_once_at_invocation():
 
 def _wired_world(tmp_path):
     from patternbuffer import World
+    tmp_path.mkdir(parents=True, exist_ok=True)
     from patternbuffer.testing import StubModel, rule_classifier_fallback
     rule = rule_classifier_fallback()
 
@@ -990,23 +991,25 @@ def test_wired_gate_not_invoked_without_the_signal(tmp_path):
         w.close()
 
 
-def test_wired_encounter_mode_defers_to_g2(tmp_path):
-    # seeks_encounter wins eligibility but G1 wiring stands down without
-    # claiming the slot — receipt only, ordinary flow continues
+def test_wired_encounter_mode_defers_honestly(tmp_path):
+    # seeks_encounter wins eligibility but the G2 machinery is not in this
+    # slice — doctrine 5: machinery absence is NEVER narrated emptiness
+    # ("the road stays empty" would be the stonewall back). The honest
+    # answer is the NON-DIEGETIC seam; the slot stays unclaimed and the
+    # Assessor is never called.
     from construct.provider import StubProvider
-    from construct.turnloop import run_turn
+    from construct.turnloop import _GROWTH_SEAM, run_turn
     w = _wired_world(tmp_path)
     try:
         provider = StubProvider([
             _classify(moves_open=False, seeks_encounter=True),
-            {"prose": "The road stays empty a while yet."},
-            {"prose": "The road stays empty a while yet."},  # the render re-ask
         ])
         r = run_turn(w, _wired_arc(), provider, "I walk until I meet someone.",
                      turn=1)
         assert r.trace.growth == "deferred:encounter"
-        assert r.trace.growth_retry is False
-        assert "empty a while" in r.prose
+        assert r.trace.growth_retry is True
+        assert r.prose == _GROWTH_SEAM
+        assert r.settle is None
         assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
     finally:
         w.close()
@@ -1051,5 +1054,332 @@ def test_wired_concealment_screens_the_proposal(tmp_path):
         assert r.trace.growth == "declined:unlicensed:place.name_concealed"
         assert w.porcelain.state("place:the_rival_crossing",
                                  "kind")["status"] != "known"
+    finally:
+        w.close()
+
+
+def test_wired_charter_phrases_route_to_growth_never_the_legacy_mint(
+        tmp_path):
+    # cr wiring blocker 1: the canonical prospective/open shapes must reach
+    # Growth — the legacy mint slugging "the first light I trust" into a
+    # junk place IS the gap G1 closes
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    for phrase, slug, deictic in [
+            ("the first light I trust", "place:the_first_light_i_trust",
+             False),
+            ("somewhere no one knows me", "place:somewhere_no_one_knows_me",
+             False),
+            ("downstream", "place:downstream", False)]:
+        w = _wired_world(tmp_path / slug.split(":")[1])
+        try:
+            q = [_classify(moves_to=phrase)]
+            if not deictic:                    # the semantic bind still runs
+                q.append({"verdict": "new", "match": ""})
+            q.append(_good())
+            provider = StubProvider(q)
+            r = run_turn(w, _wired_arc(), provider,
+                         f"I go to {phrase}.", turn=1)
+            assert r.prose == _GROWTH_SEAM, phrase
+            assert r.trace.growth == "activation_unavailable", phrase
+            assert any("⟦gro⟧" in c[0][:40] for c in provider.calls), phrase
+            # the legacy mint NEVER ran: no slugged junk place, no move
+            assert w.porcelain.state(slug, "kind")["status"] != "known"
+            assert (w.porcelain.locate("person:you") or [None])[0] \
+                == "place:north_road"
+        finally:
+            w.close()
+
+
+def test_wired_deliberating_is_handled_never_a_miss(tmp_path, monkeypatch):
+    # cr wiring blocker 2: a typed deliberation hold is an ANSWERED state —
+    # Growth must not bypass the player's confirmation beat
+    import construct.turnloop as tl
+    from construct.provider import StubProvider
+    w = _wired_world(tmp_path)
+    try:
+        monkeypatch.setattr(
+            tl, "_grant_moved_place",
+            lambda *a, **k: (None, {"status": "deliberating"}))
+        provider = StubProvider([
+            _classify(moves_open=False, moves_to="the far shore"),
+            {"verdict": "new", "match": ""},    # the semantic bind cohort
+            {"prose": "You weigh the long way round."},
+            {"prose": "You weigh the long way round."},
+        ])
+        r = tl.run_turn(w, _wired_arc(), provider, "I set out for the far "
+                        "shore.", turn=1)
+        assert r.trace.growth == ""            # never invoked
+        assert r.trace.growth_retry is False
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+
+def test_wired_seam_drops_the_whole_turn_including_dismissals(tmp_path):
+    # cr wiring blocker 3: a combined dismiss+open-move turn that seams
+    # must leave EVERYTHING unapplied — Reed stays accompanying; the
+    # retry re-applies the whole action
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:reed", "attribute": "accompanying",
+             "value": "person:you", "value_type": "entity"},
+        ])
+        provider = StubProvider([
+            _classify(npcs_dismissed=["npc_0"]),
+            dict(_good(), confidence=0.1),      # LOW → the seam
+        ])
+        r = run_turn(w, _wired_arc(), provider,
+                     "Reed, go home. I keep moving away.", turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:proposal:low_confidence"
+        # the dismissal was STAGED and dropped — nothing changed
+        assert r.trace.npcs_departed == []
+        assert w.porcelain.state("person:reed", "accompanying")["fact"][
+            "value"] == "person:you"
+        assert not w.porcelain.events(kind="departed_scene",
+                                      frame="session:main")
+    finally:
+        w.close()
+
+
+def test_wired_dismissal_still_commits_when_growth_activates_or_declines_to_run(
+        tmp_path):
+    # the staged mutations FLUSH on every non-seam path: same combined
+    # turn, but the growth signal is off → dismissal commits as today
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:reed", "attribute": "accompanying",
+             "value": "person:you", "value_type": "entity"},
+        ])
+        provider = StubProvider([
+            _classify(moves_open=False, moves_to="", npcs_dismissed=["npc_0"]),
+            {"prose": "Reed nods and turns for home."},
+            {"prose": "Reed nods and turns for home."},
+        ])
+        r = run_turn(w, _wired_arc(), provider, "Reed, go home.", turn=1)
+        assert r.trace.npcs_departed == ["person:reed"]
+        assert w.porcelain.state("person:reed", "accompanying")["fact"][
+            "value"] == ""
+    finally:
+        w.close()
+
+
+def test_wired_identity_matrix(tmp_path, monkeypatch):
+    # cr wiring blocker 4: the ENGINE refer authority, fail-closed
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+
+    # (a) authority unreadable → technical decline, never a mint
+    w = _wired_world(tmp_path / "a")
+    try:
+        real_refer = w.refer
+
+        def _boom(*a, **k):
+            raise RuntimeError("identity authority down")
+        monkeypatch.setattr(w, "refer", lambda mention, **k: (
+            _boom() if "Willow" in str(mention) else
+            real_refer(mention, **k)))
+        provider = StubProvider([_classify(), _good()])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:identity_unavailable"
+        assert w.porcelain.state("place:the_willow_ford_waypost",
+                                 "kind")["status"] != "known"
+    finally:
+        w.close()
+
+    # (b) partial-token NON-identity: an existing Willow Tavern must not
+    # capture "the Willow Ford waypost" — assembly proceeds to a NEW id
+    # (proven by reaching the activation adaptor, not a bind decline)
+    w = _wired_world(tmp_path / "b")
+    try:
+        w.ingest_structured([
+            {"entity": "place:willow_tavern", "attribute": "kind",
+             "value": "place", "timeless": True},
+            {"entity": "place:willow_tavern", "attribute": "name",
+             "value": "Willow Tavern"},
+        ])
+        provider = StubProvider([_classify(), _good()])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "activation_unavailable"   # new-id path
+    finally:
+        w.close()
+
+    # (c) exact primary-name bind: proposing the ORIGIN's own name binds
+    # (engine refer) and declines place_is_here — the road led nowhere new
+    w = _wired_world(tmp_path / "c")
+    try:
+        w.ingest_structured([{"entity": "place:north_road",
+                              "attribute": "name", "value": "north road"}])
+        g = _good()
+        g["place"]["name"] = "north road"
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "declined:proposal:place_is_here"
+    finally:
+        w.close()
+
+    # (d) ALIAS bind: the origin's learned alias is identity too
+    w = _wired_world(tmp_path / "d")
+    try:
+        w.ingest_structured([
+            {"entity": "place:north_road", "attribute": "name",
+             "value": "north road"},
+            {"entity": "place:north_road", "attribute": "alias",
+             "value": "the old carters' way"},
+        ])
+        g = _good()
+        g["place"]["name"] = "the old carters' way"
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "declined:proposal:place_is_here"
+    finally:
+        w.close()
+
+
+def test_wired_full_concealment_vocabulary(tmp_path):
+    # cr wiring blocker 5: the FULL protected vocabulary — the protected
+    # ATTRIBUTE token ("culprit") and the texture family, not only the
+    # referenced entity's slug
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path / "attr")
+    try:
+        g = _good()
+        g["place"]["name"] = "the Culprit Crossing"
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:unlicensed:place.name_concealed"
+    finally:
+        w.close()
+    w = _wired_world(tmp_path / "tex")
+    try:
+        g = _good()
+        g["texture"] = ["a poster naming the rival's debts"]
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "declined:unlicensed:texture.0_concealed"
+    finally:
+        w.close()
+
+
+def test_wired_failure_matrix_invariance(tmp_path):
+    # cr's remaining matrix: provider error; a prior failed turn; exact
+    # clock and route-price invariance across the seam
+    from construct.clock import read_clock
+    from construct.provider import ProviderTransportError, StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        before = read_clock(w).minutes
+        # (a) provider error at the assessor
+        provider = StubProvider([_classify()])   # queue exhausts at gro
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:provider_error"
+        # (b) the next turn fails the same way — fresh eligibility, same
+        # honest seam, still nothing committed
+        provider = StubProvider([_classify(), dict(_good(), confidence=0.1)])
+        r2 = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                      turn=2)
+        assert r2.prose == _GROWTH_SEAM
+        assert r2.trace.growth == "declined:proposal:low_confidence"
+        # (c) invariance: clock unmoved, no route price rows, no movement
+        assert read_clock(w).minutes == before
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+        from construct.adapter import frame_facts
+        assert not [f for f in frame_facts(w, "session:main",
+                                           entity="session:route_price")]
+    finally:
+        w.close()
+
+
+def test_wired_success_path_with_simulated_atomic_engine(tmp_path,
+                                                         monkeypatch):
+    # cr blocker 6 + success cleanup: simulate ATOMIC-ACTIVATION-V1 (the
+    # adaptor "succeeds" by writing the chunk) — the turn proceeds to a
+    # BRIEFED narration; growth marks the development ledger; standing
+    # companions are moved by the CHUNK and not re-written by 2b-ii
+    import construct.growth as growth_mod
+    from construct.adapter import frame_facts
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in",
+             "value": "place:north_road", "value_type": "entity"},
+            {"entity": "person:reed", "attribute": "accompanying",
+             "value": "person:you", "value_type": "entity"},
+        ])
+
+        def _fake_activate(porcelain, items):
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake_activate)
+        provider = StubProvider([
+            _classify(),
+            _good(),
+            # the grown cast is LIVE on arrival (npc turns) + the narrator
+            {"prose": "The waypost takes shape out of the dusk."},
+            {"prose": "The waypost takes shape out of the dusk."},
+            {"prose": "The waypost takes shape out of the dusk."},
+            {"prose": "The waypost takes shape out of the dusk."},
+            {"prose": "The waypost takes shape out of the dusk."},
+            {"prose": "The waypost takes shape out of the dusk."},
+        ])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "activated:place:the_willow_ford_waypost"
+        assert r.trace.growth_retry is False
+        assert r.trace.movement_status == "clear"
+        assert "waypost" in r.prose
+        # the protagonist AND the standing companion moved with the chunk
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:the_willow_ford_waypost"
+        assert (w.porcelain.locate("person:reed") or [None])[0] \
+            == "place:the_willow_ford_waypost"
+        # 2b-ii did NOT re-write the companion: exactly ONE in-row for Reed
+        # at the new place (the chunk's own)
+        reed_moves = [f for f in frame_facts(w, "canon", entity="person:reed")
+                      if f.attribute == "in"
+                      and f.value == "place:the_willow_ford_waypost"]
+        assert len(reed_moves) == 1
+        assert r.trace.npcs_moved_with == []
+        # doctrine 4: the development ledger saw the growth
+        led = [f for f in frame_facts(w, "session:main",
+                                      entity="session:ambient")
+               if f.attribute == "last_development_min"]
+        assert led
     finally:
         w.close()
