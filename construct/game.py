@@ -2625,7 +2625,27 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         fuel = _episode_fuel(reads, prior_main, prior_title, prior_outcome, history) if prior_main else \
             "The previous chapter has closed; a new thread stirs in its wake."
         known_ids = sorted(e for e in _canon_entity_ids(world)
-                           if e.startswith(("person:", "fact:", "obj:", "place:")))
+                           if e.startswith(("person:", "fact:", "obj:",
+                                            "place:", "region:")))
+        # WORLD-GROWTH G3: the grown territory's REGION CARDS — chapter ten
+        # reads what chapter two wrote. Each card's style (WHY the region
+        # exists) + origin (the player's own founding act) feeds the next
+        # chapter's author verbatim.
+        _region_lines: list[str] = []
+        try:
+            for _rid in known_ids:
+                if not _rid.startswith("region:"):
+                    continue
+                _rst = reads.state(_rid, "style")
+                _ror = reads.state(_rid, "origin")
+                if isinstance(_rst, str) and _rst.strip():
+                    _region_lines.append(
+                        f"- {_rid}: {_rst.strip()}"
+                        + (f' (founded when the player: "{_ror.strip()}")'
+                           if isinstance(_ror, str) and _ror.strip() else ""))
+            _region_lines = _region_lines[:8]
+        except Exception:  # noqa: BLE001 — territory memory is enrichment
+            logger.exception("region-card read failed (continuing)")
         # The continuation prompt poses the founder's two questions so the next case is callback-aware,
         # not a cold reset: (1) what does the WORLD look like now? (2) which CALLBACKS make the most
         # interesting fiction? Grow the next case from the richest one.
@@ -2691,6 +2711,11 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                 "flavor):\n" + "\n".join(
                     f"- {t.get('thread')} [{t.get('status', 'open')}]" for t in _personal))
                if _personal else "")
+            + (("\nGROWN TERRITORY (the world the PLAYER built by walking — "
+                "these regions are as real as the authored map, and the next "
+                "chapter should live in and honor them where the story "
+                "ended):\n" + "\n".join(_region_lines))
+               if _region_lines else "")
             + "\nGive the new chapter its OWN `title` — never the prior chapter's.")
         prior_protagonist = prior_main.protagonist if prior_main else None
         proposal = cohorts.generate_arc(

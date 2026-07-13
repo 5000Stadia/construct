@@ -207,6 +207,12 @@ _MAX_FIELD = 200
 #: persist as a different 60-char fact).
 _MAX_NAME = 60
 
+#: The assessment is one SHORT PARAGRAPH — and since G3 it PERSISTS as the
+#: region card's style and enters the narrator briefing, so it satisfies
+#: the full persisted-field contract (id-free, concealment-screened,
+#: bounded) at its own paragraph bound (cr G3 blocker 1).
+_MAX_ASSESSMENT = 600
+
 
 @dataclass(frozen=True)
 class GrowthProposal:
@@ -304,6 +310,12 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
     if type(assessment) is not str or not assessment.strip():
         return None, "malformed:assessment"
     assessment = assessment.strip()
+    if len(assessment) > _MAX_ASSESSMENT:
+        return None, "malformed:assessment_length"
+    if _ID_TOKEN.search(assessment):
+        return None, "unlicensed:assessment_id"
+    if leaks(assessment):
+        return None, "unlicensed:assessment_concealed"
 
     conf = raw.get("confidence")
     if type(conf) not in (int, float) or isinstance(conf, bool) \
@@ -613,6 +625,19 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                  "value": prop.place["identity"], "valid_from": at},
             ]
             parent = ancestry_options[pi]
+            # G3 GOVERNANCE IS STRUCTURAL (cr blocker 2): the nearest
+            # region card is the territory's law — a model-selected parent
+            # ABOVE it would detach the place from governance (no voice,
+            # and the next growth would mint a fragment card). The host
+            # forces the card; choices at or below it stand.
+            _first_region = next(
+                (i for i, o in enumerate(ancestry_options)
+                 if str(o).startswith("region:")), None)
+            if _first_region is not None and pi > _first_region:
+                logger.info("growth parent %s sits above the governing "
+                            "card %s — host-forced to the card", parent,
+                            ancestry_options[_first_region])
+                parent = ancestry_options[_first_region]
             # G3 — THE REGION CARD (spec §6): the first growth into
             # UNGOVERNED territory mints the region that will remember it:
             # style = the assessment (WHY this region exists), origin =

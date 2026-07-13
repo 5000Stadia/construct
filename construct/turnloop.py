@@ -389,6 +389,18 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         clock_line = _rc(world).render()
     except Exception:  # noqa: BLE001 — the clock line is context, not truth
         clock_line = ""
+    # G3: growth INSIDE governed territory reasons in that territory's own
+    # remembered voice (the nearest card's style outranks the global)
+    growth_style = style
+    try:
+        _gcard = next((c for c in pre_chain
+                       if str(c).startswith("region:")), None)
+        if _gcard:
+            _gv = live_reads.state(_gcard, "style")
+            if isinstance(_gv, str) and _gv.strip():
+                growth_style = _gv.strip()
+    except Exception:  # noqa: BLE001 — voice is context; global still serves
+        pass
     try:
         with _phase(trace, "growth_assessor"):
             raw = cohorts.assessor_propose(
@@ -396,7 +408,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
                 intent=(moves_to or player_input),
                 here_name=_disp(origin),
                 ancestry_options=[_disp(a) for a in ancestry_ids],
-                connections="", style=style, laws=laws,
+                connections="", style=growth_style, laws=laws,
                 threads=[], clock_line=clock_line,
                 protagonist=_disp(arc.protagonist))
         trace.cohort_calls.append("assessor_propose:main")
@@ -499,7 +511,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
             prop, mode=mode, origin=origin, ancestry_options=ancestry_ids,
             protagonist=arc.protagonist, companions=list(companions),
             at=turn_time(turn), exists=_exists, identity=_identity,
-            origin_action=(moves_to or player_input))
+            origin_action=player_input)
     except _IdentityUnavailable as exc:
         logger.warning("growth identity authority unreadable: %s", exc)
         trace.growth = "declined:identity_unavailable"

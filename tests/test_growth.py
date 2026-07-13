@@ -345,6 +345,27 @@ def test_concealment_predicate_screens_every_field():
         "unlicensed:texture.0_concealed"
 
 
+def test_assessment_satisfies_the_persisted_field_contract():
+    # cr G3 blocker 1: assessment PERSISTS as region.style and enters the
+    # briefing — id tokens, concealed vocabulary, and overlength decline
+    leaks = lambda text: "vermilion" in text.lower()
+    g = _good()
+    g["assessment"] = "the road serves person:rival and the farm towns"
+    assert _vp(g, mode="place", n_ancestry_options=2)[1] == \
+        "unlicensed:assessment_id"
+    g = _good()
+    g["assessment"] = "the Vermilion road carries the grain trade"
+    assert _vp(g, mode="place", n_ancestry_options=2, leaks=leaks)[1] == \
+        "unlicensed:assessment_concealed"
+    g = _good()
+    g["assessment"] = "x" * 601
+    assert _vp(g, mode="place", n_ancestry_options=2)[1] == \
+        "malformed:assessment_length"
+    g = _good()
+    g["assessment"] = "y" * 600      # the paragraph bound itself is legal
+    assert _vp(g, mode="place", n_ancestry_options=2)[1] == ""
+
+
 def test_parent_and_mode_authority_closed():
     g = _good()
     # exact-int only: float and bool decline as TYPE, never coerce
@@ -560,6 +581,34 @@ def test_assembly_accretes_no_card_under_governed_territory():
     assert not any(str(r["entity"]).startswith("region:")
                    and r["entity"] != "region:the_marchlands"
                    for r in chunk.items)
+
+
+def test_assembly_parent_above_the_card_is_host_forced(monkeypatch):
+    # cr G3 blocker 2: options [current, region, outer] with parent_index=2
+    # must NOT detach the place from governance — the host forces the card
+    g = _good()
+    g["place"]["parent_index"] = 2
+    p, why = _vp(g, mode="place", n_ancestry_options=3)
+    assert why == ""
+    canon = _CANON | {"region:the_marchlands"}
+    chunk, why = _assemble(
+        p, ancestry_options=["place:north_road", "region:the_marchlands",
+                             "place:the_march"],
+        exists=lambda eid: eid in canon)
+    assert why == "" and chunk.region_id == ""
+    row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    assert row[(chunk.place_id, "in")]["value"] == "region:the_marchlands"
+    # choices AT or BELOW the card stand (index 0 = the current place)
+    g = _good()
+    g["place"]["parent_index"] = 0
+    p, why = _vp(g, mode="place", n_ancestry_options=3)
+    chunk, why = _assemble(
+        p, ancestry_options=["place:north_road", "region:the_marchlands",
+                             "place:the_march"],
+        exists=lambda eid: eid in canon)
+    assert why == ""
+    row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    assert row[(chunk.place_id, "in")]["value"] == "place:north_road"
 
 
 def test_every_row_carries_an_explicit_temporal_coordinate():
@@ -2309,8 +2358,10 @@ def test_wired_region_card_governs_grown_territory(tmp_path, monkeypatch):
         # the card's memory: WHY it exists + what the player did arriving
         assert "farm country" in str(w.porcelain.state(rid, "style")[
             "fact"]["value"])
-        assert "away" in str(w.porcelain.state(rid, "origin")[
-            "fact"]["value"])
+        # origin is the player's COMMITTED ACTION, exact (cr G3 blocker 4:
+        # never the classifier's destination fragment)
+        assert w.porcelain.state(rid, "origin")["fact"]["value"] \
+            == "I keep moving away."
         # the NEXT turn's briefing speaks the territory's voice
         provider2 = StubProvider(
             [_classify(moves_open=False, moves_to=""), dict(npt), dict(npt)]
@@ -2319,10 +2370,31 @@ def test_wired_region_card_governs_grown_territory(tmp_path, monkeypatch):
         assert "THIS TERRITORY" in r2.trace.briefing
         assert "farm country" in r2.trace.briefing
         # the raw action is QUOTED, never grammatically embedded
-        assert 'quoted: "away"' in r2.trace.briefing
-        assert "It began when they away" not in r2.trace.briefing
+        assert 'quoted: "I keep moving away."' in r2.trace.briefing
+        assert "It began when they" not in r2.trace.briefing
     finally:
         w.close()
+
+    # NEXT GROWTH under the card reasons in ITS voice (cr G3 blocker 3):
+    # re-open the world, grow again from the grown place — the gro prompt
+    # carries the region's remembered style, not the global scenario style
+    from patternbuffer import World as _World
+    from patternbuffer.testing import (StubModel as _SM,
+                                       rule_classifier_fallback as _rcf)
+    w3 = _World(wpath, world_id="w:wire", stance="fiction",
+                model=_SM(fallback=_rcf()), title="Growth Wiring")
+    try:
+        g2 = _good()
+        g2["place"]["name"] = "the Drover's Rest"
+        g2["place"]["parent_index"] = 1
+        provider3 = StubProvider([_classify(moves_to="onward"), g2])
+        r3 = run_turn(w3, _wired_arc(), provider3, "I keep on.", turn=3,
+                      style="THE GLOBAL SCENARIO VOICE")
+        gro = [c[0] for c in provider3.calls if "⟦gro⟧" in c[0][:40]]
+        assert gro and "farm country" in gro[0]        # the card's voice
+        assert "THE GLOBAL SCENARIO VOICE" not in gro[0]
+    finally:
+        w3.close()
 
     # REOPEN (chapter-later read): the card is durable canon
     from patternbuffer import World

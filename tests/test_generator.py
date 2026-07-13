@@ -568,6 +568,15 @@ def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatc
         {"entity": "place:roof", "attribute": "kind", "value": "room", "timeless": True},
         {"entity": PLAYER, "attribute": "in", "value": "place:office", "valid_from": 1000.4},
         {"entity": PLAYER, "attribute": "in", "value": "place:roof", "valid_from": 1005.0},
+        # WORLD-GROWTH G3: a grown region card — the continuation author
+        # must READ it (chapter ten remembers chapter two)
+        {"entity": "region:gullwash", "attribute": "kind", "value": "region",
+         "timeless": True},
+        {"entity": "region:gullwash", "attribute": "style",
+         "value": "a smugglers' shore that trusts work over names",
+         "valid_from": 1004.0},
+        {"entity": "region:gullwash", "attribute": "origin",
+         "value": "I row out past the mole at dusk.", "valid_from": 1004.0},
     ])
     w.porcelain.ingest_structured([
         {"entity": "event:turn_0", "attribute": "kind", "value": "turn", "valid_from": 1000.0},
@@ -648,6 +657,12 @@ def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatc
         assert meta["title"] == "The Weight of Brass"
         _gen = next(p_ for (p_, _s2, _t2) in _door.calls if task_of(p_) == "gen")
         assert "CLOSED HISTORY" in _gen and "never re-opened" in _gen.lower()
+        # WORLD-GROWTH G3: the grown territory's memory feeds the author —
+        # style AND the founding act, verbatim
+        assert "GROWN TERRITORY" in _gen
+        assert "smugglers' shore that trusts work over names" in _gen
+        assert "I row out past the mole at dusk." in _gen
+        assert "region:gullwash" in _gen
         # #96 S2: the bridge surfaced the consequence callback + wrote its receipt
         assert "A CONSEQUENCE CALLBACK" in meta["continuation_intro"]
         assert "word of who found it travels" in meta["continuation_intro"]
