@@ -355,14 +355,6 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         return False
     if mode is None:
         return False  # not growth territory — today's behavior, unchanged
-    if mode == "encounter":
-        # G2's slice — but doctrine 5 forbids narrating emptiness over a
-        # machinery absence (cr wiring blocker 7): the honest answer is
-        # the NON-DIEGETIC seam, not "the road stays empty". Slot
-        # unclaimed (nothing generative ran).
-        trace.growth = "deferred:encounter"
-        trace.growth_retry = True
-        return False
     if not pre_chain or not str(pre_chain[0]).startswith("place:"):
         trace.growth = "declined:no_origin"  # unplaced protagonist — a
         return False                         # structural miss, not a seam
@@ -398,7 +390,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     try:
         with _phase(trace, "growth_assessor"):
             raw = cohorts.assessor_propose(
-                provider, mode="place",
+                provider, mode=mode,
                 intent=(moves_to or player_input),
                 here_name=_disp(origin),
                 ancestry_options=[_disp(a) for a in ancestry_ids],
@@ -418,7 +410,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         trace.growth = "declined:concealment_unavailable"
         return False
     prop, why = growth_mod.validated_proposal(
-        raw, mode="place", n_ancestry_options=len(ancestry_ids),
+        raw, mode=mode, n_ancestry_options=len(ancestry_ids),
         leaks=lambda text: bool(vocab & _secret_word_set(text)))
     if prop is None:
         logger.info("growth proposal declined: %s", why)
@@ -491,7 +483,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
 
     try:
         chunk, why = growth_mod.assemble_chunk(
-            prop, mode="place", origin=origin, ancestry_options=ancestry_ids,
+            prop, mode=mode, origin=origin, ancestry_options=ancestry_ids,
             protagonist=arc.protagonist, companions=list(companions),
             at=turn_time(turn), exists=_exists, identity=_identity)
     except _IdentityUnavailable as exc:
@@ -527,10 +519,13 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     if _dis_at >= 0:
         staged.pop(_dis_at)   # committed with the chunk — the flush must
         trace.npcs_departed = list(dismissed or [])  # not double-write
-    trace.growth = f"activated:{chunk.place_id}"
+    trace.growth = f"activated:{chunk.place_id or chunk.person_id}"
     trace.growth_retry = False
-    trace.growth_moved = [arc.protagonist, *companions]
-    trace.movement_status = "clear"
+    # an encounter WITHOUT a new place moves nobody — the meeting came TO
+    # the road; movement status and chunk-ownership apply only to a walk
+    if chunk.place_id:
+        trace.growth_moved = [arc.protagonist, *companions]
+        trace.movement_status = "clear"
     # doctrine 4: growth IS a development — the LWG ledger sees it (D-SOFT
     # must not teleport an arc carrier into the new scene on the same
     # turn; the drift pass ALSO reads trace.growth directly, so this
@@ -4650,6 +4645,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # DESCRIBED destination the player now stands in. An INVOKED-then-failed
     # attempt is the §3 proposal-failure contract: one attempt, a technical
     # receipt, NO world/clock change, the honest non-diegetic retry seam.
+    if (seeks_encounter and kind == "action" and not moves_to
+            and not trace.movement_status and not trace.same_place):
+        # "I walk until I run into someone" with no stated destination:
+        # refer/known/bind had no mention to run against — zero
+        # destination is proven by absence, and only the encounter signal
+        # carries content (G2; the dst-cohort-never-called oracle pins
+        # that nothing was bypassed).
+        _growth_miss = True
     if _growth_miss and not trace.same_place:
         if not _growth_attempt(world, p, arc, live_reads, provider, trace,
                                moves_to=moves_to, player_input=player_input,

@@ -991,26 +991,96 @@ def test_wired_gate_not_invoked_without_the_signal(tmp_path):
         w.close()
 
 
-def test_wired_encounter_mode_defers_honestly(tmp_path):
-    # seeks_encounter wins eligibility but the G2 machinery is not in this
-    # slice — doctrine 5: machinery absence is NEVER narrated emptiness
-    # ("the road stays empty" would be the stonewall back). The honest
-    # answer is the NON-DIEGETIC seam; the slot stays unclaimed and the
-    # Assessor is never called.
+def test_wired_encounter_invokes_with_no_destination(tmp_path):
+    # G2: "I walk until I run into someone" — no stated destination, so
+    # the pipeline had nothing to resolve (proven zero-destination); the
+    # encounter signal invokes the Assessor in encounter mode and fails
+    # CLOSED on PB 0.2.0. Nothing was bypassed: the dst cohort never ran.
     from construct.provider import StubProvider
     from construct.turnloop import _GROWTH_SEAM, run_turn
     w = _wired_world(tmp_path)
     try:
+        g = _good()
+        del g["place"]                     # a pure meeting on the road
         provider = StubProvider([
-            _classify(moves_open=False, seeks_encounter=True),
+            _classify(moves_open=False, seeks_encounter=True, moves_to=""),
+            g,
         ])
-        r = run_turn(w, _wired_arc(), provider, "I walk until I meet someone.",
-                     turn=1)
-        assert r.trace.growth == "deferred:encounter"
-        assert r.trace.growth_retry is True
+        r = run_turn(w, _wired_arc(), provider,
+                     "I walk until I meet someone.", turn=1)
         assert r.prose == _GROWTH_SEAM
-        assert r.settle is None
-        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+        assert r.trace.growth == "activation_unavailable"
+        gro = [c[0] for c in provider.calls if "⟦gro⟧" in c[0][:40]]
+        assert gro and "PERSON met on the way" in gro[0]
+        assert not any("⟦dst⟧" in c[0][:40] for c in provider.calls)
+        assert w.porcelain.state("person:gregor_bund",
+                                 "kind")["status"] != "known"
+    finally:
+        w.close()
+
+
+def test_wired_encounter_success_comes_to_the_road(tmp_path, monkeypatch):
+    # G2 success (fake atomic): the encounter is ANCHORED at the origin —
+    # the meeting came TO the player; nobody teleports, the player stays,
+    # and the grown pair is live through the ordinary engines
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        def _fake(porcelain, items):
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        g = _good()
+        del g["place"]
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=True, moves_to=""),
+             g] + [{"prose": "A husky farmer hails you from his caravan."}] * 6)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I walk until I meet someone.", turn=1)
+        assert r.trace.growth == "activated:person:gregor_bund"
+        assert r.trace.growth_retry is False
+        assert r.trace.growth_moved == []          # nobody teleported
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+        assert (w.porcelain.locate("person:gregor_bund") or [None])[0] \
+            == "place:north_road"
+        assert (w.porcelain.locate("person:kip") or [None])[0] \
+            == "place:north_road"
+        assert w.porcelain.state("person:kip", "accompanying")["fact"][
+            "value"] == "person:gregor_bund"
+        assert "farmer" in r.prose
+    finally:
+        w.close()
+
+
+def test_wired_encounter_with_a_place_walks_there(tmp_path, monkeypatch):
+    # G2: "an encounter only if someone plainly belongs there" — when the
+    # proposal includes the place the meeting needs, the player walked to
+    # it: the move commits with the same chunk
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        def _fake(porcelain, items):
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        provider = StubProvider(
+            [_classify(moves_open=False, seeks_encounter=True, moves_to=""),
+             _good()] + [{"prose": "The waypost, and a farmer at it."}] * 6)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I walk until I meet someone.", turn=1)
+        assert r.trace.growth == "activated:place:the_willow_ford_waypost"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:the_willow_ford_waypost"
+        assert (w.porcelain.locate("person:gregor_bund") or [None])[0] \
+            == "place:the_willow_ford_waypost"
+        assert r.trace.movement_status == "clear"
     finally:
         w.close()
 
