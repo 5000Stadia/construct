@@ -25,3 +25,31 @@ Findings:
 NEXT: (a) widen _phase coverage to every section between classify and
 send; (b) re-probe; (c) then decide the optimization (the dumbfire settle
 already moved the tail — the pre-send serial chain is the target).
+
+## Second probe (2026-07-13, with cp_* checkpoints — cr-GREEN d07548e)
+
+Two live turns, cumulative stamps (seconds):
+
+| stamp | turn 1 (419s) | turn 2 (317s) |
+|---|---|---|
+| cp_classified | 10.1 | 9.1 |
+| cp_movement_done | 10.3 | 9.3 |
+| cp_scene_snapshot_done | 45.8 | 47.6 |
+| cp_salience_done | **173.5** | **186.0** |
+| cp_drift_lifecycle_done | 219.7 | 242.5 |
+| cp_generator_done | 220.1 | 243.0 |
+| narrate (section) | 40.1 | 15.3 |
+| settle tail (post_extract+promote) | ~95 | ~19 |
+
+THE FINDING: the snapshot→salience window costs **128-138s on both
+turns** while its only timed members are tiny (npc_action ≤5.5s) — the
+cost is the SERIAL chain of "cheap" cohort calls (weave_pick,
+detect_events, and friends) at ~40-60s wall each on Codex. Cheap-tier ≠
+cheap wall time. Second cost: the scene snapshot window (~36s), third:
+drift+lifecycle (~46-56s, again serial cheap calls).
+
+NEXT (the optimization program, when scheduled): CONCURRENCY over the
+independent cheap cohorts (weave_pick / detect_events / npc_turn /
+memory already run concurrent internally — lift the pattern to the
+whole pre-narrate chain), not tier tuning; player-felt latency is
+roughly cp_generator + narrate ≈ 260s today.
