@@ -160,10 +160,34 @@ today's resolve/mint path untouched.
   card (the "supported style" bar — the new town remembers WHY it exists
   and what the player did arriving); conclude→continue authors ch2 against
   grown territory (the hide-and-integrate case).
-- **ACCEPTANCE for the program:** the displaced-conclusion probe re-run
-  end-to-end — ch1 concludes OFF the map in grown territory; ch2 opens
-  there with a pivoted goal series; the three founder bars judged by the
-  critic addendum already written.
+- **ACCEPTANCE for the program — THE TANGENT VOYAGE (founder, 2026-07-12):**
+  a rigorous ch1→ch2 run that INTENTIONALLY DRIFTS — the player leaves the
+  written story to start their own, and the world must stay REAL and RICH
+  the whole way. The canonical shape: *befriend an NPC pal, run off
+  together on a boat — who knows, now the story is nautical when that
+  wasn't even close to expected.* Judged bars, all in one run:
+  1. **Richness off-script** — the unwritten world is grown, textured,
+     peopled (never filler, never stonewall); the setting may MORPH
+     (nautical!) and the texture follows the player's world, not the
+     abandoned one's.
+  2. **The call keeps calling, gently** — head-tilts and encouragement
+     back toward the main story are CORRECT (the character's call to
+     action; any story where the player avoids the call, the call
+     encourages their return) — the existing drift machinery (R1 nudges,
+     R2 relocation) IS this voice; judged for proportion, never
+     railroading (the offpath critic's stonewall/railroad filings apply).
+  3. **The companion is real** — the NPC pal rides the standing
+     `accompanying` state: reacts, interjects, remembers, never vanishes
+     (presence-holds across grown territory).
+  4. **Conclusion on the tangent's own terms**, in grown territory —
+     committed, not hedged into the abandoned plot.
+  5. **Chapter 2 continues THE PLAYER'S story** — opens in the tangent's
+     world (WHERE), with a goal series grown from what they built (GOAL
+     PIVOT + SUPPORTED STYLE), the old call at most a distant echo that
+     honestly reflects how ch1 left it.
+  Vehicle: the displaced-conclusion probe extended (companion leg + the
+  five bars in the critic addendum); the displaced probe's original
+  three-bar form remains as the G1/G3 slice gate.
 
 ## 7. Open questions for review
 
