@@ -411,9 +411,10 @@ Concrete named destinations keep today's resolve/mint path untouched.
 SPECIFIED in §3/§5 per cr's r1; remaining open:)
 - The Assessor's tier (proposal: main-tier — the assessment chain is
   planning-class reasoning, and it runs at most once per turn).
-- (RESOLVED: the consult is RULED engine-side — ATOMIC-ACTIVATION-V1
-  drafted, pbr review pending; no fallback exists. Remaining engine
-  dependency: the adoption set's retraction expressibility, §G-A 3b.)
+- (RESOLVED: the consult is RULED engine-side — ATOMIC-ACTIVATION-V1 r2,
+  no fallback exists; the adoption set's retraction expressibility is
+  RULED too — `commit_set(ops)`, §G-A 3b. The only remaining gates are
+  DELIVERY: PB's implementation + pbr GREEN.)
 - Latency: the Ironhold probe's 400-450s turns need decomposition before
   G1 adds a cohort to the movement path (possibly the failed-grant retry
   chains — G1 may actually REMOVE cost by replacing repeated failures with
