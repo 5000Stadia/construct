@@ -576,6 +576,14 @@ def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatc
          "valid_from": 1005.0},
         {"entity": "event:arc_outcome_5", "attribute": "grade", "value": "vindicated",
          "valid_from": 1005.0},
+        # cr G-C r2 mixed case: an OLDER receipt carries a stale capture;
+        # the newest (arc_outcome_5) has none — live locate must win and
+        # intro/hook staging must follow it (place:roof, never office)
+        {"entity": "event:arc_outcome_3", "attribute": "kind",
+         "value": "arc_lost", "valid_from": 1003.0},
+        {"entity": "event:arc_outcome_3", "attribute": "terminal_location",
+         "value": "place:office", "value_type": "literal",
+         "valid_from": 1003.0},
     ], frame=SESSION)
     w.close()
     spath.with_suffix(".meta.json").write_text(json.dumps(

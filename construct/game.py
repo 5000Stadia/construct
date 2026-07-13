@@ -2502,8 +2502,10 @@ def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
     ENDED. The prior shipped behavior (return to the opening base) was the
     Ironhold defect: growth can displace chapter 1 perfectly and the
     doorway snapped the escapee back to the prison. The terminal location
-    is read from the conclusion's own captured engine truth (the
-    arc_outcome event's `location` row), falling back to live locate; NO
+    is read from the conclusion's own captured engine truth (the LATEST
+    arc_outcome receipt's `terminal_location` row — a stale capture on an
+    older receipt never outranks the newest conclusion), falling back to
+    live locate; NO
     relocation row is ever written by default — any future move away from
     the terminal must be an explicit, caused transition delta authored by
     its own machinery, never a silent doorway default. (iii) ITEMS: adds
@@ -2539,12 +2541,21 @@ def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
                         return int(eid.rsplit("_", 1)[-1])
                     except ValueError:
                         return -1
-                _cand = [(str(r.entity), str(r.value)) for r in
-                         _ffd(world, "session:main",
-                              attribute="terminal_location")
-                         if str(r.entity).startswith("event:arc_outcome_")]
-                if _cand:
-                    captured = max(_cand, key=lambda c: _rcpt_turn(c[0]))[1]
+                # the LATEST actual outcome receipt decides (cr G-C r2):
+                # a stale capture on an OLDER episode's receipt must never
+                # outrank the newest conclusion — find the newest
+                # arc_won/arc_lost entity first, then read the capture
+                # from that SAME receipt only; absent → live locate.
+                _receipts = [str(r.entity) for r in
+                             _ffd(world, "session:main", attribute="kind")
+                             if str(r.entity).startswith("event:arc_outcome_")
+                             and str(r.value).startswith("arc_")]
+                if _receipts:
+                    _newest = max(_receipts, key=_rcpt_turn)
+                    _cap = [str(r.value) for r in
+                            _ffd(world, "session:main", entity=_newest,
+                                 attribute="terminal_location")]
+                    captured = _cap[-1] if _cap else None
             except Exception:  # noqa: BLE001 — fall back to live locate
                 pass
             now_chain = world.porcelain.locate(protagonist)

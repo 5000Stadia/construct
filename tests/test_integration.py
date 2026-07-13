@@ -2203,13 +2203,27 @@ class TestFullTurn:
         assert w2.porcelain.locate(PLAYER)[0] == "place:far_end"   # nobody moved
         held = w2.porcelain.contents(PLAYER) if hasattr(w2.porcelain, "contents") else []
         assert not held                                      # ITEMS: nothing minted
-        # the CAPTURED terminal receipt outranks live locate when present
+        # the CAPTURED terminal receipt outranks live locate when present —
+        # but ONLY the capture on the LATEST outcome receipt (cr G-C r2):
+        # a stale older capture with a newer uncaptured conclusion falls
+        # back to live locate, keeping prose/presence with the player
+        w2.porcelain.ingest_structured([
+            {"entity": "event:arc_outcome_9", "attribute": "kind",
+             "value": "arc_lost", "valid_from": 1004.0},
+            {"entity": "event:arc_outcome_9",
+             "attribute": "terminal_location",
+             "value": "place:study", "value_type": "literal",
+             "valid_from": 1004.0},
+            {"entity": "event:arc_outcome_12", "attribute": "kind",
+             "value": "arc_won", "valid_from": 1010.0},
+        ], frame="session:main")
+        assert _episode_doorway(w2, PLAYER, 1000.0, 13) == "place:far_end"
         w2.porcelain.ingest_structured([
             {"entity": "event:arc_outcome_12",
              "attribute": "terminal_location",
              "value": "place:far_end", "value_type": "literal",
              "valid_from": 1010.0}], frame="session:main")
-        assert _episode_doorway(w2, PLAYER, 1000.0, 13) == "place:far_end"
+        assert _episode_doorway(w2, PLAYER, 1000.0, 14) == "place:far_end"
         w2.close()
 
     def test_wrong_commitment_records_loss_even_when_frame_knows_truth(self, world):
