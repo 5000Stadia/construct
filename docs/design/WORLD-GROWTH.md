@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC GREEN (cr r6, <92a037e8…>, 2026-07-13) — build-authorized; PRE-G1 DEPENDENCY: the PB atomic-activation consult (in flight). cr's binding reading: the one-generative-act budget includes the tangent-author call; technical failure receipts stay outside canon.
+**Status:** SPEC GREEN (cr r6, <92a037e8…>, 2026-07-13) — build-authorized; Consult RULED engine-side (ATOMIC-ACTIVATION-V1; pbr review + delivery pending). G1 host build ALLOWED under cr's fail-closed boundary (no non-atomic commits reachable, activation_unavailable on 0.2.0). G-A additionally blocked on the adoption-retraction surface ruling. cr's binding reading: the one-generative-act budget includes the tangent-author call; technical failure receipts stay outside canon.
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -307,17 +307,23 @@ Concrete named destinations keep today's resolve/mint path untouched.
      concrete; hidden answers sanitized; NO portfolio row commits until
      lint succeeds. Then promoted MAIN — terminal + continuation logic
      read the manifest main: unchanged readers, new occupant.
-  3b. THE ADOPTION ACTIVATION (r5 — adoption is a persistence boundary
-     and the replan path's multi-step manifest swap is not atomic): the
+  3b. THE ADOPTION ACTIVATION (r5; mechanism updated post-ruling): the
      set {new arc + index rows, old-main demotion reason, portfolio main
-     switch, adoption receipt} activates as ONE unit — either the atomic
-     primitive (the §3 PB consult covers this case too) or a durable
-     prepare→activate state machine whose reopen recovery
-     deterministically finishes or rolls back. Postconditions: exactly one
-     manifest main; it is fully linted and loadable; the old main remains
-     a portfolio member carrying `tangent_adopted`; the phase boundary
-     flips ONLY with the confirmed activation receipt. Fault-inject every
-     boundary.
+     switch, adoption receipt} activates as ONE unit through the RULED
+     ENGINE ENVELOPE ONLY (the host state-machine alternative is
+     withdrawn — PB rejected host-side atomicity mechanisms outright).
+     DEPENDENCY (cr activation-delta review): the manifest switch today
+     requires RETRACTIONS of constitutive control rows, which the drafted
+     append-only `atomic=True` surface does not yet express — pbr must
+     rule either a typed mixed-operation envelope (retractions + appends,
+     atomic) or an append-only manifest representation whose fold permits
+     main-pointer supersession. G-A is dependency-blocked on that ruling;
+     its PB-side oracle uses the real operation surface: fault before/
+     after every retract/append boundary leaves the old main fully
+     readable; success leaves exactly one fully loadable new main.
+     Postconditions: exactly one manifest main; fully linted and loadable;
+     the old main a portfolio member carrying `tangent_adopted`; the phase
+     boundary flips ONLY with the confirmed activation receipt.
   4. THE PHASE BOUNDARY (bar 2, durable and restart-safe — never
      critic-only): BEFORE adoption, R1/R2 call gently under the specified
      cadence (the drift program's own proportion rules). AFTER adoption,
@@ -400,8 +406,9 @@ Concrete named destinations keep today's resolve/mint path untouched.
 SPECIFIED in §3/§5 per cr's r1; remaining open:)
 - The Assessor's tier (proposal: main-tier — the assessment chain is
   planning-class reasoning, and it runs at most once per turn).
-- The PB consult outcome on the atomic activation primitive (§3) — the
-  fallback is specified, but the primitive's shape is PB's to rule.
+- (RESOLVED: the consult is RULED engine-side — ATOMIC-ACTIVATION-V1
+  drafted, pbr review pending; no fallback exists. Remaining engine
+  dependency: the adoption set's retraction expressibility, §G-A 3b.)
 - Latency: the Ironhold probe's 400-450s turns need decomposition before
   G1 adds a cohort to the movement path (possibly the failed-grant retry
   chains — G1 may actually REMOVE cost by replacing repeated failures with
