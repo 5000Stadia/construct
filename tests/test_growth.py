@@ -467,6 +467,11 @@ def test_assessor_schema_is_id_free_and_lints():
 
 # ---- piece 4: host row assembly -------------------------------------------
 
+#: the host references every _assemble call claims as canon truth
+_CANON = {"place:north_road", "place:the_march", "place:greywater_vale",
+          "person:you", "person:reed", "person:aldous"}
+
+
 def _assemble(prop, **kw):
     from construct.growth import assemble_chunk
     kw.setdefault("mode", "place")
@@ -476,7 +481,8 @@ def _assemble(prop, **kw):
     kw.setdefault("protagonist", "person:you")
     kw.setdefault("companions", [])
     kw.setdefault("at", 5000.0)
-    kw.setdefault("exists", lambda eid: False)
+    kw.setdefault("exists", lambda eid: eid in _CANON)
+    kw.setdefault("identity", lambda kind, name: ("new", ""))
     return assemble_chunk(prop, **kw)
 
 
@@ -497,14 +503,16 @@ def test_assembly_builds_the_ordered_chunk():
     assert keys.index((pid, "kind")) < keys.index((pid, "in"))
     assert keys.index((pid, "in")) < keys.index(("place:north_road",
                                                  "connects_to"))
-    assert keys.index((pid, "connects_to")) < keys.index(("person:you", "in"))
+    assert keys.index(("place:north_road", "connects_to")) \
+        < keys.index(("person:you", "in"))
     assert keys.index(("person:you", "in")) \
         < keys.index((chunk.person_id, "kind"))
-    # the host picked the parent from ITS OWN list, never model text
     row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    # the host picked the parent from ITS OWN list, never model text
     assert row[(pid, "in")]["value"] == "place:greywater_vale"
-    # the road walked is walkable BACK
-    assert row[(pid, "connects_to")]["value"] == "place:north_road"
+    # ONE stored edge — the lateral graph is undirected (cr ruling 7)
+    assert sum(1 for _, a in keys if a == "connects_to") == 1
+    assert (pid, "connects_to") not in row
     # the companion postcondition: every standing companion in the SAME set
     assert row[("person:reed", "in")]["value"] == pid
     assert row[("person:aldous", "in")]["value"] == pid
@@ -514,20 +522,96 @@ def test_assembly_builds_the_ordered_chunk():
     assert row[(chunk.person_id, "in")]["value"] == pid
     assert row[(chunk.companion_id, "accompanying")]["value"] \
         == chunk.person_id
-    # texture: attributes distinct within the chunk AND across chunks (a
-    # later chunk on the same anchor must never supersede these — canon
-    # forever); keyed by the chunk's unique turn-time
-    assert row[(pid, "detail_5000_1")]["value"] == "a weather-worn signpost"
-    assert row[(pid, "detail_5000_2")]["value"] == "wheel ruts in the clay"
+    # texture: chunk-keyed attributes, exact-at coordinate
+    assert row[(pid, "detail_5000p0_1")]["value"] == "a weather-worn signpost"
+    assert row[(pid, "detail_5000p0_2")]["value"] == "wheel ruts in the clay"
     # derivation receipt rides along, never as a row
     assert "farm country" in chunk.assessment
     assert all(a != "assessment" for _, a in keys)
 
 
+def test_every_row_carries_an_explicit_temporal_coordinate():
+    # cr blocker 5: nothing may ride the engine's mutable cursor — each row
+    # is constitutive (timeless) XOR acquired (valid_from == at)
+    chunk, why = _assemble(_good_prop(), companions=["person:reed"])
+    assert why == ""
+    for r in chunk.items:
+        timeless = r.get("timeless") is True
+        stamped = r.get("valid_from") == 5000.0
+        assert timeless != stamped, r
+    row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    # the classification itself: who-they-ARE is timeless, the encounter's
+    # now-facts are acquired at the turn horizon
+    for a in ("kind", "name", "role", "drive"):
+        assert row[(chunk.person_id, a)].get("timeless") is True
+    assert row[(chunk.person_id, "doing")]["valid_from"] == 5000.0
+    assert row[(chunk.person_id, "in")]["valid_from"] == 5000.0
+    assert row[(chunk.companion_id, "bond")].get("timeless") is True
+
+
+def test_assembled_rows_land_at_the_horizon_not_the_cursor(tmp_path):
+    # cr blocker 5 (engine oracle): cursor far AHEAD of at — rows must land
+    # at the supplied horizon; and cr ruling 7: ONE stored connects_to edge
+    # traverses BOTH directions on the undirected lateral graph
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    w = World(tmp_path / "g.world", world_id="w:g",
+              model=StubModel(fallback=rule_classifier_fallback()),
+              stance="fiction", title="Growth")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:north_road", "attribute": "kind", "value": "place",
+         "timeless": True},
+        {"entity": "place:the_march", "attribute": "kind", "value": "place",
+         "timeless": True},
+        {"entity": "place:greywater_vale", "attribute": "kind",
+         "value": "place", "timeless": True},
+        {"entity": "person:you", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:you", "attribute": "in",
+         "value": "place:north_road", "value_type": "entity"},
+    ])
+    w.ingestor.cursor.advance(9000.0)   # the mutable cursor sits FAR ahead
+    from construct.adapter import PorcelainWorldReads
+    reads = PorcelainWorldReads(w)
+    chunk, why = _assemble(_good_prop(), at=5000.0,
+                           exists=lambda eid: reads.has_entity(eid))
+    assert why == ""
+    receipt = w.ingest_structured(list(chunk.items), classify="rules")
+    assert not (getattr(receipt, "skipped", None) or [])
+    pid = chunk.place_id
+    # acquired facts exist AT the horizon, not before it
+    assert w.porcelain.state("person:you", "in", as_of=4999.0)["fact"][
+        "value"] == "place:north_road"
+    assert w.porcelain.state("person:you", "in", as_of=5000.5)["fact"][
+        "value"] == pid
+    assert w.porcelain.state(pid, "description", as_of=4999.0)[
+        "status"] == "known"          # constitutive: timeless
+    # one stored edge, walkable both ways
+    fwd = w.porcelain.path("place:north_road", pid, as_of=5000.5)
+    rev = w.porcelain.path(pid, "place:north_road", as_of=5000.5)
+    assert fwd and rev and fwd == list(reversed(rev))
+
+
+def test_assembly_texture_keys_are_disjoint_across_chunks():
+    # cr blocker 6: two chunks on ONE anchor at different times — int()
+    # truncation collided 5000.1 with 5000.9; the exact coordinate must not
+    g = _good()
+    del g["place"]
+    p1, _ = _vp(g, mode="encounter", n_ancestry_options=0)
+    a = _assemble(p1, mode="encounter", at=5000.1)[0]
+    b = _assemble(p1, mode="encounter", at=5000.9)[0]
+    keys_a = {(r["entity"], r["attribute"]) for r in a.items
+              if r["attribute"].startswith("detail_")}
+    keys_b = {(r["entity"], r["attribute"]) for r in b.items
+              if r["attribute"].startswith("detail_")}
+    assert keys_a and keys_b and not (keys_a & keys_b)
+
+
 def test_assembly_ids_are_collision_free():
     # canon roster collision AND intra-chunk collision both ordinal-probe
-    taken = {"place:the_willow_ford_waypost", "person:gregor_bund",
-             "person:gregor_bund_2"}
+    taken = _CANON | {"place:the_willow_ford_waypost", "person:gregor_bund",
+                      "person:gregor_bund_2"}
     g = _good()
     g["encounter"]["companion"]["name"] = "Gregor Bund"  # same-named pair
     p, why = _vp(g, mode="place", n_ancestry_options=2)
@@ -537,6 +621,80 @@ def test_assembly_ids_are_collision_free():
     assert chunk.place_id == "place:the_willow_ford_waypost_2"
     assert chunk.person_id == "person:gregor_bund_3"
     assert chunk.companion_id == "person:gregor_bund_4"
+
+
+def test_assembly_identity_decisions_are_consumed_structurally():
+    # cr blocker 1: the host identity decision, all three outcomes
+    g = _good()
+    # place BOUND → reuse: geography only, no constitutive rows
+    ident = lambda kind, name: ("bound", "place:greywater_vale") \
+        if kind == "place" else ("new", "")
+    chunk, why = _assemble(_good_prop(), identity=ident)
+    assert why == "" and chunk.place_id == "place:greywater_vale"
+    keys = [(r["entity"], r["attribute"]) for r in chunk.items]
+    assert ("place:greywater_vale", "kind") not in keys       # no re-declare
+    assert ("place:greywater_vale", "description") not in keys  # no supersede
+    assert ("place:greywater_vale", "in") not in keys
+    row = {k: r for k, r in zip(keys, chunk.items)}
+    assert row[("place:north_road", "connects_to")]["value"] \
+        == "place:greywater_vale"
+    assert row[("person:you", "in")]["value"] == "place:greywater_vale"
+    # place bound to the ORIGIN → the road led nowhere new
+    here = lambda kind, name: ("bound", "place:north_road") \
+        if kind == "place" else ("new", "")
+    assert _assemble(_good_prop(), identity=here)[1] == \
+        "proposal:place_is_here"
+    # place ambiguous → decline, never guess
+    amb = lambda kind, name: ("ambiguous", "") if kind == "place" \
+        else ("new", "")
+    assert _assemble(_good_prop(), identity=amb)[1] == \
+        "unlicensed:place.name_ambiguous"
+    # person bound/ambiguous → decline (cast/canon collision + teleport)
+    pb = lambda kind, name: ("bound", "person:reed") \
+        if kind == "person" else ("new", "")
+    assert _assemble(_good_prop(), identity=pb)[1] == \
+        "unlicensed:encounter.name_binds_existing"
+    pa = lambda kind, name: ("ambiguous", "") if kind == "person" \
+        else ("new", "")
+    assert _assemble(_good_prop(), identity=pa)[1] == \
+        "unlicensed:encounter.name_ambiguous"
+    # companion-only bind declines with its own reason
+    calls = []
+    def comp_bind(kind, name):
+        calls.append((kind, name))
+        if kind == "person" and name == "Kip":
+            return ("bound", "person:reed")
+        return ("new", "")
+    assert _assemble(_good_prop(), identity=comp_bind)[1] == \
+        "unlicensed:encounter.companion.name_binds_existing"
+    assert ("person", "Kip") in calls
+
+
+def test_assembly_names_persist_exactly_and_long_names_decline_upstream():
+    # cr blocker 4: no repair after acceptance — the 60-char gate is the
+    # VALIDATOR's; assembly persists the exact validated value
+    g = _good()
+    g["place"]["name"] = "x" * 61
+    assert _vp(g, mode="place", n_ancestry_options=2)[1] == \
+        "malformed:place.name_length"
+    g = _good()
+    g["encounter"]["name"] = "y" * 61
+    assert _vp(g, mode="place", n_ancestry_options=2)[1] == \
+        "malformed:encounter.name_length"
+    g = _good()
+    g["encounter"]["companion"]["name"] = "z" * 61
+    assert _vp(g, mode="place", n_ancestry_options=2)[1] == \
+        "malformed:encounter.companion.name_length"
+    g = _good()
+    g["place"]["name"] = "The Long Portage Above The Greywater Falls Where " \
+                         "Carters Res"  # exactly 60
+    assert len(g["place"]["name"]) == 60
+    p, why = _vp(g, mode="place", n_ancestry_options=2)
+    assert why == ""
+    chunk, why = _assemble(p)
+    assert why == ""
+    row = {(r["entity"], r["attribute"]): r for r in chunk.items}
+    assert row[(chunk.place_id, "name")]["value"] == g["place"]["name"]
 
 
 def test_assembly_encounter_without_place_anchors_at_origin():
@@ -551,7 +709,7 @@ def test_assembly_encounter_without_place_anchors_at_origin():
     # nobody teleports: an encounter come TO the road moves no one
     assert ("person:you", "in") not in row
     # growth's texture lands on the anchor
-    assert row[("place:north_road", "detail_5000_1")]["value"] \
+    assert row[("place:north_road", "detail_5000p0_1")]["value"] \
         == "a weather-worn signpost"
 
 
@@ -564,28 +722,57 @@ def test_assembly_declines_unsluggable_names():
     assert chunk is None and why == "malformed:place.name_unsluggable"
 
 
+def test_assembly_mode_continuity_is_proven():
+    # cr blocker 3: a proposal validated under one mode must not assemble
+    # under another — both directions raise
+    import pytest as _pt
+    g = _good()
+    del g["place"]
+    enc_prop, why = _vp(g, mode="encounter", n_ancestry_options=0)
+    assert why == ""
+    with _pt.raises(ValueError):
+        _assemble(enc_prop, mode="place")
+    with _pt.raises(ValueError):
+        _assemble(_good_prop(), mode="encounter")
+
+
 def test_assembly_host_bugs_raise():
     import pytest as _pt
     p = _good_prop()
     bad_calls = [
         dict(exists=None),
+        dict(identity=None),
+        dict(identity=lambda k, n: "new"),           # malformed decision
+        dict(identity=lambda k, n: ("maybe", "")),
         dict(origin="north road"),
+        dict(origin="place:"),                       # frozen grammar: empty local
+        dict(origin="place:Elsewhere"),              # frozen grammar: case
         dict(origin=None),
+        dict(origin="place:unknown_road"),           # shape ok, NOT canon
         dict(protagonist="you"),
-        dict(companions=("person:reed",)),          # exact list, not tuple
+        dict(protagonist="person:nobody"),           # not canon
+        dict(companions=("person:reed",)),           # exact list, not tuple
         dict(companions=["person:reed", "reed"]),
+        dict(companions=["person:ghost"]),           # not canon
+        dict(companions=["person:reed", "person:reed"]),   # duplicate
+        dict(companions=["person:you"]),             # protagonist-as-companion
         dict(at=float("nan")),
         dict(at=True),
         dict(at=-5.0),
         dict(mode="wander"),
         dict(ancestry_options=[]),                   # place proposed, no list
-        dict(ancestry_options=["place:a"]),          # index 1 out of range —
+        dict(ancestry_options=["place:a"]),          # not canon
+        dict(ancestry_options=["place:the_march"]),  # index 1 out of range —
     ]                                                # validation/assembly split
     for kw in bad_calls:
         with _pt.raises(ValueError):
             _assemble(p, **kw)
     with _pt.raises(ValueError):
         _assemble({"not": "a proposal"})
+    # all-anchors-absent (cr blocker 2's pinned oracle): shape-valid host
+    # refs whose canon membership is FALSE must never assemble
+    with _pt.raises(ValueError):
+        _assemble(p, exists=lambda eid: False)
 
 
 # ---- piece 5: the no-growth host check + the generative slot --------------

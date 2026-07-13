@@ -201,15 +201,25 @@ _ID_TOKEN = __import__("re").compile(r"\b[a-z_]+:[a-z0-9_]+\b|[{}<>`]")
 #: Field length bound — display lines, not documents.
 _MAX_FIELD = 200
 
+#: NAME fields persist verbatim as `name` rows and must fit the display
+#: contract EXACTLY at validation time — assembly never repairs (cr piece-4
+#: blocker 4: a 61-char accepted name must decline here, not silently
+#: persist as a different 60-char fact).
+_MAX_NAME = 60
+
 
 @dataclass(frozen=True)
 class GrowthProposal:
     """The VALIDATED Assessor proposal — display fields only, host-checked;
     the row-assembly step (its own piece) turns this into ordered items
-    with host-allocated ids."""
+    with host-allocated ids. `mode` carries the vocabulary the proposal
+    was validated UNDER — assembly proves continuity against it (cr
+    piece-4 blocker 3: a validator/assembler mode disagreement must be
+    structurally impossible, not merely unlikely)."""
 
     assessment: str
     confidence: float
+    mode: str = ""
     place: dict | None = None       # {name, identity, parent_index}
     encounter: dict | None = None   # {name, role, drive, doing, companion?}
     texture: tuple = ()
@@ -311,6 +321,8 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
         place, why = _clean(place_raw, "place", ("name", "identity"), leaks)
         if place is None:
             return None, why
+        if len(place["name"]) > _MAX_NAME:
+            return None, "malformed:place.name_length"
         pi = place_raw.get("parent_index")
         if type(pi) is not int:
             return None, "malformed:place.parent_index_type"
@@ -325,12 +337,16 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
                                 ("name", "role", "drive", "doing"), leaks)
         if encounter is None:
             return None, why
+        if len(encounter["name"]) > _MAX_NAME:
+            return None, "malformed:encounter.name_length"
         comp_raw = enc_raw.get("companion")
         if comp_raw is not None:
             comp, why = _clean(comp_raw, "encounter.companion",
                                ("name", "kind", "bond"), leaks)
             if comp is None:
                 return None, why
+            if len(comp["name"]) > _MAX_NAME:
+                return None, "malformed:encounter.companion.name_length"
             encounter["companion"] = comp
 
     if mode == "encounter" and encounter is None:
@@ -357,7 +373,7 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
             return None, f"unlicensed:texture.{i}_concealed"
         texture.append(t)
     return GrowthProposal(assessment=assessment, confidence=confidence,
-                          place=place, encounter=encounter,
+                          mode=mode, place=place, encounter=encounter,
                           texture=tuple(texture)), ""
 
 
@@ -384,6 +400,12 @@ class AssembledChunk:
     place_id: str = ""          # host-allocated (empty when no new place)
     person_id: str = ""
     companion_id: str = ""
+
+
+#: The frozen id grammar every pre-existing host reference must satisfy —
+#: a nonempty lower-snake local part under a typed prefix. `place:` alone
+#: is NOT an id.
+_ID_GRAMMAR = _re.compile(r"(?:place|person|obj|region):[a-z0-9_]+")
 
 
 def _slugify(name: str) -> str:
@@ -414,7 +436,7 @@ def _entity_row(entity: str, attribute: str, value: str, at: float) -> dict:
 
 def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                    ancestry_options: list, protagonist: str,
-                   companions: list, at: float, exists
+                   companions: list, at: float, exists, identity
                    ) -> tuple["AssembledChunk | None", str]:
     """Validated proposal → the ordered, host-built row batch.
 
@@ -427,48 +449,108 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
     atomic set), `at` (the turn's valid_from), `exists` (the canon roster
     membership predicate backing id allocation).
 
+    `identity` is the HOST's global identity decision (spec §2: the host
+    binds to unique existing identities where they exist and declines
+    ambiguity): identity(kind, display_name) -> ("new"|"bound"|"ambiguous",
+    bound_id_or_""), built over the same name authority the resolve seam
+    uses. Assembly consumes the decision structurally:
+    - place "bound" REUSES the existing place (pure geography — no
+      declaration/containment/description rows are emitted, so the
+      proposal's constitutive text can never supersede canon; the passage,
+      moves, and chunk-keyed texture attach to the bound id). A bind to
+      the ORIGIN itself declines `proposal:place_is_here` (the road led
+      nowhere new — retry);
+    - person/companion "bound" DECLINES (`unlicensed:…name_binds_existing`):
+      the proposal authored a NEW character, and binding would both
+      supersede an existing person's constitutive facts (the cast/canon
+      identity-collision defect) and teleport a located actor;
+    - "ambiguous" DECLINES (`unlicensed:…name_ambiguous`) — never guess,
+      never mint a homonym twin (the tripwire doctrine).
+
     Malformed HOST inputs raise ValueError (a host bug must fail loudly,
-    the piece-3 posture); a proposal defect that only assembly can see
-    (an unsluggable display name) DECLINES retryably. Row facts:
+    the piece-3 posture): unproven canon claims included — origin, the
+    ancestry options, the protagonist, and every companion must SATISFY
+    the frozen id grammar AND exist in canon (host truth is proven, never
+    shape-checked); duplicate companions or the protagonist listed as a
+    companion are host bugs. A proposal defect only assembly can see (an
+    unsluggable display name) DECLINES retryably. Row facts:
     - the new place is declared (kind/name) with its `description` set to
       the proposed identity — `furnish_scene` sees a described place and
       STANDS DOWN (spec §3: one texture owner);
     - containment nests it in the host-picked parent; the passage commits
-      `connects_to` BOTH WAYS (the road walked is walkable back);
+      ONE `connects_to` edge (origin → new): the engine's lateral graph is
+      UNDIRECTED and symmetrizes traversal, so one stored assertion is
+      already walkable both ways, and ending it later ends the passage
+      whole (two rows would be two independent assertions for one logical
+      edge — route failure could then not be represented coherently);
+    - every row carries an EXPLICIT temporal coordinate — constitutive
+      facts (kind, name, description, role, drive, bond) are `timeless`;
+      acquired facts (containment, passage, moves, `doing`, `accompanying`,
+      texture) are stamped `valid_from=at`. Nothing rides the engine's
+      mutable cursor;
     - the protagonist AND every standing companion move in the same set;
     - the encounter person is ANCHORED (`in` the grown place, else the
       origin — never prose-only), their companion bonded via
       `accompanying` (the standing presence machinery's own state);
-    - texture lands as distinct `detail_<at>_N` rows on the anchor place:
-      distinct within the chunk (same-attribute rows would supersede, and
-      three facts must not collapse to one) AND across chunks (a later
-      encounter on the same road must never supersede an earlier chunk's
-      texture — growth is canon, forever); `at` is unique per chunk
-      because one generative act per turn is the budget contract.
+    - texture lands as `detail_<coord>_N` rows on the anchor place, where
+      `coord` encodes the EXACT `at` value (repr-faithful — fractional
+      identity kept, "." → "p"): distinct within the chunk (same-attribute
+      rows would supersede) AND across chunks at different times (growth
+      is canon, forever; `at` is chunk-unique because one generative act
+      per turn is the budget contract).
     """
     if not isinstance(prop, GrowthProposal):
         raise ValueError("growth assembly: prop must be a GrowthProposal")
     if mode not in ("place", "encounter"):
         raise ValueError(f"growth assembly: unknown mode {mode!r}")
+    if prop.mode != mode:
+        raise ValueError(f"growth assembly: proposal was validated as "
+                         f"{prop.mode!r} but assembly was asked for {mode!r} "
+                         "— mode continuity broken (host bug)")
     if not callable(exists):
         raise ValueError("growth assembly: exists must be the canon roster "
                          "membership predicate")
-    if type(origin) is not str or not origin.startswith("place:"):
-        raise ValueError(f"growth assembly: origin must be a place id, got "
-                         f"{origin!r}")
-    if type(protagonist) is not str or not protagonist.startswith("person:"):
-        raise ValueError("growth assembly: protagonist must be a person id, "
-                         f"got {protagonist!r}")
-    if type(companions) is not list or any(
-            type(c) is not str or not c.startswith("person:")
-            for c in companions):
+    if not callable(identity):
+        raise ValueError("growth assembly: identity must be the host's "
+                         "global identity decision (kind, name) -> "
+                         "(outcome, bound_id)")
+
+    def _canon(eid, prefix: str, what: str) -> str:
+        if type(eid) is not str or not _ID_GRAMMAR.fullmatch(eid) \
+                or not eid.startswith(prefix):
+            raise ValueError(f"growth assembly: {what} must be a well-formed "
+                             f"{prefix}* id, got {eid!r}")
+        if not exists(eid):
+            raise ValueError(f"growth assembly: {what} {eid} is not in canon "
+                             "— host truth must be proven, not asserted")
+        return eid
+
+    _canon(origin, "place:", "origin")
+    _canon(protagonist, "person:", "protagonist")
+    if type(companions) is not list:
         raise ValueError("growth assembly: companions must be a list of "
                          "person ids")
+    for c in companions:
+        _canon(c, "person:", "companion")
+    if len(set(companions)) != len(companions) or protagonist in companions:
+        raise ValueError("growth assembly: companions must be unique and "
+                         "must not include the protagonist")
     if type(at) not in (int, float) or isinstance(at, bool) \
             or not _math.isfinite(float(at)) or float(at) < 0:
         raise ValueError(f"growth assembly: at must be a finite non-negative "
                          f"time, got {at!r}")
     at = float(at)
+
+    def _decision(kind: str, name: str, path: str) -> tuple[str, str]:
+        out = identity(kind, name)
+        if (type(out) not in (tuple, list) or len(out) != 2
+                or out[0] not in ("new", "bound", "ambiguous")):
+            raise ValueError(f"growth assembly: identity returned {out!r} — "
+                             "must be (new|bound|ambiguous, id_or_empty)")
+        outcome, bound = out[0], out[1]
+        if outcome == "bound":
+            _canon(bound, f"{kind}:", f"{path} bound identity")
+        return outcome, bound
 
     taken: set = set()
     place_rows: list[dict] = []
@@ -476,35 +558,50 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
     passage: list[dict] = []
     place_id = ""
     if prop.place is not None:
-        if type(ancestry_options) is not list or not ancestry_options or any(
-                type(o) is not str or not o.startswith("place:")
-                for o in ancestry_options):
+        if type(ancestry_options) is not list or not ancestry_options:
             raise ValueError("growth assembly: ancestry_options must be a "
                              "nonempty list of place ids")
+        for o in ancestry_options:
+            _canon(o, "place:", "ancestry option")
         pi = prop.place["parent_index"]
         if not (0 <= pi < len(ancestry_options)):
             raise ValueError("growth assembly: parent_index outside the "
                              "supplied ancestry_options — the validation and "
                              "assembly lists disagree (host bug)")
-        place_id = _alloc("place", prop.place["name"], exists, taken)
-        if not place_id:
-            return None, "malformed:place.name_unsluggable"
-        place_rows = [
-            {"entity": place_id, "attribute": "kind", "value": "place",
-             "timeless": True},
-            {"entity": place_id, "attribute": "name",
-             "value": prop.place["name"][:60]},
-            {"entity": place_id, "attribute": "description",
-             "value": prop.place["identity"]},
-        ]
-        containment = [_entity_row(place_id, "in", ancestry_options[pi], at)]
-        passage = [_entity_row(origin, "connects_to", place_id, at),
-                   _entity_row(place_id, "connects_to", origin, at)]
+        outcome, bound = _decision("place", prop.place["name"], "place")
+        if outcome == "ambiguous":
+            return None, "unlicensed:place.name_ambiguous"
+        if outcome == "bound":
+            if bound == origin:
+                return None, "proposal:place_is_here"
+            place_id = bound   # reuse: geography only, no constitutive rows
+            passage = [_entity_row(origin, "connects_to", place_id, at)]
+        else:
+            place_id = _alloc("place", prop.place["name"], exists, taken)
+            if not place_id:
+                return None, "malformed:place.name_unsluggable"
+            place_rows = [
+                {"entity": place_id, "attribute": "kind", "value": "place",
+                 "timeless": True},
+                {"entity": place_id, "attribute": "name",
+                 "value": prop.place["name"], "timeless": True},
+                {"entity": place_id, "attribute": "description",
+                 "value": prop.place["identity"], "timeless": True},
+            ]
+            containment = [_entity_row(place_id, "in",
+                                       ancestry_options[pi], at)]
+            passage = [_entity_row(origin, "connects_to", place_id, at)]
 
     anchor = place_id or origin
     encounter_rows: list[dict] = []
     person_id = companion_id = ""
     if prop.encounter is not None:
+        outcome, _b = _decision("person", prop.encounter["name"],
+                                "encounter")
+        if outcome == "bound":
+            return None, "unlicensed:encounter.name_binds_existing"
+        if outcome == "ambiguous":
+            return None, "unlicensed:encounter.name_ambiguous"
         person_id = _alloc("person", prop.encounter["name"], exists, taken)
         if not person_id:
             return None, "malformed:encounter.name_unsluggable"
@@ -512,17 +609,24 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
             {"entity": person_id, "attribute": "kind", "value": "person",
              "timeless": True},
             {"entity": person_id, "attribute": "name",
-             "value": prop.encounter["name"][:60]},
+             "value": prop.encounter["name"], "timeless": True},
             {"entity": person_id, "attribute": "role",
-             "value": prop.encounter["role"]},
+             "value": prop.encounter["role"], "timeless": True},
             {"entity": person_id, "attribute": "drive",
-             "value": prop.encounter["drive"]},
+             "value": prop.encounter["drive"], "timeless": True},
             {"entity": person_id, "attribute": "doing",
-             "value": prop.encounter["doing"]},
+             "value": prop.encounter["doing"], "valid_from": at},
             _entity_row(person_id, "in", anchor, at),
         ]
         comp = prop.encounter.get("companion")
         if comp is not None:
+            outcome, _b = _decision("person", comp["name"],
+                                    "encounter.companion")
+            if outcome == "bound":
+                return None, \
+                    "unlicensed:encounter.companion.name_binds_existing"
+            if outcome == "ambiguous":
+                return None, "unlicensed:encounter.companion.name_ambiguous"
             companion_id = _alloc("person", comp["name"], exists, taken)
             if not companion_id:
                 return None, "malformed:encounter.companion.name_unsluggable"
@@ -530,9 +634,9 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
                 {"entity": companion_id, "attribute": "kind",
                  "value": comp["kind"], "timeless": True},
                 {"entity": companion_id, "attribute": "name",
-                 "value": comp["name"][:60]},
+                 "value": comp["name"], "timeless": True},
                 {"entity": companion_id, "attribute": "bond",
-                 "value": comp["bond"]},
+                 "value": comp["bond"], "timeless": True},
                 _entity_row(companion_id, "in", anchor, at),
                 _entity_row(companion_id, "accompanying", person_id, at),
             ]
@@ -540,13 +644,14 @@ def assemble_chunk(prop: GrowthProposal, *, mode: str, origin: str,
     # the player's own displacement + the companion postcondition: ALL
     # standing companions move in the SAME atomic set — a place chunk with
     # no move is a map annotation, not a walk, so moves exist only when a
-    # new place does (an encounter comes TO the road; nobody teleports).
+    # (new or bound) destination does; an encounter comes TO the road.
     moves: list[dict] = []
     if place_id:
         moves = [_entity_row(protagonist, "in", place_id, at)]
         moves += [_entity_row(c, "in", place_id, at) for c in companions]
 
-    texture = [{"entity": anchor, "attribute": f"detail_{int(at)}_{i + 1}",
+    coord = repr(at).replace("-", "m").replace("+", "").replace(".", "p")
+    texture = [{"entity": anchor, "attribute": f"detail_{coord}_{i + 1}",
                 "value": t, "valid_from": at}
                for i, t in enumerate(prop.texture)]
 
