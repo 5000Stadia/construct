@@ -1823,3 +1823,42 @@ def test_wired_protected_key_enumeration_failure_seams(tmp_path,
             == "place:north_road"
     finally:
         w.close()
+
+
+def test_wired_superseded_aliases_still_conceal(tmp_path, monkeypatch):
+    # cr r5: alias accrual is DURABLE identity — an older alias superseded
+    # by a newer one must conceal forever, not only the point-state value
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([{"entity": "person:rival", "attribute": "alias",
+                              "value": "the Red Jack", "valid_from": 100.0}])
+        w.ingest_structured([{"entity": "person:rival", "attribute": "alias",
+                              "value": "the Scarlet Fox",
+                              "valid_from": 200.0}])
+        # point state now reports only the newer alias
+        assert w.porcelain.state("person:rival", "alias")["fact"][
+            "value"] == "the Scarlet Fox"
+
+        def _fake(porcelain, items):   # a WILLING engine never sees it
+            receipt = porcelain.ingest_structured(items, classify="rules")
+            return growth_mod.ActivationResult(
+                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
+        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        for leaked in ("the Red Jack Crossing", "the Scarlet Fox Landing"):
+            g = _good()
+            g["place"]["name"] = leaked
+            provider = StubProvider([_classify(), g])
+            r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                         turn=1)
+            assert r.prose == _GROWTH_SEAM, leaked
+            assert r.trace.growth == \
+                "declined:unlicensed:place.name_concealed", leaked
+        assert w.porcelain.state("place:the_red_jack_crossing",
+                                 "kind")["status"] != "known"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()

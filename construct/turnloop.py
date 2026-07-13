@@ -241,6 +241,7 @@ def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
     the unpayable one. EVERY authority read is fail-closed: an exception
     raises GrowthVocabUnavailable (technical decline upstream), never an
     empty contribution."""
+    from construct.adapter import frame_facts
     from construct.arc.executor import concealed_tokens
     secret: set[str] = set()
     try:
@@ -248,35 +249,38 @@ def _growth_concealed_vocab(arc: Arc, reads: Any) -> set[str]:
     except Exception as exc:  # the enumeration itself is an authority read
         raise GrowthVocabUnavailable(f"protected-key enumeration: {exc}") \
             from exc
+
+    def _identity_words(entity: str) -> set[str]:
+        """EVERY durable identity value the entity has ever registered —
+        the full canon assertion log, not the folded point state (cr r5:
+        alias accrual is durable identity; a superseded alias still names
+        the hidden answer). Over-inclusion is the safe direction."""
+        out: set[str] = set()
+        try:
+            for f in frame_facts(reads._world, "canon", entity=entity):
+                if f.attribute in ("name", "alias", "aliases", "title") \
+                        and isinstance(f.value, str):
+                    out |= _secret_word_set(f.value)
+        except Exception as exc:
+            raise GrowthVocabUnavailable(
+                f"{entity} identity log: {exc}") from exc
+        return out
+
     for (e, a) in keys:
         secret |= _secret_word_set(a)
         secret |= _secret_word_set(e.split(":")[-1])
-        for attr in (a, "name", "alias", "aliases", "title"):
-            try:
-                val = reads.state(e, attr)
-            except Exception as exc:
-                raise GrowthVocabUnavailable(f"{e}.{attr}: {exc}") from exc
-            if isinstance(val, str):
-                secret |= _secret_word_set(val)
-        # the referenced-answer entity's own names (the move-guard's
-        # vocabulary, read strictly here)
+        secret |= _identity_words(e)
         try:
             val = reads.state(e, a)
         except Exception as exc:
             raise GrowthVocabUnavailable(f"{e}.{a}: {exc}") from exc
-        if isinstance(val, str) and re.match(r"^[a-z_]+:[a-z0-9_]+$", val):
-            secret |= _secret_word_set(val.split(":", 1)[-1])
-            # EVERY identity surface of the referenced answer — an alias is
-            # as much the hidden identity as the primary name (cr r4: "the
-            # Red Jack" must conceal exactly like "rival")
-            for nattr in ("name", "alias", "aliases", "title"):
-                try:
-                    nm = reads.state(val, nattr)
-                except Exception as exc:
-                    raise GrowthVocabUnavailable(
-                        f"{val}.{nattr}: {exc}") from exc
-                if isinstance(nm, str):
-                    secret |= _secret_word_set(nm)
+        if isinstance(val, str):
+            secret |= _secret_word_set(val)     # the protected VALUE itself
+            if re.match(r"^[a-z_]+:[a-z0-9_]+$", val):
+                # the referenced ANSWER's whole identity — slug + every
+                # durable name/alias/title it has ever carried
+                secret |= _secret_word_set(val.split(":", 1)[-1])
+                secret |= _identity_words(val)
     secret |= concealed_tokens(keys)              # entity/attr distinctives
     return secret
 
