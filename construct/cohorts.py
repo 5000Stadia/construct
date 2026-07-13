@@ -185,6 +185,17 @@ CLASSIFY_SCHEMA = {
                   "stationary look or question ('is anyone around?' — that is "
                   "observation, not travel), and false whenever no movement is "
                   "committed. Most turns: false."},
+        "declares_tangent_aim": {"type": "boolean",
+                  "description": "true ONLY when the player plainly declares a NEW "
+                  "personal aim or story of their own that DEPARTS from the current "
+                  "main thread ('forget the case — I'm making a life on this boat', "
+                  "'this crew is my story now'). A declaration, not a move: never "
+                  "true for ordinary travel, curiosity, side errands, or a line of "
+                  "enthusiasm without a stated aim. Most turns: false."},
+        "tangent_aim": {"type": "string",
+                  "description": "when declares_tangent_aim: the declared aim in one "
+                  "plain sentence, normalized from the player's words ('build a life "
+                  "aboard the Gullwing with Sefa'); else empty"},
         "addresses_present": {"type": "boolean",
                   "description": "true when the input SPEAKS TO or directly engages a "
                   "present person — a question, an order, a greeting, pressing them, "
