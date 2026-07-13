@@ -34,19 +34,53 @@ class ActivationResult:
     receipts: tuple = ()        # engine receipt rows on success (as returned)
 
 
-def atomic_capable(p) -> bool:
-    """Does this engine expose the atomic envelope? Detection is
-    signature-based and conservative: absent, ambiguous, or unreadable →
-    NOT capable (fail closed). The final call shape is pbr's to GREEN; we
-    detect only the reviewed protocol boundary (`atomic` on the
-    structured-ingest path or the `commit_set` verb)."""
+def _capability(p) -> str:
+    """Which atomic surface does this engine expose? "commit_set" |
+    "atomic_ingest" | "" (none). Detection is conservative and BOUND TO
+    THE SURFACE THAT WILL BE CALLED (cr: never infer safety from one
+    surface and invoke another): commit_set must be callable;
+    atomic_ingest requires an EXPLICIT NAMED `atomic` parameter — a broad
+    **kwargs ingest that would silently swallow the flag is NOT capable.
+    Absent, ambiguous, or unreadable → "" (fail closed)."""
     try:
-        if hasattr(p, "commit_set"):
-            return True
+        if callable(getattr(p, "commit_set", None)):
+            return "commit_set"
         sig = inspect.signature(p.ingest_structured)
-        return "atomic" in sig.parameters
+        param = sig.parameters.get("atomic")
+        if param is not None and param.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY):
+            return "atomic_ingest"
+        return ""
     except Exception:  # noqa: BLE001 — unreadable surface is not capable
-        return False
+        return ""
+
+
+def atomic_capable(p) -> bool:
+    return _capability(p) != ""
+
+
+def _affirmative_success(receipt, n_items: int) -> tuple[bool, str, tuple]:
+    """ATOMIC-ACTIVATION-V1 r2 permits TYPED FAILURE RETURNS — success
+    must be affirmative, never inferred from the absence of an exception
+    (cr: an {outcome: aborted} return must not read as ok). Rejects an
+    explicit failure outcome, any skipped ops, empty rows for a nonempty
+    chunk, and any ambiguous shape."""
+    if isinstance(receipt, dict):
+        outcome = str(receipt.get("outcome", "")).lower()
+        skipped = receipt.get("skipped") or ()
+        rows = tuple(receipt.get("rows") or ())
+    else:
+        outcome = str(getattr(receipt, "outcome", "") or "").lower()
+        skipped = getattr(receipt, "skipped", None) or ()
+        rows = tuple(getattr(receipt, "rows", None) or ())
+    if outcome and outcome not in ("ok", "committed", "success"):
+        return False, f"engine_outcome:{outcome}", rows
+    if skipped:
+        return False, "engine_skipped_ops", rows
+    if n_items and not rows:
+        return False, "ambiguous_receipt:no_rows", rows
+    return True, "", rows
 
 
 def activate_chunk(p, items: list[dict]) -> ActivationResult:
@@ -59,18 +93,26 @@ def activate_chunk(p, items: list[dict]) -> ActivationResult:
     the envelope's own contract)."""
     if not items:
         return ActivationResult(ok=False, reason="empty_chunk")
-    if not atomic_capable(p):
+    cap = _capability(p)
+    if not cap:
         logger.warning("growth activation unavailable: engine has no atomic "
                        "envelope (%d items withheld — nothing written)",
                        len(items))
         return ActivationResult(ok=False, reason="activation_unavailable")
     try:
-        receipt = p.ingest_structured(items, atomic=True)
+        if cap == "commit_set":
+            # dispatch the surface that was DETECTED (never the sugar path
+            # through a possibly-broad legacy ingest)
+            receipt = p.commit_set([{"op": "assert", "item": i} for i in items])
+        else:
+            receipt = p.ingest_structured(items, atomic=True)
     except Exception as exc:  # noqa: BLE001 — an aborted set is a clean refusal
         logger.warning("growth activation aborted by the engine: %s", exc)
         return ActivationResult(ok=False, reason=f"engine_abort:{exc}")
-    rows = tuple(getattr(receipt, "rows", None) or
-                 (receipt.get("rows", ()) if isinstance(receipt, dict) else ()))
+    ok, reason, rows = _affirmative_success(receipt, len(items))
+    if not ok:
+        logger.warning("growth activation not affirmed: %s", reason)
+        return ActivationResult(ok=False, reason=reason, receipts=rows)
     return ActivationResult(ok=True, receipts=rows)
 
 

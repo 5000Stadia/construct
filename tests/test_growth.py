@@ -1,8 +1,9 @@
 """WORLD-GROWTH G1 — the activation adaptor under cr's build boundary.
 
 The safety gate is a PASSING test (the fail-closed path on today's
-engine); the future atomic integration is a STRICT xfail against a FAKE
-atomic backend — never a guess at the final engine signature.
+engine); the happy path runs against a FAKE atomic backend; the STRICT
+xfail probes the REAL engine for the envelope's arrival — it flips (and
+must be replaced by the real fault matrix) exactly when PB ships.
 """
 from __future__ import annotations
 
@@ -109,3 +110,63 @@ def test_ordered_chunk_items_is_contractual():
         moves=[{"entity": "m"}], containment=[{"entity": "c"}],
         passage=[{"entity": "x"}], encounter=[{"entity": "e"}])
     assert [i["entity"] for i in items] == ["p", "c", "x", "m", "e", "t"]
+
+
+def test_typed_abort_return_is_not_success():
+    # cr: the r2 envelope permits TYPED failure returns — success must be
+    # affirmative; {outcome: aborted, rows: []} must never read ok
+    class _TypedAbortP(_FakeAtomicP):
+        def ingest_structured(self, items, atomic=False, **kw):
+            return {"outcome": "aborted", "rows": [],
+                    "skipped": [{"op": 3, "reason": "gate"}]}
+    r = activate_chunk(_TypedAbortP(), list(_CHUNK))
+    assert not r.ok and r.reason.startswith("engine_outcome:aborted")
+    # skipped ops alone also refuse
+    class _SkippedP(_FakeAtomicP):
+        def ingest_structured(self, items, atomic=False, **kw):
+            return {"rows": [{"entity": "x"}], "skipped": [{"op": 1}]}
+    r2 = activate_chunk(_SkippedP(), list(_CHUNK))
+    assert not r2.ok and r2.reason == "engine_skipped_ops"
+    # empty rows for a nonempty chunk = ambiguous, refused
+    class _EmptyP(_FakeAtomicP):
+        def ingest_structured(self, items, atomic=False, **kw):
+            return {"rows": []}
+    r3 = activate_chunk(_EmptyP(), list(_CHUNK))
+    assert not r3.ok and r3.reason == "ambiguous_receipt:no_rows"
+
+
+def test_commit_set_branch_never_touches_a_broad_kwargs_ingest():
+    # cr: never infer safety from one surface and invoke another — a
+    # backend with commit_set plus a broad **kwargs legacy ingest must be
+    # served through commit_set ONLY (the kwargs ingest would silently
+    # swallow atomic=True and tear).
+    class _CommitSetP:
+        def __init__(self):
+            self.set_calls, self.ingest_calls = [], []
+        def commit_set(self, ops):
+            self.set_calls.append(list(ops))
+            return {"outcome": "ok",
+                    "rows": [{"entity": o["item"]["entity"]} for o in ops]}
+        def ingest_structured(self, items, **kwargs):  # broad legacy surface
+            self.ingest_calls.append((list(items), kwargs))
+            return {"rows": [{"entity": i["entity"]} for i in items]}
+    p = _CommitSetP()
+    r = activate_chunk(p, list(_CHUNK))
+    assert r.ok and len(r.receipts) == 2
+    assert p.ingest_calls == []                      # the legacy door untouched
+    assert [o["op"] for o in p.set_calls[0]] == ["assert", "assert"]
+
+
+def test_broad_kwargs_ingest_alone_is_not_capable():
+    # a **kwargs-only ingest (no named atomic param, no commit_set) would
+    # swallow the flag — it is NOT capable; the adaptor fails closed.
+    class _BroadP:
+        def __init__(self):
+            self.calls = []
+        def ingest_structured(self, items, **kwargs):
+            self.calls.append(items)
+            return {"rows": [{"entity": i["entity"]} for i in items]}
+    p = _BroadP()
+    r = activate_chunk(p, list(_CHUNK))
+    assert r.reason == "activation_unavailable"
+    assert p.calls == []                             # nothing written
