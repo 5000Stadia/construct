@@ -192,10 +192,14 @@ def growth_eligibility(*, kind: str, committed: bool, moves_open: bool,
     return None
 
 
-#: Display fields must be PLAIN WORDS — an id/slug-shaped string in a model
-#: proposal is an authority escape (the model naming entities). The host
-#: allocates every id; a proposal that tries is declined, not repaired.
-_ID_SHAPED = __import__("re").compile(r"^[a-z_]+:[a-z0-9_]+$|[{}<>`]")
+#: Model display fields must be PLAIN WORDS: an id token ANYWHERE in a
+#: persisted field is an authority escape (the model naming/referencing
+#: entities), as is markup. Search, never fullmatch (cr piece-3: the
+#: embedded "waypost at place:secret_ford" must decline too).
+_ID_TOKEN = __import__("re").compile(r"\b[a-z_]+:[a-z0-9_]+\b|[{}<>`]")
+
+#: Field length bound — display lines, not documents.
+_MAX_FIELD = 200
 
 
 @dataclass(frozen=True)
@@ -211,65 +215,102 @@ class GrowthProposal:
     texture: tuple = ()
 
 
-def validated_proposal(raw: dict, *, mode: str,
-                       n_ancestry_options: int) -> tuple["GrowthProposal | None", str]:
-    """The host gate over the Assessor's output (spec §3): returns
-    (proposal, "") or (None, reason). Structural checks only — plausibility
-    was the model's job; AUTHORITY is checked here: no id-shaped display
-    strings anywhere, parent_index strictly within the host-supplied
-    options, encounter present when the mode demands it, texture bounded,
-    confidence a real number. Every decline is retryable telemetry for the
-    caller (the proposal-failure minimal contract)."""
-    if not isinstance(raw, dict):
-        return None, "malformed:not_object"
-    assessment = str(raw.get("assessment") or "").strip()
-    if not assessment:
-        return None, "malformed:no_assessment"
-    try:
-        confidence = float(raw.get("confidence"))
-    except (TypeError, ValueError):
+def _field(obj: dict, path: str, key: str, leaks) -> tuple[str | None, str]:
+    """One persisted model field: EXACT string type (no coercion-as-repair),
+    nonempty, bounded, id-token-free anywhere, and concealment-screened by
+    the HOST-SUPPLIED leak predicate. Returns (value, "") or (None, reason)
+    with a field-qualified reason the wiring receipt can act on."""
+    v = obj.get(key)
+    if type(v) is not str:
+        return None, f"malformed:{path}.{key}_type"
+    v = v.strip()
+    if not v:
+        return None, f"malformed:{path}.{key}_empty"
+    if len(v) > _MAX_FIELD:
+        return None, f"malformed:{path}.{key}_length"
+    if _ID_TOKEN.search(v):
+        return None, f"unlicensed:{path}.{key}_id"
+    if leaks is not None and leaks(v):
+        return None, f"unlicensed:{path}.{key}_concealed"
+    return v, ""
+
+
+def _clean(obj, path: str, fields: tuple, leaks) -> tuple[dict | None, str]:
+    if type(obj) is not dict:
+        return None, f"malformed:{path}_type"
+    out = {}
+    for f in fields:
+        v, why = _field(obj, path, f, leaks)
+        if v is None:
+            return None, why
+        out[f] = v
+    return out, ""
+
+
+def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
+                       leaks=None, min_confidence: float = 0.35
+                       ) -> tuple["GrowthProposal | None", str]:
+    """The host gate over the Assessor's output (spec §3; cr piece-3
+    hardening). Structural AUTHORITY checks — plausibility was the model's
+    job: id tokens anywhere in any persisted field decline; every field is
+    screened by the HOST-SUPPLIED concealment predicate (`leaks`, built
+    from the arc's protected/concealed vocabulary — the model never sees
+    the hidden words, the host applies them); parent_index must be exactly
+    an int strictly inside the host option count (no fallback option — the
+    host names a wider-world option explicitly if legal); mode must be
+    exactly place|encounter; texture is a real list of 1-3 exact strings
+    (overage DECLINES, never truncates — a proposal failure is not a host
+    repair opportunity); confidence must be a real finite number in [0,1]
+    (bool excluded) and BELOW `min_confidence` declines
+    `proposal:low_confidence` — LOW never emerges as an accepted proposal
+    for a later caller to forget. Every decline is a stable
+    field-qualified retryable reason."""
+    if mode not in ("place", "encounter"):
+        return None, "malformed:mode"
+    if type(raw) is not dict:
+        return None, "malformed:proposal_type"
+    assessment = raw.get("assessment")
+    if type(assessment) is not str or not assessment.strip():
+        return None, "malformed:assessment"
+    assessment = assessment.strip()
+
+    conf = raw.get("confidence")
+    import math
+    if type(conf) not in (int, float) or isinstance(conf, bool) \
+            or not math.isfinite(float(conf)) or not (0.0 <= float(conf) <= 1.0):
         return None, "malformed:confidence"
+    confidence = float(conf)
+    if confidence < min_confidence:
+        return None, "proposal:low_confidence"
 
-    def _clean(obj, fields) -> tuple[dict | None, str]:
-        if obj is None:
-            return None, ""
-        if not isinstance(obj, dict):
-            return None, "malformed:not_object"
-        out = {}
-        for f in fields:
-            v = str(obj.get(f) or "").strip()
-            if not v:
-                return None, f"malformed:missing_{f}"
-            if _ID_SHAPED.search(v):
-                return None, f"unlicensed:id_shaped_{f}"
-            out[f] = v
-        return out, ""
-
-    place_raw = raw.get("place")
     place = None
+    place_raw = raw.get("place")
     if place_raw is not None:
-        place, why = _clean(place_raw, ("name", "identity"))
+        if n_ancestry_options < 1:
+            return None, "unlicensed:place.no_ancestry_options"
+        place, why = _clean(place_raw, "place", ("name", "identity"), leaks)
         if place is None:
-            return None, why or "malformed:place"
-        try:
-            pi = int(place_raw.get("parent_index"))
-        except (TypeError, ValueError):
-            return None, "malformed:parent_index"
-        if not (0 <= pi < max(1, n_ancestry_options)):
-            return None, "unlicensed:parent_index_out_of_range"
+            return None, why
+        pi = place_raw.get("parent_index")
+        if type(pi) is not int:
+            return None, "malformed:place.parent_index_type"
+        if not (0 <= pi < n_ancestry_options):
+            return None, "unlicensed:place.parent_index_range"
         place["parent_index"] = pi
 
-    enc_raw = raw.get("encounter")
     encounter = None
+    enc_raw = raw.get("encounter")
     if enc_raw is not None:
-        encounter, why = _clean(enc_raw, ("name", "role", "drive", "doing"))
+        encounter, why = _clean(enc_raw, "encounter",
+                                ("name", "role", "drive", "doing"), leaks)
         if encounter is None:
-            return None, why or "malformed:encounter"
+            return None, why
         comp_raw = enc_raw.get("companion")
         if comp_raw is not None:
-            comp, why = _clean(comp_raw, ("name", "kind", "bond"))
+            comp, why = _clean(comp_raw, "encounter.companion",
+                               ("name", "kind", "bond"), leaks)
             if comp is None:
-                return None, why or "malformed:companion"
+                return None, why
             encounter["companion"] = comp
 
     if mode == "encounter" and encounter is None:
@@ -277,11 +318,24 @@ def validated_proposal(raw: dict, *, mode: str,
     if mode == "place" and place is None:
         return None, "malformed:place_required"
 
-    texture = tuple(str(t).strip() for t in (raw.get("texture") or ())
-                    if str(t).strip())[:3]
-    for t in texture:
-        if _ID_SHAPED.search(t):
-            return None, "unlicensed:id_shaped_texture"
+    tex_raw = raw.get("texture")
+    if type(tex_raw) not in (list, tuple):
+        return None, "malformed:texture_type"
+    if not (1 <= len(tex_raw) <= 3):
+        return None, ("malformed:texture_too_many" if len(tex_raw) > 3
+                      else "malformed:texture_empty")
+    texture = []
+    for i, t in enumerate(tex_raw):
+        if type(t) is not str or not t.strip():
+            return None, f"malformed:texture.{i}_type"
+        t = t.strip()
+        if len(t) > _MAX_FIELD:
+            return None, f"malformed:texture.{i}_length"
+        if _ID_TOKEN.search(t):
+            return None, f"unlicensed:texture.{i}_id"
+        if leaks is not None and leaks(t):
+            return None, f"unlicensed:texture.{i}_concealed"
+        texture.append(t)
     return GrowthProposal(assessment=assessment, confidence=confidence,
                           place=place, encounter=encounter,
-                          texture=texture), ""
+                          texture=tuple(texture)), ""

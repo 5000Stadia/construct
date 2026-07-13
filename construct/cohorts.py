@@ -3100,10 +3100,6 @@ def relocate_pick(provider: Provider, target: dict, holder: str, scene: str,
         RELOCATE_SCHEMA, tier="cheap", task="rlc")
 
 
-#: DRIFT-HANDLING.md §3 R3 — the absence-consequence cohort's output schema:
-#: 1-2 concrete world-facts (camera-facts: what a witness at the staged scene
-#: could have RECORDED), a one-line callback directive for when the player next
-#: touches the affected people/places, and a confidence the caller declines on.
 #: WORLD-GROWTH §3 — the Assessor's output schema (G1/G2). The founder's
 #: reasoning chain as a contract: assess FROM established context, propose
 #: DISPLAY FIELDS ONLY — no ids, no entity references; the HOST allocates
@@ -3170,18 +3166,19 @@ ASSESSOR_SCHEMA = {
                                         "required": ["name", "kind", "bond"]},
                       },
                       "required": ["name", "role", "drive", "doing"]},
-        "texture": {"type": "array", "items": {"type": "string"}, "maxItems": 3,
-                    "description": "1-3 plain furnishing facts for the arrival "
-                                   "(weather-worn signpost, the smell of tar) — "
-                                   "concrete, never plot-suggestive"},
-        "confidence": {"type": "number",
+        "texture": {"type": "array", "items": {"type": "string"},
+                    "minItems": 1, "maxItems": 3,
+                    "description": "EXACTLY 1-3 plain furnishing facts for the "
+                                   "arrival (weather-worn signpost, the smell of "
+                                   "tar) — concrete, never plot-suggestive"},
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0,
                        "description": "0.0-1.0 — how honestly this growth fits HERE "
                                       "given the established context; LOW only when "
                                       "the world you were shown offers no honest "
                                       "material (your low is a proposal failure, "
                                       "never proof of emptiness)"},
     },
-    "required": ["assessment", "confidence"],
+    "required": ["assessment", "texture", "confidence"],
 }
 
 
@@ -3197,8 +3194,13 @@ def assessor_propose(provider: Provider, *, mode: str, intent: str,
     the model may only choose among them. Main-tier: the assessment chain
     is planning-class reasoning, at most once per turn (the invocation
     claims the turn's one generative slot — the caller's arbitration)."""
-    _opts = "\n".join(f"  [{i}] {o}" for i, o in enumerate(ancestry_options)) \
-        or "  [0] the wider world"
+    if mode not in ("place", "encounter"):
+        raise ValueError(f"assessor mode must be place|encounter, got {mode!r}")
+    if not ancestry_options:
+        raise ValueError("assessor requires host-supplied ancestry options "
+                         "(the host names the wider-world option explicitly "
+                         "if that is legal here — never fabricated)")
+    _opts = "\n".join(f"  [{i}] {o}" for i, o in enumerate(ancestry_options))
     _thr = "\n".join(f"- {t}" for t in threads) or "(none pressing)"
     want = ("a PERSON met on the way (the encounter is the point; a new "
             "place only if the meeting needs one)" if mode == "encounter"
@@ -3225,6 +3227,10 @@ def assessor_propose(provider: Provider, *, mode: str, intent: str,
         ASSESSOR_SCHEMA, tier="main", task="gro")
 
 
+#: DRIFT-HANDLING.md §3 R3 — the absence-consequence cohort's output schema:
+#: 1-2 concrete world-facts (camera-facts: what a witness at the staged scene
+#: could have RECORDED), a one-line callback directive for when the player next
+#: touches the affected people/places, and a confidence the caller declines on.
 ABSENCE_SCHEMA = {
     "type": "object",
     "properties": {
