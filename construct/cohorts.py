@@ -2064,6 +2064,39 @@ GEN_ARC_SCHEMA = {
 }
 
 
+def author_tangent_arc(provider: Provider, *, aim: str, protagonist: str,
+                       visible_facts: str, style: str,
+                       available_ids: list[str]) -> dict:
+    """WORLD-GROWTH G-A item 3 — the DEDICATED tangent author. The player
+    declared a NEW story of their own and a later committed action
+    confirmed it; author the arc of THAT story. Inputs are the persisted
+    stated aim + PLAYER-VISIBLE facts only (the host assembles them from
+    the player's frame and grown canon — the hidden plot frame is
+    structurally absent, so nothing here can leak or lean on the old
+    answers). The proposal shape is the shared arc grammar; the HOST
+    forces the protagonist and lints before anything commits."""
+    _ids = "\n".join(f"- {i}" for i in available_ids[:60])
+    return complete_sync(provider,
+        f"The player has walked out of the written story and STARTED THEIR "
+        f"OWN — and the world says yes. Author the hidden arc of the story "
+        f"they declared, as real dramaturgy: a destination worth reaching, "
+        f"earned through the world they are actually in.\n\n"
+        f"THE DECLARED AIM (their story, their words — serve it, never "
+        f"replace it): {aim}\n"
+        f"THE PROTAGONIST (this is a PLAYER-CHARACTER arc; `protagonist` "
+        f"must be EXACTLY this id): {protagonist}\n"
+        f"WHAT THE PLAYER CAN SEE (the only truth available — build from "
+        f"it):\n{visible_facts}\n"
+        f"AVAILABLE IDS (beats may reference only these):\n{_ids}\n"
+        f"STYLE: {style}\n\n"
+        f"Shape the aim into a destination with stakes (delta_type + "
+        f"tension), 1-2 concrete path-independent beats, and give it a "
+        f"title in the world's voice. The hook is the world ANSWERING "
+        f"their declaration — the first pull of the new story, diegetic, "
+        f"never an announcement.",
+        GEN_ARC_SCHEMA, tier="main", deliberate=True, task="tga")
+
+
 def generate_arc(provider: Provider, *, trigger: str, fuel: str,
                  available_ids: list[str], style: str,
                  present_characters: str, protagonist: str = "") -> dict:

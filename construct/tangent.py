@@ -205,3 +205,156 @@ def may_confirm(pending, *, turn: int, committed: bool) -> bool:
         # the validated value
         return False
     return 1 <= turn - pending.declared_turn <= EXPIRY_TURNS
+
+
+# ---------------------------------------------------------------------------
+# Piece B — the tangent author gate + the ATOMIC adoption set (spec §6 G-A
+# items 2, 3, 3b). The author's proposal is model display material; the
+# HOST forces the protagonist, builds, and LINTS before anything touches
+# the portfolio; the adoption itself is ONE typed mixed-operation set
+# through the RULED engine envelope (PB <d0e5199b…>: commit_set(ops) with
+# exactly {op:"assert", item} | {op:"retract", assertion_id, reason}) —
+# host-side atomicity mechanisms are rejected outright, so on an engine
+# without commit_set adoption fails CLOSED before writing anything.
+
+#: The durable adoption receipt (the phase boundary reads it — item 4):
+#: rides IN the atomic set, so the boundary flips with the adoption or
+#: not at all.
+ADOPTION_RECEIPT_KIND = "tangent_adopted"
+
+
+def build_tangent_arc(proposal, *, protagonist: str, arc_id: str, reads
+                      ) -> tuple:
+    """The DEDICATED tangent build path (item 3; the LWG mint path
+    structurally rejects player-protagonist arcs and is not reused): the
+    model's proposal is display material — the HOST forces the
+    protagonist to exactly the player, builds through the shared
+    grammar, and runs the full arc lint. Returns (arc, []) or
+    (None, problems); NOTHING is committed here — the caller may only
+    hand a linted arc to the adoption set."""
+    if type(protagonist) is not str or not protagonist.startswith("person:"):
+        raise ValueError(f"tangent build: protagonist must be a person id, "
+                         f"got {protagonist!r}")
+    if type(arc_id) is not str or not arc_id.startswith("arc:"):
+        raise ValueError(f"tangent build: arc_id must be an arc id, got "
+                         f"{arc_id!r}")
+    if not isinstance(proposal, dict):
+        return None, ["proposal: not a mapping"]
+    proposal = dict(proposal)
+    proposal["protagonist"] = protagonist   # forced, never trusted
+    try:
+        from construct.game import _build_arc
+        arc = _build_arc(proposal, arc_id=arc_id)
+    except Exception as exc:  # noqa: BLE001 — a bad proposal is retryable
+        return None, [f"build: {exc}"]
+    if arc.protagonist != protagonist:
+        return None, ["build: protagonist drift"]
+    # the dedicated PREFLIGHT (item 3 "owns its schema and preflight"):
+    # grounding the lint layer doesn't cover — the protagonist and the
+    # tension entity must exist in the world the arc will govern
+    try:
+        if not reads.has_entity(protagonist):
+            return None, ["preflight: ungrounded_protagonist"]
+        tension_entity = arc.shape.tension[0] if arc.shape.tension else None
+        if not tension_entity or not reads.has_entity(tension_entity):
+            return None, ["preflight: ungrounded_tension"]
+    except Exception as exc:  # noqa: BLE001 — an unreadable world is unfit
+        return None, [f"preflight: {exc}"]
+    try:
+        from construct.arc.lint import lint_arc
+        findings = lint_arc(arc, reads)
+    except Exception as exc:  # noqa: BLE001 — an unlintable arc is unfit
+        return None, [f"lint: {exc}"]
+    # `2-paths` is advisory here exactly as at session zero and the LWG
+    # preflight (generator.py) — everything else blocks
+    problems = [f"lint:{f.check}" for f in findings if f.check != "2-paths"]
+    if problems:
+        return None, problems
+    return arc, []
+
+
+def adoption_ops(*, new_arc_items: list, manifest_items: list,
+                 retract_ids: list, old_main_id: str, new_main_id: str,
+                 aim: str, turn: int, at: float) -> list[dict]:
+    """The ONE adoption unit (item 3b), as ordered typed ops for
+    commit_set: retract the sealed portfolio manifest rows FIRST (the
+    Cx 167 constitutive-fold discipline), then assert the new arc + its
+    index, the old main's durable demotion (reason `tangent_adopted` —
+    never a silent drop), the replacement manifest, and the adoption
+    receipt the phase boundary reads. Any op failing aborts the whole
+    set engine-side; nothing here writes."""
+    if type(old_main_id) is not str or not old_main_id.startswith("arc:"):
+        raise ValueError(f"adoption ops: old_main_id must be an arc id, "
+                         f"got {old_main_id!r}")
+    if type(new_main_id) is not str or not new_main_id.startswith("arc:") \
+            or new_main_id == old_main_id:
+        raise ValueError(f"adoption ops: new_main_id must be a DIFFERENT "
+                         f"arc id, got {new_main_id!r}")
+    if type(new_arc_items) is not list or not new_arc_items or any(
+            not isinstance(i, dict) for i in new_arc_items):
+        raise ValueError("adoption ops: new_arc_items must be a nonempty "
+                         "list of row dicts")
+    if type(manifest_items) is not list or not manifest_items or any(
+            not isinstance(i, dict) for i in manifest_items):
+        raise ValueError("adoption ops: manifest_items must be a nonempty "
+                         "list of row dicts")
+    if type(retract_ids) is not list or any(
+            type(r) is not str or not r.strip() for r in retract_ids):
+        raise ValueError("adoption ops: retract_ids must be assertion-id "
+                         "strings")
+    norm_aim = _normalize_aim(aim)
+    if not norm_aim:
+        raise ValueError(f"adoption ops: aim must be a nonempty bounded "
+                         f"string, got {aim!r}")
+    _require_turn(turn, "turn")
+    at = _require_at(at)
+    ev = f"event:tangent_adopted_{turn}"
+    ops: list[dict] = [
+        {"op": "retract", "assertion_id": rid,
+         "reason": "tangent adoption: superseding the portfolio manifest"}
+        for rid in retract_ids]
+    ops += [{"op": "assert", "item": dict(i)} for i in new_arc_items]
+    ops.append({"op": "assert", "item": {
+        "entity": old_main_id, "attribute": "demoted",
+        "value": ADOPTION_RECEIPT_KIND, "frame": "plot:main",
+        "valid_from": at}})
+    ops += [{"op": "assert", "item": dict(i)} for i in manifest_items]
+    for attr, value in (("kind", ADOPTION_RECEIPT_KIND), ("aim", norm_aim),
+                        ("old_main", old_main_id),
+                        ("new_main", new_main_id)):
+        ops.append({"op": "assert", "item": {
+            "entity": ev, "attribute": attr, "value": value,
+            "frame": "session:main", "valid_from": at}})
+    return ops
+
+
+def activate_adoption(p, ops: list) -> "object":
+    """Commit the adoption set atomically, or refuse before writing.
+
+    commit_set is the ONLY door (the set mixes retracts with asserts, so
+    the assert-only atomic sugar can never carry it; host-side atomicity
+    is rejected by PB outright). On an engine without commit_set:
+    `adoption_unavailable`, nothing written. Success must be affirmative
+    (the growth adaptor's own receipt discipline)."""
+    from construct.growth import ActivationResult, _affirmative_success
+    if type(ops) is not list or not ops:
+        return ActivationResult(ok=False, reason="empty_set")
+    for op in ops:
+        if not isinstance(op, dict) or op.get("op") not in ("assert",
+                                                            "retract"):
+            return ActivationResult(ok=False, reason="malformed_op")
+    n_asserts = sum(1 for op in ops if op["op"] == "assert")
+    if not callable(getattr(p, "commit_set", None)):
+        logger.warning("adoption unavailable: engine has no commit_set "
+                       "(%d ops withheld — nothing written)", len(ops))
+        return ActivationResult(ok=False, reason="adoption_unavailable")
+    try:
+        receipt = p.commit_set(list(ops))
+    except Exception as exc:  # noqa: BLE001 — an aborted set is a refusal
+        logger.warning("adoption aborted by the engine: %s", exc)
+        return ActivationResult(ok=False, reason=f"engine_abort:{exc}")
+    ok, reason, rows = _affirmative_success(receipt, n_asserts)
+    if not ok:
+        logger.warning("adoption not affirmed: %s", reason)
+        return ActivationResult(ok=False, reason=reason, receipts=rows)
+    return ActivationResult(ok=True, receipts=rows)

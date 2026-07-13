@@ -215,3 +215,165 @@ def test_pending_lifecycle_on_a_real_world(tmp_path):
                             turn=12).declared_turn == 11
     finally:
         w2.close()
+
+
+# ---- piece B: the author gate + the atomic adoption set --------------------
+
+def _proposal(**over):
+    p = {"protagonist": "person:npc",   # the host FORCES this — never trusted
+         "delta_type": "identity_accepted",
+         "tension": ["person:you", "drive:belonging", "drive:duty"],
+         "beats": [{"id": "beat:first_catch", "phase": "rising",
+                    "weight": "required", "kind": "event_occurs",
+                    "entity": "first_catch", "attribute": "", "value": ""}],
+         "hook": "Sefa tosses you the bow line as the tide turns.",
+         "title": "The Gullwing's Own"}
+    p.update(over)
+    return p
+
+
+def _world_reads(tmp_path):
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    from construct.adapter import PorcelainWorldReads
+    w = World(tmp_path / "b.world", world_id="w:b", stance="fiction",
+              model=StubModel(fallback=rule_classifier_fallback()),
+              title="Tangent B")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "person:you", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:sefa", "attribute": "kind", "value": "person",
+         "timeless": True},
+    ])
+    return w, PorcelainWorldReads(w)
+
+
+def test_build_tangent_arc_forces_protagonist_and_lints(tmp_path):
+    from construct.tangent import build_tangent_arc
+    w, reads = _world_reads(tmp_path)
+    try:
+        arc, problems = build_tangent_arc(
+            _proposal(), protagonist="person:you", arc_id="arc:tangent_9",
+            reads=reads)
+        assert problems == [] and arc is not None
+        assert arc.protagonist == "person:you"       # FORCED over the
+        assert arc.arc_id == "arc:tangent_9"         # proposal's npc pick
+        # a proposal the grammar rejects returns problems, commits nothing
+        bad, problems = build_tangent_arc(
+            _proposal(beats=[{"id": "beat:x", "phase": "nonsense",
+                              "weight": "required", "kind": "event_occurs",
+                              "entity": "x", "attribute": "", "value": ""}]),
+            protagonist="person:you", arc_id="arc:tangent_9", reads=reads)
+        assert bad is None and problems
+        # a lint-blocked proposal (ungrounded referent) returns problems
+        bad, problems = build_tangent_arc(
+            _proposal(tension=["person:nobody_here", "drive:a", "drive:b"]),
+            protagonist="person:you", arc_id="arc:tangent_9", reads=reads)
+        assert bad is None and problems
+        bad, problems = build_tangent_arc(
+            "not a mapping", protagonist="person:you",
+            arc_id="arc:tangent_9", reads=reads)
+        assert bad is None and problems
+        import pytest as _pt
+        with _pt.raises(ValueError):
+            build_tangent_arc(_proposal(), protagonist="you",
+                              arc_id="arc:t", reads=reads)
+        with _pt.raises(ValueError):
+            build_tangent_arc(_proposal(), protagonist="person:you",
+                              arc_id="tangent", reads=reads)
+    finally:
+        w.close()
+
+
+def test_adoption_ops_shape_and_order():
+    import pytest as _pt
+    from construct.tangent import ADOPTION_RECEIPT_KIND, adoption_ops
+    arc_items = [{"entity": "arc:tangent_9", "attribute": "kind",
+                  "value": "arc", "frame": "plot:main"}]
+    manifest = [{"entity": "arc:portfolio", "attribute": "main_arc",
+                 "value": "arc:tangent_9", "frame": "plot:main"}]
+    ops = adoption_ops(new_arc_items=arc_items, manifest_items=manifest,
+                       retract_ids=["a-77", "a-78"],
+                       old_main_id="arc:main", new_main_id="arc:tangent_9",
+                       aim="a life aboard", turn=9, at=1009.0)
+    kinds = [op["op"] for op in ops]
+    # retracts FIRST (the Cx 167 discipline), then asserts only
+    assert kinds[:2] == ["retract", "retract"]
+    assert set(kinds[2:]) == {"assert"}
+    assert ops[0]["assertion_id"] == "a-77" and ops[0]["reason"]
+    items = [op["item"] for op in ops if op["op"] == "assert"]
+    by = {(i["entity"], i["attribute"]): i.get("value") for i in items}
+    # the old main is DEMOTED durably, never silently dropped
+    assert by[("arc:main", "demoted")] == ADOPTION_RECEIPT_KIND
+    # the durable receipt the phase boundary reads rides the SAME set
+    ev = "event:tangent_adopted_9"
+    assert by[(ev, "kind")] == ADOPTION_RECEIPT_KIND
+    assert by[(ev, "aim")] == "a life aboard"
+    assert by[(ev, "old_main")] == "arc:main"
+    assert by[(ev, "new_main")] == "arc:tangent_9"
+    # the manifest switch is inside the set too
+    assert by[("arc:portfolio", "main_arc")] == "arc:tangent_9"
+    # host bugs raise: same-id switch, empty items, malformed retracts,
+    # blank aim, bad turn/at
+    for kw in (dict(new_main_id="arc:main"),
+               dict(old_main_id="main"),
+               dict(new_arc_items=[]),
+               dict(new_arc_items=["row"]),
+               dict(manifest_items=[]),
+               dict(retract_ids=[""]),
+               dict(retract_ids=[7]),
+               dict(aim="   "),
+               dict(turn=-1), dict(turn=True),
+               dict(at=float("nan")), dict(at=2**53 + 1)):
+        base = dict(new_arc_items=arc_items, manifest_items=manifest,
+                    retract_ids=["a-77"], old_main_id="arc:main",
+                    new_main_id="arc:tangent_9", aim="a life aboard",
+                    turn=9, at=1009.0)
+        base.update(kw)
+        with _pt.raises(ValueError):
+            adoption_ops(**base)
+
+
+def test_activate_adoption_fails_closed_without_commit_set():
+    from construct.growth import ActivationResult
+    from construct.tangent import activate_adoption
+
+    class _NoEnvelope:
+        def ingest_structured(self, items, atomic=False):
+            raise AssertionError("the sugar path must NEVER carry a "
+                                 "mixed-op adoption set")
+    ops = [{"op": "retract", "assertion_id": "a-1", "reason": "r"},
+           {"op": "assert", "item": {"entity": "arc:t", "attribute": "kind",
+                                     "value": "arc"}}]
+    r = activate_adoption(_NoEnvelope(), ops)
+    assert isinstance(r, ActivationResult)
+    assert r.ok is False and r.reason == "adoption_unavailable"
+    # malformed sets refuse before any engine call
+    assert activate_adoption(_NoEnvelope(), []).reason == "empty_set"
+    assert activate_adoption(_NoEnvelope(),
+                             [{"op": "upsert"}]).reason == "malformed_op"
+
+    class _Willing:
+        def __init__(self):
+            self.sets = []
+
+        def commit_set(self, ops_):
+            self.sets.append(ops_)
+            return {"outcome": "committed",
+                    "rows": [{"entity": "arc:t"}]}
+    w = _Willing()
+    r = activate_adoption(w, ops)
+    assert r.ok is True and len(w.sets) == 1 and w.sets[0] == ops
+
+    class _Aborting:
+        def commit_set(self, ops_):
+            raise RuntimeError("op 3 rejected")
+    r = activate_adoption(_Aborting(), ops)
+    assert r.ok is False and r.reason.startswith("engine_abort:")
+
+    class _Typed:
+        def commit_set(self, ops_):
+            return {"outcome": "aborted", "skipped": [{"op": 1}]}
+    r = activate_adoption(_Typed(), ops)
+    assert r.ok is False and r.reason == "engine_outcome:aborted"
