@@ -3875,7 +3875,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                        npc_candidates=npc_candidates,
                                        laws=_laws_full)
         kind = verdict["kind"]
-        moves_to = verdict.get("moves_to", "") or ""
+        # normalized ONCE at the classifier boundary (cr G2 r4): a
+        # whitespace-only destination is schema-valid but semantically
+        # blank — every downstream consumer (pipeline admission, the
+        # destination-less lane, its consequence guard) must see the SAME
+        # emptiness, or the zero-displacement bound gains a bypass.
+        moves_to = str(verdict.get("moves_to", "") or "").strip()
         requires = [r for r in verdict.get("requires", []) if r]
         needs_test = bool(verdict.get("needs_test")) and kind == "action"
         uncertain_of = (verdict.get("uncertain_of") or "").strip()

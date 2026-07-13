@@ -2203,3 +2203,34 @@ def test_wired_seek_signal_never_broadens_over_answered_states(
         assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
     finally:
         w.close()
+
+
+def test_wired_whitespace_destination_stays_inside_the_bound(tmp_path,
+                                                             monkeypatch):
+    # cr G2 r4: moves_to="   " is schema-valid but semantically blank —
+    # it must remain inside the destination-less encounter-only bound
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        monkeypatch.setattr(
+            growth_mod, "activate_chunk",
+            lambda porcelain, items: growth_mod.ActivationResult(
+                ok=True, receipts=("r",)))
+        provider = StubProvider(
+            [_classify(moves_open=True, seeks_encounter=True,
+                       moves_to="   "),
+             _good()])   # place-bearing — the exact bypass shape
+        r = run_turn(w, _wired_arc(), provider,
+                     "I walk until I meet someone.", turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == \
+            "declined:unlicensed:place.destinationless_lane"
+        assert w.porcelain.state("place:the_willow_ford_waypost",
+                                 "kind")["status"] != "known"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+        assert r.trace.movement_status == ""
+    finally:
+        w.close()
