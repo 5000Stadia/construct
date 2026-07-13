@@ -851,3 +851,205 @@ def test_generative_slot_claims_once_at_invocation():
     padded = GenerativeSlot()
     assert padded.claim(" assessor ") is True
     assert padded.claimed_by == "assessor"   # stored clean (cr nonblocking)
+
+
+# ---- the wiring slice: the gate on the REAL turn path ----------------------
+
+def _wired_world(tmp_path):
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    rule = rule_classifier_fallback()
+
+    def fallback(prompt, schema):
+        if prompt.startswith("Classify the lifetime"):
+            return rule(prompt, schema)
+        return {"items": []}
+
+    w = World(tmp_path / "wire.world", world_id="w:wire",
+              model=StubModel(fallback=fallback), stance="fiction",
+              title="Growth Wiring")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([
+        {"entity": "place:the_march", "attribute": "kind", "value": "region",
+         "timeless": True},
+        {"entity": "place:greywater_vale", "attribute": "kind",
+         "value": "region", "timeless": True},
+        {"entity": "place:greywater_vale", "attribute": "in",
+         "value": "place:the_march", "value_type": "entity"},
+        {"entity": "place:north_road", "attribute": "kind", "value": "place",
+         "timeless": True},
+        {"entity": "place:north_road", "attribute": "in",
+         "value": "place:greywater_vale", "value_type": "entity"},
+        {"entity": "person:you", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:you", "attribute": "in",
+         "value": "place:north_road", "value_type": "entity"},
+        {"entity": "fact:secret", "attribute": "kind", "value": "proposition",
+         "timeless": True},
+        {"entity": "fact:secret", "attribute": "culprit",
+         "value": "person:rival"},
+        {"entity": "person:rival", "attribute": "kind", "value": "person",
+         "timeless": True},
+    ])
+    w.ingest_structured(
+        [{"entity": "person:you", "attribute": "in",
+          "value": "place:north_road", "value_type": "entity"}],
+        frame="knows:person:you")
+    return w
+
+
+def _wired_arc():
+    from construct.arc.conditions import InFrame, Occurred, TurnsQuiet
+    from construct.arc.grammar import (Arc, Beat, Clock, ConclusionShape,
+                                       Phase, Rung, Weight)
+    beat = Beat("beat:find", Phase.CLIMAX, Weight.REQUIRED,
+                achievable_via=InFrame("knows:person:you", "fact:secret",
+                                       "culprit", "person:rival"))
+    refusal = Clock("clock:refusal", Occurred("event:abandoned"),
+                    effects=({"entity": "event:world_concludes",
+                              "attribute": "kind",
+                              "value": "refusal_conclusion"},),
+                    bound_to="arc:main", rung=Rung.REFUSAL)
+    shape = ConclusionShape(
+        "shape:main", "drive_inverted",
+        ("person:you", "drive:comfort", "drive:truth"),
+        world_condition=InFrame("knows:person:you", "fact:secret", "culprit",
+                                "person:rival"),
+        premise=InFrame("canon", "fact:secret", "culprit", "person:rival"),
+        refusal_variant_id="shape:refused")
+    return Arc(arc_id="arc:main", protagonist="person:you", shape=shape,
+               beats=(beat,), clocks=(), refusal_clock=refusal,
+               climax_ready_k=1, climax_ready_beats=("beat:find",),
+               phase_budget={Phase.SETUP: 5, Phase.RISING: 5, Phase.CRISIS: 3,
+                             Phase.CLIMAX: 2, Phase.FALLING: 2})
+
+
+def _classify(**over):
+    v = {"kind": "action", "moves_to": "away", "requires": [],
+         "needs_test": False, "uncertain_of": "", "moves_open": True}
+    v.update(over)
+    return v
+
+
+def test_wired_gate_fails_closed_at_the_seam(tmp_path):
+    # THE OBSERVABLE GATE-CALL ORACLE (cr's standing wiring requirement):
+    # a real run_turn on a real (non-atomic PB 0.2.0) World — the pipeline
+    # misses, the Assessor is INVOKED through the actual turn path, and the
+    # activation adaptor fails CLOSED: the seam prose returns, the receipt
+    # lands on the trace, and the world/clock are untouched.
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        provider = StubProvider([
+            _classify(),
+            _good(),               # the Assessor's (valid) proposal
+        ])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.settle is None
+        assert r.trace.growth == "activation_unavailable"
+        assert r.trace.growth_retry is True
+        assert "assessor_propose:main" in r.trace.cohort_calls
+        # NOTHING committed: no growth entities, no displacement, no clock
+        assert w.porcelain.state("place:the_willow_ford_waypost",
+                                 "kind")["status"] != "known"
+        assert w.porcelain.state("person:gregor_bund", "kind")[
+            "status"] != "known"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+        # the assessor saw the HOST's truth: ancestry options + frontier
+        gro = [c[0] for c in provider.calls if "⟦gro⟧" in c[0][:40]]
+        assert gro and "north road" in gro[0]
+        assert "[1]" in gro[0]           # indexed host ancestry options
+        assert "nothing is authored past here" in gro[0]  # frontier, not
+    finally:                                              # emptiness
+        w.close()
+
+
+def test_wired_gate_not_invoked_without_the_signal(tmp_path):
+    # negative control: same pipeline miss, moves_open False → the gate
+    # never runs (trace.growth empty), the turn renders normally
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        provider = StubProvider([
+            _classify(moves_open=False),
+            {"prose": "You press on down the road."},
+            {"prose": "You press on down the road."},   # the render re-ask
+        ])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == ""
+        assert r.trace.growth_retry is False
+        assert "press on" in r.prose
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+
+def test_wired_encounter_mode_defers_to_g2(tmp_path):
+    # seeks_encounter wins eligibility but G1 wiring stands down without
+    # claiming the slot — receipt only, ordinary flow continues
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
+        provider = StubProvider([
+            _classify(moves_open=False, seeks_encounter=True),
+            {"prose": "The road stays empty a while yet."},
+            {"prose": "The road stays empty a while yet."},  # the render re-ask
+        ])
+        r = run_turn(w, _wired_arc(), provider, "I walk until I meet someone.",
+                     turn=1)
+        assert r.trace.growth == "deferred:encounter"
+        assert r.trace.growth_retry is False
+        assert "empty a while" in r.prose
+        assert not any("⟦gro⟧" in c[0][:40] for c in provider.calls)
+    finally:
+        w.close()
+
+
+def test_wired_low_confidence_declines_at_the_seam(tmp_path):
+    # an INVOKED attempt whose proposal fails semantically: one attempt,
+    # a stable retryable receipt, the seam, and zero world change
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        provider = StubProvider([
+            _classify(),
+            dict(_good(), confidence=0.1),
+        ])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:proposal:low_confidence"
+        assert r.trace.growth_retry is True
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+
+def test_wired_concealment_screens_the_proposal(tmp_path):
+    # the REAL arc-derived leaks predicate (cr's wiring requirement): a
+    # proposal naming the hidden answer's entity declines — the concealed
+    # vocabulary is applied by the HOST; the model never saw the words
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        g = _good()
+        g["place"]["name"] = "the Rival Crossing"   # names the culprit slug
+        provider = StubProvider([_classify(), g])
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.prose == _GROWTH_SEAM
+        assert r.trace.growth == "declined:unlicensed:place.name_concealed"
+        assert w.porcelain.state("place:the_rival_crossing",
+                                 "kind")["status"] != "known"
+    finally:
+        w.close()

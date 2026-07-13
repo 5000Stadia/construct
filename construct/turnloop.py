@@ -199,6 +199,30 @@ def _take_touches_secret(takes: str, arc: Arc, reads: Any) -> bool:
     return bool(secret & _secret_word_set(takes))
 
 
+def _concealed_move_vocab(arc: Arc, reads: Any) -> set[str]:
+    """The MOVE-mint concealment vocabulary (see _move_touches_secret): the
+    protected keys' ENTITY-REFERENCE answers only — each referenced entity's
+    distinctive slug/name tokens, never descriptive prose. Shared by the
+    move-permanence mint guard and the WORLD-GROWTH leaks predicate (the
+    host applies the hidden words; the model never sees them)."""
+    secret: set[str] = set()
+    for (e, a) in arc_protected_keys(arc, reads):
+        try:
+            val = reads.state(e, a)
+        except Exception:
+            val = None
+        # only an ENTITY-REFERENCE value names an answer (person:/place:/obj:/…); skip prose.
+        if isinstance(val, str) and re.match(r"^[a-z_]+:[a-z0-9_]+$", val):
+            secret |= _secret_word_set(val.split(":", 1)[-1])
+            try:
+                nm = reads.state(val, "name")
+            except Exception:
+                nm = None
+            if isinstance(nm, str):
+                secret |= _secret_word_set(nm)
+    return secret
+
+
 def _move_touches_secret(moves_to: str, arc: Arc, reads: Any) -> bool:
     """NARROW concealment guard for the MOVE-permanence mint (founder live cohesion test,
     2026-06-29). The object-take guard above tokenizes the WHOLE protected vocabulary — including
@@ -210,24 +234,167 @@ def _move_touches_secret(moves_to: str, arc: Arc, reads: Any) -> bool:
     ENTITY-REFERENCE values (`person:rival`, `place:lair`); block on the referenced entity's
     distinctive slug/name tokens ONLY, never on descriptive prose. Reaching an EXISTING hidden
     place stays the entitlement gate's job (`_names_undiscovered_dest`)."""
-    secret: set[str] = set()
-    for (e, a) in arc_protected_keys(arc, reads):
-        try:
-            val = reads.state(e, a)
-        except Exception:
-            val = None
-        # only an ENTITY-REFERENCE value names an answer (person:/place:/obj:/…); skip prose.
-        if isinstance(val, str) and re.match(r"^[a-z_]+:[a-z0-9_]+$", val):
-            secret |= _secret_word_set(val.split(":", 1)[-1])  # the referenced entity's slug
-            try:
-                nm = reads.state(val, "name")
-            except Exception:
-                nm = None
-            if isinstance(nm, str):
-                secret |= _secret_word_set(nm)
+    secret = _concealed_move_vocab(arc, reads)
     if not secret:
         return False
     return bool(secret & _secret_word_set(moves_to))
+
+
+#: WORLD-GROWTH G1: the non-diegetic retry seam (spec §3 proposal-failure
+#: contract clause c) — the transports' parenthesized technical voice, never
+#: prose about the world. Rendering travel or emptiness over an uncommitted
+#: state is the exact prose/canon divergence the program exists to kill.
+_GROWTH_SEAM = ("(the road ahead wouldn't take shape this turn — the "
+                "technical side is logged, and nothing in the world has "
+                "changed; try that again.)")
+
+
+def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
+                    provider: Provider, trace: TurnTrace, *,
+                    moves_to: str, player_input: str, kind: str,
+                    moves_open: bool, seeks_encounter: bool,
+                    pipeline_miss: bool, pre_chain: list, turn: int,
+                    gen_slot: Any, style: str, laws: str) -> bool:
+    """The WORLD-GROWTH G1 invocation (docs/design/WORLD-GROWTH.md §3/§5
+    wiring): eligibility → host deny → slot claim → Assessor → host gates
+    → assembly → ATOMIC activation. Returns True only when a chunk
+    ACTIVATED (the move is committed canon; ordinary staging/pricing takes
+    over). Every other outcome leaves the world, clock, and route prices
+    UNTOUCHED and writes its receipt to trace.growth; an INVOKED-then-
+    failed attempt additionally sets trace.growth_retry (the caller
+    early-returns the non-diegetic seam — one generative act per turn,
+    no in-turn semantic retry).
+
+    G1 is PLACES: an eligibility verdict of "encounter" records
+    deferred:encounter and stands down without claiming the slot (the G2
+    wiring owns it) — the ordinary no-destination flow continues.
+    """
+    from construct import growth as growth_mod
+
+    host_deny = growth_mod.no_growth_deny()  # v1 evidence: no structural
+    # deny is derivable yet — boundary status needs a destination to route
+    # against, no_frontier/laws_forbid flags are not authored anywhere.
+    # The producer is wired so richer evidence drops in without reshaping
+    # the gate; an EMPTY deny keeps growth eligible (never the reverse).
+    mode = growth_mod.growth_eligibility(
+        kind=kind, committed=(kind == "action"), moves_open=moves_open,
+        seeks_encounter=seeks_encounter,
+        pipeline_outcome=growth_mod.PIPELINE_MISS if pipeline_miss else None,
+        host_deny=host_deny or None)
+    if host_deny:
+        trace.growth = f"denied:{host_deny}"  # the ONLY licensed quiet
+        return False
+    if mode is None:
+        return False  # not growth territory — today's behavior, unchanged
+    if mode == "encounter":
+        trace.growth = "deferred:encounter"  # G2's slice; slot unclaimed
+        return False
+    if not pre_chain or not str(pre_chain[0]).startswith("place:"):
+        trace.growth = "declined:no_origin"  # unplaced protagonist — a
+        return False                         # structural miss, not a seam
+    origin = pre_chain[0]
+
+    # THE INVOCATION claims the turn's one generative act (spec §5) —
+    # spent from here on, success or not.
+    if not gen_slot.claim("assessor"):
+        trace.growth = "declined:slot_spent"
+        return False
+    trace.growth_retry = True  # every exit below this line is an INVOKED
+    # attempt: either activation flips it back off, or the caller seams.
+
+    # HOST truth assembly (frame-bounded: canon + player-visible only).
+    ancestry_ids = [c for c in pre_chain if str(c).startswith("place:")]
+    if not ancestry_ids:
+        trace.growth = "declined:no_ancestry"
+        return False
+
+    def _disp(eid: str) -> str:
+        try:
+            v = live_reads.state(eid, "name")
+        except Exception:
+            v = None
+        return v if isinstance(v, str) and v else \
+            eid.split(":", 1)[-1].replace("_", " ")
+
+    try:
+        from construct.clock import read_clock as _rc
+        clock_line = _rc(world).render()
+    except Exception:  # noqa: BLE001 — the clock line is context, not truth
+        clock_line = ""
+    try:
+        with _phase(trace, "growth_assessor"):
+            raw = cohorts.assessor_propose(
+                provider, mode="place",
+                intent=(moves_to or player_input),
+                here_name=_disp(origin),
+                ancestry_options=[_disp(a) for a in ancestry_ids],
+                connections="", style=style, laws=laws,
+                threads=[], clock_line=clock_line,
+                protagonist=_disp(arc.protagonist))
+        trace.cohort_calls.append("assessor_propose:main")
+    except Exception as exc:  # noqa: BLE001 — provider failure = technical
+        logger.warning("growth assessor failed: %s", exc)
+        trace.growth = "declined:provider_error"
+        return False
+
+    vocab = _concealed_move_vocab(arc, live_reads)
+    prop, why = growth_mod.validated_proposal(
+        raw, mode="place", n_ancestry_options=len(ancestry_ids),
+        leaks=lambda text: bool(vocab & _secret_word_set(text)))
+    if prop is None:
+        logger.info("growth proposal declined: %s", why)
+        trace.growth = f"declined:{why}"
+        return False
+
+    _growth_h = getattr(live_reads, "_horizon", None)
+
+    # the host's global identity decision, over the horizon-bound canon
+    # rosters through the same name authority as the resolve seam.
+    def _identity(kind_: str, name: str) -> tuple[str, str]:
+        try:
+            roster = p.entities("canon", prefix=f"{kind_}:", as_of=_growth_h)
+        except Exception:  # noqa: BLE001 — an unreadable roster binds nothing
+            roster = ()
+        low = name.strip().lower()
+        hits = [e for e in roster
+                if _names_entity(e, low, name=_disp(e))]
+        hits = list(dict.fromkeys(hits))
+        if not hits:
+            return ("new", "")
+        if len(hits) == 1:
+            return ("bound", hits[0])
+        return ("ambiguous", "")
+
+    companions = sorted(
+        n for n in p.entities("canon", prefix="person:", as_of=_growth_h)
+        if n != arc.protagonist
+        and live_reads.state(n, "accompanying") == arc.protagonist)
+
+    def _exists(eid: str) -> bool:
+        return bool(live_reads.has_entity(eid))
+
+    chunk, why = growth_mod.assemble_chunk(
+        prop, mode="place", origin=origin, ancestry_options=ancestry_ids,
+        protagonist=arc.protagonist, companions=list(companions),
+        at=turn_time(turn), exists=_exists, identity=_identity)
+    if chunk is None:
+        logger.info("growth assembly declined: %s", why)
+        trace.growth = f"declined:{why}"
+        return False
+
+    # ATOMIC activation — the RAW porcelain, never the fail-open turn
+    # wrapper (an abort must be SEEN; the adaptor fails closed on
+    # non-atomic engines before writing anything).
+    result = growth_mod.activate_chunk(world.porcelain, list(chunk.items))
+    if not result.ok:
+        trace.growth = result.reason
+        return False
+    trace.growth = f"activated:{chunk.place_id}"
+    trace.growth_retry = False
+    trace.movement_status = "clear"
+    logger.info("world grew: %s (%s) — %s", chunk.place_id,
+                _disp(chunk.place_id), chunk.assessment[:120])
+    return True
 
 
 #: The 3-act overlay on the five dramatic phases (CONVERGENCE-TO-CONCLUSION.md;
@@ -697,6 +864,8 @@ class TurnTrace:
     timings: dict = field(default_factory=dict)  # per-section wall-clock (s) this turn — optimization surface
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
     drift: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, class) classified this turn (D-SOFT only)
+    growth: str = ""  # WORLD-GROWTH G1 receipt: "activated:<place_id>" | "declined:<reason>" | "activation_unavailable" | "denied:<deny>" | "deferred:encounter" | "" (not invoked)
+    growth_retry: bool = False  # an INVOKED growth attempt failed → the transport shows the non-diegetic retry seam (no world/clock change this turn)
     relocations: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, new_staging) committed this turn
     relocate_directive: str = ""  # DRIFT-HANDLING D1 debug: the sanitized staging line (mirrors `nudge`)
     absence_consequences: list = field(default_factory=list)  # DRIFT-HANDLING D2: (moment_event_id, committed_row_count) this turn
@@ -1804,7 +1973,11 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
     chain = PorcelainWorldReads(world).location_chain(protagonist) or []
     if not chain or chain[0] != place_id:
         logger.warning("move grant to %r did not take (%s)", moves_to, place_id)
-        return None, seg
+        # WORLD-GROWTH: a did-not-take already WROTE rows — an engine-trouble
+        # state, never a pipeline miss (growth minting a second place over a
+        # half-taken one is the torn-state scenario). Typed so the caller
+        # can tell it from a refused mint.
+        return None, {"status": "grant_failed", "seg": seg}
     logger.info("move: granted improv destination %r → %s (player now in%s)", moves_to,
                 place_id, f", nested in {container}" if container else "")
     return place_id, seg
@@ -3420,6 +3593,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     _h = horizon
     live_reads = PorcelainWorldReads(world, horizon=horizon)
     trace = TurnTrace(turn=turn)
+    # WORLD-GROWTH §5 budget: the turn's ONE generative act — the Assessor
+    # claims at invocation; the LWG generator chain claims at each of its
+    # own invocation sites below. Spent whether or not the act succeeds.
+    from construct.growth import GenerativeSlot as _GenerativeSlot
+    _gen_slot = _GenerativeSlot()
     p = _FailOpenIngest(p, trace)  # the climax shield (#89): in-turn writes fail open
     player_frame = _player_frame(arc)
 
@@ -3806,6 +3984,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     Unresolved destinations fall back to whatever extraction did,
     #     loudly logged.
     _move_clarify = ""  # ambiguous destination → the world ASKS (founder: never hallucinate)
+    _growth_miss = False  # WORLD-GROWTH G1: the pipeline PROVED zero destination
+    # (refer zero-candidate + the move-permanence grant refused to mint) — the
+    # ONLY state that can license growth (closed PIPELINE_MISS contract).
     # ---- #102 JOURNEY DELIBERATION (Cx 457; founder-shaped 2026-07-04) -----------------
     # When a live deadline stands and a move the map can't prove local would eat the
     # remaining budget, the character's OWN MIND weighs it before a single step is
@@ -4112,6 +4293,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         logger.warning("place roster build failed", exc_info=True)
                         _roster = []
 
+                def nonlocal_miss() -> None:
+                    nonlocal _growth_miss
+                    _growth_miss = True
+
                 def _do_grant() -> None:
                     """The improv mint (shared by the compound-container path and the
                     zero-candidate fallback) — route/passability gated inside; the
@@ -4133,11 +4318,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     elif _gseg and _gseg.get("status") == "blocked":
                         trace.movement_status = "blocked"
                         trace.movement_obstruction = _gseg
+                    elif _gseg and _gseg.get("status") == "grant_failed":
+                        # engine trouble AFTER rows were written — an error
+                        # state, never a growth-licensing miss
+                        logger.warning("movement grant failed for %r; "
+                                       "relying on extraction", moves_to)
                     elif granted:
                         trace.movement_status = _gseg.get("status") if _gseg else "clear"
                         if _gseg:
                             trace.movement_obstruction = _gseg
                     else:
+                        nonlocal_miss()  # the TRUE miss: zero candidates AND
+                        # the grant refused to mint (deictic/open phrase)
                         logger.warning("movement destination %r did not resolve (%s); "
                                        "relying on extraction", moves_to, status)
 
@@ -4257,6 +4449,23 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # an absorbed in-scene fixture / already-here no-op is handled, not a miss
             logger.warning("movement destination %r did not resolve (%s); "
                            "relying on extraction", moves_to, status)
+
+    # ---- WORLD-GROWTH G1 (spec §3/§5): the world grows where the player walks.
+    # Invoked ONLY on the proven pipeline miss (the closed contract); commits
+    # UPSTREAM, pre-render, resolve-and-commit — on success the ordinary
+    # staging, nearness pricing, and narrator briefing below see a real,
+    # DESCRIBED destination the player now stands in. An INVOKED-then-failed
+    # attempt is the §3 proposal-failure contract: one attempt, a technical
+    # receipt, NO world/clock change, the honest non-diegetic retry seam.
+    if _growth_miss and not trace.same_place:
+        if not _growth_attempt(world, p, arc, live_reads, provider, trace,
+                               moves_to=moves_to, player_input=player_input,
+                               kind=kind, moves_open=moves_open,
+                               seeks_encounter=seeks_encounter,
+                               pipeline_miss=True, pre_chain=pre_chain,
+                               turn=turn, gen_slot=_gen_slot, style=style,
+                               laws=_laws_full) and trace.growth_retry:
+            return TurnResult(prose=_GROWTH_SEAM, trace=trace, settle=None)
 
     # ---- #101 DISTANCE: THE NEARNESS INVERSION (Cx 454; founder's shape challenge) -----
     # The map is authoritative about NEARNESS, never farness. A committed move is
@@ -5782,8 +5991,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
 
             # 2. Regenerative (P2a): a dead arc seeds the next (highest priority).
             elif fallouts:
-                minted = generate_from_fallout(world, live_reads, provider,
-                                               fallouts[0], side_arcs, ctx, turn)
+                # WORLD-GROWTH §5: the generator chain shares the turn's one
+                # generative slot — a growth invocation earlier this turn
+                # already spent it (claim is the LAST condition checked).
+                if _gen_slot.claim("lwg_fallout"):
+                    minted = generate_from_fallout(world, live_reads, provider,
+                                                   fallouts[0], side_arcs, ctx, turn)
 
             # 3. Opportunistic (P2b): player's committed delta touched something
             #    salient — the DM wakes only when it notices (§A).
@@ -5799,7 +6012,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # carrying NPC present the cohort has no grounded protagonist to
                 # propose (§D — "world moves *at* the player, never *as* them").
                 if _opp_moments and _spined:
-                    if _gen_pacing_ok(live_reads, side_arcs, turn):
+                    if _gen_pacing_ok(live_reads, side_arcs, turn) \
+                            and _gen_slot.claim("lwg_opportunistic"):
                         minted = generate_opportunistic(
                             world, live_reads, provider, _opp_moments,
                             side_arcs, ctx, turn, arc.protagonist)
@@ -5808,7 +6022,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 elif scenario_mode == "endless" and _gen_mins is not None and _spined:
                     _last_dev = _last_development_min(world, live_reads, _gen_mins, turn)
                     if (_gen_mins - _last_dev >= AMBIENT_QUIET_MIN
-                            and _gen_pacing_ok(live_reads, side_arcs, turn)):
+                            and _gen_pacing_ok(live_reads, side_arcs, turn)
+                            and _gen_slot.claim("lwg_ambient")):
                         minted = generate_ambient(
                             world, live_reads, provider,
                             side_arcs, ctx, turn, arc.protagonist)

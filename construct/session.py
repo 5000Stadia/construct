@@ -1113,6 +1113,11 @@ class Session:
         self._note_scene_image()
         # Hold the post-narrate bookkeeping; the adapter runs it post-send (see _flush_settle).
         self._pending_settle = getattr(result, "settle", None)
+        if result.trace is not None and getattr(result.trace, "growth_retry", False):
+            # WORLD-GROWTH §3 proposal-failure seam: an invoked growth attempt
+            # failed technically — the prose IS the transports' non-diegetic
+            # retry line; ok=False marks it a failed turn, not fiction.
+            return Reply(prose=result.prose, trace=result.trace, ok=False)
         return Reply(prose=result.prose, trace=result.trace,
                      ended=bool(result.trace and result.trace.terminal),
                      can_continue=not bool(
