@@ -871,21 +871,72 @@ def test_wired_adoption_success_with_a_willing_envelope(tmp_path,
         assert reads.state(arc.arc_id, "demoted",
                            frame="plot:main") == ADOPTION_RECEIPT_KIND
         assert read_pending(reads, turn=3) is None    # receipt cleared
-        # cr piece-C blocker 2: even if the best-effort clear had FAILED,
-        # the consumed generation cannot adopt twice — restore the exact
-        # pre-adoption record (simulating the failed clear) and run the
-        # next confirming action: the receipt makes it ineligible, the
-        # confirm cohort never runs, main stays the tangent
+    finally:
+        w.close()
+
+
+def test_wired_swallowed_clear_cannot_adopt_twice(tmp_path, monkeypatch):
+    # cr piece-C r2: the GENUINE swallowed-clear fault — cancel_rows raises
+    # inside the best-effort post-atomic clear, so the original pending
+    # record stays LIVE and CURRENT; the durable receipt alone must make
+    # it ineligible, and the next confirming action (run under the
+    # RELOADED tangent main, the real session path) must not adopt again
+    import construct.tangent as tangent_mod
+    from construct.arc import io as arc_io
+    from construct.provider import StubProvider
+    from construct.tangent import PENDING, pending_rows, read_pending
+    from construct.turnloop import run_turn
+    from construct.adapter import PorcelainWorldReads
+    tg, w = _wired(tmp_path)
+    try:
+        arc = _seed_wired_portfolio(w)
         w.porcelain.ingest_structured(
             pending_rows("a life aboard the Gullwing", turn=1,
-                         action="Forget the case.", at=1001.5),
+                         action="Forget the case.", at=1001.0),
             frame="session:main")
-        assert read_pending(reads, turn=3) is None    # consumed forever
+
+        def _willing(porcelain, ops):
+            for op in ops:
+                if op["op"] == "retract":
+                    porcelain.retract(op["assertion_id"], op["reason"])
+                else:
+                    item = dict(op["item"])
+                    frame = item.pop("frame", None)
+                    porcelain.ingest_structured([item], frame=frame,
+                                                classify="rules")
+            from construct.growth import ActivationResult
+            return ActivationResult(ok=True, receipts=("r",))
+        monkeypatch.setattr(tangent_mod, "activate_adoption", _willing)
+
+        def _clear_down(**kw):
+            raise RuntimeError("clear down")
+        monkeypatch.setattr(tangent_mod, "cancel_rows", _clear_down)
+        provider = StubProvider([
+            tg._classify(moves_open=False, moves_to=""),
+            {"consistent": True, "abandons": False},
+            _proposal(),
+        ] + [{"prose": "Sefa tosses you the bow line."}] * 3)
+        r = run_turn(w, arc, provider, "I sign on with the Gullwing.",
+                     turn=2)
+        assert r.trace.tangent == "adopted:arc:tangent_2"
+        assert "tangent_post_adoption bookkeeping" in r.trace.dropped_cohorts
+        reads = PorcelainWorldReads(w)
+        w.ingestor.cursor.advance(5000.0)
+        # the fault is REAL: the raw pending record is nonempty and
+        # current — only the receipt consumption filters it
+        raw = reads.state(PENDING, "record", frame="session:main")
+        assert isinstance(raw, str) and raw.strip()
+        assert read_pending(reads, turn=3) is None
+        # the next confirming-shaped action runs under the RELOADED
+        # tangent main (the real session path): never armed, no second
+        # adoption, main unmoved
+        loaded = {a.arc_id: a for a in arc_io.portfolio_from_frame(reads)}
+        tangent_arc = loaded["arc:tangent_2"]
         provider = StubProvider([
             tg._classify(moves_open=False, moves_to="")]
             + [{"prose": "The deck settles under you."}] * 4)
-        r2 = run_turn(w, arc, provider, "I coil the lines and make "
-                      "myself useful.", turn=3)
+        r2 = run_turn(w, tangent_arc, provider, "I coil the lines and "
+                      "make myself useful.", turn=3)
         assert r2.trace.tangent == ""                 # never armed
         assert not any("⟦tgc⟧" in c[0][:40] for c in provider.calls)
         assert arc_io.main_arc_from_frame(reads) == "arc:tangent_2"
