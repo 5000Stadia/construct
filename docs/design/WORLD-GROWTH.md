@@ -157,11 +157,22 @@ a growth chunk (place + containment + passage + move + encounter +
 texture) must become visible ALL OR NONE — PB ingest is edge-granular and
 ordinary canon rows are visible immediately, so batch+receipt is not a
 transaction (the shipped move mint already exhibits the orphan risk).
-Mechanism decision: an ENGINE-SIDE atomic ingest/activation primitive,
-taken to PB as a shape consult BEFORE the G1 build (the collaboration
-model: an engine gap is a PB letter, never a local workaround); if PB
-declines, the specified fallback is staging-world copy/swap with session
-reopen. THE COMPANION POSTCONDITION (r4): the atomic set includes not only a
+Mechanism decision — RULED (PB <54152f82…>, 2026-07-13): ENGINE-SIDE.
+The host consumes PB's ATOMIC-ACTIVATION-V1 (spec drafting, pbr review):
+a transactional envelope on the structured-ingest path — the FULL gate
+pass runs over the entire set before any append (intra-set dependencies
+evaluated against log+staged-prefix, so the G3 ancestry insertion is
+legal within one set), then all appends in ONE storage transaction;
+visibility flips whole. ALL-OR-NONE skip policy (any rejected edge aborts
+the set, receipts as RETURN VALUES never rows — technical failure stays
+outside canon by construction); crash/timeout/reopen = the uncommitted
+transaction never happened, deterministically. The host fallback
+(staging copy/swap) is affirmatively REJECTED by PB — it would strain
+the one-world/one-buffer identity and log continuity invariants; do not
+build it. cr's fault-injection bar collapses to two structural facts
+(fault at any boundary → set absent; after the one commit → fully
+present) realized as a harness loop. G1's commit seam is written against
+this contract and ships when the primitive does. THE COMPANION POSTCONDITION (r4): the atomic set includes not only a
 GENERATED companion but ALL STANDING companions selected at the PRE-MOVE
 horizon (`accompanying == protagonist`): after any accepted grown
 transition, each remains accompanying AND co-located with the
