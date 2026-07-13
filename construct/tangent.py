@@ -223,6 +223,47 @@ def may_confirm(pending, *, turn: int, committed: bool) -> bool:
 ADOPTION_RECEIPT_KIND = "tangent_adopted"
 
 
+def _tangent_arc_problems(arc, *, protagonist: str, reads) -> list:
+    """The COMPLETE tangent loadability contract, over the BUILT arc's
+    DERIVED ids (cr piece-B r3: raw model ids normalize in _build_arc, so
+    uniqueness/collision must be judged after it) — shared by
+    build_tangent_arc and re-run at the adoption boundary so a mutated
+    exact-type Arc can never reach the envelope."""
+    problems: list = []
+    if arc.protagonist != protagonist:
+        return ["build: protagonist drift"]
+    if not arc.beats:
+        return ["build: no beats — not a loadable tangent"]
+    derived = [b.beat_id for b in arc.beats]
+    if len(set(derived)) != len(derived):
+        return ["build: duplicate derived beat ids"]
+    # collisions live in the PLOT frame (arcs are plot rows, not canon) —
+    # any visible row on a derived id is a collision; canon ids collide too
+    try:
+        for eid in [arc.arc_id, arc.shape.shape_id, *derived,
+                    *[c.clock_id for c in arc.clocks]]:
+            if reads.frame_rows("plot:main", entity=eid) \
+                    or reads.has_entity(eid):
+                problems.append(f"preflight: id_collision:{eid}")
+        if problems:
+            return problems
+        if not reads.has_entity(protagonist):
+            return ["preflight: ungrounded_protagonist"]
+        tension_entity = arc.shape.tension[0] if arc.shape.tension else None
+        if not tension_entity or not reads.has_entity(tension_entity):
+            return ["preflight: ungrounded_tension"]
+    except Exception as exc:  # noqa: BLE001 — an unreadable world is unfit
+        return [f"preflight: {exc}"]
+    try:
+        from construct.arc.lint import lint_arc
+        findings = lint_arc(arc, reads)
+    except Exception as exc:  # noqa: BLE001 — an unlintable arc is unfit
+        return [f"lint: {exc}"]
+    # `2-paths` is advisory here exactly as at session zero and the LWG
+    # preflight (generator.py) — everything else blocks
+    return [f"lint:{f.check}" for f in findings if f.check != "2-paths"]
+
+
 def build_tangent_arc(proposal, *, protagonist: str, arc_id: str, reads
                       ) -> tuple:
     """The DEDICATED tangent build path (item 3; the LWG mint path
@@ -244,44 +285,13 @@ def build_tangent_arc(proposal, *, protagonist: str, arc_id: str, reads
         return None, ["proposal: not a mapping"]
     proposal = dict(proposal)
     proposal["protagonist"] = protagonist   # forced, never trusted
-    # UNIQUENESS + COLLISION (cr piece-B r2 blocker 3): duplicate beat ids
-    # would serialize as one persisted beat with conflicting rows; an arc
-    # id already in the world would collide two stories
-    try:
-        if reads.has_entity(arc_id):
-            return None, ["preflight: arc_id_collision"]
-    except Exception as exc:  # noqa: BLE001 — an unreadable world is unfit
-        return None, [f"preflight: {exc}"]
-    _beat_ids = [str(b.get("id", "")) for b in proposal.get("beats", [])
-                 if isinstance(b, dict)]
-    if len(set(_beat_ids)) != len(_beat_ids):
-        return None, ["proposal: duplicate beat ids"]
     try:
         from construct.game import _build_arc
         arc = _build_arc(proposal, arc_id=arc_id)
     except Exception as exc:  # noqa: BLE001 — a bad proposal is retryable
         return None, [f"build: {exc}"]
-    if arc.protagonist != protagonist:
-        return None, ["build: protagonist drift"]
-    # the dedicated PREFLIGHT (item 3 "owns its schema and preflight"):
-    # grounding the lint layer doesn't cover — the protagonist and the
-    # tension entity must exist in the world the arc will govern
-    try:
-        if not reads.has_entity(protagonist):
-            return None, ["preflight: ungrounded_protagonist"]
-        tension_entity = arc.shape.tension[0] if arc.shape.tension else None
-        if not tension_entity or not reads.has_entity(tension_entity):
-            return None, ["preflight: ungrounded_tension"]
-    except Exception as exc:  # noqa: BLE001 — an unreadable world is unfit
-        return None, [f"preflight: {exc}"]
-    try:
-        from construct.arc.lint import lint_arc
-        findings = lint_arc(arc, reads)
-    except Exception as exc:  # noqa: BLE001 — an unlintable arc is unfit
-        return None, [f"lint: {exc}"]
-    # `2-paths` is advisory here exactly as at session zero and the LWG
-    # preflight (generator.py) — everything else blocks
-    problems = [f"lint:{f.check}" for f in findings if f.check != "2-paths"]
+    problems = _tangent_arc_problems(arc, protagonist=protagonist,
+                                     reads=reads)
     if problems:
         return None, problems
     return arc, []
@@ -289,60 +299,91 @@ def build_tangent_arc(proposal, *, protagonist: str, arc_id: str, reads
 
 @dataclass(frozen=True)
 class PortfolioState:
-    """The VERIFIED current portfolio (cr piece-B r2 blocker 1): both
-    constitutive control rows located with their assertion ids — the
-    adoption builder consumes only this, so an unverifiable manifest can
-    never reach the envelope."""
+    """The VERIFIED current portfolio (cr piece-B r2/r3 blocker 1): both
+    constitutive control rows located AT THE PLAY HORIZON with their
+    assertion ids, attribute-tagged so coverage of BOTH controls is
+    provable — the adoption builder consumes only this, so an
+    unverifiable manifest can never reach the envelope."""
 
     arc_ids: tuple
     main_arc: str
-    retract_ids: tuple   # every visible arc_ids/main_arc assertion id
+    retracts: tuple   # ((attribute, assertion_id), …) — tagged coverage
 
     def __post_init__(self):
-        if not self.arc_ids or any(
-                type(a) is not str or not a.startswith("arc:")
+        import re as _re
+        if type(self.arc_ids) is not tuple or not self.arc_ids \
+                or len(set(self.arc_ids)) != len(self.arc_ids) or any(
+                type(a) is not str
+                or not _re.fullmatch(r"arc:[a-z0-9_]+", a)
                 for a in self.arc_ids):
-            raise ValueError("PortfolioState: arc_ids must be arc ids")
+            raise ValueError("PortfolioState: arc_ids must be an exact "
+                             "tuple of unique well-formed arc ids")
         if type(self.main_arc) is not str \
-                or not self.main_arc.startswith("arc:") \
                 or self.main_arc not in self.arc_ids:
             raise ValueError("PortfolioState: main_arc must be a member "
                              "arc id")
-        if len(self.retract_ids) < 2 \
-                or len(set(self.retract_ids)) != len(self.retract_ids) \
-                or any(type(r) is not str or not r.strip()
-                       for r in self.retract_ids):
-            raise ValueError("PortfolioState: retract_ids must be the >=2 "
-                             "distinct assertion ids covering BOTH control "
-                             "rows")
+        if type(self.retracts) is not tuple:
+            raise ValueError("PortfolioState: retracts must be an exact "
+                             "tuple")
+        attrs = set()
+        ids = []
+        for pair in self.retracts:
+            if (type(pair) is not tuple or len(pair) != 2
+                    or pair[0] not in ("arc_ids", "main_arc")
+                    or type(pair[1]) is not str or not pair[1].strip()):
+                raise ValueError("PortfolioState: each retract must be "
+                                 "(attribute∈{arc_ids,main_arc}, "
+                                 "assertion_id)")
+            attrs.add(pair[0])
+            ids.append(pair[1])
+        if attrs != {"arc_ids", "main_arc"} or len(set(ids)) != len(ids):
+            raise ValueError("PortfolioState: retracts must cover BOTH "
+                             "control attributes with distinct assertion "
+                             "ids")
 
 
-def read_portfolio_state(world) -> "PortfolioState | None":
-    """Locate BOTH portfolio control rows (arc_ids + main_arc) with their
-    assertion ids. Returns None when either is unlocatable — adoption
-    fails toward the ordinary story, never toward a blind retract."""
+def read_portfolio_state(reads) -> "PortfolioState | None":
+    """Locate BOTH portfolio control rows (arc_ids + main_arc) AT THE
+    PLAY HORIZON with their assertion ids (cr r3: a head scan selected a
+    FUTURE manifest over the horizon-folded one). Fail-closed on
+    multiplicity (a conflicted constitutive fold is not a safe base for
+    adoption), on missing provenance (the visible row must be the one
+    the fold serves), and on any read failure — adoption fails toward
+    the ordinary story, never toward a blind retract."""
     import json as _json
     try:
-        from construct.adapter import frame_facts
-        rows = [r for r in frame_facts(world, "plot:main",
-                                       entity="arc:portfolio")
+        rows = [r for r in reads.frame_rows("plot:main",
+                                            entity="arc:portfolio")
                 if r.attribute in ("arc_ids", "main_arc")]
         ids_rows = [r for r in rows if r.attribute == "arc_ids"]
         main_rows = [r for r in rows if r.attribute == "main_arc"]
-        if not ids_rows or not main_rows:
+        if len(ids_rows) != 1 or len(main_rows) != 1:
+            return None  # absent or CONFLICTED — either way, no adoption
+        # provenance: the folded controls must be served BY these rows
+        folded_main = reads.state("arc:portfolio", "main_arc",
+                                  frame="plot:main")
+        folded_ids_raw = reads.state("arc:portfolio", "arc_ids",
+                                     frame="plot:main")
+        if str(folded_main) != str(main_rows[0].value) \
+                or str(folded_ids_raw) != str(ids_rows[0].value):
             return None
-        arc_ids = _json.loads(str(ids_rows[-1].value))
-        main_arc = str(main_rows[-1].value)
+        arc_ids = _json.loads(str(ids_rows[0].value))
+        ids_aid = getattr(ids_rows[0], "id", None)
+        main_aid = getattr(main_rows[0], "id", None)
+        if not ids_aid or not main_aid:
+            return None  # missing provenance — nothing to retract safely
         return PortfolioState(
-            arc_ids=tuple(str(a) for a in arc_ids), main_arc=main_arc,
-            retract_ids=tuple(str(r.id) for r in rows))
+            arc_ids=tuple(str(a) for a in arc_ids),
+            main_arc=str(main_rows[0].value),
+            retracts=(("arc_ids", str(ids_aid)),
+                      ("main_arc", str(main_aid))))
     except Exception:  # noqa: BLE001 — unverifiable manifest = no adoption
         logger.warning("portfolio state read failed", exc_info=True)
         return None
 
 
 def adoption_ops(*, arc, portfolio: PortfolioState, aim: str, turn: int,
-                 at: float) -> list[dict]:
+                 at: float, reads) -> list[dict]:
     """The ONE adoption unit (item 3b), as ordered typed ops for
     commit_set — built ONLY from the exact linted Arc and the VERIFIED
     portfolio (cr r2 blockers 1+2: no raw row lists, no caller-supplied
@@ -357,6 +398,14 @@ def adoption_ops(*, arc, portfolio: PortfolioState, aim: str, turn: int,
     from construct.arc import io as arc_io
     if type(arc) is not Arc:
         raise ValueError("adoption ops: arc must be the exact linted Arc")
+    # THE LINT IS RERUN HERE (cr r3 blocker 2): the exact type proves
+    # nothing about content — a dataclasses.replace() mutation of a once-
+    # linted arc must be refused at the envelope's door
+    problems = _tangent_arc_problems(arc, protagonist=arc.protagonist,
+                                     reads=reads)
+    if problems:
+        raise ValueError(f"adoption ops: arc fails the tangent contract: "
+                         f"{problems[:3]}")
     if type(portfolio) is not PortfolioState:
         raise ValueError("adoption ops: portfolio must be the verified "
                          "PortfolioState")
@@ -373,9 +422,9 @@ def adoption_ops(*, arc, portfolio: PortfolioState, aim: str, turn: int,
     at = _require_at(at)
     ev = f"event:tangent_adopted_{turn}"
     ops: list[dict] = [
-        {"op": "retract", "assertion_id": rid,
-         "reason": "tangent adoption: superseding the portfolio manifest"}
-        for rid in portfolio.retract_ids]
+        {"op": "retract", "assertion_id": aid,
+         "reason": f"tangent adoption: superseding the portfolio {attr}"}
+        for attr, aid in portfolio.retracts]
     new_arc_items = (arc_io.arc_to_items(arc, frame="plot:main")
                      + arc_io.index_items(arc, frame="plot:main"))
     ops += [{"op": "assert", "item": dict(i)} for i in new_arc_items]
