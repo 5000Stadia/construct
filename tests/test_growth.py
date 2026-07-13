@@ -25,7 +25,7 @@ class _NonAtomicP:
 
 
 class _FakeAtomicP:
-    """A FAKE atomic backend for the xfail pin (protocol boundary only)."""
+    """The FAKE atomic backend for the passing happy-path tests (the strict xfail probes the REAL engine)."""
 
     def __init__(self, abort=False):
         self.calls = []
