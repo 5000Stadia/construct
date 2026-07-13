@@ -60,6 +60,7 @@ recommended spine for a first read.
 | [DEATH-TESTAMENT.md](DEATH-TESTAMENT.md) | Death as staged permanence: per-chapter policy, the warning before the kill, the testament epilogue, no next chapter. |
 | [EPISODIC-CONTINUATION.md](EPISODIC-CONTINUATION.md) | Conclude → continue: consequences as canon events, settled history never re-opened, personal threads honored. |
 | [LIVING-WORLD-GENERATOR.md](LIVING-WORLD-GENERATOR.md) · [LIVING-WORLD-GENERATOR-P2.md](LIVING-WORLD-GENERATOR-P2.md) | The regenerative arc engine: side-arc lifecycle, fallout as canon consequence, the opportunistic generator. |
+| [WORLD-GROWTH.md](WORLD-GROWTH.md) | The world grows where the player walks: the improv-Assessor cohort reasons plausible places/encounters into canon on open-ended travel — the drawer/room make-it-real element generalized to geography and society; the closed-map stonewall (Ironhold probe) dies here. |
 | [DRIFT-HANDLING.md](DRIFT-HANDLING.md) | When the player leaves the road: relocate-the-beat, absence-consequence, alternative-path repair, gentle nudge tuning — the founder's four-part drift design. |
 | [WIN-LOSS-CONDITIONS.md](WIN-LOSS-CONDITIONS.md) · [GAUGE-PRIMITIVE.md](GAUGE-PRIMITIVE.md) · [DIEGETIC-TIME.md](DIEGETIC-TIME.md) | Authored stakes: failure conditions, numeric gauges as live drama, in-world time as the only clock. |
 
