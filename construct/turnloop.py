@@ -3441,6 +3441,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     addresses_present = True  # conservative default (task #5 + cr fail-open catch:
     # a classify ProviderError must keep the rule-5 sole-NPC protection, never
     # unbind the name — the signal only ever RELAXES on an explicit False)
+    moves_open = False        # WORLD-GROWTH G1 (cr piece-2 finding 1): the growth
+    seeks_encounter = False   # signals default False BEFORE the classify try —
+    # a ProviderError leaves them defined and closed; only a literal True from
+    # a successful verdict (strict_flag) ever raises them
     asserts_or_reveals = True  # conservative default (TURN-LATENCY A-lite): keep extraction
     # A brief actor descriptor so `classify` can wave off a test for things this
     # character is plainly proficient at (ACTION-RESOLUTION §1). Cheap point reads.
@@ -3553,8 +3557,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # These alone authorize NOTHING: growth eligibility is conjunctive
         # and ordered (growth.growth_eligibility), and its turnloop wiring
         # is a separate reviewed slice.
-        moves_open = bool(verdict.get("moves_open", False)) and kind == "action"
-        seeks_encounter = (bool(verdict.get("seeks_encounter", False))
+        from construct.growth import strict_flag as _strict
+        moves_open = _strict(verdict.get("moves_open")) and kind == "action"
+        seeks_encounter = (_strict(verdict.get("seeks_encounter"))
                            and kind == "action")
         # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids; only action
         # turns move people; a candidate can't be both dismissed and brought along (dismissal

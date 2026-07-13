@@ -136,17 +136,22 @@ def ordered_chunk_items(*, place: list[dict] | None = None,
     return out
 
 
-#: The ordinary movement pipeline's outcomes that FORBID growth — each is a
-#: state where the world already answered (or refused for its own reason);
-#: growth only serves the genuinely-unanswered frontier (spec §5 step 2).
-_PIPELINE_ANSWERED = frozenset({
-    "resolved",        # a real destination bound — the normal move path owns it
-    "ambiguous",       # candidates exist — disambiguation, not growth
-    "blocked",         # an in-world refusal (locked, denied) — honored
-    "undiscovered",    # the entitlement gate holds it — honored
-    "same_place",      # a restatement — nothing to grow toward
-    "fixture",         # scenery/bind target — not travel
-})
+def strict_flag(value) -> bool:
+    """The strict signal parser (cr piece-2 finding 1): ONLY the literal
+    boolean True is true — strings ("false", "true"), numbers, and every
+    other shape read False. Model-supplied flags gate canon mutation and
+    must never fail open through truthiness."""
+    return value is True
+
+
+#: The CLOSED pipeline-outcome contract (cr piece-2 finding 2): exactly one
+#: value permits growth — "miss", produced only AFTER the ordinary pipeline
+#: (refer + known-place + semantic-bind) ran to completion and found
+#: nothing. None/""/unknown/error are uninitialized-or-failed sentinels and
+#: FORBID growth; the answered states forbid it because the world already
+#: spoke: resolved / ambiguous / blocked / undiscovered / same_place /
+#: fixture.
+PIPELINE_MISS = "miss" 
 
 
 def growth_eligibility(*, kind: str, committed: bool, moves_open: bool,
@@ -160,9 +165,11 @@ def growth_eligibility(*, kind: str, committed: bool, moves_open: bool,
     1. an in-world, COMMITTED action turn (never hypothetical/negated/
        deliberative/OOC/question — the caller passes `committed` from the
        classify kind + its own guards);
-    2. the ordinary pipeline ran FIRST and proved zero destination —
-       `pipeline_outcome` None/"" means refer/known-place/semantic-bind
-       all missed; any answered state forbids growth;
+    2. the ordinary pipeline ran FIRST and PROVED the miss —
+       `pipeline_outcome` must be exactly PIPELINE_MISS ("miss"), a value
+       produced only after refer/known-place/semantic-bind completed and
+       found nothing; None/""/unknown/error are uninitialized-or-failed
+       sentinels and forbid growth, as does every answered state;
     3. the host's NO-GROWTH check found no structural deny (`host_deny`
        is the enumerated provable reason, or None — a model opinion is
        never one);
@@ -172,14 +179,14 @@ def growth_eligibility(*, kind: str, committed: bool, moves_open: bool,
     Pure and explicit (the salient_moments discipline): no reads, no
     hidden state — the turnloop wiring slice supplies every input.
     """
-    if kind != "action" or not committed:
+    if kind != "action" or committed is not True:
         return None
-    if pipeline_outcome in _PIPELINE_ANSWERED:
-        return None
+    if pipeline_outcome != PIPELINE_MISS:
+        return None  # the ONLY permitting value; everything else forbids
     if host_deny:
         return None
-    if seeks_encounter:
+    if seeks_encounter is True:
         return "encounter"
-    if moves_open:
+    if moves_open is True:
         return "place"
     return None

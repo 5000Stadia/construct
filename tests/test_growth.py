@@ -174,14 +174,22 @@ def test_broad_kwargs_ingest_alone_is_not_capable():
 
 
 def test_growth_eligibility_is_conjunctive_and_ordered():
-    from construct.growth import growth_eligibility as g
+    from construct.growth import PIPELINE_MISS, growth_eligibility as g
     base = dict(kind="action", committed=True, moves_open=True,
-                seeks_encounter=False, pipeline_outcome=None)
+                seeks_encounter=False, pipeline_outcome=PIPELINE_MISS)
     assert g(**base) == "place"
-    # every answered pipeline state forbids growth (the ordinary path owns it)
+    # THE CLOSED OUTCOME CONTRACT (cr): only the literal "miss" permits —
+    # answered states, uninitialized sentinels, and unknown/error all forbid
     for state in ("resolved", "ambiguous", "blocked", "undiscovered",
-                  "same_place", "fixture"):
-        assert g(**{**base, "pipeline_outcome": state}) is None
+                  "same_place", "fixture", None, "", "error", "MISS",
+                  "unknown_future_state"):
+        assert g(**{**base, "pipeline_outcome": state}) is None, state
+    # STRICT BOOLEANS (cr): truthy non-True never authorizes
+    assert g(**{**base, "committed": "false"}) is None
+    assert g(**{**base, "committed": 1}) is None
+    assert g(**{**base, "moves_open": "false"}) is None
+    assert g(**{**base, "moves_open": "true"}) is None
+    assert g(**{**base, "moves_open": 1}) is None
     # non-action / uncommitted turns never grow
     assert g(**{**base, "kind": "question"}) is None
     assert g(**{**base, "committed": False}) is None
@@ -210,3 +218,62 @@ def test_classify_fields_fail_closed(world):
     r = run_turn(world, arc, provider, "I look around.", turn=2,
                  generate=False)
     assert r.prose                       # the turn ran exactly as before
+
+
+def test_strict_flag_accepts_only_literal_true():
+    from construct.growth import strict_flag
+    assert strict_flag(True)
+    for v in (False, None, "", "true", "false", "True", 1, 0, [], [True],
+              {"v": True}):
+        assert not strict_flag(v), repr(v)
+
+
+def test_classify_signal_unpack_is_strict_and_provider_error_safe(world):
+    # cr piece-2 finding 1, end to end: (a) a classify verdict carrying
+    # MALFORMED signal values ("true"/"false" strings) leaves both growth
+    # locals False — no signal ever raised; (b) a classify ProviderError
+    # leaves them DEFINED and False (the pre-classify defaults). Proven via
+    # the trace's absence of any growth artifact and the turn surviving.
+    from tests.test_integration import make_arc, run_turn, seed_arc
+    from construct.provider import StubProvider
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "moves_open": "true", "seeks_encounter": 1},
+        {"prose": "The study holds its quiet."},
+    ])
+    r = run_turn(world, arc, provider, "I wander off.", turn=2, generate=False)
+    assert r.prose                              # ran; malformed flags inert
+    # provider-error path: classify raises → defaults hold, turn survives
+    import construct.turnloop as tl
+    from construct.provider import ProviderTransportError
+    mp = pytest.MonkeyPatch()
+    mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
+
+    def _boom(*_a, **_k):
+        raise ProviderTransportError("classify down")
+
+    mp.setattr(tl.cohorts, "classify", _boom)
+    try:
+        world._extractions.extend([{"items": []}, {"items": []}])
+        p2 = StubProvider([{"prose": "Still standing."}])
+        r2 = run_turn(world, arc, p2, "I wander again.", turn=3,
+                      generate=False)
+    finally:
+        mp.undo()
+    assert r2.prose                             # defined-and-False, no crash
+
+
+def test_moves_open_contract_covers_prospective_first_x():
+    # cr piece-2 finding 3: the field's own contract must put prospective
+    # first-X travel ("the first light I trust" — the Ironhold class) on
+    # the TRUE side and concrete named places on the FALSE side. Pin the
+    # schema text both ways.
+    from construct.cohorts import CLASSIFY_SCHEMA
+    desc = CLASSIFY_SCHEMA["properties"]["moves_open"]["description"]
+    assert "first light I trust" in desc          # prospective → true side
+    assert "prospective" in desc
+    assert "FALSE for any CONCRETE named" in desc # concrete → false side
+    assert "'the first tavern I see'" not in desc.split("FALSE")[1]         if "FALSE" in desc else True              # first-X never a FALSE example

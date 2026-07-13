@@ -160,11 +160,14 @@ CLASSIFY_SCHEMA = {
                   "plain movement, talk, or any action not focused on inspecting one detail."},
         "moves_open": {"type": "boolean",
                   "description": "true ONLY for committed OPEN-ENDED travel with no "
-                  "concrete nameable destination — directional or deictic flight "
-                  "('downstream', 'away from here', 'until I reach somewhere no one "
-                  "knows me'). FALSE for movement to any named or describable place "
-                  "('the mill', 'the first tavern I see' — those resolve or mint), "
-                  "for hypotheticals, questions, or staying put. Most turns: false."},
+                  "concrete destination the world could already contain — directional "
+                  "or deictic flight ('downstream', 'away from here', 'until I reach "
+                  "somewhere no one knows me') AND prospective first-X travel toward a "
+                  "place that exists only as a hope ('the first tavern I see', 'the "
+                  "first light I trust' — nothing concrete to bind). FALSE for any "
+                  "CONCRETE named or known place ('the mill', 'Liddell's warehouse' — "
+                  "those resolve or mint), for hypotheticals, questions, or staying "
+                  "put. Most turns: false."},
         "seeks_encounter": {"type": "boolean",
                   "description": "true ONLY for travel-UNTIL-someone — moving with the "
                   "stated aim of finding a person on the way ('I keep running down the "
