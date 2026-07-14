@@ -140,7 +140,107 @@ Interaction with world-growth: because poles are **shapes rendered to the world 
 actually stands** (§6), a player who reshaped the setup still gets an authored ending
 that *fits* the world they made — same instinct as the arc regenerating under drift
 ([living-world-generator], DRIFT-HANDLING). If a player fundamentally invalidates the
-premise the fan was authored against, that is a **regeneration** trigger, not a crack.
+premise the fan was authored against, that is a **regeneration** trigger, not a crack —
+see §5a.
+
+## 5a. The unexpected direction — tangent-absorbed vs fan-invalidated (founder, 2026-07-14)
+
+Not every off-script move is equal. The line is ONE test: **are the fan's outcomes still
+reachable given what the player just did?**
+
+- **Tangent the fan ABSORBS** (Sherlock detours to a bar for a couple of drinks). Reachability
+  is untouched; the outcomes just **defer**. The fan carries an implicit **engagement/time
+  tolerance** — its outcomes "land in the next few days *as long as the protagonist re-engages*"
+  (a diegetic-reachability window; [diegetic-time-is-the-only-clock] is the clock). The narrator
+  may still gently converge. Normal improv-serves-the-destination.
+
+- **Divergence that INVALIDATES the fan** (heist the crown and run; leave the country on
+  vacation without notice). The player destroys the precondition every authored outcome depends
+  on — the protagonist's continued engagement with THIS situation — so the outcomes literally
+  cannot happen. Two consequences:
+  1. **The narrator must NOT keep tipping toward the dead outcomes.** Steering toward the now-
+     impossible is stonewalling toward dead ends (violates [improvisation-north-star]'s never-
+     stonewall). Honesty over railroading.
+  2. **Terminate the fan, end the chapter, open a NEW one with a RESHAPED genre** fit to what the
+     player actually did (Sherlock-on-a-beach → travel-adventure / travel-romance / who knows).
+
+**The "mandatory item for unexpected direction" — a REQUIRED escape valve on every fan.** Not a
+5th authored ending: a guaranteed regeneration path so the player can ALWAYS blow up the story and
+get a real new one, never a stonewall. Every fan authors its 1-4 directions AND this valve.
+
+**Reuse the engine already built.** The tangent-adoption system (G-A, `construct/tangent.py`) does
+exactly "player declares a new aim → build a new arc → adopt it, demote the old main." Fan-
+invalidation reshape is that SAME machinery, triggered by **invalidation** instead of an explicit
+declaration, plus one added step: **re-select the genre** (a new game-type card set from the 155,
+[game-types], fit to the new trajectory). Not new construction — a new trigger + genre re-selection.
+
+**Reshape policy:** fit-driven WITH variety, not pure randomness — read the player's actual
+trajectory and pick a genre that fits, with room for surprise (fled to Marrakech → travel-thriller
+or travel-romance, not farming-sim). The sabotage EARNS an unpredictable response; the surprise is
+part of the contract.
+
+OPEN forks (founder, not yet pinned): (1) invalidation detection is an assessor read — "are the
+outcomes still reachable with plausible re-engagement?" — same family as the §4 assured-vs-test
+gate; is the tolerance a FIXED diegetic window or a PER-FAN authored one? (2) how much surprise in
+the reshape — fit-with-variety (proposed) vs genuinely randomized among fitting genres.
+
+## 5b. The chapter-boundary structure-validation pass (founder, 2026-07-14)
+
+§5a's reshape is the EXTREME case of a general principle: **the story structure for the next
+chapter is chosen from how the player actually PLAYED the last one.** A quick check runs at every
+chapter boundary, BEFORE the next chapter's arc/fan is authored, at three intensities:
+
+| Intensity | Signal | Next chapter |
+|-----------|--------|--------------|
+| **Confirm** | played to type (clean Sherlock) | stays the same genre |
+| **Blend**   | played to type + a PERSISTENT added dimension (Sherlock who keeps flirting) | genre **blend** (mystery + romance) |
+| **Reshape** | invalidated the fan (§5a: heist / vacation) | full new genre |
+
+Same mechanism, three settings. **The quick check** — a lightweight assessor at the doorway
+(`continue_episode` / `_episode_doorway`) — is a **reflection on the WHOLE story so far** (not just
+the last chapter; inherently cumulative — the structure converges on the story actually told). It
+reads two signals, and pointedly NOT a third:
+
+- ✅ **Tonal / thematic texture the player injects** → register + genre blend. Slapstick along the
+  way → lighten (a comic mystery); persistent flirting → thread in romance; dread → darken. This
+  can shift **register WITHIN a genre** (grim mystery → cozy/comic mystery) as readily as it blends
+  a second genre — "same genre, lighter" is often the right move, not "add romance."
+- ✅ **Premise engagement** (§5a) — still pursuing this situation, or gone to a new one.
+- ❌ **NOT win/loss / skill / effectiveness.** A player who fails the mystery is NOT asking for a
+  different genre — they had a hard time with the mystery; keep it. **Performance lives in the POLE
+  (§4), never in the structure choice** — swapping genre because the player struggled would punish
+  difficulty. This decoupling is load-bearing (founder, 2026-07-14).
+
+The arc author then builds the next fan against the selected/blended/reshaped genre + register.
+
+**The new input:** the player's demonstrated STYLE (tone + engagement, not competence) drives story
+structure. This is "the world grows where the player walks" applied to the STORY SHAPE, and the
+concrete delivery of "genre proposes, player disposes" ([episodic-and-play-contracts]) — the player
+disposes the next genre by how they play, not by menu.
+
+RESOLVED (founder, 2026-07-14):
+- The pass reflects on the ENTIRE story (cumulative), is tone/engagement-driven, NOT
+  performance-driven.
+- **The pass's canonical question is simply: *"Is there a more appropriate SHAPE for where the
+  player is?"*** A fit question, not drift-tracking — about where the player has ARRIVED (tonally,
+  situationally), not a vector to chase. The default answer is almost always "no, the current shape
+  fits" → do nothing.
+- **Default = do little or nothing.** Strong inertia toward the current structure; the pass acts
+  ONLY when a clearly better-fitting shape is evident — the player has "clearly turned" the romance
+  into a romance-with-heist. A one-off beat is noise; a clear, sustained fit is signal. Conservative
+  by default; hysteresis, not a hair-trigger.
+- **A fit assessment, never a report card.** It asks whether a better shape fits the player's
+  situation — so it structurally cannot punish a struggling player, because struggling is
+  difficulty, not a mismatch of shape. (Reinforces the performance-decoupling above.)
+- The pass is therefore mostly INVISIBLE — most boundaries change nothing; it earns its keep only
+  on the rare clear pivot.
+
+OPEN fork (founder, not yet pinned):
+- **Composite game-types** — "mystery + romance" (and register shifts) need the 155-card taxonomy
+  ([game-types], [genre-signature-elements]) to BLEND / re-register — layer a secondary genre's
+  signature onto the primary, or dial its tonal register. This is the one load-bearing NEW
+  capability here; the rest is wiring the adoption engine + the boundary assessor. Everything else
+  in §5a/§5b reuses tangent-adoption + the continuation doorway.
 
 ## 6. Authored at creation, selected + rendered at conclusion
 
