@@ -37,6 +37,11 @@ SCHEDULE = ["F", "K", "F", "P", "F", "K", "P", "F", "F", "K",
 #: ENGAGING whatever path the player chooses.
 OFFPATH_SCHEDULE = ["F", "K", "T", "T", "B", "T", "K", "T", "T", "B",
                     "T", "P", "T", "T", "T", "T", "T", "C"]
+#: GENRE-SHIFT (founder): COMPLETE the presented story while persistently CURVING it
+#: toward an alternative story type, so chapter 2 should reshape/blend to that type.
+#: Interleaves genuine plot pursuit (F/K) with the curve (R); concludes the story (C).
+GENRESHIFT_SCHEDULE = ["F", "R", "K", "R", "F", "R", "F", "R", "K", "R",
+                       "F", "R", "K", "R", "F", "R", "F", "C"]
 
 _STANCE = {
     "F": ("FOLLOW THE THREAD — pursue what seems interesting or off. You do NOT know "
@@ -57,7 +62,31 @@ _STANCE = {
           "trust the untrustworthy, go where you were warned not to). Not suicidal — "
           "unwise. You are testing whether consequences land honestly and the story "
           "stays engaging."),
+    "R": ("CURVE IT — make THIS turn's move in a way that pulls the story's TONE and "
+          "TYPE toward YOUR CHOSEN ALTERNATIVE shape (flirt and let feeling steer you; "
+          "bring levity or mischief; crave the road and risk) while STILL addressing the "
+          "plot at hand. Both at once — serve the presented story AND bend it your way."),
 }
+
+GENRESHIFT_PRIMER = """
+YOUR DUAL AIM (genre-shift mode): you ARE here to genuinely play and COMPLETE the
+presented story — pursue its plot, engage its people, bring it to a real resolution.
+AND, threaded through everything you do, you are CURVING the whole story toward a
+DIFFERENT story type than the one presented. In your first two turns choose ONE
+alternative shape true to your character — a ROMANCE (court someone present; let feeling
+steer you), a COMEDY (levity, mischief, slapstick), or an ADVENTURE (crave travel, risk,
+the open road) — name it to yourself and thread it through EVERY turn after: not INSTEAD
+of the plot, but woven INTO how you pursue it. Address the story at hand while
+persistently, unmistakably leaning it your way, so that by the end an onlooker would say
+"this is still the presented story — but it has clearly become [presented] + [your
+alternative]." Do NOT abandon the plot (that is a different mode); the test is whether a
+story you genuinely completed, but visibly colored, is NOTICED at the chapter seam.
+Your critic hat watches that seam most of all: when chapter 2 opens, did the world notice
+where you took the whole story — is chapter 2 reshaped or BLENDED toward your alternative
+type (a mystery gone lighter; an investigation now also a romance), or did it snap back
+to the original genre as if your steering never happened? A chapter 2 that ignores the
+direction you clearly pulled the entire first chapter is THE finding to file.
+"""
 
 OFFPATH_PRIMER = """
 YOUR CHOSEN PATH (off-the-beaten-path mode): you are NOT here to serve the presented
@@ -157,7 +186,9 @@ def player_move(story_tail: str, stance: str, ch2: bool = False) -> dict:
         "You are the PLAYER of a text interactive fiction — you control the protagonist "
         "('you'). You are COLD to the plot (discover it like a first-time player) but "
         "your CHARACTER has lived this life (draw on their plausible knowledge).\n"
-        + CRITIC_PRIMER + (OFFPATH_PRIMER if MODE == "offpath" else "")
+        + CRITIC_PRIMER
+        + (OFFPATH_PRIMER if MODE == "offpath"
+           else GENRESHIFT_PRIMER if MODE == "genreshift" else "")
         + (CH2_CRITIC_ADDENDUM if ch2 else "") +
         f"\nSTORY SO FAR (most recent — this is ALL you know):\n{story_tail}\n\n"
         f"YOUR STANCE THIS TURN: {_STANCE[stance]}\n\n"
@@ -178,7 +209,8 @@ def file_feedback(note: str, story_tail: str, scenario: str, turn: int) -> str:
 
 
 _PID = "critic" if MODE == "standard" else f"critic_{MODE}"
-_SCHED = OFFPATH_SCHEDULE if MODE == "offpath" else SCHEDULE
+_SCHED = (OFFPATH_SCHEDULE if MODE == "offpath"
+          else GENRESHIFT_SCHEDULE if MODE == "genreshift" else SCHEDULE)
 
 
 def main() -> None:
@@ -258,7 +290,10 @@ def main() -> None:
             ch2_open = s2.opening()
             w("## CH2 OPENING\n\n" + ch2_open + "\n")
             story2 = story[-2500:] + "\n\n===== CHAPTER 2 BEGINS =====\n\n" + ch2_open
-            for j, st in enumerate(["F", "K", "F", "P", "F", "K"], 1):
+            # genre-shift mode keeps CURVING in ch2 so the seam is judged for reshape/blend
+            _ch2_sched = (["R", "F", "R", "K", "R", "F"] if MODE == "genreshift"
+                          else ["F", "K", "F", "P", "F", "K"])
+            for j, st in enumerate(_ch2_sched, 1):
                 try:
                     mv = player_move(story2[-5000:], st, ch2=True)
                     inp = (mv.get("input") or "").strip() or "I look around."
