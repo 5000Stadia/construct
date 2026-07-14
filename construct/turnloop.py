@@ -1284,6 +1284,33 @@ def _partition_frames(items: list) -> tuple[list[dict], list[str]]:
 #: (resolve.py:40) covers `in`/`inside` but NOT `located_in`.
 _CONTAINMENT_SYNONYMS = frozenset({"in", "inside", "located_in"})
 
+#: Attributes whose narrator-promoted value is TEMPORAL STATE (true from THIS turn),
+#: not a timeless trait. A promoted row with no `valid_from` defaults to 0.0 — fine for
+#: a trait (colour/occupation are true-always, learned-now via `asserted_at`), but WRONG
+#: for positional state: a `valid_from=0.0` relocation is dominated by any earlier
+#: properly-timed `in`, so a narrated arrival never advances the play-horizon position.
+#: (Bodycase teleport, founder 2026-07-14: the ch1 walk to Liddell's warehouse promoted
+#: `in` at 0.0, so the ch1→ch2 doorway read a stale briefing-room location.) These
+#: attributes are stamped with `turn_time(turn)` when promoted; see the settle path.
+_TEMPORAL_PROMOTE_ATTRS = frozenset({"in"})
+
+
+def _stamp_temporal_state(rows: list, turn: int) -> list:
+    """Stamp `valid_from=turn_time(turn)` on resolver-output rows whose attribute is
+    TEMPORAL positional state (`_TEMPORAL_PROMOTE_ATTRS`) and that don't already carry a
+    `valid_from`. A committed `in` relocation left at the ingest default (0.0/cursor) is a
+    degenerate stamp dominated by any earlier properly-timed location, so a narrated
+    arrival never advances the play horizon (the bodycase ch1->ch2 teleport). Timeless
+    traits are untouched — they are true-always, learned-now via `asserted_at`. Non-dict
+    rows pass through unchanged."""
+    out = []
+    for r in rows:
+        if (isinstance(r, dict) and r.get("attribute") in _TEMPORAL_PROMOTE_ATTRS
+                and "valid_from" not in r):
+            r = {**r, "valid_from": turn_time(turn)}
+        out.append(r)
+    return out
+
 
 def _canonicalize_containment(rows: list[dict]) -> list[dict]:
     """Rewrite `inside`/`located_in` rows to the canonical `in` spelling — run on the ACCEPTED
@@ -4290,6 +4317,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                                 name_of=_pin_name, allow_mint=True,
                                                 mint_kinds=_PLAYER_INPUT_MINT_KINDS)
                 trace.resolver = (trace.resolver or []) + _prec
+                # POSITIONAL STATE IS TEMPORAL (bodycase teleport, founder 2026-07-14): a
+                # player-input `in` relocation must land at THIS turn, not the ingest default —
+                # else locate()/the episode doorway read a stale position. Stamp before BOTH the
+                # growth-deferred stage and the direct commit; the movement lane (2b) still wins
+                # on a later assertion when it fires. Timeless traits untouched.
+                _resolved = _stamp_temporal_state(list(_resolved), turn)
                 # Capture candidates BEFORE ingest for the value-side hydration join (§A, Cx 525):
                 # receipt_rows below carries entity/attribute only; _player_delta_candidates
                 # preserves values so confirmed_batch() can satisfy the value-side spine-touch check.
@@ -7653,6 +7686,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         promote: list[dict] = []
         contradictions: list[tuple] = []
         quarantined: list[tuple] = []
+
+        def _promote_row(_entity: Any, _attribute: str, _value: Any) -> dict:
+            # Narrator PROVENANCE (Cx 022): re-stamp `source_doc` so a promoted improv fact is
+            # auditable as narrator-origin. Temporal stamping of positional `in` state happens
+            # in one place — `_stamp_temporal_state`, applied to the whole batch at ingest.
+            return {"entity": _entity, "attribute": _attribute,
+                    "value": _value, "source_doc": _NARRATOR_SOURCE}
+
         for (entity, attribute), newv in proposed_vals.items():
             # ENTITY AUTHORITY (verified-then-strip, Cx 313): the malformed / narrator-voice / pronoun-
             # deixis / person-in-object band-aids that USED to live here are GONE — the resolver
@@ -7693,22 +7734,23 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # auditable as narrator-origin (vs player/author/canon-seed).
             if key in protected_keys:
                 if licensed_strict:
-                    promote.append({"entity": entity, "attribute": attribute,
-                                    "value": newv, "source_doc": _NARRATOR_SOURCE})
+                    promote.append(_promote_row(entity, attribute, newv))
                 else:
                     quarantined.append(key)
                 continue
             if established is not _ABSENT and established != newv and not licensed_strict:
                 contradictions.append(key)  # narrator overwrote established truth
             else:
-                promote.append({"entity": entity, "attribute": attribute,
-                                "value": newv, "source_doc": _NARRATOR_SOURCE})
+                promote.append(_promote_row(entity, attribute, newv))
         # The narrator_promote batch is a quarantine-gate audit/receipt surface retained
         # for future drift-handling readers. Cx 567 §2 retired it as a salience input;
         # the opportunistic generator does not read it. PB receipts carry entity/attribute
         # but NOT value, so confirmed_batch() retains candidate values for confirmed keys.
         _promote_receipt_rows: list[dict] = []
         if promote:
+            # Stamp positional `in` state at THIS turn so a promoted relocation advances the
+            # play horizon (bodycase teleport) — the same rule the player-input path uses.
+            promote = _stamp_temporal_state(promote, turn)
             with _phase(trace, "promote"):
                 _promote_receipt = p.ingest_structured(promote, frame="canon", classify="batch")
                 _promote_receipt_rows = _receipt_rows(_promote_receipt)

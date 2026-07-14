@@ -425,6 +425,44 @@ class TestFullTurn:
         # new fact promoted (good improv preserved)
         assert world.porcelain.state("obj:candle", "kind")["status"] == "known"
 
+    def test_extracted_relocation_is_stamped_at_the_turn_not_time_zero(self, world):
+        # BODYCASE TELEPORT (founder 2026-07-14): a protagonist `in` relocation extracted from
+        # the player's input is TEMPORAL STATE — true from THIS turn — so it must carry
+        # valid_from=turn_time(turn). Left at the ingest default it is a degenerate stamp
+        # dominated by any earlier properly-timed `in`, so `locate()` never advances and the
+        # ch1->ch2 doorway read a stale location. A TRAIT extracted the same turn stays timeless
+        # (true-always, learned-now via asserted_at) — only positional state is stamped.
+        # See turnloop._stamp_temporal_state / _TEMPORAL_PROMOTE_ATTRS.
+        from construct.adapter import frame_facts
+        from construct.arc.executor import turn_time
+        arc = make_arc()
+        seed_arc(world, arc)
+        # an EMPTY known place to move into (place:flat holds person:rival, whose npc_turn
+        # would consume extra stub responses — presence is irrelevant to the stamp)
+        world.ingest_structured([{"entity": "place:hall", "attribute": "kind",
+                                  "value": "room", "timeless": True}])
+        # player-input extraction: deixis "i" -> protagonist; a move + a trait, same batch
+        world._extractions.append({"items": [
+            {"entity": "i", "attribute": "in", "value": "place:hall", "frame": "canon"},   # positional
+            {"entity": "i", "attribute": "mood", "value": "wary", "frame": "canon"},        # trait
+        ]})
+        world._extractions.append({"items": []})                        # narrator prose
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "You step through into the empty hall."},
+        ])
+        run_turn(world, arc, provider, "I slip through into the hall.", turn=3,
+                 scope=[PLAYER, "place:study", "place:hall"])
+        # the relocation took effect at the play horizon — locate() MOVED (the teleport fix)
+        assert world.porcelain.locate(PLAYER)[0] == "place:hall"
+        in_rows = list(frame_facts(world, "canon", entity=PLAYER, attribute="in"))
+        hall_rows = [r for r in in_rows if r.value == "place:hall"]
+        assert hall_rows and hall_rows[-1].valid_from == turn_time(3)   # TEMPORAL: stamped
+        # a trait extracted the SAME turn is NOT stamped at the turn (stays timeless)
+        mood_rows = list(frame_facts(world, "canon", entity=PLAYER, attribute="mood"))
+        assert mood_rows and mood_rows[-1].valid_from != turn_time(3)
+
     def test_dropping_a_held_object_commits_it_into_the_scene(self, world):
         # FOUNDER cohesion test: "set the letter-opener down" narrated but canon kept it held →
         # it snapped back to the pocket next turn. A drop of a HELD object now commits obj.in =
