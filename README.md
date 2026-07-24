@@ -25,6 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/i
 ### Start playing
 
 ```sh
+export OPENAI_API_KEY=sk-...    # the default model provider (see "Providers" below)
 construct start                 # the same conversational entry your phone gets
 ```
 
@@ -61,7 +62,20 @@ print(s.turn("I look around.").prose)
 s.close()
 ```
 
-Bring any LLM behind the provider interface. Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
+### Providers
+
+Every model call routes through one provider interface — bring any LLM behind it. Two wires ship, selected by `CONSTRUCT_PROVIDER`:
+
+- **Default (recommended): a metered OpenAI API key.** Set `OPENAI_API_KEY`; calls go to the official `api.openai.com/v1/responses` endpoint. This is the right path for anything shared, automated, hosted, production, or multi-user — including running the Telegram/Discord transports for anyone but yourself.
+- **Opt-in: `CONSTRUCT_PROVIDER=codex` — ChatGPT-subscription OAuth.** Reuses the credential from `codex login` (`~/.codex/auth.json`).
+
+> **Warning — the `codex` opt-in uses your personal ChatGPT-subscription credentials.** Per OpenAI's guidance, subscription auth is intended for personal, interactive use; programmatic or automated use should prefer an API key, and subscription credentials should not be exposed in untrusted, public, shared, or multi-user environments. The operator is responsible for compliance with [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/).
+>
+> **Recommendation:** stay on the default metered API key unless you are a single operator running Construct personally and have read the terms.
+
+There is no silent fallback or credential auto-detection: an unknown `CONSTRUCT_PROVIDER` value fails loudly, and a missing credential fails at the first model call with the fix named. Scene imagery follows the same preference (API key first; `CONSTRUCT_IMAGE_BACKEND` forces a backend). Model knobs: `CONSTRUCT_OPENAI_MODEL` / `CONSTRUCT_OPENAI_CHEAP_MODEL` / `CONSTRUCT_OPENAI_BASE_URL`.
+
+Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
 
 ---
 
