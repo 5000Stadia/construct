@@ -1282,10 +1282,11 @@ def _partition_frames(items: list) -> tuple[list[dict], list[str]]:
 #: CAST-MOVES.md §1 (Cx r1 gap 1): the containment-synonym set that collapses to the single
 #: canonical `in` spelling BEFORE `resolve_rows` — the resolver's `_ENTITY_VALUED_ATTRS`
 #: (resolve.py:40) covers `in`/`inside` but NOT `located_in`.
-#: `within` is included by explicit disposition (cr 2026-07-24): the resolver treats it
-#: as entity-valued but the engine does NOT collapse it to `in` at ingest, so left alone
-#: it would commit as a separate containment spelling — unstamped, unbound, invisible to
-#: locate() domination. One spelling carries containment: `in`.
+#: `within` is included by explicit disposition (cr 2026-07-24): the engine DOES alias
+#: `within` -> `in` at ingest (`_BUILTIN_ALIASES`), but that canonicalization runs AFTER
+#: this host's resolver/temporal-stamp seam — so left to the engine, a `within` row would
+#: pass resolve/stamp un-collapsed (unbound, unstamped) and only become `in` once it was
+#: too late to carry the turn coordinate. One spelling carries containment at the seam: `in`.
 _CONTAINMENT_SYNONYMS = frozenset({"in", "inside", "located_in", "within"})
 
 #: Attributes whose narrator-promoted value is TEMPORAL STATE (true from THIS turn),
@@ -1317,11 +1318,12 @@ def _stamp_temporal_state(rows: list, turn: int) -> list:
 
 
 def _canonicalize_containment(rows: list[dict]) -> list[dict]:
-    """Rewrite `inside`/`located_in` rows to the canonical `in` spelling — run on the ACCEPTED
-    RAW extraction rows, BEFORE `resolve_rows` sees them (CAST-MOVES.md §1). Un-canonicalized, a
+    """Rewrite every containment-synonym row (`inside`/`located_in`/`within`) to the canonical
+    `in` spelling — run on the ACCEPTED RAW extraction rows, BEFORE `resolve_rows` sees them
+    (CAST-MOVES.md §1), on BOTH the narrator and player channels. Un-canonicalized, a
     `located_in` row would never have its destination bound (the resolver's entity-valued
     vocabulary doesn't recognize that spelling) and would silently strand as a literal-valued
-    row instead of a movement candidate. Every OTHER attribute passes through untouched; a
+    row instead of a movement candidate; `inside`/`within` would slip past the temporal stamp. Every OTHER attribute passes through untouched; a
     changed row is copied, never mutated in place."""
     out: list[dict] = []
     for r in rows:

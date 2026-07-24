@@ -45,7 +45,7 @@ entity-valued vocabulary (`_ENTITY_VALUED_ATTRS`, resolve.py:40) contains
 un-canonicalized would never have its destination bound, and the gate's own
 canonicalization map runs at ingest, one boundary too late for either the
 resolver or this lane. Canonicalizing at the seam's entry gives every
-downstream step one spelling. (Test bar 9 exercises all three spellings —
+downstream step one spelling. (Test bar 9 exercises all four spellings —
 `located_in` especially, since it is the one the resolver would silently
 strand.)
 
@@ -342,8 +342,8 @@ the deferral to STATE deterministically).
    projection** (the receipt-gated sequencing oracle — Cx r1 gap 4).
 9. **Ordinary person rows** (non-containment) still flow through the normal
    promote gate unchanged — the lane takes ONLY movement — AND
-   **synonym-authored moves in all three spellings** (`in`, `inside`,
-   `located_in` at the seam) enter the lane rather than leaking to ordinary
+   **synonym-authored moves in all four spellings** (`in`, `inside`,
+   `located_in`, `within` at the seam) enter the lane rather than leaking to ordinary
    promotion; `located_in` especially, since un-canonicalized it would never
    even bind its destination (Cx r1 gap 1 oracle).
 10. **Horizon oracle:** a FUTURE-stamped location or kind row (beyond the
