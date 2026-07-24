@@ -59,14 +59,17 @@ source of truth.
    touch of the world's **listed genre / game-type** (dumped in for per-story
    variety, e.g. *"with a touch of mystery whodunnit, social drama atmosphere"*).
 5. **Generate the asset.** `imagery._dispatch` produces the file from the prompt.
-   The **default backend is the Codex OAuth subscription** — the Responses
-   `image_generation` tool over `/codex/responses`, reusing Construct's own
-   `CodexProvider` auth (the *same* ChatGPT subscription that powers all the text, so
-   **no separate API key and no separate billing**). Backends, in order: an explicit
-   `imagery.dispatcher` → `CONSTRUCT_IMAGE_CMD` (`{prompt}`/`{out}`) → **Codex
-   subscription** → OpenAI Images (`OPENAI_API_KEY`, `gpt-image-1`) → none; force one
-   with `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none). With **no backend the
-   manifest is still produced** and play is byte-for-byte text-only.
+   The **default backend is OpenAI Images** (`OPENAI_API_KEY`, `gpt-image-1`) —
+   post-A1, same policy as the text provider. The Codex OAuth subscription backend
+   (the Responses `image_generation` tool over `/codex/responses`, reusing
+   Construct's own `CodexProvider` auth) is **never auto-detected**: it runs only
+   on an explicit signal — `CONSTRUCT_IMAGE_BACKEND=codex`, or the deployment-wide
+   opt-in coupling `CONSTRUCT_PROVIDER=codex` (one flag opts text AND imagery into
+   subscription auth). Backends, in order: an explicit `imagery.dispatcher` →
+   `CONSTRUCT_IMAGE_CMD` (`{prompt}`/`{out}`) → OpenAI Images → Codex subscription
+   *(explicit signal only)* → none; force one with `CONSTRUCT_IMAGE_BACKEND`
+   (codex|openai|cmd|none). With **no backend the manifest is still produced** and
+   play is byte-for-byte text-only.
 6. **Deliver before the prose — but never block on it; never drop it.** When the turn
    returns, the transport takes the render holder (`Session.take_pending_image`) and does a
    SHORT join (`IMAGE_BEFORE_TEXT_S`, ~12 s — the render had the whole turn to cook). If
@@ -93,7 +96,7 @@ change-detector; nothing else has to decide "did it change".
 |---|---|---|
 | `CONSTRUCT_SCENE_IMAGES` | `1` (on) | set falsey to opt a world out entirely |
 | `CONSTRUCT_IMAGE_BACKEND` | auto | force `codex` / `openai` / `cmd` / `none` |
-| (Codex OAuth) | default | `~/.codex/auth.json` → subscription image gen, no API key |
+| (Codex OAuth) | opt-in | `CONSTRUCT_PROVIDER=codex` (or forced backend) + `~/.codex/auth.json` → subscription image gen — never auto-detected |
 | `CONSTRUCT_IMAGE_SIZE` | `1536x1024` | requested image size |
 | `CONSTRUCT_IMAGE_QUALITY` | `auto` | Codex image quality (detail comes from the style prompt, not high-res) |
 | `OPENAI_API_KEY` | — | enables the OpenAI gpt-image-1 fallback backend |

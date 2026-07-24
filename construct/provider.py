@@ -362,6 +362,11 @@ class CodexProvider(Provider):
     _endpoint_path = "/codex/responses"
     _label = "Codex"
     _auth_fix = "run `codex login`"
+    #: Whether text.format carries `strict: true` (server-side Structured
+    #: Outputs adherence). The Codex consumer wire ships WITHOUT it — the
+    #: Kernos-proven request shape is preserved verbatim; the official
+    #: metered endpoint (OpenAIProvider) opts in.
+    _schema_strict = False
 
     def __init__(
         self,
@@ -439,6 +444,7 @@ class CodexProvider(Provider):
             "text": {"format": {
                 "type": "json_schema",
                 "name": "output",
+                **({"strict": True} if self._schema_strict else {}),
                 "schema": force_strict_object_schema(schema),
             }},
         }
@@ -667,6 +673,7 @@ class OpenAIProvider(CodexProvider):
     _label = "OpenAI"
     _auth_fix = ("set OPENAI_API_KEY (or opt in to subscription auth with "
                  "CONSTRUCT_PROVIDER=codex)")
+    _schema_strict = True   # server-side Structured Outputs adherence
 
     def __init__(
         self,

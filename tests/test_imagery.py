@@ -33,19 +33,29 @@ def _prov(prompt="a gaslit Victorian study, bolted door, dying coal fire, fog at
     return StubProvider([{"prompt": prompt}])
 
 
-def test_backend_autodetect_prefers_api_key_over_subscription(worlds, monkeypatch):
-    # A1 policy: metered auth is the shipped default; the subscription is an
-    # explicit opt-in — so with BOTH available, auto-detect picks the API key,
-    # and only a forced CONSTRUCT_IMAGE_BACKEND=codex selects the subscription.
+def test_backend_never_autodetects_the_subscription(worlds, monkeypatch):
+    # A1 policy (cr review): metered auth is the shipped default and the Codex
+    # subscription is NEVER auto-detected — a present ~/.codex/auth.json must not
+    # silently select it. It is chosen only by an explicit signal: the forced
+    # backend, or the documented coupling to the text opt-in CONSTRUCT_PROVIDER=codex.
     monkeypatch.delenv("CONSTRUCT_IMAGE_BACKEND", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.delenv("CONSTRUCT_PROVIDER", raising=False)
     monkeypatch.setattr(imagery, "_codex_available", lambda: True)
-    assert imagery._selected_backend() == "openai"
-    monkeypatch.setenv("CONSTRUCT_IMAGE_BACKEND", "codex")
-    assert imagery._selected_backend() == "codex"      # explicit opt-in wins
-    monkeypatch.delenv("CONSTRUCT_IMAGE_BACKEND", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert imagery._selected_backend() == "openai"     # key wins over credential
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    assert imagery._selected_backend() == "codex"      # no key → subscription
+    # THE NEGATIVE ORACLE: credential present, no explicit signal → NOT codex
+    assert imagery._selected_backend() == "none"
+    # explicit signal 1: the deployment-wide text opt-in couples imagery in
+    monkeypatch.setenv("CONSTRUCT_PROVIDER", "codex")
+    assert imagery._selected_backend() == "codex"
+    # ...but only with a usable credential behind it
+    monkeypatch.setattr(imagery, "_codex_available", lambda: False)
+    assert imagery._selected_backend() == "none"
+    # explicit signal 2: the forced backend, independent of CONSTRUCT_PROVIDER
+    monkeypatch.delenv("CONSTRUCT_PROVIDER", raising=False)
+    monkeypatch.setenv("CONSTRUCT_IMAGE_BACKEND", "codex")
+    assert imagery._selected_backend() == "codex"
 
 
 def test_fresh_then_cached_reuses_without_a_model_call(worlds):

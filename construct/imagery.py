@@ -26,13 +26,14 @@ turn is never blocked on an image.
 
 Default-on, lazy, fail-open, opt-out via ``CONSTRUCT_SCENE_IMAGES=0``. Image
 GENERATION is pluggable; the DEFAULT backend is the **OpenAI API key** (gpt-image-1 —
-metered, same policy as :func:`construct.provider.default_provider`), with the Codex
-OAuth subscription (the Responses `image_generation` tool) as the opt-in alternative.
-Order: an explicit :data:`dispatcher` → ``CONSTRUCT_IMAGE_CMD`` → ``OPENAI_API_KEY``
-(gpt-image-1) → Codex subscription → none; force one with ``CONSTRUCT_IMAGE_BACKEND``
-(codex|openai|cmd|none). With no backend, the manifest
-(``worlds/<scenario>.images.json``) IS the deliverable and play is byte-for-byte
-text-only.
+metered, same policy as :func:`construct.provider.default_provider`). The Codex OAuth
+subscription backend (the Responses `image_generation` tool) is NEVER auto-detected —
+explicit signal only: ``CONSTRUCT_IMAGE_BACKEND=codex``, or the deployment-wide opt-in
+coupling ``CONSTRUCT_PROVIDER=codex``. Order: an explicit :data:`dispatcher` →
+``CONSTRUCT_IMAGE_CMD`` → ``OPENAI_API_KEY`` (gpt-image-1) → Codex *(explicit signal
+only)* → none; force one with ``CONSTRUCT_IMAGE_BACKEND`` (codex|openai|cmd|none).
+With no backend, the manifest (``worlds/<scenario>.images.json``) IS the deliverable
+and play is byte-for-byte text-only.
 """
 
 from __future__ import annotations
@@ -285,10 +286,12 @@ def _codex_available() -> bool:
 
 def _selected_backend() -> str:
     """Which generation backend to use: an explicit `dispatcher` always wins; otherwise
-    `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none) forces it, else auto-detect in the
-    order custom-command → OpenAI API key → Codex subscription → none (the API key
-    outranks the subscription: metered auth is the shipped default, subscription
-    auth an explicit opt-in — same policy as `provider.default_provider`)."""
+    `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none) forces it, else custom-command →
+    OpenAI API key → none. The Codex subscription is NEVER auto-detected (cr A1 review:
+    a present `~/.codex/auth.json` must not silently select subscription auth) — it is
+    chosen only by an explicit signal: the forced backend above, or the documented
+    coupling to the text opt-in (`CONSTRUCT_PROVIDER=codex` opts the WHOLE deployment
+    into subscription auth, imagery included — one flag, one policy)."""
     if dispatcher is not None:
         return "dispatcher"
     forced = os.getenv("CONSTRUCT_IMAGE_BACKEND", "").strip().lower()
@@ -300,7 +303,8 @@ def _selected_backend() -> str:
         return "cmd"
     if os.getenv("OPENAI_API_KEY", "").strip():
         return "openai"
-    if _codex_available():
+    if os.getenv("CONSTRUCT_PROVIDER", "").strip().lower() == "codex" \
+            and _codex_available():
         return "codex"
     return "none"
 

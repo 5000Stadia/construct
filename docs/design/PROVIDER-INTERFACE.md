@@ -49,8 +49,11 @@ def engine_callable(provider: Provider, tier: Tier = "main") -> ModelCallable:
 - **MUST** route every model call through this interface — engine
   `model=`, renderer/GM, NPC engines, beat-evaluator, input-classifier,
   interviewer, arc author. No exceptions, including "temporary" ones.
-- **MUST** ship Codex subscription auth as the working default: detected
-  and usable with zero configuration and zero credits.
+- **MUST** ship a metered API-key provider as the working default
+  (post-A1, 2026-07-24 — this bullet originally read "Codex subscription
+  auth as the working default", reversed by the founder's A1 ruling);
+  subscription auth is available only as the explicit opt-in
+  `CONSTRUCT_PROVIDER=codex`, and no credential is ever auto-detected.
 - **NEVER** name a vendor, model id, endpoint, or credential anywhere
   past the interface boundary. Downstream code knows `main` and `cheap`,
   nothing else.

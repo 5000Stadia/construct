@@ -273,6 +273,30 @@ def test_openai_wire_is_api_key_shaped(monkeypatch):
     assert "sk-test" not in provider.describe()   # no secret in describe()
 
 
+def test_openai_request_body_is_the_complete_strict_wire(monkeypatch):
+    # cr A1 review: the metered wire must carry server-side Structured Outputs
+    # adherence — text.format.strict=true — while the Codex consumer wire keeps
+    # the Kernos-proven shape WITHOUT it. Oracle over the complete request body.
+    from construct.provider import OpenAIProvider
+    monkeypatch.delenv("CONSTRUCT_OPENAI_MODEL", raising=False)
+    monkeypatch.delenv("HOLODECK_CODEX_REASONING_EFFORT", raising=False)
+    body = OpenAIProvider(api_key="sk-test")._body("the prompt", SCHEMA, "main")
+    fmt = body["text"]["format"]
+    assert fmt["type"] == "json_schema" and fmt["name"] == "output"
+    assert fmt["strict"] is True
+    assert fmt["schema"] == force_strict_object_schema(SCHEMA)
+    assert body["model"] == "gpt-5.5"
+    assert body["store"] is False and body["stream"] is True
+    assert body["input"] == [{"role": "user", "content": "the prompt"}]
+    assert body["include"] == ["reasoning.encrypted_content"]
+    assert "reasoning" in body and body["reasoning"]["effort"]
+    assert body["prompt_cache_key"]
+    # the Codex wire is DISTINCT: no strict key (proven shape preserved verbatim)
+    codex_fmt = CodexProvider(auth_path=Path("/nonexistent"))._body(
+        "the prompt", SCHEMA, "main")["text"]["format"]
+    assert "strict" not in codex_fmt
+
+
 def test_openai_key_fresh_read_from_env(monkeypatch):
     from construct.provider import OpenAIProvider
     provider = OpenAIProvider()
