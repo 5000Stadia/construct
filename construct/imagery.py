@@ -25,13 +25,14 @@ turn is never blocked on an image.
   isn't ready in time.
 
 Default-on, lazy, fail-open, opt-out via ``CONSTRUCT_SCENE_IMAGES=0``. Image
-GENERATION is pluggable; the DEFAULT backend is the **Codex OAuth subscription** (the
-Responses `image_generation` tool — the same credential that powers all of Construct's
-text, no separate API key, no separate billing). Order: an explicit :data:`dispatcher`
-→ ``CONSTRUCT_IMAGE_CMD`` → Codex subscription → ``OPENAI_API_KEY`` (gpt-image-1) →
-none; force one with ``CONSTRUCT_IMAGE_BACKEND`` (codex|openai|cmd|none). With no
-backend, the manifest (``worlds/<scenario>.images.json``) IS the deliverable and play
-is byte-for-byte text-only.
+GENERATION is pluggable; the DEFAULT backend is the **OpenAI API key** (gpt-image-1 —
+metered, same policy as :func:`construct.provider.default_provider`), with the Codex
+OAuth subscription (the Responses `image_generation` tool) as the opt-in alternative.
+Order: an explicit :data:`dispatcher` → ``CONSTRUCT_IMAGE_CMD`` → ``OPENAI_API_KEY``
+(gpt-image-1) → Codex subscription → none; force one with ``CONSTRUCT_IMAGE_BACKEND``
+(codex|openai|cmd|none). With no backend, the manifest
+(``worlds/<scenario>.images.json``) IS the deliverable and play is byte-for-byte
+text-only.
 """
 
 from __future__ import annotations
@@ -285,7 +286,9 @@ def _codex_available() -> bool:
 def _selected_backend() -> str:
     """Which generation backend to use: an explicit `dispatcher` always wins; otherwise
     `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none) forces it, else auto-detect in the
-    order custom-command → Codex subscription → OpenAI API key → none."""
+    order custom-command → OpenAI API key → Codex subscription → none (the API key
+    outranks the subscription: metered auth is the shipped default, subscription
+    auth an explicit opt-in — same policy as `provider.default_provider`)."""
     if dispatcher is not None:
         return "dispatcher"
     forced = os.getenv("CONSTRUCT_IMAGE_BACKEND", "").strip().lower()
@@ -295,10 +298,10 @@ def _selected_backend() -> str:
         return forced
     if os.getenv(_CMD_ENV, "").strip():
         return "cmd"
-    if _codex_available():
-        return "codex"
     if os.getenv("OPENAI_API_KEY", "").strip():
         return "openai"
+    if _codex_available():
+        return "codex"
     return "none"
 
 
@@ -311,7 +314,7 @@ def _backend_configured() -> bool:
 
 def _dispatch(rec: SceneImage) -> None:
     """Synchronously produce the asset file from the prompt. Backend per
-    :func:`_selected_backend` (default: the Codex subscription). Never raises."""
+    :func:`_selected_backend`. Never raises."""
     try:
         backend = _selected_backend()
         if backend == "dispatcher":
@@ -330,10 +333,10 @@ def _dispatch(rec: SceneImage) -> None:
 
 
 def _codex_dispatch(rec: SceneImage) -> None:
-    """Built-in DEFAULT backend: generate via the Codex OAuth subscription — the
+    """Built-in OPT-IN backend: generate via the Codex OAuth subscription — the
     Responses `image_generation` tool over `/codex/responses`, reusing Construct's own
-    `CodexProvider` auth/headers (no separate OpenAI API key, no separate billing).
-    Synchronous; writes a PNG to ``rec.asset_path``. Never raises."""
+    `CodexProvider` auth/headers. Synchronous; writes a PNG to ``rec.asset_path``.
+    Never raises."""
     import asyncio
 
     import httpx

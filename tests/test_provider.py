@@ -226,6 +226,60 @@ def test_lint_schema_runs_on_the_stub_path_too():
                           "x": {"type": "array"}}})
 
 
+# ---- A1 provider swap: the shipped default is the metered API-key provider;
+# subscription OAuth is an explicit opt-in (CONSTRUCT_PROVIDER=codex,
+# personal-use context under OpenAI's Terms of Use).
+
+def test_default_provider_is_openai(monkeypatch):
+    from construct.provider import OpenAIProvider, default_provider
+    monkeypatch.delenv("CONSTRUCT_PROVIDER", raising=False)
+    assert type(default_provider()) is OpenAIProvider
+    monkeypatch.setenv("CONSTRUCT_PROVIDER", "openai")
+    assert type(default_provider()) is OpenAIProvider
+
+
+def test_default_provider_codex_is_explicit_opt_in(monkeypatch):
+    from construct.provider import default_provider
+    monkeypatch.setenv("CONSTRUCT_PROVIDER", "codex")
+    assert type(default_provider()) is CodexProvider
+
+
+def test_default_provider_unknown_is_loud(monkeypatch):
+    from construct.provider import ProviderError, default_provider
+    monkeypatch.setenv("CONSTRUCT_PROVIDER", "anthropic")
+    with pytest.raises(ProviderError, match="CONSTRUCT_PROVIDER"):
+        default_provider()
+
+
+def test_openai_missing_key_fails_fast(monkeypatch):
+    from construct.provider import OpenAIProvider
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    provider = OpenAIProvider()
+    with pytest.raises(ProviderAuthError, match="OPENAI_API_KEY"):
+        asyncio.run(provider.complete("q?", SCHEMA))
+
+
+def test_openai_wire_is_api_key_shaped(monkeypatch):
+    from construct.provider import OpenAIProvider
+    monkeypatch.delenv("CONSTRUCT_OPENAI_BASE_URL", raising=False)
+    provider = OpenAIProvider(api_key="sk-test")
+    headers = provider._headers(provider._read_auth())
+    assert headers["Authorization"] == "Bearer sk-test"
+    # no subscription-shim identity headers on the metered wire
+    assert "chatgpt-account-id" not in headers and "originator" not in headers
+    assert provider._endpoint_path == "/v1/responses"
+    assert provider._base_url == "https://api.openai.com"
+    assert provider.describe().startswith("openai/")
+    assert "sk-test" not in provider.describe()   # no secret in describe()
+
+
+def test_openai_key_fresh_read_from_env(monkeypatch):
+    from construct.provider import OpenAIProvider
+    provider = OpenAIProvider()
+    monkeypatch.setenv("OPENAI_API_KEY", "  sk-later  ")  # set AFTER construction
+    assert provider._read_auth() == {"access": "sk-later"}
+
+
 def test_every_authored_cohort_schema_lints():
     # The audit: every module-level *_SCHEMA constant in the host must pass
     # the preflight — a defective schema fails HERE, never on a live call.

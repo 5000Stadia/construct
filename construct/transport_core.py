@@ -225,8 +225,8 @@ class TransportCore:
 
     def _provider(self) -> Any:
         if self._provider_obj is None:
-            from construct.provider import CodexProvider
-            self._provider_obj = CodexProvider()
+            from construct.provider import default_provider
+            self._provider_obj = default_provider()
         return self._provider_obj
 
     def _build(self, **kw) -> Any:

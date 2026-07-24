@@ -288,8 +288,8 @@ class Session:
         resume; it governs the establishing entry, not ongoing turn
         stamping (turns run forward at TURN_EPOCH as ever)."""
         if provider is None:
-            from construct.provider import CodexProvider
-            provider = CodexProvider()
+            from construct.provider import default_provider
+            provider = default_provider()
         start_playthrough(scenario, fresh=fresh, player_id=player_id)
         world, arc, meta = open_playthrough(scenario, provider, player_id=player_id)
         entry = _entry_as_of(world, requested=as_of, fresh=fresh)

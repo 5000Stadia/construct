@@ -145,8 +145,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _provider():
-    from construct.provider import CodexProvider
-    return CodexProvider()
+    from construct.provider import default_provider
+    return default_provider()
 
 
 class _Spinner:

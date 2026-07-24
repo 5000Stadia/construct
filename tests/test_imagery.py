@@ -33,6 +33,21 @@ def _prov(prompt="a gaslit Victorian study, bolted door, dying coal fire, fog at
     return StubProvider([{"prompt": prompt}])
 
 
+def test_backend_autodetect_prefers_api_key_over_subscription(worlds, monkeypatch):
+    # A1 policy: metered auth is the shipped default; the subscription is an
+    # explicit opt-in — so with BOTH available, auto-detect picks the API key,
+    # and only a forced CONSTRUCT_IMAGE_BACKEND=codex selects the subscription.
+    monkeypatch.delenv("CONSTRUCT_IMAGE_BACKEND", raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(imagery, "_codex_available", lambda: True)
+    assert imagery._selected_backend() == "openai"
+    monkeypatch.setenv("CONSTRUCT_IMAGE_BACKEND", "codex")
+    assert imagery._selected_backend() == "codex"      # explicit opt-in wins
+    monkeypatch.delenv("CONSTRUCT_IMAGE_BACKEND", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert imagery._selected_backend() == "codex"      # no key → subscription
+
+
 def test_fresh_then_cached_reuses_without_a_model_call(worlds):
     prov = _prov()
     rec = imagery.note_scene("latch", "place:study", "the study", STUDY, provider=prov)

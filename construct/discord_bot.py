@@ -331,7 +331,7 @@ async def _ingest_attachment(channel, attachment) -> bool:
     if the attachment was an ingestible document (handled), else False."""
     import os.path
     from construct.library import INGEST_SUFFIXES, ingest_bytes
-    from construct.provider import CodexProvider
+    from construct.provider import default_provider
 
     if os.path.splitext(attachment.filename)[1].lower() not in INGEST_SUFFIXES:
         return False
@@ -349,7 +349,7 @@ async def _ingest_attachment(channel, attachment) -> bool:
 
     try:
         name, meta = await asyncio.to_thread(
-            ingest_bytes, attachment.filename, data, CodexProvider(), on_stage=_on_stage)
+            ingest_bytes, attachment.filename, data, default_provider(), on_stage=_on_stage)
         await channel.send(f"✅ **{meta.get('title', name)}** is in the library. "
                            f"Play it: `{PREFIX}play {name}`")
     except Exception as exc:

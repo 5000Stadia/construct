@@ -344,8 +344,13 @@ def force_strict_object_schema(schema: Any) -> Any:
 
 
 class CodexProvider(Provider):
-    """The shipped default: ChatGPT-subscription OAuth via
-    the Codex-shape HTTP shim (Kernos-proven pattern, letter 020).
+    """The EXPLICIT OPT-IN path (`CONSTRUCT_PROVIDER=codex`):
+    ChatGPT-subscription OAuth via the Codex-shape HTTP shim
+    (Kernos-proven pattern, letter 020).
+
+    Opt-in only — personal-use context under OpenAI's Terms of Use
+    (https://openai.com/policies/terms-of-use/); the shipped default is
+    the metered `OpenAIProvider` below (see `default_provider`).
 
     Wire invariants carried from Kernos production: OAuth bearer (never
     an API key) + chatgpt-account-id + originator/UA headers; SSE-only
@@ -353,6 +358,10 @@ class CodexProvider(Provider):
     strict-coerced output schema; ~40KB payload cap enforced loudly.
     Auth is fresh-read from `~/.codex/auth.json` per call; 401 fails
     fast with the fix named — never retried."""
+
+    _endpoint_path = "/codex/responses"
+    _label = "Codex"
+    _auth_fix = "run `codex login`"
 
     def __init__(
         self,
@@ -493,7 +502,7 @@ class CodexProvider(Provider):
         if text_chunks:
             return "".join(text_chunks)
         raise ProviderTransportError(
-            f"Codex stream ended without output text; final event tail: "
+            f"response stream ended without output text; final event tail: "
             f"{json.dumps(final)[:300]}")
 
     # -- the interface ----------------------------------------------------
@@ -515,7 +524,8 @@ class CodexProvider(Provider):
                 except SchemaViolation as exc:
                     exc_msg = str(exc)
             if attempt == 0:
-                logger.warning("codex schema mismatch, re-asking: %s", exc_msg[:200])
+                logger.warning("%s schema mismatch, re-asking: %s",
+                               self._label, exc_msg[:200])
                 attempt_prompt = (
                     f"{prompt}\n\nYour previous answer was rejected: {exc_msg[:300]}. "
                     f"Answer again with JSON valid against the schema.")
@@ -539,9 +549,9 @@ class CodexProvider(Provider):
             except ProviderTransportError as exc:
                 if i == 2 or not getattr(exc, "transient", False):
                     raise
-                logger.warning("codex transient transport failure "
-                               "(retry %d/2, tier=%s): %s", i + 1, tier,
-                               str(exc)[:150])
+                logger.warning("%s transient transport failure "
+                               "(retry %d/2, tier=%s): %s", self._label, i + 1,
+                               tier, str(exc)[:150])
                 await asyncio.sleep(2.0 * (i + 1))
         raise AssertionError("unreachable")
 
@@ -576,7 +586,7 @@ class CodexProvider(Provider):
         if payload_bytes > CODEX_PAYLOAD_CAP_BYTES:
             raise ProviderTransportError(
                 f"payload {payload_bytes // 1024}KB exceeds the {CODEX_PAYLOAD_CAP_BYTES // 1024}KB "
-                f"Codex transport cap — the briefing composer owns budget-shaping; "
+                f"{self._label} transport cap — the briefing composer owns budget-shaping; "
                 f"shrink the prompt, do not raise the cap")
         auth = self._read_auth()
         # `deliberate` (planning-class) calls are BUILD-TIME authoring only (story/cast/intro/
@@ -589,7 +599,7 @@ class CodexProvider(Provider):
         _tier_bound = self._timeouts.get(tier, DEFAULT_TIMEOUTS[tier])
         bound = min(max(_tier_bound, HARD_BOUND_SECONDS) if deliberate else _tier_bound,
                     HARD_BOUND_SECONDS)
-        url = f"{self._base_url}/codex/responses"
+        url = f"{self._base_url}{self._endpoint_path}"
         import httpx
         try:
             async with asyncio.timeout(bound):
@@ -609,32 +619,114 @@ class CodexProvider(Provider):
                         if resp.status_code == 401:
                             await resp.aread()
                             raise ProviderAuthError(
-                                f"Codex auth failed (401) — run `codex login`. "
+                                f"{self._label} auth failed (401) — {self._auth_fix}. "
                                 f"Tail: {resp.text[:200]}")
                         if resp.status_code >= 400:
                             await resp.aread()
                             raise ProviderTransportError(
-                                f"Codex API error ({resp.status_code}): {resp.text[:300]}")
+                                f"{self._label} API error ({resp.status_code}): {resp.text[:300]}")
                         return await self._collect_sse_text(resp)
         except TimeoutError as exc:
             raise ProviderTimeout(
-                f"Codex call exceeded {bound:.0f}s bound (tier={tier})") from exc
+                f"{self._label} call exceeded {bound:.0f}s bound (tier={tier})") from exc
         except httpx.TimeoutException as exc:
             # Network read/connect timeout — surface as a typed ProviderTimeout
             # so callers' fail-open (except ProviderError) catches it: a
             # network blip skips one cohort/frame, never crashes the build.
-            raise ProviderTimeout(f"Codex network timeout (tier={tier}): {exc}") from exc
+            raise ProviderTimeout(
+                f"{self._label} network timeout (tier={tier}): {exc}") from exc
         except httpx.TransportError as exc:
             # Connection-level failure (reset, refused, incomplete chunked
             # read): marked transient so `_call_transient_retry` re-tries it
             # bounded — a dropped stream must not sink a whole build. (Caught
             # BEFORE HTTPError; TimeoutException above stays a timeout.)
             err = ProviderTransportError(
-                f"Codex transport error (tier={tier}): {exc}")
+                f"{self._label} transport error (tier={tier}): {exc}")
             err.transient = True
             raise err from exc
         except httpx.HTTPError as exc:
-            raise ProviderTransportError(f"Codex transport error (tier={tier}): {exc}") from exc
+            raise ProviderTransportError(
+                f"{self._label} transport error (tier={tier}): {exc}") from exc
 
     def describe(self) -> str:
         return f"codex/{self._main_model}+{self._cheap_model}"
+
+
+class OpenAIProvider(CodexProvider):
+    """THE SHIPPED DEFAULT: a metered OpenAI API key against the official
+    Responses endpoint (`https://api.openai.com/v1/responses`).
+
+    Same wire shape as the Codex shim — one SSE collect path, the same
+    strict-coerced schema, payload cap, keepalive sockets, bounded
+    transient retry, and effort ladder — only auth and endpoint differ:
+    `Authorization: Bearer $OPENAI_API_KEY`, no account/originator
+    headers. The key is fresh-read from the environment per call (same
+    discipline as the OAuth path: never cached across runs)."""
+
+    _endpoint_path = "/v1/responses"
+    _label = "OpenAI"
+    _auth_fix = ("set OPENAI_API_KEY (or opt in to subscription auth with "
+                 "CONSTRUCT_PROVIDER=codex)")
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        main_model: str | None = None,
+        cheap_model: str | None = None,
+        base_url: str | None = None,
+        timeouts: dict[str, float] | None = None,
+        main_effort: str | None = None,
+        cheap_effort: str | None = None,
+    ) -> None:
+        super().__init__(
+            main_model=main_model or os.getenv("CONSTRUCT_OPENAI_MODEL", "gpt-5.5"),
+            cheap_model=cheap_model or os.getenv(
+                "CONSTRUCT_OPENAI_CHEAP_MODEL", "gpt-5.4-mini"),
+            base_url=(base_url or os.getenv(
+                "CONSTRUCT_OPENAI_BASE_URL", "https://api.openai.com")),
+            timeouts=timeouts,
+            main_effort=main_effort,
+            cheap_effort=cheap_effort,
+        )
+        self._api_key = api_key
+
+    def _read_auth(self) -> dict:
+        """Fresh per call — never cached across runs (same rule as OAuth)."""
+        key = (self._api_key or os.getenv("OPENAI_API_KEY", "")).strip()
+        if not key:
+            raise ProviderAuthError(f"no OpenAI API key — {self._auth_fix}")
+        return {"access": key}
+
+    def _headers(self, auth: dict) -> dict[str, str]:
+        return {
+            "session_id": self._session_id,
+            "x-client-request-id": self._session_id,
+            "Authorization": f"Bearer {auth['access']}",
+            "Content-Type": "application/json",
+            "accept": "text/event-stream",
+        }
+
+    def describe(self) -> str:
+        return f"openai/{self._main_model}+{self._cheap_model}"
+
+
+def default_provider() -> Provider:
+    """The shipped provider-selection seam — explicit, closed vocabulary.
+
+    `CONSTRUCT_PROVIDER` selects the wire:
+      - unset / `openai` → :class:`OpenAIProvider` (metered API key; the
+        shipped default),
+      - `codex` → :class:`CodexProvider` (explicit opt-in:
+        personal ChatGPT-subscription OAuth; personal-use context under
+        OpenAI's Terms of Use — https://openai.com/policies/terms-of-use/),
+      - anything else → :class:`ProviderError` (no silent fallback, and
+        never auto-detection: absent credentials surface at first call
+        as a typed `ProviderAuthError` naming the fix).
+    """
+    choice = os.getenv("CONSTRUCT_PROVIDER", "").strip().lower()
+    if choice in ("", "openai"):
+        return OpenAIProvider()
+    if choice == "codex":
+        return CodexProvider()
+    raise ProviderError(
+        f"unknown CONSTRUCT_PROVIDER {choice!r} — valid: openai (default), codex")

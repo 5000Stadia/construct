@@ -7,7 +7,11 @@
 > live** (`porcelain-v0.1`; the API sketch in §4 predates it — the real
 > signatures are pattern-buffer's `docs/ADOPTION.md`), and the integration
 > §9 gates on is **complete** — the engine described here plays end-to-end
-> today (see the README).
+> today (see the README). One decision has since been reversed: the
+> "subscription auth everywhere" ruling in §"Model & auth" — the shipped
+> default is now a metered API-key provider, with subscription OAuth as
+> an explicit opt-in (`CONSTRUCT_PROVIDER=codex`; personal-use context
+> under OpenAI's terms).
 
 > A text holodeck. A persistent world — ingested from a book or built live through an interview — held in a pattern-buffer world store and played turn by turn. The player chooses who they are and where in the timeline they enter, pursues an authored arc they cannot see, and the world remembers everything: object permanence, frame-scoped NPC knowledge, re-entry coherence.
 

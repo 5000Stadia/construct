@@ -7,10 +7,17 @@ not the machinery.
 
 **One sentence:** every model call in Holodeck — the engine's injected
 `model=` and every host cohort — routes through one
-`(prompt, schema) -> json` interface with a tier hint; Codex
-subscription auth is the shipped zero-credit default implementation, and
-any user-supplied LLM API is just another implementation behind the same
-boundary.
+`(prompt, schema) -> json` interface with a tier hint; a metered OpenAI
+API key (`OpenAIProvider`) is the shipped default implementation, Codex
+subscription auth is the explicit opt-in (`CONSTRUCT_PROVIDER=codex`,
+personal-use context under OpenAI's Terms of Use), and any user-supplied
+LLM API is just another implementation behind the same boundary.
+
+> **A1 update (2026-07-24):** the shipped default moved from the Codex
+> subscription shim to the metered API-key provider; the shim remains as
+> the opt-in. §4 below documents the shim as built; selection lives in
+> `provider.default_provider()` (closed vocabulary: `openai` | `codex`,
+> unknown values raise — no silent fallback, no auto-detection).
 
 ---
 
@@ -77,7 +84,7 @@ much lower per tier — main 240s, cheap 60s, configurable). On schema
 mismatch: one bounded re-ask with the violation named, then
 `SchemaViolation`.
 
-## 4. The Codex reference implementation (the shipped default)
+## 4. The Codex reference implementation (the explicit opt-in; was the shipped default pre-A1)
 
 The Kernos-proven shim — pattern copied from
 Kernos `kernos/providers/codex_provider.py` (read-only

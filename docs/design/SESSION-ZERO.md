@@ -80,8 +80,11 @@ is skipped entirely. Create-new → PROVIDER (this wizard, producing a new
 pristine scenario).
 
 ### PROVIDER (letter 003: alongside, but distinct from, world creation)
-Detect `~/.codex/auth.json` → Codex is the working zero-credit default,
-one confirmation line. Otherwise (or on request): enter any provider
+The shipped default is the metered OpenAI API-key provider
+(`OPENAI_API_KEY`); `CONSTRUCT_PROVIDER=codex` explicitly opts in to
+Codex subscription auth (personal-use context — post-A1, detection of
+`~/.codex/auth.json` no longer silently selects it). Otherwise (or on
+request): enter any provider
 (OpenAI / Anthropic / local endpoint / …) as an implementation of the
 provider interface. The selection is honored EVERYWHERE a model is
 called — engine `model=` and every cohort. **Provider config and
