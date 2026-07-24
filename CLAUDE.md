@@ -9,7 +9,7 @@ An interactive-fiction engine where a persistent world (ingested from a book, or
 ## Before you do anything
 
 1. **Read `docs/CONCEPT.md` in full.** It is the founding brief: the vision, the session-zero flow, the architecture (you are a HOST over the pattern-buffer engine), the arc layer (the one genuinely new design surface), and the adopted patterns from Kernos and pattern-buffer. Start here.
-2. **Read the pattern-buffer whitepaper and adoption guide** at `/home/k/pattern-buffer/docs/WHITEPAPER.md` and `/home/k/pattern-buffer/docs/ADOPTION.md`. The engine is your substrate; you integrate it as a library, you do not reimplement it. **Read-only reference — never import from or edit the pattern-buffer tree.**
+2. **Read the pattern-buffer whitepaper and adoption guide** at `~/pattern-buffer/docs/WHITEPAPER.md` and `~/pattern-buffer/docs/ADOPTION.md`. The engine is your substrate; you integrate it as a library, you do not reimplement it. **Read-only reference — never import from or edit the pattern-buffer tree.**
 3. This is a DESIGN-FIRST project (docs-first genesis, the house method). No engine integration code until a concept is pressure-tested on paper and the pattern-buffer porcelain API exists. Brainstorming and outline first.
 
 ## What you are building (and not)
@@ -28,7 +28,7 @@ You are agent **c** in a coordination mesh with **Kernos CC** (k), **PB** (pb, t
 - Use `--notify idle` routinely; `immediate` only for active blockers. Blockers and deliberation are messages, never silent waits. Bound every external call (~10 min) and report if it stalls.
 - Tag subjects: **[STATUS]** / **[DECISION]** / **[BLOCKED]** / **[MILESTONE]**. The founder is in the loop on all exchanges (Audience). Surface genuine forks to him; obvious calls you make and record.
 - The AgentPost plugin's native persistent monitor is the wake mechanism — no hand-rolled inbox polling.
-- **Legacy channels are RETIRED:** `/home/k/Newproject/dev_inbox/` and `/home/k/codex-inbox/` are read-only history/recovery. Never create new actionable files there, and never mirror one request across channels. After a proven notification failure only, a legacy control note may point to the existing AgentPost Message-ID (never copy its body).
+- **Legacy channels are RETIRED:** this repo's `dev_inbox/` and `~/codex-inbox/` are read-only history/recovery. Never create new actionable files there, and never mirror one request across channels. After a proven notification failure only, a legacy control note may point to the existing AgentPost Message-ID (never copy its body).
 
 ## Process conventions
 
@@ -39,7 +39,7 @@ You are agent **c** in a coordination mesh with **Kernos CC** (k), **PB** (pb, t
 ## The mesh (read both, import neither)
 
 Two sibling projects are readable reference — study freely, never import or edit:
-- **Kernos** (`/home/k/Kernos`) — reference host; instructor (Kernos CC). Your outbox: `/home/k/Kernos/dev_inbox/` (`NNN-from-hd-<topic>.md`). Design knowledge: `docs/DESIGN-PRINCIPLES.md`, `docs/architecture/`.
-- **pattern-buffer** (`/home/k/pattern-buffer`) — the engine you build on. Its inbox is readable (the full coordination history with Kernos CC, letters 007-027 = case law). Design knowledge: `docs/WHITEPAPER.md`, `LEXICON.md`, `ADOPTION.md`, `docs/reference/prior-art-survey-2026-06.md`.
+- **Kernos** (`~/Kernos`) — reference host; instructor (Kernos CC). Your outbox: `~/Kernos/dev_inbox/` (`NNN-from-hd-<topic>.md`). Design knowledge: `docs/DESIGN-PRINCIPLES.md`, `docs/architecture/`.
+- **pattern-buffer** (`~/pattern-buffer`) — the engine you build on. Its inbox is readable (the full coordination history with Kernos CC, letters 007-027 = case law). Design knowledge: `docs/WHITEPAPER.md`, `LEXICON.md`, `ADOPTION.md`, `docs/reference/prior-art-survey-2026-06.md`.
 
 Before/with your read-back: survey both projects' novel elements and report which you adopt for Holodeck and why (element → source → use), per dev_inbox letter 002. Adopt by intent, not osmosis.

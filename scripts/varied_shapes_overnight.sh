@@ -5,7 +5,7 @@
 # also probing a different corner of the WORLD LAWS register gate (quiet social
 # law / systemic-only REAL / single absurd law / scheme). SERIAL (Codex limit).
 # Probe worlds are atticked after criticking so the live shelf stays clean.
-cd /home/k/Newproject
+cd "${CONSTRUCT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 export PYTHONPATH=.
 L=logs/overnight-critic.log
 # wait for the first campaign to finish (poll the completion marker)

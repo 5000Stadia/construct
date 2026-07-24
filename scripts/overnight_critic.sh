@@ -4,7 +4,7 @@
 # /feedback to dev_inbox on anything less than exceptional live fiction. Uses a
 # separate 'critic' slot — never touches the real players' saves. One failure
 # never stops the chain.
-cd /home/k/Newproject
+cd "${CONSTRUCT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 export PYTHONPATH=.
 run() {
   echo "=== $(date '+%H:%M:%S') START $1 ($2) ==="

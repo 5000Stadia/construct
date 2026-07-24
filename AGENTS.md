@@ -24,6 +24,6 @@ starting its work, reply against the original Message-ID, and give the user a
 short synopsis. Route Construct specification, code, and test-plan reviews to
 `cr`. Route AgentPost architecture and implementation to `cx`.
 
-Do not edit or import from `/home/k/pattern-buffer` or `/home/k/Kernos`; they
+Do not edit or import from `~/pattern-buffer` or `~/Kernos`; they
 are read-only sibling references. A GREEN verdict means no known actionable
 blocker remains in the reviewed scope; state any unrun tests or residual risk.
