@@ -1282,7 +1282,11 @@ def _partition_frames(items: list) -> tuple[list[dict], list[str]]:
 #: CAST-MOVES.md §1 (Cx r1 gap 1): the containment-synonym set that collapses to the single
 #: canonical `in` spelling BEFORE `resolve_rows` — the resolver's `_ENTITY_VALUED_ATTRS`
 #: (resolve.py:40) covers `in`/`inside` but NOT `located_in`.
-_CONTAINMENT_SYNONYMS = frozenset({"in", "inside", "located_in"})
+#: `within` is included by explicit disposition (cr 2026-07-24): the resolver treats it
+#: as entity-valued but the engine does NOT collapse it to `in` at ingest, so left alone
+#: it would commit as a separate containment spelling — unstamped, unbound, invisible to
+#: locate() domination. One spelling carries containment: `in`.
+_CONTAINMENT_SYNONYMS = frozenset({"in", "inside", "located_in", "within"})
 
 #: Attributes whose narrator-promoted value is TEMPORAL STATE (true from THIS turn),
 #: not a timeless trait. A promoted row with no `valid_from` defaults to 0.0 — fine for
@@ -4310,6 +4314,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         len(_input_dropped), _input_dropped[:5])
                     trace.dropped_cohorts.append(
                         f"input_noncanon_frames ({len(_input_dropped)})")
+                # CONTAINMENT CANONICALIZATION (cr RED 2026-07-24): collapse the synonym
+                # spellings BEFORE resolve_rows, exactly as the narrator settle path does —
+                # un-canonicalized, `located_in` never gets its destination bound, and
+                # `inside`/`within` slip past the temporal stamp below (its set is exactly
+                # {"in"}), commit at the ingest default, and lose to any older properly-timed
+                # location: the stale-location failure again, through the player channel.
+                _raw = _canonicalize_containment(_raw)
                 # PLAYER channel mint policy (founder 2026-06-30): no person/place by fiat — the
                 # player's "I am Bradford Clemense" must not mint a present NPC; the world introduces
                 # NPCs, the move channel makes places. Objects still mint (improv permanence).

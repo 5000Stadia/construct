@@ -119,9 +119,10 @@ def test_canonicalize_containment_collapses_synonyms_and_leaves_others():
         {"entity": "person:reed", "attribute": "in", "value": "place:flat"},
         {"entity": "person:reed", "attribute": "holds", "value": "obj:lamp"},
         {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+        {"entity": "person:maud", "attribute": "within", "value": "place:flat"},
     ]
     out = _canonicalize_containment(rows)
-    assert [r["attribute"] for r in out] == ["in", "in", "in", "holds", "name"]
+    assert [r["attribute"] for r in out] == ["in", "in", "in", "holds", "name", "in"]
     # untouched rows are the SAME values (no needless copy of a row we didn't rewrite)
     assert out[2] is rows[2]
     assert out[3] is rows[3]

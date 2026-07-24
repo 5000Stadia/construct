@@ -463,6 +463,47 @@ class TestFullTurn:
         mood_rows = list(frame_facts(world, "canon", entity=PLAYER, attribute="mood"))
         assert mood_rows and mood_rows[-1].valid_from != turn_time(3)
 
+    @pytest.mark.parametrize("spelling", ["in", "inside", "located_in", "within"])
+    def test_player_containment_spelling_relocates_at_the_turn(self, world, spelling):
+        # cr RED 2026-07-24: `inside` survived resolution un-canonicalized on the PLAYER
+        # channel (run_turn 2a canonicalized only in narrator settle), slipped past the
+        # temporal stamp (whose set is exactly {"in"}), committed at the ingest default,
+        # and was dominated by an older properly-timed location — the stale-location
+        # failure again. Every sanctioned containment spelling must collapse to `in`
+        # BEFORE resolve_rows and land at THIS turn, advancing locate() past the older row.
+        from construct.adapter import frame_facts
+        from construct.arc.executor import turn_time
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([
+            {"entity": "place:hall", "attribute": "kind", "value": "room",
+             "timeless": True},
+            # the OLDER properly-timed location the new arrival must beat
+            {"entity": PLAYER, "attribute": "in", "value": "place:study",
+             "value_type": "entity", "valid_from": turn_time(1)},
+        ])
+        world._extractions.append({"items": [
+            {"entity": "i", "attribute": spelling, "value": "place:hall",
+             "frame": "canon"}]})
+        world._extractions.append({"items": []})                    # narrator prose
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": ""},
+            {"prose": "You slip through into the empty hall."},
+        ])
+        run_turn(world, arc, provider, "I slip into the hall.", turn=3,
+                 scope=[PLAYER, "place:study", "place:hall"])
+        # advanced past the older timed location (locate() moved)
+        assert world.porcelain.locate(PLAYER)[0] == "place:hall"
+        hall_rows = [r for r in frame_facts(world, "canon", entity=PLAYER,
+                                            attribute="in")
+                     if r.value == "place:hall"]
+        assert hall_rows and hall_rows[-1].valid_from == turn_time(3)
+        # no stray un-canonicalized spelling committed alongside
+        if spelling != "in":
+            assert not list(frame_facts(world, "canon", entity=PLAYER,
+                                        attribute=spelling))
+
     def test_dropping_a_held_object_commits_it_into_the_scene(self, world):
         # FOUNDER cohesion test: "set the letter-opener down" narrated but canon kept it held →
         # it snapped back to the pocket next turn. A drop of a HELD object now commits obj.in =
