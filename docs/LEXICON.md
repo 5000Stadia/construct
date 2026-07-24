@@ -5,7 +5,7 @@ wholesale: (1) every exported name must double-read for an engineer with
 zero source-material context; (2) nouns carry the flavor, verbs stay
 boring. A term not in this file is added here before it is used twice.
 Engine terms (World, PatternBuffer, frame, thunk, frontier,
-materialization) are inherited from `/home/k/pattern-buffer/docs/LEXICON.md`
+materialization) are inherited from pattern-buffer's `docs/LEXICON.md`
 and never redefined.
 
 | Term | Definition | Double-read |

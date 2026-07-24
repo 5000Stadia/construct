@@ -6,7 +6,7 @@
 > advances a hidden story arc, and only then lets a model narrate. Object
 > permanence, per-character knowledge frames, as-of queries — put a thing
 > down, walk away, come back: it's still there. Pre-1.0, research active;
-> 800+ tests green; evaluated over a 5-scenario live corpus plus an
+> 1100+ tests green; evaluated over a 5-scenario live corpus plus an
 > adversarial critic campaign.
 
 Vocabulary: pattern-buffer holds a world's pattern -> the Construct loads

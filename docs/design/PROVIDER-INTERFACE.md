@@ -80,7 +80,7 @@ mismatch: one bounded re-ask with the violation named, then
 ## 4. The Codex reference implementation (the shipped default)
 
 The Kernos-proven shim — pattern copied from
-`/home/k/Kernos/kernos/providers/codex_provider.py` (read-only
+Kernos `kernos/providers/codex_provider.py` (read-only
 reference; **copy the pattern, never import**):
 
 - **Auth:** fresh-read `~/.codex/auth.json` per run (never cached across

@@ -19,7 +19,7 @@
 
 Interactive fiction has always had to choose between two failures: hand-authored worlds (rich but rigid — every path pre-written) or generative worlds (free but amnesiac — AI Dungeon, which contradicts itself within twenty turns). The thing that makes a *holodeck* different from either is **a persistent, queryable world model underneath the improvisation** — so the world can be freely generated *and* never forget, never contradict, never re-invent the drawer you already opened.
 
-That substrate now exists: **pattern-buffer** (`/home/k/pattern-buffer`), a validated append-only world-state engine. Holodeck is the first product built on it. The strategic point: **Holodeck needs only the engine's fiction mode — the validated mode, four graded runs deep — plus its porcelain API.** It does not wait on tracking-mode maturity. It can consume the porcelain the moment it ships and exercise it as a real host while tracking matures elsewhere (in Kernos).
+That substrate now exists: **pattern-buffer** (the sibling repo), a validated append-only world-state engine. Holodeck is the first product built on it. The strategic point: **Holodeck needs only the engine's fiction mode — the validated mode, four graded runs deep — plus its porcelain API.** It does not wait on tracking-mode maturity. It can consume the porcelain the moment it ships and exercise it as a real host while tracking matures elsewhere (in Kernos).
 
 Holodeck also *is* a test instrument. It exercises the pattern-buffer §19.2 interactive criteria — thunk stability across a long session, NPC non-leak, loop closure (the town that remembers you), the resonances surface — by **play** rather than by synthetic harness. Eval-as-product, the same trick the chapter test pulled, one level up.
 
@@ -77,7 +77,7 @@ The dependency is one-way and the rule is absolute: **never import from or edit 
 signatures below no longer match the shipped API. The canonical contract is
 pattern-buffer's `docs/ADOPTION.md`; kept here unedited for lineage.)*
 
-Read `/home/k/pattern-buffer/docs/ADOPTION.md` for exact signatures; the shape:
+Read pattern-buffer's `docs/ADOPTION.md` for exact signatures; the shape:
 
 ```
 world = World.open(path, model=shim)          # reload a saved world
@@ -108,7 +108,7 @@ This layer is the project's intellectual contribution and where the real design 
 
 ## 6. Adopted patterns from Kernos (orchestration knowledge)
 
-Kernos (`/home/k/Kernos`) is the reference host. Patterns worth lifting — by **pattern**, never by import:
+Kernos (the sibling repo) is the reference host. Patterns worth lifting — by **pattern**, never by import:
 
 - **The Cognitive UI / rendered context window.** Each turn, compose the renderer's entire view deliberately — what the scene materialization surfaces *is* the renderer's control set; a callback it cannot see, it cannot play. (This is why loop-closure resonances must be *surfaced into* the briefing, not left to the renderer's memory — pattern-buffer letter 013.)
 - **The Quiet Cohort.** Single-purpose cheap model calls around the main render: an NPC-response cohort (frame-scoped), a beat-evaluator cohort (did this turn advance an arc beat?), an input-classifier (is this player utterance an action, a question, or out-of-character?). Selectively invoked, fail-open, silent.
@@ -119,7 +119,7 @@ Kernos (`/home/k/Kernos`) is the reference host. Patterns worth lifting — by *
 
 ## 7. Model auth (no API credits) — Codex auth for EVERY agent
 
-Same decision as the rest of the mesh (pattern-buffer letter 020): **no Anthropic API key, no metered SDK.** **Every model-calling agent in Holodeck wires to subscription auth via the Codex-shape HTTP shim** — the pattern proven in Kernos production (`/home/k/Kernos/kernos/providers/codex_provider.py`, read-only reference: copy the pattern, never import). This is a first-class architectural requirement, not just the engine's plumbing:
+Same decision as the rest of the mesh (pattern-buffer letter 020): **no Anthropic API key, no metered SDK.** **Every model-calling agent in Holodeck wires to subscription auth via the Codex-shape HTTP shim** — the pattern proven in Kernos production (Kernos `kernos/providers/codex_provider.py`, read-only reference: copy the pattern, never import). This is a first-class architectural requirement, not just the engine's plumbing:
 
 - **The engine's injected `model=` callable** (ingestion, classification, resolution, refer tier-2) — one shim instance.
 - **Holodeck's own primary in-engine agents**, all on the same shim: the **renderer/GM**, the **NPC character engines** (one frame-scoped call each), the **beat-evaluator cohort**, the **input-classifier cohort**, and the **session-zero interviewer**.

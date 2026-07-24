@@ -100,7 +100,7 @@ Every hard problem in this genre — spoilers, secret-leaking, railroading, cont
 - The story can't puppet your character because your character is **never handed to it** as a scene entity.
 - Prose can't mint phantom places because free-text extraction passes through pattern-buffer's single resolve seam, which **cannot type-slip** — bind to a known entity, mint once with the right kind, or drop; Entity Authority adds the channel permissions on top (who may mint what).
 
-Where a rule would have been added, a doorway was narrowed instead. The design docs record each of these as a named decision with the live failure that forced it.
+Where a rule would have been added, a doorway was narrowed instead. The design docs record each of these as a named decision with the live failure that forced it. These are claims about what is structurally absent from each context window, not perfection claims: an independent [fresh-eyes audit](docs/design/AUDIT-2026-07-FRESH-EYES.md) pressure-tested the seams and tracks the residual hazards it found — none currently misfiring, all latent — as named debt.
 
 ---
 
@@ -135,7 +135,7 @@ The claim of a system like this can't be proven by unit tests alone — the prod
 - **An adversarial critic campaign** — player-agents *primed to break immersion and file their own bug reports* through the in-game `/feedback` channel, including deliberate off-path runs (pursuing a romance the story never offered) and cross-chapter continuations. Every filing was independently triaged against engine ground truth before anything was "fixed": [`eval/09-critic-campaign.md`](docs/design/eval/09-critic-campaign.md).
 - **A five-probe live acceptance set** — object permanence, loop closure, frame non-leak, player agency, honest adjudication — passed 5/5 in live play and re-verified as the engine grew.
 - **A generalized synthesis** — the campaign's findings distilled into five portable pillars of the optimal interactive-fiction experience (truth-keeping, the player's story is the story, proportion, initiative, the ending is the payoff): [`docs/design/OPTIMAL-IF-EXPERIENCE.md`](docs/design/OPTIMAL-IF-EXPERIENCE.md).
-- **800+ test functions across 36 files** — including structural pins for every invariant the design docs promise (frame non-leak, protected-key concealment, mint-channel discipline, terminal precedence, no-reopen of settled history).
+- **1100+ test functions across 38 files** — including structural pins for every invariant the design docs promise (frame non-leak, protected-key concealment, mint-channel discipline, terminal precedence, no-reopen of settled history).
 
 ### Development methodology
 
@@ -167,7 +167,7 @@ The project is **design-first**: 60 design documents, each recording a decision,
 
 ## Engineering proof
 
-- **800+ test functions, 36 files, zero live model calls in the suite** — engine extraction via pattern-buffer's `StubModel`, host cohorts via a canned provider; the full suite runs in under two minutes.
+- **1100+ test functions, 38 files, zero live model calls in the suite** — engine extraction via pattern-buffer's `StubModel`, host cohorts via a canned provider; the full suite runs in under two minutes.
 - **Deterministic spine, model calls only at the boundaries.** Classification, adjudication, arc evaluation, entity resolution, and all bookkeeping are deterministic or cheap-tier; the expensive model renders prose and voices characters, nothing else. Turn latency is protected by a deferred-settle design: post-narration bookkeeping overlaps the player reading.
 - **Fail-open discipline everywhere it must be.** No enrichment call may sink a turn; the climax cannot be lost to a provider hiccup; every dropped cohort is receipted in the turn trace.
 - **Receipts-first debugging.** Every turn emits a structured trace — writes, resolver decisions with reasons, clocks fired, clues surfaced, cohort calls — the same record the debug CLI, the tests, and the eval reports all read.
@@ -196,6 +196,7 @@ The project is **design-first**: 60 design documents, each recording a decision,
 | Scene imagery (per-location AI illustration) | Live | Oil-painting style; regenerates only when the scene truly changes |
 | Telegram / Discord / CLI / REPL transports | Live | One session API; outbound-only, no inbound exposure |
 | Multi-player shared worlds | Designed, not built | [Design notes](docs/design/) — shared-world observer semantics to be worked jointly with the substrate |
+| `run_turn` decomposition | Known debt | The turn spine is one ~4,000-line function (`turnloop.py`) — deliberately unsplit while the turn contract is still moving; carried in the open here rather than silently |
 | Narrator-authored NPC movement (the CAST-MOVES lane) | Live | Narrated arrivals/departures become canon presence truth through five stagecraft rules (never the player, never a bound companion, no minted places, scene-touching only, engaged cast can't vanish mid-conversation); receipt-confirmed commits; fail-closed against ambiguous prose — live-accepted |
 | Journey-price anchoring (route precedent) | Live | The first pricing of a route is its canon precedent — the same road costs the same time in both directions, forever; receipt-confirmed durability with a settle backstop |
 | Drift handling — the complete program (D1 relocate + D2 absence-consequence + D3 alternative-path repair) | Live | Dodge the staged clue-holder and the mechanic finds you; skip the deadline and the window closes without you — the lapse becomes canon and a durable callback surfaces as felt consequence; and when the world kills a route outright, the HOST re-mints the beat's own mechanic through a LIVE surviving carrier (walkability + witness-driving-entity + shared action-eligibility gates; graph-derived repair budget) with the new road rendered diegetically — where no honest road exists the repair declines and the refusal clock concludes the story incompletable, never a zombie |
@@ -212,7 +213,7 @@ Three projects, one line of research — each a résumé of the last:
 
 ## Project status
 
-**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (800+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
+**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (1100+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
 
 ## License
 

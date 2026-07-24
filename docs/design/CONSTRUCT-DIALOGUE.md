@@ -159,7 +159,7 @@ Construct collaborates on the *direction* ("a case to crack"), never the spoiler
 ## Adopted from Kernos (founder: "KERNOS handled this pretty good")
 Kernos's integration layer is the proven instance of "natural conversation →
 structured tool directive when the provider only emits JSON." Patterns borrowed
-(see `/home/k/Kernos` integration/template.py + DESIGN-PRINCIPLES.md):
+(see Kernos `integration/template.py` + `DESIGN-PRINCIPLES.md`):
 - **The JSON output IS the tool call** — a strict discriminated-action schema
   (Kernos `decided_action.kind` enum + per-variant required fields). The loop
   orchestration is pure Python, provider-agnostic. ✓ our `actions[].tool`.

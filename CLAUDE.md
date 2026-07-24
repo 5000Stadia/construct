@@ -1,5 +1,7 @@
 # CLAUDE.md — Instructions for Claude Code (Holodeck / "HD")
 
+> Naming: **Holodeck** is the internal/legacy codename ("HD" in the mesh); the shipped product is **Construct Projector** (README, package `construct`).
+
 ## Project: Holodeck — a text holodeck
 
 An interactive-fiction engine where a persistent world (ingested from a book, or built live through an interview) is held in a **pattern-buffer** world store and played turn by turn: the player chooses who they are and where in the timeline they enter, pursues an authored character arc they cannot see, and the world remembers everything with object permanence, frame-scoped NPC knowledge, and re-entry coherence.
