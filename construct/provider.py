@@ -344,7 +344,7 @@ def force_strict_object_schema(schema: Any) -> Any:
 
 
 class CodexProvider(Provider):
-    """The shipped zero-credit default: ChatGPT-subscription OAuth via
+    """The shipped default: ChatGPT-subscription OAuth via
     the Codex-shape HTTP shim (Kernos-proven pattern, letter 020).
 
     Wire invariants carried from Kernos production: OAuth bearer (never

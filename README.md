@@ -28,7 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/5000Stadia/construct/main/scripts/i
 construct start                 # the same conversational entry your phone gets
 ```
 
-You land at the projector's welcome — the world shelf, or describe a new world and it's shaped with you in conversation. Type what you do, line after line. (Each new scene gets an AI-painted image — the terminal can only print a path to it, so for the full experience with embedded scene imagery, **Telegram is the recommended way to play — and the easiest to set up** (two commands, below); Discord works too.) Every turn is saved; bare `construct play` resumes. Four complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
+You land at the projector's welcome — the world shelf, or describe a new world and it's shaped with you in conversation. Type what you do, line after line. (Each new scene gets an AI-painted image — the terminal can only print a path to it, so for the full experience with embedded scene imagery, **Telegram is the recommended way to play — and the easiest to set up** (two commands, below); Discord works too.) Every turn is saved; bare `construct play` resumes. Three complete worlds ship in the box — jump straight in with `construct play bodycase` (*The Rain in Bluegate Yard*, an original Victorian murder mystery).
 
 ### Make your own world
 
@@ -61,7 +61,7 @@ print(s.turn("I look around.").prose)
 s.close()
 ```
 
-Bring any LLM behind the provider interface; ships with a zero-marginal-cost ChatGPT-subscription default. Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
+Bring any LLM behind the provider interface. Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
 
 ---
 
@@ -145,7 +145,7 @@ The engine was built through a **multi-agent adversarial review loop**: every su
 
 ## Proven in live play
 
-The shipped example, ***The Rain in Bluegate Yard*** — a complete original Victorian murder mystery (London, 1888; a dock messenger dead in Bluegate Yard; a plain-clothes bureau racing the Met) — plays end-to-end on a real model: grounded cold open, earned clue trail, companion texture, a staged conclusion scene, a consequence-bearing epilogue, and a next chapter grown from the wake of the first. Three further worlds (a dark-fantasy pilgrimage, an undersea survival thriller, a country-house death) exercise the other genre shapes.
+The shipped example, ***The Rain in Bluegate Yard*** — a complete original Victorian murder mystery (London, 1888; a dock messenger dead in Bluegate Yard; a plain-clothes bureau racing the Met) — plays end-to-end on a real model: grounded cold open, earned clue trail, companion texture, a staged conclusion scene, a consequence-bearing epilogue, and a next chapter grown from the wake of the first. Two further worlds (a dark-fantasy pilgrimage, an undersea survival thriller) exercise the other genre shapes.
 
 Worlds are built, not hand-coded: drop any prose document in and it becomes a playable world, or build one live from a one-line brief through the session-zero interview.
 
