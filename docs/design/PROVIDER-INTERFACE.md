@@ -17,7 +17,8 @@ LLM API is just another implementation behind the same boundary.
 > subscription shim to the metered API-key provider; the shim remains as
 > the opt-in. §4 below documents the shim as built; selection lives in
 > `provider.default_provider()` (closed vocabulary: `openai` | `codex`,
-> unknown values raise — no silent fallback, no auto-detection).
+> unknown values raise — no silent fallback, no subscription-credential
+> auto-detection).
 
 ---
 
@@ -53,7 +54,9 @@ def engine_callable(provider: Provider, tier: Tier = "main") -> ModelCallable:
   (post-A1, 2026-07-24 — this bullet originally read "Codex subscription
   auth as the working default", reversed by the founder's A1 ruling);
   subscription auth is available only as the explicit opt-in
-  `CONSTRUCT_PROVIDER=codex`, and no credential is ever auto-detected.
+  `CONSTRUCT_PROVIDER=codex`, and no subscription credential is ever
+  auto-detected (imagery may select the metered key from its presence;
+  the subscription, never).
 - **NEVER** name a vendor, model id, endpoint, or credential anywhere
   past the interface boundary. Downstream code knows `main` and `cheap`,
   nothing else.

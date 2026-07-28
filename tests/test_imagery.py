@@ -49,8 +49,22 @@ def test_backend_never_autodetects_the_subscription(worlds, monkeypatch):
     # explicit signal 1: the deployment-wide text opt-in couples imagery in
     monkeypatch.setenv("CONSTRUCT_PROVIDER", "codex")
     assert imagery._selected_backend() == "codex"
-    # ...but only with a usable credential behind it
+    # THE FULL MATRIX (cr A1 r2 blocker): the explicit coupling is
+    # AUTHORITATIVE over a merely present API key — the migration env
+    # (quickstart key + codex opt-in) must not split the deployment
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert imagery._selected_backend() == "codex"
+    # ...and the forced backend remains the explicit override of the coupling
+    monkeypatch.setenv("CONSTRUCT_IMAGE_BACKEND", "openai")
+    assert imagery._selected_backend() == "openai"
+    monkeypatch.delenv("CONSTRUCT_IMAGE_BACKEND", raising=False)
+    # THE BARRIER CELL (cr final-review blocker 1): opt-in + key present +
+    # codex credential MISSING → NONE, never a silent fall-through to
+    # surprise-metered images
     monkeypatch.setattr(imagery, "_codex_available", lambda: False)
+    assert imagery._selected_backend() == "none"
+    # same barrier without the key (coupling needs a usable credential)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     assert imagery._selected_backend() == "none"
     # explicit signal 2: the forced backend, independent of CONSTRUCT_PROVIDER
     monkeypatch.delenv("CONSTRUCT_PROVIDER", raising=False)

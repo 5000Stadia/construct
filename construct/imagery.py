@@ -29,9 +29,10 @@ GENERATION is pluggable; the DEFAULT backend is the **OpenAI API key** (gpt-imag
 metered, same policy as :func:`construct.provider.default_provider`). The Codex OAuth
 subscription backend (the Responses `image_generation` tool) is NEVER auto-detected —
 explicit signal only: ``CONSTRUCT_IMAGE_BACKEND=codex``, or the deployment-wide opt-in
-coupling ``CONSTRUCT_PROVIDER=codex``. Order: an explicit :data:`dispatcher` →
-``CONSTRUCT_IMAGE_CMD`` → ``OPENAI_API_KEY`` (gpt-image-1) → Codex *(explicit signal
-only)* → none; force one with ``CONSTRUCT_IMAGE_BACKEND`` (codex|openai|cmd|none).
+coupling ``CONSTRUCT_PROVIDER=codex`` (authoritative over a merely present key). Order:
+an explicit :data:`dispatcher` → ``CONSTRUCT_IMAGE_CMD`` → the codex coupling →
+``OPENAI_API_KEY`` (gpt-image-1) → none; force one with ``CONSTRUCT_IMAGE_BACKEND``
+(codex|openai|cmd|none).
 With no backend, the manifest (``worlds/<scenario>.images.json``) IS the deliverable
 and play is byte-for-byte text-only.
 """
@@ -276,10 +277,10 @@ def note_scene(scenario: str, place_id: str | None, place_name: str,
 
 
 def _codex_available() -> bool:
-    """Whether the Codex OAuth credential is present — the DEFAULT image backend, the
-    same ChatGPT subscription that powers all of Construct's text (no separate API key,
-    no separate billing). Image pixels come from the Responses `image_generation` tool
-    over the `/codex/responses` endpoint."""
+    """Whether the Codex OAuth credential is present. Presence alone selects NOTHING
+    (the subscription backend is explicit-signal-only, post-A1) — this check merely
+    proves the opt-in has a usable credential behind it. Image pixels come from the
+    Responses `image_generation` tool over the `/codex/responses` endpoint."""
     from pathlib import Path as _P
     return (_P.home() / ".codex" / "auth.json").exists()
 
@@ -287,11 +288,11 @@ def _codex_available() -> bool:
 def _selected_backend() -> str:
     """Which generation backend to use: an explicit `dispatcher` always wins; otherwise
     `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none) forces it, else custom-command →
-    OpenAI API key → none. The Codex subscription is NEVER auto-detected (cr A1 review:
-    a present `~/.codex/auth.json` must not silently select subscription auth) — it is
-    chosen only by an explicit signal: the forced backend above, or the documented
-    coupling to the text opt-in (`CONSTRUCT_PROVIDER=codex` opts the WHOLE deployment
-    into subscription auth, imagery included — one flag, one policy)."""
+    the `CONSTRUCT_PROVIDER=codex` coupling → OpenAI API key → none. The Codex
+    subscription is NEVER auto-detected (a present `~/.codex/auth.json` alone selects
+    nothing) — it is chosen only by an explicit signal: the forced backend above, or
+    the deployment-wide text opt-in coupling, which is AUTHORITATIVE over a merely
+    present API key (one flag, one policy — the whole deployment, text and imagery)."""
     if dispatcher is not None:
         return "dispatcher"
     forced = os.getenv("CONSTRUCT_IMAGE_BACKEND", "").strip().lower()
@@ -301,11 +302,17 @@ def _selected_backend() -> str:
         return forced
     if os.getenv(_CMD_ENV, "").strip():
         return "cmd"
+    # The deployment-wide opt-in is AUTHORITATIVE over mere key presence (cr):
+    # the migration environment — quickstart-exported OPENAI_API_KEY, then the
+    # operator opts into codex — must not split the deployment (subscription
+    # text, surprise-metered images). The opt-in is a BARRIER, not a preference:
+    # with the codex credential missing it selects NONE (no images — fail-open
+    # decoration), never a silent fall-through to metered spend. Forcing
+    # CONSTRUCT_IMAGE_BACKEND=openai remains the explicit override.
+    if os.getenv("CONSTRUCT_PROVIDER", "").strip().lower() == "codex":
+        return "codex" if _codex_available() else "none"
     if os.getenv("OPENAI_API_KEY", "").strip():
         return "openai"
-    if os.getenv("CONSTRUCT_PROVIDER", "").strip().lower() == "codex" \
-            and _codex_available():
-        return "codex"
     return "none"
 
 

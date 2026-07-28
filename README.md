@@ -73,7 +73,7 @@ Every model call routes through one provider interface — bring any LLM behind 
 >
 > **Recommendation:** stay on the default metered API key unless you are a single operator running Construct personally and have read the terms.
 
-There is no silent fallback or credential auto-detection: an unknown `CONSTRUCT_PROVIDER` value fails loudly, and a missing credential fails at the first model call with the fix named. Scene imagery follows the same policy — it uses the API key when present and selects the subscription only on an explicit signal (`CONSTRUCT_PROVIDER=codex` opts the whole deployment in, imagery included; `CONSTRUCT_IMAGE_BACKEND` forces a specific backend). Model knobs: `CONSTRUCT_OPENAI_MODEL` / `CONSTRUCT_OPENAI_CHEAP_MODEL` / `CONSTRUCT_OPENAI_BASE_URL`.
+There is no silent fallback and no subscription-credential auto-detection: an unknown `CONSTRUCT_PROVIDER` value fails loudly, a missing credential fails at the first model call with the fix named, and a present `~/.codex/auth.json` never selects anything by itself. Scene imagery follows the same policy — the `CONSTRUCT_PROVIDER=codex` opt-in carries the whole deployment (text and imagery, even when an API key is also present); otherwise imagery uses the API key when present, and `CONSTRUCT_IMAGE_BACKEND` forces a specific backend. Model knobs: `CONSTRUCT_OPENAI_MODEL` / `CONSTRUCT_OPENAI_CHEAP_MODEL` / `CONSTRUCT_OPENAI_BASE_URL`.
 
 Re-running the install one-liner updates in place. Developers: `git clone` + `pip install -e .` works exactly as you'd expect (`construct turn bodycase "I look around." --debug` shows each turn's receipts — every write the turn committed, and why).
 

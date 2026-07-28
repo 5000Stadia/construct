@@ -65,10 +65,11 @@ source of truth.
    Construct's own `CodexProvider` auth) is **never auto-detected**: it runs only
    on an explicit signal — `CONSTRUCT_IMAGE_BACKEND=codex`, or the deployment-wide
    opt-in coupling `CONSTRUCT_PROVIDER=codex` (one flag opts text AND imagery into
-   subscription auth). Backends, in order: an explicit `imagery.dispatcher` →
-   `CONSTRUCT_IMAGE_CMD` (`{prompt}`/`{out}`) → OpenAI Images → Codex subscription
-   *(explicit signal only)* → none; force one with `CONSTRUCT_IMAGE_BACKEND`
-   (codex|openai|cmd|none). With **no backend the manifest is still produced** and
+   subscription auth — AUTHORITATIVE over a merely present API key; force
+   `CONSTRUCT_IMAGE_BACKEND=openai` to override the coupling). Backends, in order:
+   an explicit `imagery.dispatcher` → `CONSTRUCT_IMAGE_CMD` (`{prompt}`/`{out}`) →
+   the codex coupling → OpenAI Images → none; force one with
+   `CONSTRUCT_IMAGE_BACKEND` (codex|openai|cmd|none). With **no backend the manifest is still produced** and
    play is byte-for-byte text-only.
 6. **Deliver before the prose — but never block on it; never drop it.** When the turn
    returns, the transport takes the render holder (`Session.take_pending_image`) and does a
@@ -97,11 +98,10 @@ change-detector; nothing else has to decide "did it change".
 | `CONSTRUCT_SCENE_IMAGES` | `1` (on) | set falsey to opt a world out entirely |
 | `CONSTRUCT_IMAGE_BACKEND` | auto | force `codex` / `openai` / `cmd` / `none` |
 | (Codex OAuth) | opt-in | `CONSTRUCT_PROVIDER=codex` (or forced backend) + `~/.codex/auth.json` → subscription image gen — never auto-detected |
-| `CONSTRUCT_IMAGE_SIZE` | `1536x1024` | requested image size |
+| `CONSTRUCT_IMAGE_SIZE` | per-backend | requested image size — defaults `1536x1024` (codex) / `1024x1024` (openai) |
 | `CONSTRUCT_IMAGE_QUALITY` | `auto` | Codex image quality (detail comes from the style prompt, not high-res) |
-| `OPENAI_API_KEY` | — | enables the OpenAI gpt-image-1 fallback backend |
+| `OPENAI_API_KEY` | — | enables the OpenAI gpt-image-1 DEFAULT backend |
 | `CONSTRUCT_IMAGE_MODEL` | `gpt-image-1` | OpenAI image model |
-| `CONSTRUCT_IMAGE_SIZE` | `1024x1024` | OpenAI image size |
 | `CONSTRUCT_IMAGE_CMD` | — | custom generator command (`{prompt}`,`{out}`) |
 
 The feature (capture + prompt manifest) is default-on; **actual image generation
