@@ -1,9 +1,10 @@
 """WORLD-GROWTH G1 — the activation adaptor under cr's build boundary.
 
-The safety gate is a PASSING test (the fail-closed path on today's
-engine); the happy path runs against a FAKE atomic backend; the STRICT
-xfail probes the REAL engine for the envelope's arrival — it flips (and
-must be replaced by the real fault matrix) exactly when PB ships.
+ATOMIC-ACTIVATION-V1 is LIVE (consumed 2026-07-24): the real matrix runs
+against the shipped engine's commit_set door and the atomic_ingest sugar
+(happy / gate-skip rollback / exception rollback / reopen durability).
+The fail-closed path is preserved against SIMULATED envelope absence —
+`_NonAtomicP` and the narrowly scoped `_capability -> ""` wired test.
 """
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ from tests.test_integration import world  # noqa: F401 — the engine fixture
 
 
 class _NonAtomicP:
-    """Today's PB 0.2.0 shape: ingest_structured without `atomic`."""
+    """An envelope-less engine shape: ingest_structured without `atomic`."""
 
     def __init__(self):
         self.calls = []
@@ -26,7 +27,7 @@ class _NonAtomicP:
 
 
 class _FakeAtomicP:
-    """The FAKE atomic backend for the passing happy-path tests (the strict xfail probes the REAL engine)."""
+    """A FAKE atomic backend for shape-level unit tests (the real matrix below probes the shipped engine)."""
 
     def __init__(self, abort=False):
         self.calls = []
@@ -45,10 +46,10 @@ _CHUNK = [{"entity": "place:waypost", "attribute": "kind", "value": "place"},
            "value_type": "entity"}]
 
 
-def test_fail_closed_on_todays_engine_nothing_written():
-    # THE SAFETY GATE (passing, not xfail): capability absent → refuse
-    # BEFORE writing; zero calls reach the engine; the receipt is a return
-    # value naming activation_unavailable.
+def test_fail_closed_on_an_envelope_less_engine_nothing_written():
+    # THE SAFETY GATE: capability absent → refuse BEFORE writing; zero
+    # calls reach the engine; the receipt is a return value naming
+    # activation_unavailable.
     p = _NonAtomicP()
     r = activate_chunk(p, list(_CHUNK))
     assert r == ActivationResult(ok=False, reason="activation_unavailable")
@@ -70,28 +71,148 @@ def test_engine_abort_is_a_clean_refusal():
     # records only the refusal (receipts stay return values)
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="ATOMIC-ACTIVATION-V1 not shipped: the real "
-                          "fault/skip/reopen matrix replaces this pin when "
-                          "PB's primitive lands with pbr GREEN")
-def test_atomic_integration_pin_real_engine():
-    # STRICT xfail: this intentionally imports the REAL engine surface and
-    # requires the atomic parameter to exist there — it flips to passing
-    # (and must then be replaced by the real matrix) exactly when PB ships.
-    import inspect as _i
-    from patternbuffer import World  # noqa: F401
-    from construct.adapter import PorcelainWorldReads  # noqa: F401
-    import patternbuffer
-    sig = _i.signature(patternbuffer.World.__init__)
-    # the pin: today's engine has no atomic envelope anywhere we can see
-    porcelain_cls = None
-    for name in dir(patternbuffer):
-        obj = getattr(patternbuffer, name)
-        if hasattr(obj, "ingest_structured"):
-            porcelain_cls = obj
-            break
-    assert porcelain_cls is not None
-    assert "atomic" in _i.signature(porcelain_cls.ingest_structured).parameters
+# ---- THE REAL MATRIX (replaces the strict xfail arrival pin, 2026-07-24:
+# ATOMIC-ACTIVATION-V1 shipped — porcelain commit_set(ops) is the detected
+# door; ingest_structured(atomic=True) is the assert-only sugar) --------------
+
+def _region_chunk(suffix: str) -> list[dict]:
+    return [
+        {"entity": f"place:waypost_{suffix}", "attribute": "kind",
+         "value": "place", "timeless": True},
+        {"entity": f"place:waypost_{suffix}", "attribute": "in",
+         "value": "place:region", "value_type": "entity"},
+    ]
+
+
+def _matrix_world(path):
+    from patternbuffer import World
+    from patternbuffer.testing import StubModel, rule_classifier_fallback
+    w = World(path, world_id="w:matrix", stance="fiction",
+              model=StubModel(fallback=rule_classifier_fallback()),
+              title="Atomic Matrix")
+    w.ingestor.cursor.advance(1.0)
+    w.ingest_structured([{"entity": "place:region", "attribute": "kind",
+                          "value": "region", "timeless": True}])
+    return w
+
+
+class _SugarFacade:
+    """A REAL porcelain behind an atomic_ingest-only surface — no commit_set,
+    an EXPLICIT named `atomic` parameter (the branch that held the latent
+    classify defect runs against the true engine, not a fake)."""
+
+    def __init__(self, porcelain):
+        self._p = porcelain
+
+    def ingest_structured(self, items, atomic=False, classify="inline",
+                          frame=None):
+        return self._p.ingest_structured(items, atomic=atomic,
+                                         classify=classify, frame=frame)
+
+    def state(self, entity, attribute):
+        return self._p.state(entity, attribute)
+
+
+def test_real_engine_happy_chunk_activates_and_persists(tmp_path):
+    # the detected commit_set door on the REAL engine: one call, affirmed
+    # receipts, every row visible — and DURABLE: the full set survives a
+    # close/reopen (the retired arrival pin promised fault/skip/REOPEN)
+    path = tmp_path / "m.world"
+    w = _matrix_world(path)
+    r = activate_chunk(w.porcelain, _region_chunk("a"))
+    assert r.ok, r.reason
+    assert len(r.receipts) == 2
+    assert w.porcelain.state("place:waypost_a", "kind")["status"] == "known"
+    assert w.porcelain.state("place:waypost_a", "in")["status"] == "known"
+    w.close()
+    w2 = _matrix_world(path)
+    try:
+        assert w2.porcelain.state("place:waypost_a", "kind")["status"] == "known"
+        assert w2.porcelain.state("place:waypost_a", "in")["status"] == "known"
+    finally:
+        w2.close()
+
+
+def test_real_engine_gate_skip_aborts_the_whole_set(tmp_path):
+    # AtomicAbort(cause=gate_skip): one malformed id in the set → the engine
+    # rolls the WHOLE set back; the GOOD prefix row is not visible either
+    # (all-or-none is the entire point) — and the rollback is DURABLE: the
+    # good prefix stays absent across a close/reopen
+    path = tmp_path / "m.world"
+    w = _matrix_world(path)
+    items = _region_chunk("b") + [
+        {"entity": "place:", "attribute": "kind",     # malformed_id → gate skip
+         "value": "place", "timeless": True}]
+    r = activate_chunk(w.porcelain, items)
+    assert not r.ok and r.reason.startswith("engine_abort:")
+    assert "gate_skip" in r.reason
+    assert w.porcelain.state("place:waypost_b", "kind")["status"] != "known"
+    w.close()
+    w2 = _matrix_world(path)
+    try:
+        assert w2.porcelain.state("place:waypost_b",
+                                  "kind")["status"] != "known"
+    finally:
+        w2.close()
+
+
+def test_real_engine_exception_aborts_the_whole_set(tmp_path):
+    # AtomicAbort(cause=exception): a row the ingest body cannot process
+    # (no entity key) → same total rollback, typed as exception
+    w = _matrix_world(tmp_path / "m.world")
+    try:
+        items = _region_chunk("c") + [{"attribute": "in",
+                                       "value": "place:region"}]
+        r = activate_chunk(w.porcelain, items)
+        assert not r.ok and r.reason.startswith("engine_abort:")
+        assert w.porcelain.state("place:waypost_c",
+                                 "kind")["status"] != "known"
+    finally:
+        w.close()
+
+
+def test_sugar_path_on_the_real_engine_happy_and_rollback(tmp_path):
+    # cr AMBER delta: the branch that held the latent classify defect must
+    # run against the TRUE engine — a real porcelain behind an
+    # atomic_ingest-only facade. Happy: visible; gate-skip: total rollback
+    # including the good prefix.
+    w = _matrix_world(tmp_path / "m.world")
+    try:
+        facade = _SugarFacade(w.porcelain)
+        assert not callable(getattr(facade, "commit_set", None))
+        r = activate_chunk(facade, _region_chunk("d"))
+        assert r.ok, r.reason
+        assert w.porcelain.state("place:waypost_d",
+                                 "kind")["status"] == "known"
+        items = _region_chunk("e") + [
+            {"entity": "place:", "attribute": "kind",
+             "value": "place", "timeless": True}]
+        r2 = activate_chunk(facade, items)
+        assert not r2.ok and r2.reason.startswith("engine_abort:")
+        assert w.porcelain.state("place:waypost_e",
+                                 "kind")["status"] != "known"
+    finally:
+        w.close()
+
+
+def test_sugar_path_carries_model_free_classify():
+    # the atomic_ingest sugar path (an engine WITHOUT commit_set) must pass
+    # classify="rules" — the real engine raises ValueError on the default
+    # 'inline' BEFORE any write (ATOMIC-ACTIVATION-V1 §A), so omitting it
+    # turns every activation into an abort on such an engine
+    class _SugarOnlyP:
+        def __init__(self):
+            self.kwargs = None
+
+        def ingest_structured(self, items, atomic=False, classify="inline",
+                              frame="canon"):
+            self.kwargs = {"atomic": atomic, "classify": classify}
+            return {"rows": [{"entity": i["entity"]} for i in items]}
+
+    p = _SugarOnlyP()
+    r = activate_chunk(p, list(_CHUNK))
+    assert r.ok
+    assert p.kwargs == {"atomic": True, "classify": "rules"}
 
 
 def test_fake_atomic_backend_happy_path():
@@ -1013,14 +1134,52 @@ def _classify(**over):
     return v
 
 
-def test_wired_gate_fails_closed_at_the_seam(tmp_path):
-    # THE OBSERVABLE GATE-CALL ORACLE (cr's standing wiring requirement):
-    # a real run_turn on a real (non-atomic PB 0.2.0) World — the pipeline
-    # misses, the Assessor is INVOKED through the actual turn path, and the
-    # activation adaptor fails CLOSED: the seam prose returns, the receipt
-    # lands on the trace, and the world/clock are untouched.
+def test_wired_gate_activates_through_the_real_envelope(tmp_path):
+    # THE OBSERVABLE GATE-CALL ORACLE, post-arrival: a real run_turn on the
+    # REAL engine's detected commit_set door — the pipeline misses, the
+    # Assessor is INVOKED through the actual turn path, the chunk commits
+    # atomically, the walk lands, and the seam is gone.
     from construct.provider import StubProvider
     from construct.turnloop import _GROWTH_SEAM, run_turn
+    w = _wired_world(tmp_path)
+    try:
+        npt = {"acts": True, "action": "waters his team at the trough",
+               "speaks": True, "intent": "size up the newcomer",
+               "line_hint": ""}
+        provider = StubProvider(
+            [_classify(), _good(), dict(npt), dict(npt)]
+            + [{"prose": "The waypost, and a farmer at it."}] * 4)
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "activated:place:the_willow_ford_waypost"
+        assert r.trace.growth_retry is False
+        assert r.prose != _GROWTH_SEAM
+        assert "assessor_propose:main" in r.trace.cohort_calls
+        # COMMITTED: growth entities live, the walk landed
+        assert w.porcelain.state("place:the_willow_ford_waypost",
+                                 "kind")["status"] == "known"
+        assert w.porcelain.state("person:gregor_bund",
+                                 "kind")["status"] == "known"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:the_willow_ford_waypost"
+        assert "person:you" in r.trace.growth_moved
+        # the assessor saw the HOST's truth: ancestry options + frontier
+        gro = [c[0] for c in provider.calls if "⟦gro⟧" in c[0][:40]]
+        assert gro and "north road" in gro[0]
+        assert "[1]" in gro[0]           # indexed host ancestry options
+        assert "nothing is authored past here" in gro[0]  # frontier, not
+    finally:                                              # emptiness
+        w.close()
+
+
+def test_wired_gate_fails_closed_without_the_envelope(tmp_path, monkeypatch):
+    # the narrowly scoped PRE-arrival oracle (cr AMBER: keep exactly one):
+    # capability pinned "" simulates an envelope-less engine — the adaptor
+    # fails CLOSED: seam prose, receipt on the trace, world untouched.
+    import construct.growth as growth_mod
+    from construct.provider import StubProvider
+    from construct.turnloop import _GROWTH_SEAM, run_turn
+    monkeypatch.setattr(growth_mod, "_capability", lambda p: "")
     w = _wired_world(tmp_path)
     try:
         provider = StubProvider([
@@ -1033,7 +1192,6 @@ def test_wired_gate_fails_closed_at_the_seam(tmp_path):
         assert r.settle is None
         assert r.trace.growth == "activation_unavailable"
         assert r.trace.growth_retry is True
-        assert "assessor_propose:main" in r.trace.cohort_calls
         # NOTHING committed: no growth entities, no displacement, no clock
         assert w.porcelain.state("place:the_willow_ford_waypost",
                                  "kind")["status"] != "known"
@@ -1041,12 +1199,7 @@ def test_wired_gate_fails_closed_at_the_seam(tmp_path):
             "status"] != "known"
         assert (w.porcelain.locate("person:you") or [None])[0] \
             == "place:north_road"
-        # the assessor saw the HOST's truth: ancestry options + frontier
-        gro = [c[0] for c in provider.calls if "⟦gro⟧" in c[0][:40]]
-        assert gro and "north road" in gro[0]
-        assert "[1]" in gro[0]           # indexed host ancestry options
-        assert "nothing is authored past here" in gro[0]  # frontier, not
-    finally:                                              # emptiness
+    finally:
         w.close()
 
 
@@ -1075,45 +1228,47 @@ def test_wired_gate_not_invoked_without_the_signal(tmp_path):
 def test_wired_encounter_invokes_with_no_destination(tmp_path):
     # G2: "I walk until I run into someone" — no stated destination, so
     # the pipeline had nothing to resolve (proven zero-destination); the
-    # encounter signal invokes the Assessor in encounter mode and fails
-    # CLOSED on PB 0.2.0. Nothing was bypassed: the dst cohort never ran.
-    from construct.provider import StubProvider
-    from construct.turnloop import _GROWTH_SEAM, run_turn
-    w = _wired_world(tmp_path)
-    try:
-        g = _good()
-        del g["place"]                     # a pure meeting on the road
-        provider = StubProvider([
-            _classify(moves_open=True, seeks_encounter=True, moves_to=""),
-            g,
-        ])
-        r = run_turn(w, _wired_arc(), provider,
-                     "I walk until I meet someone.", turn=1)
-        assert r.prose == _GROWTH_SEAM
-        assert r.trace.growth == "activation_unavailable"
-        gro = [c[0] for c in provider.calls if "⟦gro⟧" in c[0][:40]]
-        assert gro and "PERSON met on the way" in gro[0]
-        assert not any("⟦dst⟧" in c[0][:40] for c in provider.calls)
-        assert w.porcelain.state("person:gregor_bund",
-                                 "kind")["status"] != "known"
-    finally:
-        w.close()
-
-
-def test_wired_encounter_success_comes_to_the_road(tmp_path, monkeypatch):
-    # G2 success (fake atomic): the encounter is ANCHORED at the origin —
-    # the meeting came TO the player; nobody teleports, the player stays,
-    # and the grown pair is live through the ordinary engines
-    import construct.growth as growth_mod
+    # encounter signal invokes the Assessor in encounter mode and, on the
+    # REAL engine, the meeting commits atomically at the origin. Nothing
+    # was bypassed: the dst cohort never ran.
     from construct.provider import StubProvider
     from construct.turnloop import run_turn
     w = _wired_world(tmp_path)
     try:
-        def _fake(porcelain, items):
-            receipt = porcelain.ingest_structured(items, classify="rules")
-            return growth_mod.ActivationResult(
-                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
-        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
+        g = _good()
+        del g["place"]                     # a pure meeting on the road
+        npt = {"acts": True, "action": "hails the traveler from beside "
+               "his caravan", "speaks": True,
+               "intent": "greet the stranger on the road", "line_hint": ""}
+        provider = StubProvider(
+            [_classify(moves_open=True, seeks_encounter=True, moves_to=""),
+             g, dict(npt), dict(npt)]
+            + [{"prose": "A husky farmer hails you from his caravan."}] * 4)
+        r = run_turn(w, _wired_arc(), provider,
+                     "I walk until I meet someone.", turn=1)
+        assert r.trace.growth == "activated:person:gregor_bund"
+        gro = [c[0] for c in provider.calls if "⟦gro⟧" in c[0][:40]]
+        assert gro and "PERSON met on the way" in gro[0]
+        assert not any("⟦dst⟧" in c[0][:40] for c in provider.calls)
+        assert w.porcelain.state("person:gregor_bund",
+                                 "kind")["status"] == "known"
+        assert r.trace.growth_moved == []          # the meeting came HERE
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:north_road"
+    finally:
+        w.close()
+
+
+def test_wired_encounter_success_comes_to_the_road(tmp_path):
+    # G2 success through the REAL atomic door (ATOMIC-ACTIVATION-V1 live,
+    # 2026-07-24 — the fake activate_chunk this ran on pre-arrival is
+    # retired): the encounter is ANCHORED at the origin — the meeting came
+    # TO the player; nobody teleports, the player stays, and the grown
+    # pair is live through the ordinary engines
+    from construct.provider import StubProvider
+    from construct.turnloop import run_turn
+    w = _wired_world(tmp_path)
+    try:
         g = _good()
         del g["place"]
         npt = {"acts": True, "action": "hails the traveler from beside "
@@ -1178,22 +1333,16 @@ def test_wired_destinationless_lane_declines_a_place(tmp_path, monkeypatch):
         w.close()
 
 
-def test_wired_phrase_bearing_encounter_keeps_its_walk(tmp_path,
-                                                       monkeypatch):
+def test_wired_phrase_bearing_encounter_keeps_its_walk(tmp_path):
     # the separately justified shape: a PHRASE-BEARING encounter seek
     # ("down the old road until I meet someone") goes through the real
     # pipeline (G1 routing) and its chunk may carry the meeting's place —
-    # the player committed the travel, so the walk commits with the chunk
-    import construct.growth as growth_mod
+    # the player committed the travel, so the walk commits with the chunk.
+    # Runs through the REAL atomic door (the pre-arrival fake is retired).
     from construct.provider import StubProvider
     from construct.turnloop import run_turn
     w = _wired_world(tmp_path)
     try:
-        def _fake(porcelain, items):
-            receipt = porcelain.ingest_structured(items, classify="rules")
-            return growth_mod.ActivationResult(
-                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
-        monkeypatch.setattr(growth_mod, "activate_chunk", _fake)
         npt = {"acts": True, "action": "waters his team at the trough",
                "speaks": True, "intent": "size up the newcomer",
                "line_hint": ""}
@@ -1267,9 +1416,11 @@ def test_wired_charter_phrases_route_to_growth_never_the_legacy_mint(
         tmp_path):
     # cr wiring blocker 1: the canonical prospective/open shapes must reach
     # Growth — the legacy mint slugging "the first light I trust" into a
-    # junk place IS the gap G1 closes
+    # junk place IS the gap G1 closes. On the REAL engine the routed growth
+    # ACTIVATES: the grown place commits, the walk lands there, and the
+    # slugged junk place still never exists.
     from construct.provider import StubProvider
-    from construct.turnloop import _GROWTH_SEAM, run_turn
+    from construct.turnloop import run_turn
     for phrase, slug, deictic in [
             ("the first light I trust", "place:the_first_light_i_trust",
              False),
@@ -1278,20 +1429,25 @@ def test_wired_charter_phrases_route_to_growth_never_the_legacy_mint(
             ("downstream", "place:downstream", False)]:
         w = _wired_world(tmp_path / slug.split(":")[1])
         try:
+            npt = {"acts": True, "action": "waters his team at the trough",
+                   "speaks": True, "intent": "size up the newcomer",
+                   "line_hint": ""}
             q = [_classify(moves_to=phrase)]
             if not deictic:                    # the semantic bind still runs
                 q.append({"verdict": "new", "match": ""})
-            q.append(_good())
+            q += [_good(), dict(npt), dict(npt)]
+            q += [{"prose": "The waypost, and a farmer at it."}] * 4
             provider = StubProvider(q)
             r = run_turn(w, _wired_arc(), provider,
                          f"I go to {phrase}.", turn=1)
-            assert r.prose == _GROWTH_SEAM, phrase
-            assert r.trace.growth == "activation_unavailable", phrase
+            assert r.trace.growth == \
+                "activated:place:the_willow_ford_waypost", phrase
             assert any("⟦gro⟧" in c[0][:40] for c in provider.calls), phrase
-            # the legacy mint NEVER ran: no slugged junk place, no move
+            # the legacy mint NEVER ran: no slugged junk place; the walk
+            # landed at the GROWN place instead
             assert w.porcelain.state(slug, "kind")["status"] != "known"
             assert (w.porcelain.locate("person:you") or [None])[0] \
-                == "place:north_road"
+                == "place:the_willow_ford_waypost"
         finally:
             w.close()
 
@@ -1412,8 +1568,9 @@ def test_wired_identity_matrix(tmp_path, monkeypatch):
         w.close()
 
     # (b) partial-token NON-identity: an existing Willow Tavern must not
-    # capture "the Willow Ford waypost" — assembly proceeds to a NEW id
-    # (proven by reaching the activation adaptor, not a bind decline)
+    # capture "the Willow Ford waypost" — assembly proceeds to a NEW id,
+    # which on the REAL engine ACTIVATES as its own place (the tavern
+    # stays untouched, uncaptured)
     w = _wired_world(tmp_path / "b")
     try:
         w.ingest_structured([
@@ -1422,10 +1579,23 @@ def test_wired_identity_matrix(tmp_path, monkeypatch):
             {"entity": "place:willow_tavern", "attribute": "name",
              "value": "Willow Tavern"},
         ])
-        provider = StubProvider([_classify(), _good()])
+        npt = {"acts": True, "action": "waters his team at the trough",
+               "speaks": True, "intent": "size up the newcomer",
+               "line_hint": ""}
+        provider = StubProvider(
+            [_classify(), _good(), dict(npt), dict(npt)]
+            + [{"prose": "The waypost, and a farmer at it."}] * 4)
         r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
                      turn=1)
-        assert r.trace.growth == "activation_unavailable"   # new-id path
+        assert r.trace.growth == \
+            "activated:place:the_willow_ford_waypost"       # new-id path
+        assert w.porcelain.state("place:the_willow_ford_waypost",
+                                 "kind")["status"] == "known"
+        # the tavern was NOT captured: name intact, nobody moved there
+        assert w.porcelain.state("place:willow_tavern", "name")["fact"][
+            "value"] == "Willow Tavern"
+        assert (w.porcelain.locate("person:you") or [None])[0] \
+            == "place:the_willow_ford_waypost"
     finally:
         w.close()
 
@@ -1525,13 +1695,11 @@ def test_wired_failure_matrix_invariance(tmp_path):
         w.close()
 
 
-def test_wired_success_path_with_simulated_atomic_engine(tmp_path,
-                                                         monkeypatch):
-    # cr blocker 6 + success cleanup: simulate ATOMIC-ACTIVATION-V1 (the
-    # adaptor "succeeds" by writing the chunk) — the turn proceeds to a
-    # BRIEFED narration; growth marks the development ledger; standing
-    # companions are moved by the CHUNK and not re-written by 2b-ii
-    import construct.growth as growth_mod
+def test_wired_success_path_through_the_real_atomic_engine(tmp_path):
+    # cr blocker 6 + success cleanup, now through the REAL commit_set door
+    # (the pre-arrival simulation is retired, cr final-review 2): the turn
+    # proceeds to a BRIEFED narration; growth marks the development ledger;
+    # standing companions are moved by the CHUNK and not re-written by 2b-ii
     from construct.adapter import frame_facts
     from construct.provider import StubProvider
     from construct.turnloop import run_turn
@@ -1546,12 +1714,6 @@ def test_wired_success_path_with_simulated_atomic_engine(tmp_path,
             {"entity": "person:reed", "attribute": "accompanying",
              "value": "person:you", "value_type": "entity"},
         ])
-
-        def _fake_activate(porcelain, items):
-            receipt = porcelain.ingest_structured(items, classify="rules")
-            return growth_mod.ActivationResult(
-                ok=True, receipts=tuple(getattr(receipt, "rows", ()) or ()))
-        monkeypatch.setattr(growth_mod, "activate_chunk", _fake_activate)
         provider = StubProvider([
             _classify(),
             _good(),
@@ -2412,7 +2574,7 @@ def test_wired_region_card_governs_grown_territory(tmp_path, monkeypatch):
         w2.close()
 
 
-def test_latency_checkpoints_cover_every_return_shape(tmp_path):
+def test_latency_checkpoints_cover_every_return_shape(tmp_path, monkeypatch):
     # cr (telemetry review): checkpoint placement has correctness
     # semantics — every return path is bounded by a cumulative stamp
     from construct.provider import StubProvider
@@ -2433,15 +2595,41 @@ def test_latency_checkpoints_cover_every_return_shape(tmp_path):
     finally:
         w.close()
     # (b) GROWTH-RETRY path: the Assessor's interval is stamped
+    # (envelope absence simulated INSIDE a scoped context — a bare undo()
+    # would strip the suite-wide fixture patches too, cr final-review 3)
+    import construct.growth as growth_mod
     w = _wired_world(tmp_path / "seam")
     try:
-        provider = StubProvider([_classify(), _good()])
-        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
-                     turn=1)
+        with monkeypatch.context() as mp:
+            mp.setattr(growth_mod, "_capability", lambda p: "")
+            provider = StubProvider([_classify(), _good()])
+            r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                         turn=1)
         assert r.trace.growth == "activation_unavailable"
         assert "cp_growth_gate_done" in r.trace.timings
         assert r.trace.timings["cp_growth_gate_done"] >= \
             r.trace.timings["cp_movement_done"]
+    finally:
+        w.close()
+    # (b2) the ACTIVATED return shape (cr AMBER delta E): the real engine
+    # commits the chunk and the full checkpoint ladder still stamps in order
+    w = _wired_world(tmp_path / "activated")
+    try:
+        npt = {"acts": True, "action": "waters his team at the trough",
+               "speaks": True, "intent": "size up the newcomer",
+               "line_hint": ""}
+        provider = StubProvider(
+            [_classify(), _good(), dict(npt), dict(npt)]
+            + [{"prose": "The waypost, and a farmer at it."}] * 4)
+        r = run_turn(w, _wired_arc(), provider, "I keep moving away.",
+                     turn=1)
+        assert r.trace.growth == "activated:place:the_willow_ford_waypost"
+        keys = ["cp_classified", "cp_movement_done", "cp_growth_gate_done",
+                "cp_scene_snapshot_done", "cp_salience_done",
+                "cp_drift_lifecycle_done", "cp_generator_done"]
+        vals = [r.trace.timings.get(k) for k in keys]
+        assert all(v is not None for v in vals), r.trace.timings
+        assert vals == sorted(vals)
     finally:
         w.close()
     # (c) an early ANSWERED/DENIED path is bounded by a later stamp: the

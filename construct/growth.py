@@ -2,8 +2,9 @@
 
 The host half of the ACTIVATION CONTRACT (docs/design/WORLD-GROWTH.md §3):
 growth chunks become visible canon ALL OR NONE through PB's atomic
-envelope (ATOMIC-ACTIVATION-V1: `ingest_structured(items, atomic=True)`
-sugar over `commit_set`). Until that primitive ships, this adaptor FAILS
+envelope (ATOMIC-ACTIVATION-V1, LIVE since 2026-07-24: `commit_set(ops)`
+is the detected door; `ingest_structured(items, atomic=True)` the
+assert-only sugar). On an ENVELOPE-LESS engine this adaptor FAILS
 CLOSED — it detects capability absence BEFORE writing anything and
 returns `activation_unavailable`: zero rows, zero displacement, zero
 clock/route change, the caller renders the non-diegetic technical seam.
@@ -86,7 +87,7 @@ def _affirmative_success(receipt, n_items: int) -> tuple[bool, str, tuple]:
 def activate_chunk(p, items: list[dict]) -> ActivationResult:
     """Commit one growth chunk atomically, or refuse before writing.
 
-    On a non-atomic engine (PB 0.2.0): `activation_unavailable`, nothing
+    On an envelope-less engine: `activation_unavailable`, nothing
     written — a torn prefix is never an accepted runtime behavior. On an
     atomic engine: one envelope call; any engine-side abort surfaces as a
     failed result with the engine's receipts (still nothing visible, by
@@ -105,7 +106,12 @@ def activate_chunk(p, items: list[dict]) -> ActivationResult:
             # through a possibly-broad legacy ingest)
             receipt = p.commit_set([{"op": "assert", "item": i} for i in items])
         else:
-            receipt = p.ingest_structured(items, atomic=True)
+            # ATOMIC-ACTIVATION-V1 §A: the atomic door demands model-free
+            # classification (classify ∈ {rules, defer} — ValueError before any
+            # write otherwise). "rules" matches the porcelain's own commit_set
+            # default: durability rules run at write, so growth's containment
+            # rows don't join the deferred-classification residual.
+            receipt = p.ingest_structured(items, atomic=True, classify="rules")
     except Exception as exc:  # noqa: BLE001 — an aborted set is a clean refusal
         logger.warning("growth activation aborted by the engine: %s", exc)
         return ActivationResult(ok=False, reason=f"engine_abort:{exc}")

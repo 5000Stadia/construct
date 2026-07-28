@@ -1,6 +1,6 @@
 # WORLD-GROWTH — the world grows where the player walks
 
-**Status:** SPEC GREEN (cr r6, <92a037e8…>, 2026-07-13) — build-authorized; Consult RULED engine-side (ATOMIC-ACTIVATION-V1; pbr review + delivery pending). G1 host build ALLOWED under cr's fail-closed boundary (no non-atomic commits reachable, activation_unavailable on 0.2.0). G-A's adoption-retraction surface RULED: commit_set(ops) mixed-operation envelope (ATOMIC-ACTIVATION-V1 r2 §C; pbr reviews r1+r2 in one round). cr's binding reading: the one-generative-act budget includes the tangent-author call; technical failure receipts stay outside canon.
+**Status:** SPEC GREEN (cr r6, <92a037e8…>, 2026-07-13) — build-authorized; Consult RULED engine-side (ATOMIC-ACTIVATION-V1 — **DELIVERED and consumed 2026-07-24**: the shipped porcelain's `commit_set`/atomic sugar carry live activation end-to-end; the fail-closed boundary is preserved against simulated envelope absence). G1 host build ALLOWED under cr's fail-closed boundary (no non-atomic commits reachable, activation_unavailable on an envelope-less engine). G-A's adoption-retraction surface RULED: commit_set(ops) mixed-operation envelope (ATOMIC-ACTIVATION-V1 r2 §C; pbr reviews r1+r2 in one round). cr's binding reading: the one-generative-act budget includes the tangent-author call; technical failure receipts stay outside canon.
 **Author:** HD (Construct), from the founder's captured design (2026-07-12)
 **Motivating failure:** the Ironhold displaced-conclusion probe
 (`logs/critic-displaced-ironhold-1783898717.md`; ledger entry 2026-07-12)
@@ -439,10 +439,12 @@ Concrete named destinations keep today's resolve/mint path untouched.
 SPECIFIED in §3/§5 per cr's r1; remaining open:)
 - The Assessor's tier (proposal: main-tier — the assessment chain is
   planning-class reasoning, and it runs at most once per turn).
-- (RESOLVED: the consult is RULED engine-side — ATOMIC-ACTIVATION-V1 r2,
-  no fallback exists; the adoption set's retraction expressibility is
-  RULED too — `commit_set(ops)`, §G-A 3b. The only remaining gates are
-  DELIVERY: PB's implementation + pbr GREEN.)
+- (RESOLVED and DELIVERED: the consult was RULED engine-side —
+  ATOMIC-ACTIVATION-V1 r2, no fallback exists; the adoption set's
+  retraction expressibility RULED too — `commit_set(ops)`, §G-A 3b.
+  The delivery gate CLOSED 2026-07-24: PB shipped the envelope and the
+  host consumed it — growth activation and tangent adoption both run the
+  real `commit_set` door in the wired suite.)
 - Latency: the Ironhold probe's 400-450s turns need decomposition before
   G1 adds a cohort to the movement path (possibly the failed-grant retry
   chains — G1 may actually REMOVE cost by replacing repeated failures with

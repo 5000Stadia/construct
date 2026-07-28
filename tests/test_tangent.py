@@ -733,17 +733,21 @@ def test_wired_beat1_persists_and_supersedes(tmp_path):
         w.close()
 
 
-def test_wired_beat2_fails_closed_without_the_envelope(tmp_path):
-    # the full confirm→author→adopt path on PB 0.2.0: adoption_unavailable,
-    # the pending SURVIVES, the manifest is untouched, and the ordinary
-    # action still renders (no seam — unlike growth, the action is real
-    # without the arc swap)
+def test_wired_beat2_fails_closed_without_the_envelope(tmp_path, monkeypatch):
+    # the full confirm→author→adopt path on an engine WITHOUT commit_set:
+    # adoption_unavailable, the pending SURVIVES, the manifest is untouched,
+    # and the ordinary action still renders (no seam — unlike growth, the
+    # action is real without the arc swap). The shipped engine now HAS the
+    # envelope (ATOMIC-ACTIVATION-V1), so absence is simulated by pinning
+    # the attribute non-callable; the adopted path is pinned by the two
+    # adopted:arc:tangent_2 wired tests below.
     from construct.arc import io as arc_io
     from construct.provider import StubProvider
     from construct.tangent import pending_rows, read_pending
     from construct.turnloop import run_turn
     from construct.adapter import PorcelainWorldReads
     tg, w = _wired(tmp_path)
+    monkeypatch.setattr(type(w.porcelain), "commit_set", None, raising=True)
     try:
         arc = _seed_wired_portfolio(w)
         w.porcelain.ingest_structured(
@@ -811,13 +815,12 @@ def test_wired_beat2_negative_and_cancel(tmp_path):
         w.close()
 
 
-def test_wired_adoption_success_with_a_willing_envelope(tmp_path,
-                                                        monkeypatch):
-    # fake-envelope success: the manifest flips whole, the session reload
-    # is armed (trace.replanned — the reshape path), the narrator carries
-    # the world's YES, the receipt clears, and the old main survives
-    # demoted as a side arc
-    import construct.tangent as tangent_mod
+def test_wired_adoption_success_through_the_real_envelope(tmp_path):
+    # REAL-envelope success (the willing fake is retired — the shipped
+    # engine's commit_set carries the mixed retract+assert set): the
+    # manifest flips whole, the session reload is armed (trace.replanned —
+    # the reshape path), the narrator carries the world's YES, the receipt
+    # clears, and the old main survives demoted as a side arc
     from construct.arc import io as arc_io
     from construct.provider import StubProvider
     from construct.tangent import (ADOPTION_RECEIPT_KIND, pending_rows,
@@ -832,20 +835,6 @@ def test_wired_adoption_success_with_a_willing_envelope(tmp_path,
                          action="Forget the case.", at=1001.0),
             frame="session:main")
 
-        real = tangent_mod.activate_adoption
-
-        def _willing(porcelain, ops):
-            for op in ops:
-                if op["op"] == "retract":
-                    porcelain.retract(op["assertion_id"], op["reason"])
-                else:
-                    item = dict(op["item"])
-                    frame = item.pop("frame", None)
-                    porcelain.ingest_structured([item], frame=frame,
-                                                classify="rules")
-            from construct.growth import ActivationResult
-            return ActivationResult(ok=True, receipts=("r",))
-        monkeypatch.setattr(tangent_mod, "activate_adoption", _willing)
         provider = StubProvider([
             tg._classify(moves_open=False, moves_to=""),
             {"consistent": True, "abandons": False},
@@ -895,19 +884,8 @@ def test_wired_swallowed_clear_cannot_adopt_twice(tmp_path, monkeypatch):
                          action="Forget the case.", at=1001.0),
             frame="session:main")
 
-        def _willing(porcelain, ops):
-            for op in ops:
-                if op["op"] == "retract":
-                    porcelain.retract(op["assertion_id"], op["reason"])
-                else:
-                    item = dict(op["item"])
-                    frame = item.pop("frame", None)
-                    porcelain.ingest_structured([item], frame=frame,
-                                                classify="rules")
-            from construct.growth import ActivationResult
-            return ActivationResult(ok=True, receipts=("r",))
-        monkeypatch.setattr(tangent_mod, "activate_adoption", _willing)
-
+        # the adoption itself rides the REAL commit_set envelope; only the
+        # post-adoption clear is fault-injected (the swallowed-clear case)
         def _clear_down(**kw):
             raise RuntimeError("clear down")
         monkeypatch.setattr(tangent_mod, "cancel_rows", _clear_down)
