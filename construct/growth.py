@@ -323,6 +323,10 @@ def validated_proposal(raw: dict, *, mode: str, n_ancestry_options: int,
     if leaks(assessment):
         return None, "unlicensed:assessment_concealed"
 
+    # `confidence` is the model's SELF-REPORT of its own proposal (no denominator, no
+    # provenance) — a FEEL gate below `min_confidence`, never a calibrated measurement
+    # (pbeo review 2026-07-28, Item 2). Validated strictly so a malformed self-report
+    # can't slip the gate.
     conf = raw.get("confidence")
     if type(conf) not in (int, float) or isinstance(conf, bool) \
             or not math.isfinite(float(conf)) or not (0.0 <= float(conf) <= 1.0):

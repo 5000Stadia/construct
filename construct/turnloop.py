@@ -2727,7 +2727,24 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
 #: DRIFT-HANDLING D1 (§3 R2 step 2): decline `relocate_pick` below this confidence
 #: — relocation must feel inevitable, not conjured. The spec leaves the number
 #: unpinned ("decline on low confidence"); tune with live-test data (§7 D1 note).
+#: The value compared here is a model SELF-REPORT (see `_model_self_report`), a
+#: FEEL gate — not a calibrated measurement.
 _RELOCATE_CONFIDENCE_MIN = 0.5
+
+
+def _model_self_report(pick: dict) -> float:
+    """The model's self-reported `confidence` for a nudge pick, as a finite float in
+    the schema's [0,1] (0.0 on any malformed/missing value).
+
+    Named for what it IS at the point it is consumed (pbeo review 2026-07-28, Item 2):
+    a model's self-assessment of its own output — no denominator, no provenance, NOT a
+    measurement. We gate low nudge picks on it because a conjured relocation should feel
+    wrong; never read it as evidence or a calibrated score.
+    """
+    try:
+        return float(pick.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _turn_salience(live_reads: Any, turn: int, player_delta_candidates: list[dict],
@@ -3000,10 +3017,7 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         trace.dropped_cohorts.append(f"absence_consequence ({exc})")
         drift.record_absence_declined(world, turn, beat_id, "cohort_error")
         return False
-    try:
-        confidence = float(pick.get("confidence", 0.0))
-    except (TypeError, ValueError):
-        confidence = 0.0
+    confidence = _model_self_report(pick)
     if confidence < _RELOCATE_CONFIDENCE_MIN:
         trace.dropped_cohorts.append("absence_consequence (low confidence)")
         drift.record_absence_declined(world, turn, beat_id, "low_confidence")
@@ -3207,10 +3221,7 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         trace.dropped_cohorts.append(f"relocate_pick ({exc})")
         drift.record_relocate_declined(world, turn, beat_id, "cohort_error")
         return False
-    try:
-        confidence = float(pick.get("confidence", 0.0))
-    except (TypeError, ValueError):
-        confidence = 0.0
+    confidence = _model_self_report(pick)
     if confidence < _RELOCATE_CONFIDENCE_MIN:
         trace.dropped_cohorts.append("relocate_pick (low confidence)")
         drift.record_relocate_declined(world, turn, beat_id, "low_confidence")
@@ -3545,10 +3556,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             trace.dropped_cohorts.append(f"repair_arc ({exc})")
             drift.record_repair_declined(world, turn, beat_id, "cohort_error")
             return False
-        try:
-            confidence = float(pick.get("confidence", 0.0))
-        except (TypeError, ValueError):
-            confidence = 0.0
+        confidence = _model_self_report(pick)
         if confidence < _RELOCATE_CONFIDENCE_MIN:
             drift.record_repair_declined(world, turn, beat_id, "low_confidence")
             return False
