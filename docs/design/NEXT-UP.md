@@ -94,8 +94,10 @@ decisions still hold:
 ## ⏳ Passive review gates (self-reporting, no action)
 
 - **cr** — review of the hostcontrol slice is queued (delivers on cr's next launch).
-- **pbr** — ATOMIC-ACTIVATION verdicted **RED (2026-07-29), but implementation
-  fidelity only** — the r11 public surface Construct consumes does NOT move (F1 is
-  an internal poison-gate repair; F2 tightens Python to reject shapes the schema
-  already excluded, and our grep confirmed we emit none). No host action; pb is
-  fixing both and notifies us when it goes GREEN. MOVED-EVENT-V1 still under review.
+- **pbr** — ATOMIC-ACTIVATION-V1 is **GREEN, spec + code (2026-07-29)**. The engine
+  surface Construct consumes is now reviewed end to end; no public surface ever
+  moved (F1 internal poison-gate repair, F2 an op-schema tightening we grepped
+  clean for). Our `reason.strip()` guard stays as a blessed host-quality policy
+  (the engine boundary is `str` incl. `""` by contract). All three engine tracks
+  (ATOMIC, MOVED-EVENT, SOURCE-IDENTITY) are now spec+code GREEN. No host gate
+  remains open.
