@@ -94,6 +94,8 @@ decisions still hold:
 ## ⏳ Passive review gates (self-reporting, no action)
 
 - **cr** — review of the hostcontrol slice is queued (delivers on cr's next launch).
-- **pbr** — the ATOMIC-ACTIVATION verdict is outstanding (the review was a stuck
-  claim, now resubmitted); pb notifies us the moment it lands. The consumed
-  *contract* is already spec-GREEN r11; only engine-internal fidelity is unreviewed.
+- **pbr** — ATOMIC-ACTIVATION verdicted **RED (2026-07-29), but implementation
+  fidelity only** — the r11 public surface Construct consumes does NOT move (F1 is
+  an internal poison-gate repair; F2 tightens Python to reject shapes the schema
+  already excluded, and our grep confirmed we emit none). No host action; pb is
+  fixing both and notifies us when it goes GREEN. MOVED-EVENT-V1 still under review.
