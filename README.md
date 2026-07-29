@@ -227,7 +227,9 @@ Three projects, one line of research — each a résumé of the last:
 
 ## Project status
 
-**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (1100+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
+**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (1200+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
+
+> **⏭️ Next up:** the headline build after this button-up is the RESOLUTION-FAN §5b chapter-boundary reshape (the arc-layer contribution). See **[docs/design/NEXT-UP.md](docs/design/NEXT-UP.md)** — designed and audited, needs a broad design pass on its open forks before implementation is pieced out.
 
 ## License
 

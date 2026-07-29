@@ -1,5 +1,14 @@
 # The Resolution Fan — a chapter's authored, closed set of endings
 
+> # ⏭️ THIS IS THE NEXT HEADLINE BUILD (see [NEXT-UP.md](NEXT-UP.md))
+> §5b (chapter-boundary reshape) is the one large net-new build left after the
+> 2026-07-29 button-up. **A broad design pass must settle the open forks BEFORE
+> implementation is pieced out** — §5a tolerance-window + reshape randomness, the
+> §5b register dial (G4 defer-vs-build), and composite game-type interplay. The
+> audit ([STRUCTURE-VALIDATION-AUDIT.md](STRUCTURE-VALIDATION-AUDIT.md)) already
+> narrowed the build to G1 + G2/G3 on existing blend machinery. Then: spec → cr →
+> build → the `genreshift` probe as acceptance.
+
 **Status:** DIRECTION (founder, 2026-07-14) — banked, host-side, not yet built.
 Extends [CONCLUSION-AND-OUTCOME.md](CONCLUSION-AND-OUTCOME.md): where that doc has
 ONE authored conclusive event + a free runtime OUTCOME judgment, this authors the
