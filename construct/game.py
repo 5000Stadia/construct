@@ -18,6 +18,7 @@ from typing import Any, NamedTuple
 
 from patternbuffer import World
 
+from construct import hostcontrol
 from construct.adapter import PorcelainWorldReads
 from construct.arc import io as arc_io
 from construct.arc.conditions import (
@@ -2047,10 +2048,9 @@ _COARSE_PLACE_KINDS = frozenset({
 def _place_kind(world: Any, place: str) -> str:
     """The resolved (folded) `kind` value for a place, lower-cased; '' if unknown. Reads
     the holding value under an open conflict too (kind is normally timeless canon)."""
-    st = world.porcelain.state(place, "kind")
-    if st.get("status") in ("known", "conflicted"):
-        return str((st.get("fact") or {}).get("value") or "").lower()
-    return ""
+    value = hostcontrol.collapse_state(world.porcelain.state(place, "kind"),
+                                       place, "kind")
+    return str(value or "").lower()
 
 
 def _place_specificity(world: Any, place: str) -> tuple[int, int]:

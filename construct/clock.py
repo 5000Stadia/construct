@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from construct import hostcontrol
+
 DEFAULT_HOURS_PER_DAY = 24
 
 #: Default time-of-day bands as (start_fraction_of_day, name), ascending. The
@@ -166,9 +168,7 @@ def _state_value(porcelain, entity, attribute):
         st = porcelain.state(entity, attribute)
     except Exception:
         return None
-    if isinstance(st, dict) and st.get("status") in ("known", "conflicted"):
-        return (st.get("fact") or {}).get("value")
-    return None
+    return hostcontrol.collapse_state(st, entity, attribute)
 
 
 def _to_number(v) -> float | None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from construct import hostcontrol
 from construct.arc.conditions import EventRow
 
 logger = logging.getLogger(__name__)
@@ -60,21 +61,11 @@ class PorcelainWorldReads:
 
     def state(self, entity: str, attribute: str, *, frame: str = "canon") -> object:
         st = self._p.state(entity, attribute, frame=frame, as_of=self._horizon)
-        if st["status"] == "known":
-            return st["fact"]["value"]
-        if st["status"] == "conflicted":
-            # The engine's holding answer under an open TM flag. This is normally
-            # silent — fine for ordinary facts, but DANGEROUS for the host-control
-            # portfolio manifest: a conflicted `arc:portfolio` read silently serves
-            # the stale arc (the EP2 bug, Cx 167). Surface it loudly so a future
-            # mid-play writer that forgets to retract is caught (telemetry, not a fix).
-            if entity == "arc:portfolio":
-                logger.warning(
-                    "CONFLICTED read on arc:portfolio.%s — serving the holding value %r; "
-                    "a mid-play portfolio writer must retract the sealed rows before appending",
-                    attribute, st["fact"]["value"])
-            return st["fact"]["value"]
-        return None  # unknown/frontier — INDETERMINATE to the atoms
+        # known → value; unknown → None; conflicted → the engine's holding answer
+        # under an open TM flag, surfaced loudly for the whole host-control `arc:`
+        # class (a conflicted read there = a mid-play writer that appended without
+        # retracting — the EP2/Cx-167 stale-arc serve). One policy in hostcontrol.
+        return hostcontrol.collapse_state(st, entity, attribute)
 
     def location_chain(self, entity: str) -> list[str] | None:
         chain = self._p.locate(entity, as_of=self._horizon)

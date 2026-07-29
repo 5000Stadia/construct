@@ -18,7 +18,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from construct import cohorts
+from construct import cohorts, hostcontrol
 from construct.provider import Provider
 
 logger = logging.getLogger(__name__)
@@ -98,9 +98,7 @@ def state_value(porcelain: Any, entity: str, attribute: str,
         st = porcelain.state(entity, attribute, as_of=as_of)
     except Exception:
         return None
-    if isinstance(st, dict) and st.get("status") in ("known", "conflicted"):
-        return (st.get("fact") or {}).get("value")
-    return None
+    return hostcontrol.collapse_state(st, entity, attribute)
 
 
 def world_anchors(world: Any, scope: list[str] | None, protagonist: str,
