@@ -33,6 +33,7 @@ from construct.arc.conditions import (
 from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung, Weight
 from construct.arc.lint import lint_arc
 from construct.provider import Provider, ProviderError, complete_sync, engine_tier_dispatch
+from construct.scenario_meta import ScenarioMeta
 
 logger = logging.getLogger(__name__)
 
@@ -164,9 +165,8 @@ def list_scenarios() -> list[dict]:
         # scenarios (a checkpoint is `<name>.<pid>.ep.checkpoint.world`)
         if path.name.endswith((".play.world", ".ep.checkpoint.world")):
             continue
-        meta_path = path.with_suffix(".meta.json")
-        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-        out.append({"name": path.stem, "path": str(path), **meta})
+        meta = ScenarioMeta.load(path.stem)
+        out.append({"name": path.stem, "path": str(path), **meta.to_json()})
     return out
 
 
@@ -1159,9 +1159,12 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
             # write, never facts). Scenario-level, like theme.
             "style": style,
             # `mode` (pure/coauthor) is turn-loop input authority — never
-            # overloaded. `scenario_mode` is the win/loss-vs-freeplay axis
-            # (WIN-LOSS §10, Cx 063): separate field so the declaration-denial
-            # guard can't be silently disabled. Inert until termination is wired.
+            # overloaded (scenario_meta.InputAuthority). `scenario_mode` is the
+            # win/loss-vs-freeplay axis (WIN-LOSS §10, Cx 063): separate field so the
+            # declaration-denial guard can't be silently disabled
+            # (scenario_meta.ScenarioMode). Inert until termination is wired.
+            # KNOWN (audit B9, not fixed): the `endless` bool below persists the SAME axis
+            # a second time, so the two can disagree once a mode_override is applied.
             "scenario_mode": "endless" if endless else "win_loss",
             # Scope = arc referents (now incl. pillar clue-fact entities) UNION the cast
             # node ids, so interview delivery actually sees present cast NPCs at play time
@@ -1279,7 +1282,8 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
         pass  # no build session open — nothing deferred, nothing to seal
     except Exception as exc:  # never sink a build on the optimization
         logger.warning("durability classification failed: %s", exc)
-    spath.with_suffix(".meta.json").write_text(json.dumps(meta, indent=2))
+    # Same bytes as ever (`ScenarioMeta` serializes exactly the keys it is given, in order).
+    ScenarioMeta.from_json(meta).save_to(spath.with_suffix(".meta.json"))
     return meta
 
 
@@ -1943,9 +1947,8 @@ def reseed_character_frames(name: str, provider: Provider,
     spath = scenario_path(name)
     if not spath.exists():
         raise FileNotFoundError(f"no scenario {name!r}")
-    meta_path = spath.with_suffix(".meta.json")
-    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-    targets = characters or meta.get("seeded_frames", [])
+    meta = ScenarioMeta.load(name)
+    targets = characters or meta.seeded_frames
     world = _world(spath, name, model=engine_tier_dispatch(provider))
     try:
         digest = _world_digest(world)
@@ -1966,8 +1969,7 @@ def reseed_character_frames(name: str, provider: Provider,
                                        protagonist=protagonist, protected=protected)
     finally:
         world.close()
-    meta["seeded_frames"] = sorted(set(meta.get("seeded_frames", [])) | set(seeded))
-    meta_path.write_text(json.dumps(meta, indent=2))
+    meta.evolve(seeded_frames=sorted(set(meta.seeded_frames) | set(seeded))).save()
     return seeded
 
 
@@ -1984,8 +1986,7 @@ def knows_inspect(name: str, character: str, contrast: str | None = None) -> dic
         character = f"person:{character}"
     if contrast and ":" not in contrast:
         contrast = f"person:{contrast}"
-    meta_path = spath.with_suffix(".meta.json")
-    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    meta = ScenarioMeta.load(name)
     world = _world(spath, name)                          # model=None: reads are LLM-free
     try:
         # Inspect over the whole canon cast + key entities (not just the
@@ -1993,7 +1994,7 @@ def knows_inspect(name: str, character: str, contrast: str | None = None) -> dic
         ids = _canon_entity_ids(world)
         scope = sorted(
             {e for e in ids if e.startswith(("person:", "obj:", "fact:", "place:"))}
-            | set(meta.get("arc_scope", [])))
+            | set(meta.arc_scope))
 
         def facts(frame: str) -> dict[tuple[str, str], object]:
             if not scope:
@@ -2004,7 +2005,7 @@ def knows_inspect(name: str, character: str, contrast: str | None = None) -> dic
 
         cf = facts(f"knows:{character}")
         result: dict = {"character": character, "scope_size": len(scope),
-                        "knows": cf, "seeded": meta.get("seeded_frames", [])}
+                        "knows": cf, "seeded": meta.seeded_frames}
         if contrast:
             of = facts(f"knows:{contrast}")
             result["contrast"] = contrast
@@ -2380,8 +2381,19 @@ def restore_original(name: str, player_id: str | None = None) -> None:
     episode_checkpoint_path(name, player_id).unlink(missing_ok=True)
 
 
+class Playthrough(NamedTuple):
+    """What `open_playthrough` returns: the open slot world, the MAIN (terminal-bearing)
+    arc, the scenario meta (with `main_arc` resolved to that arc), and the rest of the
+    arc portfolio. `side_arcs` are RUNTIME `Arc` objects — a real return value, never
+    stored on the persisted-shape meta."""
+    world: Any
+    arc: Arc
+    meta: ScenarioMeta
+    side_arcs: list[Arc]
+
+
 def open_playthrough(name: str, provider: Provider,
-                     player_id: str | None = None) -> tuple[Any, Arc, dict]:
+                     player_id: str | None = None) -> Playthrough:
     slot = slot_path(name, player_id)
     if not slot.exists():
         raise FileNotFoundError(
@@ -2392,25 +2404,23 @@ def open_playthrough(name: str, provider: Provider,
     # original single-slot model. Passing a different id would trip the
     # engine's stored-world_id check.
     world = _world(slot, name, model=engine_tier_dispatch(provider))
-    meta_path = scenario_path(name).with_suffix(".meta.json")
-    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    meta = ScenarioMeta.load(name)
     # Reconstruct the PORTFOLIO from the plot: frame (~21ms/arc post-037). The
-    # main (terminal-bearing) arc is returned as `arc` (backward-compatible 3-
-    # tuple); side arcs ride on a runtime meta key the Session reads. A legacy
-    # single-arc `arc_cache` (pre-portfolio) is wrapped as a one-arc portfolio;
-    # a world with no portfolio manifest fails open to a single `arc:main`.
+    # main (terminal-bearing) arc is returned as `arc`; the side arcs are returned
+    # beside it as `side_arcs`. A legacy single-arc `arc_cache` (pre-portfolio) is
+    # wrapped as a one-arc portfolio; a world with no portfolio manifest fails open
+    # to a single `arc:main`.
     reads = PorcelainWorldReads(world)
-    if "arc_cache" in meta:
-        arcs = [arc_io.arc_from_cache(meta["arc_cache"])]
+    if meta.has("arc_cache"):
+        arcs = [arc_io.arc_from_cache(meta.arc_cache)]
     else:
         arcs = arc_io.portfolio_from_frame(reads)
     if not arcs:
         raise RuntimeError(f"scenario {name!r}: no arcs could be reconstructed")
     main_arc_id = arc_io.main_arc_from_frame(reads)
     arc = next((a for a in arcs if a.arc_id == main_arc_id), arcs[0])
-    meta["_side_arcs"] = [a for a in arcs if a.arc_id != arc.arc_id]
-    meta["main_arc"] = arc.arc_id
-    return world, arc, meta
+    side_arcs = [a for a in arcs if a.arc_id != arc.arc_id]
+    return Playthrough(world, arc, meta.evolve(main_arc=arc.arc_id), side_arcs)
 
 
 def _episode_fuel(reads: Any, prior_arc: Arc, prior_title: str = "",
@@ -2641,8 +2651,7 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
     _epoch_tok = None
     try:
         reads = PorcelainWorldReads(world)
-        meta_path = scenario_path(name).with_suffix(".meta.json")
-        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        meta = ScenarioMeta.load(name)
         # The episode's write origin (Cx 253 §4): for a HORIZON world the origin STAYS at
         # `opening_as_of` — the new chapter's arc rows + turns advance the play horizon within
         # the reserved band (turn_time(turn) = opening_as_of + turn supersedes prior); raising
@@ -3039,23 +3048,21 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
 
         _emit(on_stage, "Opening the next chapter")
         checkpoint_episode_start(name, player_id)  # this episode's opening = the rollback point
-        meta["main_arc"] = new_id
-        meta["arc_ids"] = all_ids
-        meta["entry_epoch"] = epoch
+        _changes: dict[str, Any] = {"main_arc": new_id, "arc_ids": all_ids, "entry_epoch": epoch}
         if _chapter_title:
-            meta["title"] = _chapter_title
+            _changes["title"] = _chapter_title
         if _chapter_dp:
-            meta["death_policy"] = _chapter_dp
-            meta["death_policy_reason"] = _chapter_dp_reason
+            _changes["death_policy"] = _chapter_dp
+            _changes["death_policy_reason"] = _chapter_dp_reason
         if _ep2_scope:                              # scope the new chapter to its OWN arc (Cx 189 #2)
-            meta["arc_scope"] = _ep2_scope
+            _changes["arc_scope"] = _ep2_scope
         # The cold-open continuation note (founder, 2026-06-26): bridge WHERE THE LAST STORY LANDED to
         # WHERE THIS ONE IS HEADED, creatively — NOT the old time-pass + "you made a name" formula (it
         # was 4-for-4 identical). Consumed by the opening briefing; never a stored row.
-        meta["continuation_intro"] = _continuation_intro(
+        _changes["continuation_intro"] = _continuation_intro(
             prior_title, prior_outcome, prior_main, proposal, new_arc,
             prior_shape=_prior_shape, door_place=_door_place, callback=_callback)
-        return meta
+        return meta.evolve(**_changes).to_json()
     finally:
         # EVERY exit path (death refusal, model/parse failure, engine error, success) releases
         # the epoch and the slot's SQLite handle.

@@ -26,6 +26,9 @@ from construct.game import (
     start_playthrough,
 )
 from construct.provider import Provider
+from construct.scenario_meta import (
+    InputAuthority, PlaythroughState, ScenarioMeta, ScenarioMode,
+)
 from construct.adapter import PorcelainWorldReads, state_value
 from construct.turnloop import TurnTrace, run_turn, terminal_outcome
 
@@ -80,13 +83,21 @@ class Session:
     """An open holonovel for one player. Construct does all the model
     work inside `turn`; transports carry text in and out, nothing more."""
 
-    def __init__(self, scenario: str, world: Any, arc: Any, meta: dict,
+    def __init__(self, scenario: str, world: Any, arc: Any,
+                 meta: "PlaythroughState | ScenarioMeta | dict",
                  provider: Provider, player_id: str | None,
                  entry_as_of: float | None = None,
-                 mode_override: str | None = None) -> None:
+                 mode_override: str | None = None,
+                 side_arcs: list | None = None) -> None:
         self.scenario = scenario
         self.player_id = player_id
         self.entry_as_of = entry_as_of
+        # `meta` is normally the PlaythroughState (scenario meta + this slot's
+        # session:episode.* overrides, precedence written once in scenario_meta). A bare
+        # scenario meta (ScenarioMeta / dict — tests, tools) is layered over the slot here.
+        state = (meta if isinstance(meta, PlaythroughState)
+                 else PlaythroughState.from_world(meta, world))
+        meta = state.meta
         # AS-OF PLAY HORIZON (B' S3): a HORIZON world (ingested fiction with a spaced source
         # axis) binds every canon read to `opening_as_of + turns-so-far`, so beats/conditions
         # and scene/presence reads see the opening state and never the source aftermath.
@@ -100,22 +111,13 @@ class Session:
         self._arc = arc
         # The rest of the arc portfolio (LIVING-WORLD-GENERATOR P1): side arcs
         # tick and conclude alongside the main arc but never end the scenario.
-        self._side_arcs = meta.get("_side_arcs") or []
+        self._side_arcs = side_arcs or []
         self._provider = provider
-        self._scope = meta.get("arc_scope") or None
-        # Prefer the PER-PLAYER episode scope persisted in THIS slot's session frame (written by
-        # game.continue_episode on a CONCLUDE→CONTINUE) over the shared, build-time scenario meta
-        # (Cx 191): the live reopen reloads the stale scenario .meta.json, so without this EP2 would
-        # cold-open with EP1's scope (the old cast + any polluted aliases). Mirrors the entry_epoch fix.
-        _slot_scope_loaded = False
-        try:
-            _slot_scope = PorcelainWorldReads(self._world).state(
-                "session:episode", "arc_scope", frame="session:main")
-            if _slot_scope:
-                self._scope = json.loads(_slot_scope) if isinstance(_slot_scope, str) else _slot_scope
-                _slot_scope_loaded = True
-        except Exception:
-            logger.exception("episode scope read failed; falling back to scenario meta")
+        # The PER-PLAYER episode scope (persisted in THIS slot's session frame by
+        # game.continue_episode, Cx 191) already beats the shared scenario meta's scope in
+        # `state` — EP2 must not cold-open with EP1's cast (see PlaythroughState).
+        self._scope = state.scope
+        _slot_scope_loaded = state.slot_scope_loaded
         # DRIFT D3 (cr re-review rounds 2-4): scope provenance needs THREE
         # sets at open — the SEALED beat baseline (what build-time scope's
         # beat-derived portion was, so subtraction classifies the persisted
@@ -136,7 +138,7 @@ class Session:
         except Exception:
             logger.exception("beat-scope baseline failed; removal disabled until refresh")
         self._sealed_beat_scope = _sealed_beat_scope
-        self._mode = meta.get("mode", "pure")
+        self._mode = meta.get("mode", InputAuthority.PURE.value)
         # The PLAYER's chosen experience (session-zero interview) overrides the
         # scenario's authored default. Three states:
         #   win_loss — a story that builds to an ending (has an aim; can terminate);
@@ -146,8 +148,12 @@ class Session:
         # In the live transport the player ALWAYS supplies mode_override (the
         # session-zero interview), so this default only governs CLI/tests/legacy.
         # `_endless` honors both the mode and the legacy `meta["endless"]` flag.
+        # KNOWN WART (audit B9, deliberately not fixed here): the two flags can DISAGREE —
+        # a freeplay-built world (meta endless=True) opened with mode_override="win_loss"
+        # gives _scenario_mode == "win_loss" AND _endless == True.
         self._scenario_mode = mode_override or meta.get("scenario_mode", "bounded")
-        self._endless = self._scenario_mode == "endless" or bool(meta.get("endless"))
+        self._endless = (self._scenario_mode == ScenarioMode.ENDLESS
+                         or bool(meta.get("endless")))
         # The game-type directive (GAME-TYPES.md): the maintained narrative
         # instruction for THIS kind of game (hand-wave vs dramatize, tension).
         # None for an unset/unknown type → free improvised narrative.
@@ -219,15 +225,7 @@ class Session:
             (set(self._scope or []) - getattr(self, "_sealed_beat_scope", set()))
             | (set() if _slot_scope_loaded else set(self._cast or {}))
             | {self._arc.protagonist})
-        try:
-            _extra_raw = PorcelainWorldReads(self._world).state(
-                "session:scope", "independent_extra", frame="session:main")
-            if _extra_raw:
-                self._independent_scope |= set(
-                    json.loads(_extra_raw) if isinstance(_extra_raw, str)
-                    else _extra_raw)
-        except Exception:
-            logger.exception("persisted independent-scope read failed; continuing without")
+        self._independent_scope |= state.independent_extra
         # The rebuild runs on BOTH paths (cr D3 round 5 — a mid-episode
         # repair must survive a reopen): the slot path differs only in its
         # provenance inputs (episode-local baseline; no stale meta cast).
@@ -243,32 +241,14 @@ class Session:
         # pre-play valid_from. Re-established on the executor contextvar at every turn so
         # turn_time (staging supersession + pacing fold) sits on the entry axis. Absent →
         # TURN_EPOCH (one-timeframe / legacy worlds — unchanged behavior).
-        from construct.arc.executor import TURN_EPOCH, set_entry_epoch
-        # Prefer the PER-PLAYER episode epoch persisted in THIS slot's session frame (written by
-        # game.continue_episode on a CONCLUDE→CONTINUE) over the shared, build-time scenario meta
-        # (Cx 138 #2): a continued episode raised the epoch for its boundary, and turns must stamp
-        # ABOVE it or terminal_outcome (scoped since the episode_start) won't see the new ending.
-        _slot_epoch = None
-        try:
-            _slot_epoch = PorcelainWorldReads(self._world).state(
-                "session:episode", "entry_epoch", frame="session:main")
-        except Exception:
-            logger.exception("episode epoch read failed; falling back to scenario meta")
-        self._entry_epoch = float(_slot_epoch if _slot_epoch is not None
-                                  else (meta.get("entry_epoch", TURN_EPOCH) or TURN_EPOCH))
+        from construct.arc.executor import set_entry_epoch
+        # `state.entry_epoch` is the PER-PLAYER episode epoch (slot row) over the shared
+        # scenario meta's (Cx 138 #2): a continued episode raised the epoch for its boundary,
+        # and turns must stamp ABOVE it or terminal_outcome (scoped since the episode_start)
+        # won't see the new ending. `state.meta` already carries the slot's PER-CHAPTER
+        # title / death policy (B2) laid over the scenario's.
+        self._entry_epoch = state.entry_epoch
         set_entry_epoch(self._entry_epoch)
-        # PER-CHAPTER identity (B2): `game.continue_episode` re-derives the new chapter's
-        # title and death policy but the shared scenario meta (reloaded above) is chapter
-        # one's — the slot's session frame carries the current chapter's. Absent rows (a
-        # first chapter, a /restart to chapter one) leave the scenario meta untouched.
-        try:
-            _reads_ep = PorcelainWorldReads(self._world)
-            for _attr, _key in (("chapter_title", "title"), ("death_policy", "death_policy")):
-                _val = _reads_ep.state("session:episode", _attr, frame="session:main")
-                if isinstance(_val, str) and _val.strip():
-                    meta[_key] = _val.strip()
-        except Exception:
-            logger.exception("chapter identity read failed; falling back to scenario meta")
         self._meta = meta
         self._closed = False
         # TURN-LATENCY dumbfire: the prior turn's deferred bookkeeping (the post-narrate
@@ -303,10 +283,11 @@ class Session:
             from construct.provider import default_provider
             provider = default_provider()
         start_playthrough(scenario, fresh=fresh, player_id=player_id)
-        world, arc, meta = open_playthrough(scenario, provider, player_id=player_id)
-        entry = _entry_as_of(world, requested=as_of, fresh=fresh)
-        return cls(scenario, world, arc, meta, provider, player_id, entry_as_of=entry,
-                   mode_override=mode_override)
+        pt = open_playthrough(scenario, provider, player_id=player_id)
+        entry = _entry_as_of(pt.world, requested=as_of, fresh=fresh)
+        return cls(scenario, pt.world, pt.arc, PlaythroughState.from_world(pt.meta, pt.world),
+                   provider, player_id, entry_as_of=entry, mode_override=mode_override,
+                   side_arcs=pt.side_arcs)
 
     @property
     def title(self) -> str:

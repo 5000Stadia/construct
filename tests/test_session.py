@@ -421,7 +421,7 @@ class TestSession:
         s1.close()
         # A second open resumes the SAME slot at its head (turn count grew).
         from construct.game import next_turn_number, open_playthrough
-        w, _arc, _meta = open_playthrough(scenario, _provider(), player_id="u1")
+        w = open_playthrough(scenario, _provider(), player_id="u1").world
         assert next_turn_number(w) >= 2  # turn_0 + the played turn
         w.close()
 
@@ -739,7 +739,7 @@ class TestEndlessMode:
         import shutil
         from construct.game import scenario_path
         shutil.copyfile(scenario_path(scenario), slot_path(scenario, player_id))
-        w, _arc, _meta = open_playthrough(scenario, _provider(), player_id=player_id)
+        w = open_playthrough(scenario, _provider(), player_id=player_id).world
         w.porcelain.ingest_structured(
             [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
             frame=PLAYER_FRAME)
@@ -994,3 +994,19 @@ def test_notebook_ignores_legacy_placeholder_settled_record(scenario):
     s.close()
     you = next(ln for ln in out.splitlines() if ln.startswith("YOU —"))
     assert "settled" not in you
+
+
+def test_open_playthrough_returns_side_arcs_not_stuffed_into_meta(scenario):
+    """Audit 2026-10 F1: the side arcs are a real return value; the meta stays the
+    persisted shape (no runtime `_side_arcs` key holding `Arc` objects)."""
+    from construct.game import open_playthrough, start_playthrough
+    from construct.scenario_meta import ScenarioMeta
+    start_playthrough(scenario, fresh=True, player_id="u1")
+    pt = open_playthrough(scenario, _provider(), player_id="u1")
+    try:
+        assert isinstance(pt.meta, ScenarioMeta)
+        assert "_side_arcs" not in pt.meta.to_json()
+        assert pt.meta.main_arc == pt.arc.arc_id
+        assert all(a.arc_id != pt.arc.arc_id for a in pt.side_arcs)
+    finally:
+        pt.world.close()
