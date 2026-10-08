@@ -23,7 +23,7 @@ import time
 from typing import Callable
 
 from construct import registry
-from construct.transport_core import InboundEvent, TransportCore
+from construct.transport_core import InboundEvent, TransportCore, chunk
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,19 @@ TYPING_MAX_SECONDS = 90.0      # cover model-call waits (chiefly the architect's
 
 
 OUTBOX_FAILED = 2         # outbox.sent value for a dead-lettered (permanently undeliverable) row
+
+
+def utf16_len(text: str) -> int:
+    """Length of `text` in UTF-16 code units — how Telegram counts its 4096 limit
+    (an astral character such as most emoji is 2 units, though 1 Python char)."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def chunk_for_telegram(text: str) -> list[str]:
+    """`chunk` measured in UTF-16 units: every piece fits sendMessage, and no
+    surrogate pair is split. Pure-BMP (e.g. ASCII) text chunks exactly as `chunk`
+    does with the code-point length."""
+    return chunk(text, MSG_LIMIT, length=utf16_len)
 
 
 class TelegramSendError(RuntimeError):
@@ -105,8 +118,10 @@ class TelegramClient:
         (Codex review). Raises `TelegramSendError`, whose `permanent` flag tells the
         outbox whether a retry can ever succeed (a 4xx other than 429: no)."""
         try:
-            resp = self._http.get(f"{self._base}/sendMessage",
-                                  params={"chat_id": chat_id, "text": text})
+            # POST + JSON body (not GET query params): long text in a URL runs into
+            # URL-length limits. Parameters are unchanged (no parse_mode is used).
+            resp = self._http.post(f"{self._base}/sendMessage",
+                                   json={"chat_id": chat_id, "text": text})
             ok = resp.json().get("ok", False)
             status = getattr(resp, "status_code", 200)
         except Exception as exc:
@@ -217,7 +232,10 @@ def process_updates(conn, core: TransportCore, client: TelegramClient,
             finally:
                 stop.set()
                 typer.join(timeout=2.0)
-            registry.record_outbox(conn, PLATFORM, uid, out.chat_id, out.chunks)
+            # The core chunks by code points; re-measure in UTF-16 units (Telegram's
+            # unit) so an emoji-dense chunk can't exceed the limit and be refused.
+            pieces = [p for c in out.chunks for p in chunk_for_telegram(c)]
+            registry.record_outbox(conn, PLATFORM, uid, out.chat_id, pieces)
         _send_pending(conn, client, uid)  # raises on failure → offset NOT advanced
         if ev is not None:
             core.settle(ev)  # POST-SEND: deferred bookkeeping now (overlaps the player reading)
@@ -259,7 +277,8 @@ def serve(registry_path, token: str, *, session_factory=None, client: TelegramCl
         # Interim progress sends DURING a build (the Atrium pings) — outside the
         # exactly-once outbox, best-effort: a dropped ping must not sink the build.
         try:
-            client.send_message(chat_id, text)
+            for piece in chunk_for_telegram(text):
+                client.send_message(chat_id, piece)
         except Exception:
             logger.exception("telegram notify failed")
 

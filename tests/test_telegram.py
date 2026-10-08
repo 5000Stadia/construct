@@ -1056,6 +1056,81 @@ class TestChunk:
         assert parts == ["hello", "world"]
 
 
+class TestTelegramChunking:
+    """Telegram's 4096 limit counts UTF-16 code units; chunking and sending honour it."""
+
+    @staticmethod
+    def _u16(s):
+        return len(s.encode("utf-16-le")) // 2
+
+    def test_emoji_heavy_text_fits_in_utf16_units(self):
+        text = ("\U0001F600" * 40 + "\n") * 100        # 4100 chars, 8100 UTF-16 units
+        parts = telegram_bot.chunk_for_telegram(text)
+        assert len(parts) > 1
+        assert all(self._u16(p) <= telegram_bot.MSG_LIMIT for p in parts)
+        # nothing lost: only the boundary newlines are dropped
+        assert "".join(parts).replace("\n", "") == text.replace("\n", "")
+
+    def test_no_broken_surrogate_even_on_hard_cut(self):
+        text = "\U0001F600" * 5000                        # no newline: forced hard cuts
+        parts = telegram_bot.chunk_for_telegram(text)
+        assert all(self._u16(p) <= telegram_bot.MSG_LIMIT for p in parts)
+        for p in parts:
+            p.encode("utf-16-le")                         # raises on a lone surrogate
+            assert set(p) == {"\U0001F600"}
+        assert "".join(parts) == text
+        # an odd-aligned astral run: a 1-unit prefix shifts every pair boundary
+        parts = telegram_bot.chunk_for_telegram("a" + "\U0001F600" * 4096)
+        for p in parts:
+            p.encode("utf-16-le")
+            assert self._u16(p) <= telegram_bot.MSG_LIMIT
+
+    def test_ascii_boundaries_unchanged(self):
+        text = "".join(f"line {i:04d} " + "x" * (i % 37) + "\n" for i in range(900))
+        assert telegram_bot.chunk_for_telegram(text) == chunk(text, telegram_bot.MSG_LIMIT)
+        flat = "y" * 10000
+        assert telegram_bot.chunk_for_telegram(flat) == chunk(flat, telegram_bot.MSG_LIMIT)
+
+    def test_process_updates_records_utf16_safe_chunks(self, conn):
+        code = registry.mint_invite(conn, "telegram", "anchor", now=NOW)
+        registry.claim_invite(conn, code, "telegram", "9", now=NOW)
+
+        class _Core:
+            def handle(self, ev, now=None):
+                # one code-point-legal (<=4096) chunk that is 8000 UTF-16 units
+                return type("O", (), {"chat_id": ev.chat_id,
+                                      "chunks": ["\U0001F600" * 4000]})()
+
+            def settle(self, ev):
+                pass
+
+        client = _FakeTG()
+        telegram_bot.process_updates(conn, _Core(), client, [_msg(3, 9, "x")],
+                                     now_fn=lambda: NOW)
+        assert len(client.sent) >= 2
+        assert all(self._u16(t) <= telegram_bot.MSG_LIMIT for _, t in client.sent)
+
+    def test_send_message_posts_json_body(self):
+        from types import SimpleNamespace as NS
+        calls = []
+
+        class _H:
+            def post(self, url, json=None, **kw):
+                calls.append((url, json, kw))
+                return NS(status_code=200, json=lambda: {"ok": True})
+
+            def get(self, *a, **kw):
+                raise AssertionError("sendMessage must not use GET")
+
+        client = telegram_bot.TelegramClient("123:TOK", http=_H())
+        client.send_message("42", "hello \U0001F600 & more?x=1")
+        assert len(calls) == 1
+        url, body, kw = calls[0]
+        assert url == "https://api.telegram.org/bot123:TOK/sendMessage"
+        assert body == {"chat_id": "42", "text": "hello \U0001F600 & more?x=1"}
+        assert "params" not in kw
+
+
 # ---- telegram adapter: exactly-once + ignore non-message -----------------
 
 def _msg(uid, frm, text, chat_type="private"):
@@ -1154,7 +1229,7 @@ class TestTelegramAdapter:
         from types import SimpleNamespace as NS
         resp = NS(status_code=200, json=lambda: {"ok": False, "description": "bad"})
         client = telegram_bot.TelegramClient("123:SECRET",
-                                             http=NS(get=lambda u, params=None: resp))
+                                             http=NS(post=lambda u, json=None: resp))
         with pytest.raises(RuntimeError) as exc:
             client.send_message("1", "hi")
         assert "SECRET" not in str(exc.value)
