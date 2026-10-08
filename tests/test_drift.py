@@ -3090,9 +3090,9 @@ def test_continuation_scope_excludes_retained_past_arcs(tmp_path):
     w1.close()
     w2 = _mk(path)
     try:
-        meta = {"arc_scope": ["fact:stale_meta_only"], "cast": None,
-                "_side_arcs": [ep1]}                    # the retained past arc
-        s = Session("d3p", w2, ep2, meta, StubProvider([]), "player:test")
+        meta = {"arc_scope": ["fact:stale_meta_only"], "cast": None}
+        s = Session("d3p", w2, ep2, meta, StubProvider([]), "player:test",
+                    side_arcs=[ep1])                    # the retained past arc
         assert "fact:new" in (s._scope or [])
         assert "fact:old" not in (s._scope or [])
         assert "fact:ep1_only" not in (s._scope or [])   # the past never re-enters
