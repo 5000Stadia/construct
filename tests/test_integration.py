@@ -2086,6 +2086,42 @@ class TestFullTurn:
         assert world.porcelain.locate("person:maud")[0] == "place:lane"   # never moved
         assert trace.world_tick == []
 
+    def test_world_tick_reads_are_bound_to_the_play_horizon(self, world):
+        # polish/turnloop B2 (same class as Cx 259 for NPC sheets): the tick's per-member
+        # `locate` and character-sheet snapshot fed a model whose `detail` is committed to
+        # canon, but read at the timeline HEAD — so in a horizon world a member's FUTURE
+        # (aftermath) location and a future-stamped knows:<member> row reached the prompt.
+        from construct.arc.executor import turn_time
+        from construct.turnloop import TurnTrace, _world_tick
+        arc = make_arc()
+        seed_arc(world, arc)
+        cast = self._tick_setup(world)
+        horizon = turn_time(1) + 0.5
+        future = turn_time(50)
+        world.porcelain.ingest_structured([
+            {"entity": "place:ruins", "attribute": "kind", "value": "ruin", "timeless": True},
+            {"entity": "person:maud", "attribute": "in", "value": "place:lane",
+             "value_type": "entity", "valid_from": 1.0},
+            {"entity": "person:maud", "attribute": "in", "value": "place:ruins",
+             "value_type": "entity", "valid_from": future},
+        ])
+        world.porcelain.ingest_structured([
+            {"entity": "person:maud", "attribute": "believes", "value": "the market is honest",
+             "valid_from": 1.0},
+            {"entity": "person:maud", "attribute": "believes",
+             "value": "FUTURE-SECRET-LEDGER-BURNED", "valid_from": future},
+        ], frame="knows:person:maud")
+        trace = TurnTrace(turn=3)
+        trace.movement_status = "clear"
+        provider = StubProvider([{"ticks": []}])
+        _world_tick(world, world.porcelain, arc, trace, provider, 3, cast=cast, npcs=[],
+                    entry_scene="place:lane", scene="place:study",
+                    live_reads=PorcelainWorldReads(world, horizon=horizon), minutes_now=200.0)
+        _wtk = next(p for (p, _s, _t) in provider.calls if task_of(p) == "wtk")
+        assert "person:maud (at place:lane)" in _wtk          # located AT the horizon
+        assert "place:ruins):" not in _wtk                    # not her future location
+        assert "FUTURE-SECRET-LEDGER-BURNED" not in _wtk      # no future-stamped knowledge
+
     def test_world_tick_met_with_player_patient_dropped(self, world):
         # Cx 398 blocker 2: off-screen action is never about the player — a met_with whose
         # patient is the protagonist (or any ineligible person) drops the whole meeting.
@@ -2840,6 +2876,35 @@ class TestFullTurn:
         chain = world.porcelain.locate(PLAYER)
         assert chain and chain[0] == "place:study"       # did NOT teleport through the door
 
+    def test_known_place_reuse_respects_blocked_route(self, world, monkeypatch):
+        # polish/turnloop B7: token-matched reuse of an already-KNOWN place ("my own office"
+        # -> place:office, refer misses) must run the same passability gate as resolved and
+        # semantically-bound travel — a blocked way means NO commit, status "blocked",
+        # obstruction on the trace; never a teleport through the shut door.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.porcelain.ingest_structured([
+            {"entity": "place:office", "attribute": "kind", "value": "room", "timeless": True},
+            {"entity": "place:office", "attribute": "name", "value": "office"}])
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        import construct.turnloop as tl
+        _blocked = {"status": "blocked", "via": "obj:door1",
+                    "evidence": [{"entity": "obj:door1", "attribute": "state", "value": "shut"}]}
+        monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: dict(_blocked))
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "my own office", "requires": [],
+             "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The door will not give."},
+        ])
+        r = run_turn(world, arc, provider, "I head back to my own office.", turn=2,
+                     scope=[PLAYER, "place:study", "place:office"])
+        assert r.trace.movement_status == "blocked"
+        assert r.trace.movement_obstruction and \
+            r.trace.movement_obstruction.get("via") == "obj:door1"
+        chain = world.porcelain.locate(PLAYER)
+        assert chain and chain[0] == "place:study"       # did NOT teleport through the door
+
     def test_move_genuinely_new_place_still_mints(self, world):
         # improv-travel preserved: verdict=new falls through to the movement-permanence mint.
         arc = make_arc()
@@ -2877,6 +2942,29 @@ class TestFullTurn:
         nar = next(p for (p, _s, _t) in reversed(provider.calls) if task_of(p) == "nar")
         assert "PRESENT CHARACTERS: none besides you" in nar
         assert "Do not stage earlier characters" in nar
+
+    def test_solo_turn_briefing_has_no_dangling_peopled_world_reference(self, world):
+        # polish/turnloop B3: NEUTRAL ON THE ANSWER goes out on every unresolved turn, but the
+        # A PEOPLED WORLD block is injected only when NPCs are present — an alone-in-the-room
+        # briefing must not tell the narrator to "see" a block that is absent.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The room holds quiet around you."},
+        ])
+        run_turn(world, arc, provider, "I look around.", turn=2, scope=[PLAYER, "place:study"])
+        nar = next(p for (p, _s, _t) in reversed(provider.calls) if task_of(p) == "nar")
+        assert "PRESENT CHARACTERS: none besides you" in nar
+        assert "NEUTRAL ON THE ANSWER" in nar
+        assert "PEOPLED WORLD" not in nar
+        # the WITHHELD QUESTION clause (deflect path) carried the same dangling pointer
+        import construct.turnloop as _tl
+        with open(_tl.__file__, encoding="utf-8") as _fh:
+            assert "(see A PEOPLED WORLD)" not in _fh.read()
 
     def test_move_deictic_back_is_not_minted(self, world):
         # Cx 288 nit: a deictic/directional move ("go back") must NOT mint `place:back` — the
@@ -3264,7 +3352,10 @@ class TestFullTurn:
         # neutral-narrator discipline rides alongside — neutrality is EPISTEMIC (about
         # the answer), NOT a flattening of human feeling (founder calibration)
         assert "NEUTRAL ON THE ANSWER" in prompt
-        assert "A PEOPLED WORLD" in prompt and "full emotion" in prompt
+        # (polish/turnloop B3: this once also asserted "A PEOPLED WORLD", which on a solo turn
+        # matched ONLY the dangling "(see A PEOPLED WORLD)" pointer — that block is injected
+        # only when NPCs are present, so the pointer was dropped.)
+        assert "full emotion" in prompt and "NOT a flattening of human feeling" in prompt
         # the gate is still the commit backstop (audit clean — nothing leaked to canon)
         assert result.trace.concealment_audit == "clean"
 
@@ -4031,6 +4122,31 @@ def test_style_overlay_in_briefing(world):
     narrate_prompt = _narrate_prompt(provider)
     assert "STYLE" in narrate_prompt and "harbor-noir" in narrate_prompt
     assert "never new facts" in narrate_prompt  # the voice-not-facts guardrail
+
+
+def test_terminal_epilogue_does_not_rebind_cast_param(world, monkeypatch):
+    # polish/turnloop B4: the non-death epilogue built its fate-roster list under the name
+    # `cast`, rebinding the run_turn parameter (a dict[str, CastNode]) to a list of id strings
+    # that the settle's _world_tick then received. The roster needs its own name.
+    import construct.turnloop as tl
+    seen: list = []
+    monkeypatch.setattr(tl, "_world_tick", lambda *a, **k: seen.append(k.get("cast")))
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": [
+        {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
+    world._extractions.append({"items": []})
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"prose": "You name the rival; the meter's truth is out."},
+    ])
+    result = run_turn(world, arc, provider, "I name the culprit.", turn=2,
+                      scenario_mode="win_loss")
+    assert result.trace.terminal is True
+    assert "person:rival" in _narrate_prompt(provider)    # the fate roster still ships
+    assert seen, "settle must reach _world_tick on a terminal turn"
+    assert not any(isinstance(c, list) for c in seen), \
+        f"cast param was rebound to a list of ids: {seen!r}"
 
 
 def test_terminal_epilogue_names_cast_and_reveals(world):
