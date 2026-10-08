@@ -366,15 +366,16 @@ class Session:
 
         def _shows(r: Any) -> bool:
             vf = getattr(r, "valid_from", None)
-            if h is not None and vf is not None and float(vf) > h:
-                return False  # beyond the play horizon
             if vf is not None and float(vf) > _stamp:
                 return True   # learned in play — earned through the gated writes
             return ((str(r.entity), str(r.attribute)) not in _protected
                     and not value_leaks(str(getattr(r, "value", "")), _ctoks))
 
-        from construct.adapter import frame_facts
-        rows = [r for r in frame_facts(self._world, f"knows:{proto}") if _shows(r)]
+        # The frame's FOLDED knowledge at the play horizon (the engine's frame-knowledge
+        # recipe) — not a hand-fold over its raw rows; the horizon gate is the engine's.
+        from construct.remembrancer import frame_knowledge
+        rows = [r for r in frame_knowledge(self._world, f"knows:{proto}", as_of=h)
+                if _shows(r)]
 
         def _name_of(ent: str) -> str | None:
             try:
