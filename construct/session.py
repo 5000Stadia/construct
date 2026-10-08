@@ -26,7 +26,7 @@ from construct.game import (
     start_playthrough,
 )
 from construct.provider import Provider
-from construct.adapter import PorcelainWorldReads
+from construct.adapter import PorcelainWorldReads, state_value
 from construct.turnloop import TurnTrace, run_turn, terminal_outcome
 
 logger = logging.getLogger(__name__)
@@ -351,7 +351,6 @@ class Session:
         transport to prepend to a reply. The narrator never sees this — it's a
         host-injected header, outside the agent's context."""
         from construct.clock import read_clock
-        from construct.foyer import state_value
         loc = self.location()
         when = read_clock(self._world, loc).render()
         where = ""
@@ -368,7 +367,6 @@ class Session:
         from construct.arc.executor import (
             arc_protected_keys, concealed_tokens, turn_time, value_leaks,
         )
-        from construct.foyer import state_value
         from construct.journal import render_journal
         proto = self._arc.protagonist
         h = self._horizon()
@@ -436,7 +434,7 @@ class Session:
         change), and the world anchors tied to them. Returns None if unavailable
         (then the transport skips the Foyer and goes straight to the cold open)."""
         try:
-            from construct.foyer import world_anchors, state_value, _DETAIL_ATTRS
+            from construct.foyer import world_anchors, _DETAIL_ATTRS
             proto = self._arc.protagonist
             p = self._world.porcelain
             _h = self._horizon()  # the opening horizon (Cx 255): role/name/defaults at the start
@@ -528,7 +526,6 @@ class Session:
         the narrator may weave in IF it fits the trajectory (turn loop surfaces it).
         Append-only with a small cap; deduped by text."""
         import json
-        from construct.foyer import state_value
         text = (text or "").strip()
         if not text:
             return
@@ -621,7 +618,6 @@ class Session:
         """Render the cold open from the establishing anchors (by name, in voice).
         Fail-open: returns '' so opening() degrades to a clean banner."""
         from construct import cohorts
-        from construct.foyer import state_value
         anchors, names = self._establishing_anchors()
         # COLD-OPEN LOCKSTEP (INVESTIGATION-SHAPE.md §3b / Cx 059): the opening must foreground
         # EXACTLY the people the engine considers present, computed with the SAME _colocated the
@@ -1176,7 +1172,6 @@ class Session:
         it furnishes one ONCE so the image has a paint source. Fail-open; idempotent per scene."""
         try:
             from construct import imagery
-            from construct.foyer import state_value
             if not imagery.enabled():
                 return None
             loc = self.location()
@@ -1249,7 +1244,6 @@ class Session:
         corpse — so the image depicts the real, furnished room (founder: not a bare
         hall). LIVING people are deliberately excluded (theatre of the mind); a dead
         body IS included. Read from the arc scope (the cast + key objects); best-effort."""
-        from construct.foyer import state_value
         p = self._world.porcelain
         proto = self._arc.protagonist
         _h = self._horizon()

@@ -39,6 +39,31 @@ def frame_facts(world: Any, frame: str, *, entity: str | None = None,
     return out
 
 
+def state_value(porcelain: Any, entity: str, attribute: str,
+                *, as_of: float | None = None) -> Any:
+    """The bare canon value for (entity, attribute), or None: THE one host helper
+    for a single-fact canon read (audit 2026-10 F1/July §5 — formerly three copies in
+    foyer, clock and gauge).
+
+    `porcelain.state` returns a structured `{status, fact:{value}}` dict; this unwraps
+    it through `hostcontrol.collapse_state` (unknown/frontier -> None, known -> value,
+    conflicted -> the holding value, loud on host-control keys). A porcelain that raises
+    (a frontier/unknown entity) reads as absent.
+
+    `as_of` (B' S3): materialize as-of the play horizon, so scene/imagery reads see the
+    opening state, not the source aftermath. None (the default) = the timeline head, and
+    the kwarg is then NOT passed, so a caller that never bound a horizon (clock) issues
+    exactly the call it always did."""
+    try:
+        if as_of is None:
+            st = porcelain.state(entity, attribute)
+        else:
+            st = porcelain.state(entity, attribute, as_of=as_of)
+    except Exception:  # noqa: BLE001 — a frontier/unknown entity reads as absent
+        return None
+    return hostcontrol.collapse_state(st, entity, attribute)
+
+
 class PorcelainWorldReads:
     """WorldReads over a pattern-buffer World's porcelain."""
 
