@@ -1,0 +1,29 @@
+THE TIME (render its FEEL — light, sounds, who is about — never as a clock): Day 1, night
+
+YOU ARE AT the place you now stand in. The scene is HERE and only here — if earlier exchanges happened in another room, that place is BEHIND you now; never re-place this scene, its doors, or its furniture in an earlier location. Travel that was narrated has happened.
+
+THE SCENE RIGHT NOW (what is true and present here):
+study · description · A worn stone chamber, shelf-lined, lit by one shuttered lamp.
+
+THE STORY ENDS HERE (lost; grade: wrong). This conclusion is the EFFECT of what the player did and left undone — narrate it as consequence, never as a score. Render the close in TWO BEATS, separated by a line containing only '⸻' (the close must breathe — never one compressed breath):
+BEAT 1 — THE RECKONING SCENE: the player's decisive move LANDS where and as they staged it, and the world ANSWERS it, in scene — faces, voices, the moment turning. A wrong or failed move gets a SCENE too (the accusation landing on the wrong man, the room knowing it), never an explanation.
+BEAT 2 — THE AFTERMATH (ironic and quietly devastating — they were confident and WRONG): the settled wake. For the protagonist (you) AND each of these characters, a fitting FATE — where they end up, what the outcome cost or won them: ['person:player']. A loss may carry an unexpected BOON (a door opened, a truth freed, hope for a next time); a victory may carry a lasting WOUND — when the shape says both, say both. Concealment lifts now (the story is over): name what was hidden, savor what the player never uncovered — the secret walked past, the red herrings' truth. Close every thread; apply NO new pressure, open NO new hooks.
+
+THE TWIST (the player's case was not sound — land it like Sherlock going over his notes): they concluded “accuses the clerk”, but the truth is otherwise. Reveal the REAL answer and why their read was mistaken — the clue they misread, what was really going on. This is the payoff, not a scolding.
+
+THE TRUTH (revealed at the curtain — the full picture, including what the player never learned; weave in what lands):
+fact:secret · culprit · person:rival
+fact:secret · kind · proposition
+person:rival · in · place:flat
+person:rival · kind · person
+place:study · description · A worn stone chamber, shelf-lined, lit by one shuttered lamp.
+place:study · kind · room
+
+THE PLAYER CHARACTER IS Player. That is WHO they are — not how to address them every line (founder: the full name in every reply reads canned). Refer to them the way people actually would in this world and moment: plain 'you', a title ('sir', 'inspector'), a surname, or nothing at all — the full name only where a person would naturally use it (a formal introduction, a pointed moment). If any premise/background/context text uses a DIFFERENT personal name or gender for the protagonist, that is a stale authored default for the SAME person — never use the other name.
+
+YOU (the player character; never a third party):
+you · in · study
+
+THE PLAYER'S LAST ACT (the move that brings the curtain down — render it as the final beat that FOLDS INTO the epilogue/aftermath above, not as the whole turn; the close owns the scene): I accuse the clerk.
+
+PRESENT CHARACTERS: none besides you. Do not stage earlier characters here, and do not have an absent person arrive, speak, or be recalled doing things in this place — the world's map says who is where; if the player seeks someone absent, the way to them is going there or sending word, never their sudden appearance.
