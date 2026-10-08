@@ -189,7 +189,12 @@ FORBID_TASK_MARKERS = (
 
 
 def task_tag(code: str) -> str:
-    """The stable section header to prepend to a host cohort prompt (3-letter code)."""
+    """The stable section header to prepend to a host cohort prompt (3-letter code).
+
+    Raises ValueError for a code `task_of` could not read back: a malformed tag
+    would silently disable profiling / stub dispatch / effort routing for its cohort."""
+    if not re.fullmatch(r"[a-z]{3}", code or ""):
+        raise ValueError(f"task code must be exactly 3 lowercase letters, got {code!r}")
     return f"{_TASK_OPEN}{code}{_TASK_CLOSE}\n"
 
 
@@ -476,11 +481,34 @@ class CodexProvider(Provider):
         return body
 
     @staticmethod
+    def _stream_failure(event: dict) -> str:
+        """`code: message` of an error-bearing stream event or response object. The
+        error may sit on the event itself or under `error` / `response.error`."""
+        resp = event.get("response") if isinstance(event.get("response"), dict) else {}
+        err = event.get("error") or resp.get("error")
+        src = err if isinstance(err, dict) else event
+        code = src.get("code") or src.get("type") or ""
+        msg = src.get("message") or (err if isinstance(err, str) else "")
+        return ": ".join(str(x) for x in (code, msg) if x) or json.dumps(event)[:300]
+
+    @staticmethod
+    def _incomplete_reason(response: dict) -> str:
+        details = response.get("incomplete_details")
+        reason = details.get("reason") if isinstance(details, dict) else None
+        return str(reason or "unknown reason")
+
+    @staticmethod
     async def _collect_sse_text(resp: Any) -> str:
         """Collect the final output text from the SSE stream. Partial
-        output is preserved in errors — it is the only clue (DP-4)."""
+        output is preserved in errors — it is the only clue (DP-4).
+
+        A stream that reports an error / failure, stops incomplete, or answers with
+        a refusal raises `ProviderTransportError` carrying the server's code and
+        message — it is never returned as if it were a complete answer. These are
+        not marked transient: re-sending the same request cannot improve them."""
         final: dict = {}
         text_chunks: list[str] = []
+        refusal_chunks: list[str] = []
         buffer = ""
         async for chunk in resp.aiter_text():
             buffer += chunk
@@ -495,18 +523,48 @@ class CodexProvider(Provider):
                     event = json.loads(data_str)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(event, dict):
+                    continue
                 etype = event.get("type", "")
                 if etype in ("response.completed", "response.done"):
                     final = event.get("response", event)
                 elif etype == "response.output_text.delta":
                     text_chunks.append(event.get("delta", ""))
+                elif etype == "response.refusal.delta":
+                    refusal_chunks.append(event.get("delta", ""))
+                elif etype == "response.refusal.done":
+                    raise ProviderTransportError(
+                        f"model refused the request: "
+                        f"{event.get('refusal') or ''.join(refusal_chunks)}")
+                elif etype in ("error", "response.failed"):
+                    raise ProviderTransportError(
+                        f"response stream reported {etype}: "
+                        f"{CodexProvider._stream_failure(event)}")
+                elif etype == "response.incomplete":
+                    raise ProviderTransportError(
+                        f"response incomplete (not a full answer): "
+                        f"{CodexProvider._incomplete_reason(event.get('response') or {})}")
+        # A "completed" envelope can still carry a failed / incomplete status.
+        if final.get("error") or final.get("status") == "failed":
+            raise ProviderTransportError(
+                f"response failed: {CodexProvider._stream_failure({'response': final})}")
+        if final.get("status") == "incomplete":
+            raise ProviderTransportError(
+                f"response incomplete (not a full answer): "
+                f"{CodexProvider._incomplete_reason(final)}")
+        refusals: list[str] = []
         for item in final.get("output", []):
             if item.get("type") == "message":
                 for content in item.get("content", []):
                     if content.get("type") == "output_text" and content.get("text"):
                         return content["text"]
+                    if content.get("type") == "refusal":
+                        refusals.append(str(content.get("refusal") or ""))
         if text_chunks:
             return "".join(text_chunks)
+        if refusals or refusal_chunks:
+            raise ProviderTransportError(
+                f"model refused the request: {' '.join(refusals) or ''.join(refusal_chunks)}")
         raise ProviderTransportError(
             f"response stream ended without output text; final event tail: "
             f"{json.dumps(final)[:300]}")
