@@ -2543,8 +2543,36 @@ def _continuation_intro(prior_title: str, prior_outcome: str, prior_arc, proposa
            if callback else ""))
 
 
-def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
-                     turn: int) -> str | None:
+def _elapsed_rows(world: Any, minutes: int) -> list[dict]:
+    """`clock.commit_elapsed`'s rows, BUILT instead of written, so the doorway's time jump
+    rides the continuation's single atomic set. Keep the two in step: the `kind` row is
+    seeded independently of the baseline (Cx 182 #2), the 0 baseline once, then the
+    `+minutes` accrue delta. Canon rows."""
+    from construct.adapter import state_value
+    from construct.clock import ELAPSED_ATTR, ELAPSED_ENTITY
+    if not minutes or minutes <= 0:
+        return []
+    p = world.porcelain
+    rows: list[dict] = []
+    if state_value(p, ELAPSED_ENTITY, "kind") is None:
+        rows.append({"entity": ELAPSED_ENTITY, "attribute": "kind", "value": "clock",
+                     "timeless": True})
+    if state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) is None:
+        rows.append({"entity": ELAPSED_ENTITY, "attribute": ELAPSED_ATTR, "value": 0,
+                     "value_type": "literal"})
+    rows.append({"entity": ELAPSED_ENTITY, "attribute": ELAPSED_ATTR, "value": int(minutes),
+                 "value_type": "delta"})
+    return rows
+
+
+class _Doorway(NamedTuple):
+    """The planned episode doorway: where the next chapter opens, and the time jump's rows
+    (staged for the continuation's atomic set, never written by the planner)."""
+    place: str | None
+    time_rows: list[dict]
+
+
+def _plan_episode_doorway(world: Any, protagonist: str | None) -> _Doorway:
     """THE EPISODE DOORWAY (#88 S4 → WORLD-GROWTH G-C): the bridge to the
     next chapter is ENGINE TRUTH — never prompt-only prose. (i) TIME: jump
     to the next calendar phase (the classic "by morning…" seam);
@@ -2559,11 +2587,13 @@ def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
     relocation row is ever written by default — any future move away from
     the terminal must be an explicit, caused transition delta authored by
     its own machinery, never a silent doorway default. (iii) ITEMS: adds
-    NOTHING (possessions carry as-is). Each leg fail-open + loud. Returns
-    the doorway place (or None)."""
+    NOTHING (possessions carry as-is). PLANNED, not written: every leg is a
+    read, and the time jump comes back as rows for the caller's single
+    atomic commit. Each read leg fails open, loudly."""
     door_place = None
+    time_rows: list[dict] = []
     try:
-        from construct.clock import commit_elapsed, read_clock
+        from construct.clock import read_clock
         clk = read_clock(world)
         cal = clk.calendar
         phases = [n for _f, n in cal.phases]
@@ -2574,7 +2604,7 @@ def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
             jump = cal.next_phase_start(clk.minutes, nxt) - clk.minutes
         if jump <= 0:
             jump = int(cal.hours_per_day * 60 // 3)  # a solid rest regardless
-        commit_elapsed(world, jump)
+        time_rows = _elapsed_rows(world, jump)
         logger.info("episode doorway: time +%s min (into %s)", jump, nxt or "the next stretch")
     except Exception as exc:  # noqa: BLE001
         logger.warning("episode doorway time-jump skipped: %s", exc)
@@ -2616,7 +2646,72 @@ def _episode_doorway(world: Any, protagonist: str | None, epoch: float,
                         ", by live locate")
     except Exception as exc:  # noqa: BLE001
         logger.warning("episode doorway location read skipped: %s", exc)
-    return door_place
+    return _Doorway(door_place, time_rows)
+
+
+#: The frozen porcelain id grammar (the engine gate's `malformed_id` rule; see `_slug`).
+_PORCELAIN_ID = re.compile(r"^[a-z][a-z0-9_]*:[a-z0-9_:]+$")
+
+
+def _plan_hook_cast(world: Any, reads: Any, proposal: dict, door_place: str | None,
+                    protagonist: str | None, *, at: float) -> tuple[list[dict], list[str]]:
+    """HOOK-CAST STAGING (#90, Cx 387), PLANNED: a person the new chapter's hook puts ON
+    STAGE must exist as canon presence BEFORE the opening renders — prose-only staging made
+    the live ch2 hook witness vanish a turn later ("no one is in the room"). Ordinary
+    kind/name/role/in rows at the doorway place; at most two. Returns (rows, hook ids) for
+    the continuation's single atomic set; nothing is written here.
+
+    The rows the engine gate would SKIP (a malformed id; an `in` edge to itself, or into a
+    place the person already contains) are dropped here, as the old per-row ingest dropped
+    them, because inside an atomic set one skip aborts the whole chapter. The ids stay in
+    the returned list either way, as before. Fail-open: a read failure stages nothing,
+    because staging must never sink the continuation."""
+    try:
+        stage_place = door_place
+        if stage_place is None and protagonist:
+            ploc = world.porcelain.locate(protagonist)
+            stage_place = ploc[0] if ploc else None
+        rows: list[dict] = []
+        hook_ids: list[str] = []
+        for hc in (proposal.get("hook_cast") or [])[:2]:
+            hid = str((hc or {}).get("id") or "").strip()
+            if not hid.startswith("person:") or not stage_place:
+                continue
+            if not reads.has_entity(hid):
+                rows.append({"entity": hid, "attribute": "kind", "value": "person",
+                             "timeless": True})
+                if hc.get("name"):
+                    rows.append({"entity": hid, "attribute": "name",
+                                 "value": str(hc["name"])[:60]})
+                if hc.get("role"):
+                    rows.append({"entity": hid, "attribute": "role",
+                                 "value": str(hc["role"])[:120]})
+            rows.append({"entity": hid, "attribute": "in", "value": stage_place,
+                         "value_type": "entity", "valid_from": at})
+            hook_ids.append(hid)
+    except Exception:  # staging must never sink the continuation
+        logger.exception("hook-cast staging failed (continuing without)")
+        return [], []
+    try:   # the containers of the stage place: an `in` edge to one of them is a cycle
+        place_chain = set(world.porcelain.locate(stage_place) or []) if rows else set()
+    except Exception:  # noqa: BLE001 — the cycle pre-check is best-effort
+        place_chain = set()
+
+    def admitted(row: dict) -> bool:
+        if not _PORCELAIN_ID.fullmatch(row["entity"]):
+            return False
+        if row["attribute"] == "in":
+            place = row["value"]
+            return (isinstance(place, str) and bool(_PORCELAIN_ID.fullmatch(place))
+                    and place != row["entity"] and row["entity"] not in place_chain)
+        return True
+
+    kept = [r for r in rows if admitted(r)]
+    if len(kept) != len(rows):
+        logger.warning("hook-cast staging: %d row(s) the engine gate would skip dropped "
+                       "(%s)", len(rows) - len(kept),
+                       sorted({r["entity"] for r in rows if r not in kept}))
+    return kept, hook_ids
 
 
 def continue_episode(name: str, provider: Provider, player_id: str | None = None,
@@ -2840,8 +2935,8 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         all_ids = [a.arc_id for a in prior_arcs] + [new_id]
 
         # ---- COMPUTE (continued): everything the write phase needs that is a READ or a MODEL
-        # CALL is settled here, before the first write (a failure past this point can only be
-        # an engine-write failure, never a model/parse failure). ----------------------------
+        # CALL is settled here, before the one atomic commit below (a failure past this point
+        # can only be that commit failing, and then the engine has written nothing). ------
         # #96 S3 (Cx 414): the new chapter gets its OWN title — from the proposal, with a
         # deterministic differ if the generator echoed the old one.
         _new_title = (proposal.get("title") or "").strip()
@@ -2912,93 +3007,21 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
             _callback = None
             _callback_item = None
 
-        # ---- COMMIT: the writes, back to back, no model call between them. ---------------
+        # ---- PLAN THE WRITES: the reads that used to sit BETWEEN writes (the doorway's clock
+        # and locate, has_entity for the hook cast and the scope) run here, against the
+        # pre-commit world, so the whole write phase below is ONE atomic set. ------------
         _emit(on_stage, "Setting the new threads in motion")
-        # (#96 S3/S4) the settled-history record and the personal threads ride first.
-        _early = [i for i in (_settled_item, _personal_item) if i]
-        if _early:
-            world.porcelain.ingest_structured(_early, frame=SESSION)
-        world.porcelain.ingest_structured(
-            arc_io.arc_to_items(new_arc, frame=PLOT) + arc_io.index_items(new_arc, frame=PLOT),
-            frame=PLOT)
-        # The new arc becomes MAIN; the concluded arc stays in the portfolio as past (its terminal
-        # receipt is now BEHIND the episode boundary, so it no longer ends the scenario).
-        # RETRACT the sealed portfolio rows, THEN append the replacement (Cx 167). The portfolio
-        # rows are classified CONSTITUTIVE, and a constitutive fold does NOT recency-supersede —
-        # PB serves the EARLIEST and marks the key conflicted, so neither a timeless nor a
-        # valid_from write would override it; the reopened episode would silently run the OLD
-        # main arc (its stale session:reckoning_ready then trips turn-1 expiry). Append-only
-        # retraction of the visible rows clears the conflict so the new manifest reads clean.
-        from construct.adapter import frame_facts as _ffp
-        for _row in _ffp(world, PLOT, entity="arc:portfolio"):
-            if _row.entity == "arc:portfolio" and _row.attribute in ("arc_ids", "main_arc"):
-                world.porcelain.retract(_row.id, "continuation: superseding the portfolio manifest")
-        world.porcelain.ingest_structured(
-            arc_io.portfolio_items(all_ids, main_arc_id=new_id, frame=PLOT,
-                                   valid_from=turn_time(turn)), frame=PLOT)
-        # The EPISODE BOUNDARY: terminal_outcome reads win/loss receipts only SINCE this marker, so
-        # the prior episode's ending no longer freezes the new one (PB is append-only).
-        world.porcelain.ingest_structured(
-            [{"entity": f"event:episode_start_{turn}", "attribute": "kind",
-              "value": "episode_start", "valid_from": turn_time(turn)}], frame=SESSION)
-        # THE DOORWAY'S OPENING EPOCH (Cx 382 blocker): `epoch` above is the WRITE origin — for a
-        # played NON-horizon slot compute_entry_epoch RAISES it above prior plays (correct for
-        # writes, wrong for looking up where the episode OPENED: locate at raised+0.5 sees the
-        # terminal scene). Prefer the slot's durable episode epoch, then scenario meta, then the
-        # write origin as a last resort. Captured HERE — BEFORE the _epi_rows persist below
-        # overwrites the slot row with the new episode's raised epoch (reading after would read
-        # back our own write and re-poison the lookup).
-        _open_epoch = None
-        try:
-            _sv = reads.state("session:episode", "entry_epoch", frame=SESSION)
-            _open_epoch = float(_sv) if _sv is not None else None
-        except Exception:  # noqa: BLE001
-            _open_epoch = None
-        if _open_epoch is None:
-            _me = meta.get("entry_epoch")
-            _open_epoch = float(_me) if _me is not None else epoch
-        # THE EPISODE DOORWAY (#88 S4, Cx 375 blocking requirement): the bridge to the next chapter
-        # is ENGINE TRUTH written before the checkpoint — never prompt-only prose. (i) TIME: jump to
-        # the next calendar phase (the classic "by morning…" seam) so the new chapter never opens in
-        # the same minute; (ii) PLACE: the protagonist returns to the prior episode's OPENING place
-        # (their base — bureau/gatehouse/home), never left standing at the terminal scene unless that
-        # WAS the base; (iii) ITEMS: the doorway adds NOTHING (possessions carry as-is; intro prose
-        # may not mint). Fail-open per leg — a miss leaves that dimension unchanged, loudly.
-        _door_place = _episode_doorway(world, prior_protagonist, _open_epoch, turn)
-        # HOOK-CAST STAGING (#90, Cx 387): a person the new chapter's hook puts ON STAGE must
-        # exist as canon presence BEFORE the opening renders — prose-only staging made the live
-        # ch2 hook witness vanish a turn later ("no one is in the room"). Ordinary kind/name/
-        # role/in rows at the doorway place; at most two; fail-open per entry.
-        _hook_ids: list[str] = []
-        try:
-            _stage_place = _door_place
-            if _stage_place is None and prior_protagonist:
-                _ploc = world.porcelain.locate(prior_protagonist)
-                _stage_place = _ploc[0] if _ploc else None
-            _hc_rows: list[dict] = []
-            for _hc in (proposal.get("hook_cast") or [])[:2]:
-                _hid = str((_hc or {}).get("id") or "").strip()
-                if not _hid.startswith("person:") or not _stage_place:
-                    continue
-                if not PorcelainWorldReads(world).has_entity(_hid):
-                    _hc_rows.append({"entity": _hid, "attribute": "kind", "value": "person",
-                                     "timeless": True})
-                    if _hc.get("name"):
-                        _hc_rows.append({"entity": _hid, "attribute": "name",
-                                         "value": str(_hc["name"])[:60]})
-                    if _hc.get("role"):
-                        _hc_rows.append({"entity": _hid, "attribute": "role",
-                                         "value": str(_hc["role"])[:120]})
-                _hc_rows.append({"entity": _hid, "attribute": "in", "value": _stage_place,
-                                 "value_type": "entity", "valid_from": turn_time(turn)})
-                _hook_ids.append(_hid)
-            if _hc_rows:
-                world.porcelain.ingest_structured(_hc_rows)
-                logger.info("staged %d hook-cast row(s) (%s) at %s",
-                            len(_hc_rows), _hook_ids, _stage_place)
-        except Exception:  # staging must never sink the continuation
-            logger.exception("hook-cast staging failed (continuing without)")
-            _hook_ids = []
+        # THE EPISODE DOORWAY (#88 S4 → WORLD-GROWTH G-C, Cx 375): the bridge to the next chapter
+        # is ENGINE TRUTH committed before the checkpoint, never prompt-only prose. (i) TIME: a
+        # jump to the next calendar phase (the "by morning…" seam), so the new chapter never
+        # opens in the same minute; (ii) PLACE: the chapter opens WHERE THE STORY ENDED (no
+        # relocation row); (iii) ITEMS: nothing added. Each read leg fails open, loudly.
+        _door = _plan_episode_doorway(world, prior_protagonist)
+        _door_place = _door.place
+        # HOOK-CAST STAGING (#90, Cx 387): the hook's on-stage people become canon presence at
+        # the doorway place before the opening renders (see _plan_hook_cast).
+        _hc_rows, _hook_ids = _plan_hook_cast(world, reads, proposal, _door_place,
+                                              prior_protagonist, at=turn_time(turn))
         # DURABLE PER-PLAYER episode epoch (Cx 138 #2): persist the raised epoch into THIS slot's
         # session frame so the reopened Session stamps episode-N+1 turns ABOVE the boundary (scenario
         # meta is shared + stale; the slot is per-player). Session prefers this over meta["entry_epoch"].
@@ -3007,9 +3030,13 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # into the new chapter's opening, making EP2 read as a warped replay instead of a fresh case.
         # The staged hook cast joins the scope (#90) — presence/npc candidates enumerate FROM scope,
         # so an unscoped hook witness would be invisible even with honest canon rows.
+        # has_entity now runs BEFORE the commit, so an entity the staged canon rows make known
+        # (a `kind` or `in` row) counts as known: the scope the post-write read used to see.
         from construct.arc.executor import arc_entities as _arc_entities
-        _reads2 = PorcelainWorldReads(world)
-        _ep2_scope = sorted({e for e in _arc_entities(new_arc) if _reads2.has_entity(e)}
+        _staged_known = {r["entity"] for r in _door.time_rows + _hc_rows
+                         if r["attribute"] in ("kind", "in")}
+        _ep2_scope = sorted({e for e in _arc_entities(new_arc)
+                             if e in _staged_known or reads.has_entity(e)}
                             | set(_hook_ids))
         # PERSIST epoch AND the new scope per-slot in the session frame (Cx 191): the live reopen via
         # Session.open reloads the SHARED, stale scenario meta — so the returned meta isn't enough.
@@ -3043,7 +3070,34 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                               "valid_from": turn_time(turn)})
         if _callback_item:
             _epi_rows.append(_callback_item)
-        world.porcelain.ingest_structured(_epi_rows, frame=SESSION)
+
+        # ---- COMMIT: ONE atomic commit_set, all or none (B5 / arc audit F3). It spans plot:main
+        # (the arc + manifest), session:main (the records, the boundary, the episode rows) and
+        # canon (the doorway's time jump, the hook cast); commit_set honours per-item frames. A
+        # failure leaves the slot exactly as it was: no settled marks, the old manifest + arc,
+        # nothing for a retry to duplicate.
+        _ops = (
+            # (#96 S3/S4) the settled-history record and the personal threads
+            arc_io.assert_ops([i for i in (_settled_item, _personal_item) if i], SESSION)
+            # The new arc becomes MAIN; the concluded arc stays in the portfolio as past (its
+            # terminal receipt is now BEHIND the episode boundary, so it no longer ends the
+            # scenario). The visible manifest rows are RETRACTED in the same set (Cx 167: the
+            # constitutive fold serves the EARLIEST row, so a bare append would leave the
+            # reopened episode silently running the OLD main arc).
+            + arc_io.main_arc_swap_ops(
+                world, new_arc, all_ids, valid_from=turn_time(turn),
+                reason="continuation: superseding the portfolio manifest", frame=PLOT)
+            # The EPISODE BOUNDARY: terminal_outcome reads win/loss receipts only SINCE this
+            # marker, so the prior episode's ending no longer freezes the new one.
+            + arc_io.assert_ops([{"entity": f"event:episode_start_{turn}", "attribute": "kind",
+                                  "value": "episode_start", "valid_from": turn_time(turn)}],
+                                SESSION)
+            + arc_io.assert_ops(_door.time_rows + _hc_rows, "canon")
+            + arc_io.assert_ops(_epi_rows, SESSION))
+        arc_io.commit_ops(world, _ops, what="continuation")
+        if _hc_rows:
+            logger.info("staged %d hook-cast row(s) (%s) at %s", len(_hc_rows), _hook_ids,
+                        next((r["value"] for r in _hc_rows if r["attribute"] == "in"), None))
         _close_world()
 
         _emit(on_stage, "Opening the next chapter")
