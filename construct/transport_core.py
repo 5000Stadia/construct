@@ -147,6 +147,27 @@ OPENING_HEADS_UP = (
     "One moment…")
 
 
+# Pending prompts: the questions a player owes us an answer to. One tagged state
+# per KIND, held per player (see TransportCore._arm / _peek / _disarm).
+PENDING_EXIT = "exit"                        # "leave the story?" yes/no
+PENDING_RESTART_DEPTH = "restart_depth"      # /restart step 1: episode / original / cancel
+PENDING_RESTART_CHARACTER = "restart_character"  # step 2: keep / redo / cancel
+PENDING_RESTART_NOTES = "restart_notes"      # step 3: keep / wipe notes / cancel
+PENDING_CONTINUE = "continue"                # chapter ended: say anything to roll on
+# The three /restart steps are ONE wizard: only one step is ever armed, and arming
+# a step supersedes any other (a fresh /restart replaces a half-answered one).
+_RESTART_STEPS = (PENDING_RESTART_NOTES, PENDING_RESTART_CHARACTER,
+                  PENDING_RESTART_DEPTH)
+
+
+@dataclass(frozen=True)
+class Pending:
+    """One armed prompt: its `kind` (a PENDING_* tag) and any `data` the later
+    steps need (e.g. the restart wizard's keep_character choice)."""
+    kind: str
+    data: dict = field(default_factory=dict)
+
+
 @dataclass(frozen=True)
 class InboundEvent:
     """A transport-neutral inbound message. `update_ids` are the source
@@ -205,22 +226,14 @@ class TransportCore:
         self._platform = platform
         self._limit = msg_limit
         self._sessions: dict[str, Any] = {}
-        # Players we've asked "leave the story?" — their next message is the yes/no.
-        self._pending_exit: set[str] = set()
+        # Armed prompts: pid -> {kind: Pending}. Prompts of different kinds CAN be armed
+        # together (a command passes through an armed prompt and leaves it, so e.g. the
+        # chapter-end continue plus a /restart wizard step, or /ooc's exit confirm);
+        # `handle` consults them in a fixed precedence. The restart steps are exclusive.
+        self._pending: dict[str, dict[str, Pending]] = {}
         # Players whose last /ooc was a plot-protective deflection — a renewed push
-        # escalates (honesty + offer a new scenario).
+        # escalates (honesty + offer a new scenario). An escalation flag, not a prompt.
         self._ooc_pressed: set[str] = set()
-        # Players we've asked "restart?" — their next message picks episode / original / cancel.
-        self._pending_restart: set[str] = set()
-        # Players who chose "original" on /restart — their next message picks
-        # keep-my-character / redo-the-interview / cancel.
-        self._pending_restart_original: set[str] = set()
-        # Players mid-original-restart who still owe the notes keep/wipe answer.
-        # pid -> {"keep_character": bool}
-        self._pending_restart_notes: dict[str, dict] = {}
-        # Players whose story just CONCLUDED — their next message is the continue? yes/no
-        # (CONCLUDE→CONTINUE: a new episode/case for the same protagonist).
-        self._pending_continue: set[str] = set()
         self._session_factory = session_factory or _default_session_factory
         self._log_dir = Path(log_dir) if log_dir is not None else DEFAULT_LOG_DIR
         self._feedback_dir = (Path(feedback_dir) if feedback_dir is not None
@@ -275,19 +288,14 @@ class TransportCore:
         # the prompt armed; an ambiguous answer is re-asked by the step's handler,
         # which owns its own state (it disarms only on a decision).
         if not low.startswith("/"):
-            if pid in self._pending_restart_notes:
-                out = self._do_restart_notes(pid, ev, low)  # already an Outbound
-                self._log(ev, "BOT", "\n".join(out.chunks))
-                return out
-            if pid in self._pending_restart_original:
-                out = self._do_restart_original(pid, ev, low)  # already an Outbound
-                self._log(ev, "BOT", "\n".join(out.chunks))
-                return out
-            if pid in self._pending_restart:
-                out = self._do_restart(pid, ev, low)  # already an Outbound
-                self._log(ev, "BOT", "\n".join(out.chunks))
-                return out
-        if pid in self._pending_continue:
+            for kind, step in ((PENDING_RESTART_NOTES, self._do_restart_notes),
+                               (PENDING_RESTART_CHARACTER, self._do_restart_original),
+                               (PENDING_RESTART_DEPTH, self._do_restart)):
+                if self._peek(pid, kind):
+                    out = step(pid, ev, low)  # already an Outbound
+                    self._log(ev, "BOT", "\n".join(out.chunks))
+                    return out
+        if self._peek(pid, PENDING_CONTINUE):
             # CONCLUDE→CONTINUE (founder 2026-07-02, auto-continue): the story ended; any
             # in-fiction message ROLLS INTO the next chapter. COMMANDS PASS THROUGH and keep
             # the state armed (live bug: a /feedback here was swallowed as a "no" and ended
@@ -295,20 +303,20 @@ class TransportCore:
             if low.startswith("/"):
                 pass  # fall through to command routing below; next chapter stays offered
             elif low.strip() in ("no", "stop", "quit", "rest", "not now", "no thanks"):
-                self._pending_continue.discard(pid)
+                self._disarm(pid, PENDING_CONTINUE)
                 out = self._reply(ev, "Then the story rests here — a good place to leave it. "
                                       "Say /restart to play again, or start something new anytime.")
                 self._log(ev, "BOT", "\n".join(out.chunks))
                 return out
             else:
-                self._pending_continue.discard(pid)
+                self._disarm(pid, PENDING_CONTINUE)
                 out = self._do_continue(pid, ev)
                 self._log(ev, "BOT", "\n".join(out.chunks))
                 return out
-        if pid in self._pending_exit:
+        if self._peek(pid, PENDING_EXIT):
             # The player asked (out of character) to leave/start over; this message
             # is their yes/no. Affirm → step out; anything else → carry on.
-            self._pending_exit.discard(pid)
+            self._disarm(pid, PENDING_EXIT)
             if _affirmative(low):
                 out = self._reply(ev, self._exit(pid, ev))
             else:
@@ -328,12 +336,11 @@ class TransportCore:
             title = self._title_of(registry.scenario_for(self._conn, ev.platform,
                                                           ev.external_id))
             # A fresh /restart supersedes any half-answered earlier one.
-            self._pending_restart.discard(pid)
-            self._pending_restart_original.discard(pid)
-            self._pending_restart_notes.pop(pid, None)
+            for step in _RESTART_STEPS:
+                self._disarm(pid, step)
             if self._in_episodes(pid, ev):
                 # Multi-episode playthrough → the two depths are meaningful.
-                self._pending_restart.add(pid)
+                self._arm(pid, PENDING_RESTART_DEPTH)
                 out = self._reply(
                     ev, f"Restarting erases your saved progress in {title}. How far "
                         f"back?\n• “episode” — restart just this episode from its "
@@ -344,7 +351,7 @@ class TransportCore:
                 # Single episode (no episode progression yet) → no episode/original
                 # choice; it's just a restart (founder). Go straight to the only
                 # meaningful question — same character, or redo them.
-                self._pending_restart_original.add(pid)
+                self._arm(pid, PENDING_RESTART_CHARACTER)
                 out = self._reply(
                     ev, f"Restart {title} from the beginning? You'll lose your saved "
                         f"progress.\n• “keep” — restart but keep your character\n• "
@@ -404,9 +411,9 @@ class TransportCore:
                     f"episode from its start (your character carries over).\n• "
                     f"“original” — all the way back to the very start of the original "
                     f"scenario.\n• “cancel” — keep playing.")
-        self._pending_restart.discard(pid)
+        self._disarm(pid, PENDING_RESTART_DEPTH)
         if choice == "original":
-            self._pending_restart_original.add(pid)
+            self._arm(pid, PENDING_RESTART_CHARACTER)
             return self._reply(
                 ev, "All the way back to the original. Do you want to keep the "
                     "character and elements you set up last time, or redo that "
@@ -445,12 +452,12 @@ class TransportCore:
                 ev, "I didn't catch that — answer with one word:\n• “keep” — same "
                     "character, fresh world.\n• “redo” — start the character interview "
                     "over.\n• “cancel” — keep playing.")
-        self._pending_restart_original.discard(pid)
+        self._disarm(pid, PENDING_RESTART_CHARACTER)
         if choice == "cancel":
             return self._reply(ev, "Kept your game as is — carry on.")
         keep_character = choice == "keep"
         if registry.list_notes(self._conn, plat, ext, scen):
-            self._pending_restart_notes[pid] = {"keep_character": keep_character}
+            self._arm(pid, PENDING_RESTART_NOTES, keep_character=keep_character)
             return self._reply(
                 ev, "And your notes for this story — keep them, or wipe them for a "
                     "clean slate?\n• “keep” — keep your notes.\n• “wipe” — clear "
@@ -470,11 +477,11 @@ class TransportCore:
                 ev, "I didn't catch that — your notes for this story: answer with one "
                     "word:\n• “keep” — keep your notes.\n• “wipe” — clear them.\n• "
                     "“cancel” — don't restart after all.")
-        decision = self._pending_restart_notes.pop(pid, {})
+        decision = self._disarm(pid, PENDING_RESTART_NOTES)
         if choice == "cancel":
             return self._reply(ev, "Kept your game as is — carry on.")
         return self._execute_restart_original(
-            pid, ev, keep_character=decision.get("keep_character", False),
+            pid, ev, keep_character=bool(decision and decision.data.get("keep_character")),
             wipe_notes=choice == "wipe")
 
     def _execute_restart_original(self, pid: str, ev: InboundEvent, *,
@@ -545,18 +552,35 @@ class TransportCore:
         Series engine flips when EPISODIC-CONTINUATION ships."""
         return False
 
+    def _arm(self, pid: str, kind: str, **data: Any) -> None:
+        """Arm a prompt for the player. Arming a /restart step supersedes any other
+        step of the wizard; other kinds are independent."""
+        slots = self._pending.setdefault(pid, {})
+        if kind in _RESTART_STEPS:
+            for step in _RESTART_STEPS:
+                slots.pop(step, None)
+        slots[kind] = Pending(kind, data)
+
+    def _peek(self, pid: str, kind: str) -> Pending | None:
+        """The player's armed prompt of this kind, or None. Does not disarm."""
+        return self._pending.get(pid, {}).get(kind)
+
+    def _disarm(self, pid: str, kind: str) -> Pending | None:
+        """Disarm and return the player's prompt of this kind (None if not armed)."""
+        slots = self._pending.get(pid)
+        if slots is None:
+            return None
+        armed = slots.pop(kind, None)
+        if not slots:
+            del self._pending[pid]
+        return armed
+
     def _clear_pending(self, pid: str) -> None:
-        """Disarm EVERY pending prompt for the player (leave-story confirm, the three
-        /restart steps, the chapter-end continue). The one place that knows the full
-        set: a player who leaves or enters a world must not carry a stale arm into
-        the next one (e.g. /exit after "End of Chapter" must not let the next
-        start-menu message build a new chapter). `_ooc_pressed` is an escalation
-        flag, not a prompt, so it is not touched here."""
-        self._pending_exit.discard(pid)
-        self._pending_restart.discard(pid)
-        self._pending_restart_original.discard(pid)
-        self._pending_restart_notes.pop(pid, None)
-        self._pending_continue.discard(pid)
+        """Disarm EVERY pending prompt for the player. A player who leaves or enters a
+        world must not carry a stale arm into the next one (e.g. /exit after "End of
+        Chapter" must not let the next start-menu message build a new chapter).
+        `_ooc_pressed` is an escalation flag, not a prompt, so it is not touched."""
+        self._pending.pop(pid, None)
 
     def _wipe_data(self, pid: str, ev: InboundEvent) -> None:
         """Clear THIS player's play DATA — slots, any built world, episode
@@ -706,7 +730,7 @@ class TransportCore:
         # Pressed past protection → the engine offered a NEW scenario; route a "yes"
         # through the existing exit-confirm (exit → Atrium → build a fresh world).
         if out.get("offer_new"):
-            self._pending_exit.add(pid)
+            self._arm(pid, PENDING_EXIT)
         # A fitting suggestion the engine agreed to try → record it for the narrator.
         weave = (out.get("weave") or "").strip()
         if weave and session is not None:
@@ -1037,7 +1061,7 @@ class TransportCore:
         if getattr(reply, "exit_requested", False):
             # The player stepped out of character to ask for a new story / to quit.
             # Confirm before leaving (their next message is the yes/no).
-            self._pending_exit.add(pid)
+            self._arm(pid, PENDING_EXIT)
             title = self._title_of(registry.scenario_for(self._conn, ev.platform,
                                                           ev.external_id))
             return self._reply(
@@ -1071,7 +1095,7 @@ class TransportCore:
                 # continue automatically — the player can quit whenever they want"): announce the
                 # chapter's END; the player's next in-fiction message ROLLS INTO the next chapter
                 # (no yes/no gate). /exit (or any command) still works as itself.
-                self._pending_continue.add(pid)
+                self._arm(pid, PENDING_CONTINUE)
                 prose = (prose.rstrip() + "\n\n— — —\n**— End of Chapter —**\nThe story goes on: "
                          "say anything to begin the next chapter, or /exit to rest here.")
         self._deliver_scene_image(ev, pid)

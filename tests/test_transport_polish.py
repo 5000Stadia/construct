@@ -16,6 +16,9 @@ from types import SimpleNamespace
 import pytest
 
 from construct import registry, telegram_bot
+from construct.transport_core import (
+    PENDING_CONTINUE, PENDING_EXIT, PENDING_RESTART_CHARACTER, PENDING_RESTART_DEPTH,
+    PENDING_RESTART_NOTES)
 from tests.test_telegram import (NOW, _core, _Factory, _FakeSession, _ev, _msg)
 
 
@@ -53,9 +56,9 @@ class TestPendingContinueCleared:
         pid = _admit_started(conn, "x1", "bodycase")
         core = _core(conn, _EndingFactory())
         core.handle(_ev("telegram", "x1", "I accuse him"), now=NOW)
-        assert pid in core._pending_continue          # chapter ended: continue armed
+        assert core._peek(pid, PENDING_CONTINUE)          # chapter ended: continue armed
         core.handle(_ev("telegram", "x1", leave), now=NOW)
-        assert pid not in core._pending_continue
+        assert not core._peek(pid, PENDING_CONTINUE)
         called = []
         monkeypatch.setattr(core, "_do_continue",
                             lambda p, ev: called.append(p) or core._reply(ev, "CONT"))
@@ -67,23 +70,59 @@ class TestPendingContinueCleared:
     def test_entering_a_world_disarms_continue(self, conn):
         pid = _admit_started(conn, "x2")
         core = _core(conn, _Factory())
-        core._pending_continue.add(pid)
+        core._arm(pid, PENDING_CONTINUE)
         core._enter_world(pid, _ev("telegram", "x2", "go"), scenario="anchor",
                           mode=None, preamble="", fresh=False)
-        assert pid not in core._pending_continue
+        assert not core._peek(pid, PENDING_CONTINUE)
 
     def test_clear_pending_covers_every_prompt(self, conn):
         pid = _admit_started(conn, "x3")
         core = _core(conn, _Factory())
-        core._pending_exit.add(pid)
-        core._pending_restart.add(pid)
-        core._pending_restart_original.add(pid)
-        core._pending_restart_notes[pid] = {"keep_character": True}
-        core._pending_continue.add(pid)
+        core._arm(pid, PENDING_EXIT)
+        core._arm(pid, PENDING_RESTART_NOTES, keep_character=True)
+        core._arm(pid, PENDING_CONTINUE)
         core._clear_pending(pid)
-        assert not (core._pending_exit or core._pending_restart
-                    or core._pending_restart_original or core._pending_restart_notes
-                    or core._pending_continue)
+        assert not core._pending
+        for kind in (PENDING_EXIT, PENDING_RESTART_DEPTH, PENDING_RESTART_CHARACTER,
+                     PENDING_RESTART_NOTES, PENDING_CONTINUE):
+            assert core._peek(pid, kind) is None
+
+
+class TestPendingState:
+    def test_arm_peek_disarm_roundtrip_with_data(self, conn):
+        pid = _admit_started(conn, "p1")
+        core = _core(conn, _Factory())
+        core._arm(pid, PENDING_RESTART_NOTES, keep_character=True)
+        assert core._peek(pid, PENDING_RESTART_NOTES).data == {"keep_character": True}
+        taken = core._disarm(pid, PENDING_RESTART_NOTES)
+        assert taken.kind == PENDING_RESTART_NOTES and taken.data["keep_character"]
+        assert core._disarm(pid, PENDING_RESTART_NOTES) is None
+        assert pid not in core._pending
+
+    def test_restart_steps_are_one_wizard(self, conn):
+        pid = _admit_started(conn, "p2")
+        core = _core(conn, _Factory())
+        core._arm(pid, PENDING_RESTART_DEPTH)
+        core._arm(pid, PENDING_RESTART_CHARACTER)
+        assert core._peek(pid, PENDING_RESTART_DEPTH) is None
+        core._arm(pid, PENDING_RESTART_NOTES)
+        assert core._peek(pid, PENDING_RESTART_CHARACTER) is None
+
+    def test_different_kinds_coexist(self, conn):
+        """A command passes through an armed prompt, so prompts of different kinds
+        can be armed together; cancelling a restart must not lose the chapter-end
+        continue (this is why the state is a per-kind map, not one slot)."""
+        pid = _admit_started(conn, "p3", "bodycase")
+        core = _core(conn, _EndingFactory())
+        core.handle(_ev("telegram", "p3", "I accuse him"), now=NOW)
+        assert core._peek(pid, PENDING_CONTINUE)
+        core.handle(_ev("telegram", "p3", "/restart"), now=NOW)
+        assert core._peek(pid, PENDING_RESTART_CHARACTER)
+        assert core._peek(pid, PENDING_CONTINUE)       # both armed
+        out = core.handle(_ev("telegram", "p3", "cancel"), now=NOW)
+        assert "carry on" in out.chunks[0].lower()
+        assert core._peek(pid, PENDING_RESTART_CHARACTER) is None
+        assert core._peek(pid, PENDING_CONTINUE)       # still offered
 
 
 # ---- BUG 4: restart-confirm answers --------------------------------------
@@ -98,7 +137,7 @@ class TestRestartAnswers:
         core.handle(_ev("telegram", ext, "/restart"), now=NOW)
         out = core.handle(_ev("telegram", ext, "redo"), now=NOW)
         assert "notes" in out.chunks[0].lower()
-        assert pid in core._pending_restart_notes
+        assert core._peek(pid, PENDING_RESTART_NOTES)
         return pid, f, core
 
     def _notes(self, conn, ext):
@@ -110,7 +149,7 @@ class TestRestartAnswers:
         calls_before = len(f.calls)
         core.handle(_ev("telegram", "rs", cmd), now=NOW)
         assert not any(c[2] for c in f.calls[calls_before:])  # no fresh (restart) open
-        assert pid in core._pending_restart_notes     # still armed
+        assert core._peek(pid, PENDING_RESTART_NOTES)     # still armed
         assert self._notes(conn, "rs")                # notes untouched
         out = core.handle(_ev("telegram", "rs", "keep"), now=NOW)  # the real answer works
         assert "OPENING" in out.chunks[0]
@@ -122,7 +161,7 @@ class TestRestartAnswers:
         calls_before = len(f.calls)
         out = core.handle(_ev("telegram", "rs", answer), now=NOW)
         assert len(f.calls) == calls_before
-        assert pid in core._pending_restart_notes
+        assert core._peek(pid, PENDING_RESTART_NOTES)
         assert self._notes(conn, "rs")
         body = out.chunks[0].lower()
         assert "keep" in body and "wipe" in body      # re-asked
@@ -141,7 +180,7 @@ class TestRestartAnswers:
         pid, f, core = self._to_notes_step(conn, "rs2")
         out = core.handle(_ev("telegram", "rs2", "cancel"), now=NOW)
         assert "carry on" in out.chunks[0].lower()
-        assert pid not in core._pending_restart_notes
+        assert not core._peek(pid, PENDING_RESTART_NOTES)
         assert registry.list_notes(conn, "telegram", "rs2", "anchor")
 
     def test_step2_keep_my_character_new_name_does_not_redo(self, conn):
@@ -163,7 +202,7 @@ class TestRestartAnswers:
         core.handle(_ev("telegram", "k3", "/restart"), now=NOW)
         out = core.handle(_ev("telegram", "k3", answer), now=NOW)
         assert f.calls == []
-        assert pid in core._pending_restart_original
+        assert core._peek(pid, PENDING_RESTART_CHARACTER)
         assert "keep" in out.chunks[0].lower() and "redo" in out.chunks[0].lower()
 
     def test_step2_command_passes_through(self, conn):
@@ -172,24 +211,24 @@ class TestRestartAnswers:
         core = _core(conn, f)
         core.handle(_ev("telegram", "k4", "/restart"), now=NOW)
         core.handle(_ev("telegram", "k4", "/help"), now=NOW)
-        assert f.calls == [] and pid in core._pending_restart_original
+        assert f.calls == [] and core._peek(pid, PENDING_RESTART_CHARACTER)
 
     def test_step1_ambiguous_and_command_keep_state(self, conn):
         pid = _admit_started(conn, "k1")
         f = _Factory()
         core = _core(conn, f)
-        core._pending_restart.add(pid)            # multi-episode path (hook is off today)
+        core._arm(pid, PENDING_RESTART_DEPTH)            # multi-episode path (hook is off today)
         core.handle(_ev("telegram", "k1", "/help"), now=NOW)
-        assert pid in core._pending_restart
+        assert core._peek(pid, PENDING_RESTART_DEPTH)
         out = core.handle(_ev("telegram", "k1", "this or that, I forget"), now=NOW)
-        assert pid in core._pending_restart and f.calls == []
+        assert core._peek(pid, PENDING_RESTART_DEPTH) and f.calls == []
         assert "episode" in out.chunks[0].lower() and "original" in out.chunks[0].lower()
 
     def test_new_restart_resets_a_half_answered_restart(self, conn):
         pid, f, core = self._to_notes_step(conn)
         core.handle(_ev("telegram", "rs", "/restart"), now=NOW)
-        assert pid not in core._pending_restart_notes
-        assert pid in core._pending_restart_original   # back at the first question
+        assert not core._peek(pid, PENDING_RESTART_NOTES)
+        assert core._peek(pid, PENDING_RESTART_CHARACTER)   # back at the first question
 
 
 # ---- BUG 2: Telegram outbox head-of-line wedge ---------------------------
