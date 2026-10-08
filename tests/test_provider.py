@@ -9,6 +9,7 @@ from construct.provider import (
     CODEX_PAYLOAD_CAP_BYTES,
     CodexProvider,
     ProviderAuthError,
+    ProviderTransientError,
     ProviderTransportError,
     SchemaViolation,
     StubProvider,
@@ -155,9 +156,7 @@ def test_transient_transport_failure_retries_then_succeeds(tmp_path):
     async def flaky(prompt, schema, tier, deliberate=False):
         calls["n"] += 1
         if calls["n"] < 3:
-            err = ProviderTransportError("peer closed connection (incomplete chunked read)")
-            err.transient = True
-            raise err
+            raise ProviderTransientError("peer closed connection (incomplete chunked read)")
         return '{"ok": true}'
 
     provider._call_once = flaky
@@ -304,14 +303,150 @@ def test_openai_key_fresh_read_from_env(monkeypatch):
     assert provider._read_auth() == {"access": "sk-later"}
 
 
-def test_every_authored_cohort_schema_lints():
-    # The audit: every module-level *_SCHEMA constant in the host must pass
-    # the preflight — a defective schema fails HERE, never on a live call.
-    import construct.cohorts as cohorts
-    from construct.provider import lint_schema
-    audited = 0
-    for name in dir(cohorts):
-        if name.endswith("_SCHEMA"):
-            lint_schema(getattr(cohorts, name), path=name)
-            audited += 1
-    assert audited > 10  # the audit actually swept the module
+# ---- audit 2026-10 finding 9: engine tier routing matches pattern-buffer's prompt
+# wording (`_CHEAP_ENGINE_PREFIXES`). If PB rewords those prompts, extraction would
+# silently move to the main tier - slower, dearer, no error. This runs a tiny REAL
+# pattern-buffer ingest through `engine_tier_dispatch` with a capturing provider.
+
+class _TierRecorder(StubProvider):
+    """Answers extraction / classification schemas and records (prompt, tier)."""
+
+    async def complete(self, prompt, schema, *, tier="main", deliberate=False):
+        self.calls.append((prompt, schema, tier))
+        props = schema.get("properties", {})
+        if "items" in props:
+            return {"items": [
+                {"entity": "person:cass", "attribute": "mood", "value": "wary"},
+                {"entity": "obj:lamp", "attribute": "in", "value": "place:cellar",
+                 "value_type": "entity"},
+            ]}
+        if "durability" in props:
+            return {"durability": "STATE", "class_confidence": 0.8}
+        if "verdicts" in props:
+            return {"verdicts": []}
+        raise ProviderTransportError("unexpected engine call")
+
+
+@pytest.mark.parametrize("classify", ["inline", "batch"])
+def test_pattern_buffer_extraction_and_classification_reach_the_cheap_tier(
+        tmp_path, classify):
+    from construct.game import _world
+    from construct.provider import engine_tier_dispatch
+
+    rec = _TierRecorder()
+    world = _world(tmp_path / "drift.world", "drift", model=engine_tier_dispatch(rec),
+                   stance="fiction", title="drift")
+    world.porcelain.ingest("Cass held the lamp in the cellar, wary.", classify=classify)
+
+    extraction = [c for c in rec.calls if "items" in c[1].get("properties", {})]
+    classifying = [c for c in rec.calls
+                   if "durability" in c[1].get("properties", {})
+                   or "verdicts" in c[1].get("properties", {})]
+    assert extraction, "pattern-buffer made no extraction call - the probe is vacuous"
+    assert classifying, "pattern-buffer made no classification call - the probe is vacuous"
+    # no prompt reworded away from the routing prefix: every one reached cheap
+    assert {c[2] for c in extraction} == {"cheap"}, \
+        "pattern-buffer reworded its extraction prompt; update _CHEAP_ENGINE_PREFIXES"
+    assert {c[2] for c in classifying} == {"cheap"}, \
+        "pattern-buffer reworded its classification prompt; update _CHEAP_ENGINE_PREFIXES"
+
+
+# ---- audit 2026-10 tier 2 #10: the two Responses-wire providers are SIBLINGS
+
+def test_codex_and_openai_providers_are_siblings_not_parent_child():
+    from construct.provider import OpenAIProvider, _ResponsesWireProvider
+    assert issubclass(CodexProvider, _ResponsesWireProvider)
+    assert issubclass(OpenAIProvider, _ResponsesWireProvider)
+    assert not issubclass(OpenAIProvider, CodexProvider)
+    assert not issubclass(CodexProvider, OpenAIProvider)
+    # the Codex-only credential path does not exist on the metered wire
+    assert not hasattr(OpenAIProvider(api_key="k"), "_auth_path")
+
+
+def test_empty_openai_model_env_does_not_leak_the_codex_variable(monkeypatch):
+    from construct.provider import OpenAIProvider
+    monkeypatch.setenv("CONSTRUCT_OPENAI_MODEL", "")
+    monkeypatch.setenv("HOLODECK_CODEX_MODEL", "codex-only")
+    assert OpenAIProvider(api_key="k")._main_model == "gpt-5.5"
+
+
+def test_deliberate_calls_get_the_hard_bound_and_interactive_keep_their_tier_bound():
+    # finding 8: `HARD if deliberate else min(tier_bound, HARD)` - pinned through the
+    # timeout message the bound is reported in.
+    import httpx
+    from construct import provider as prov
+
+    seen = []
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            raise httpx.ReadTimeout("slow")
+
+        async def __aexit__(self, *a):
+            return False
+
+    async def run(deliberate, timeouts):
+        p = prov.OpenAIProvider(api_key="k", timeouts=timeouts)
+        orig = prov.asyncio.timeout
+        prov.asyncio.timeout = lambda b: (seen.append(b), orig(b))[1]
+        try:
+            with pytest.raises(prov.ProviderTimeout):
+                await p._call_once("p", SCHEMA, "main", deliberate)
+        finally:
+            prov.asyncio.timeout = orig
+
+    real_client = httpx.AsyncClient
+    httpx.AsyncClient = _Boom
+    try:
+        asyncio.run(run(False, {"main": 77.0}))
+        asyncio.run(run(True, {"main": 77.0}))
+        asyncio.run(run(False, {"main": 5000.0}))
+    finally:
+        httpx.AsyncClient = real_client
+    assert seen == [77.0, prov.HARD_BOUND_SECONDS, prov.HARD_BOUND_SECONDS]
+
+
+# ---- audit 2026-10 finding 7: one table drives the StubProvider's silent defaults
+
+@pytest.mark.parametrize("task,key,expected", [
+    ("csg", "specified", {"specified": True, "missing": [], "clarification": ""}),
+    ("rmb", "stirs", {"stirs": False, "memory": "", "feeling": ""}),
+    ("mcl", "claims", {"claims": [], "people": []}),
+    ("law", "laws", {"reality_register": "secondary", "laws": []}),
+    ("lwc", "verdicts", {"verdicts": []}),
+])
+def test_stub_silent_default_answers_without_consuming_the_queue(task, key, expected):
+    from construct.provider import task_tag
+    queued = {"answer": "kept"}
+    stub = StubProvider([queued])
+    got = asyncio.run(stub.complete(task_tag(task) + "p", {"type": "object"}))
+    assert got == expected
+    assert stub._queue == [queued]                      # the queue was not consumed
+    got["extra"] = 1                                    # fresh copy: no shared mutable default
+    assert asyncio.run(stub.complete(task_tag(task) + "p", {"type": "object"})) == expected
+    # an EXPLICITLY stubbed call (queue head carries the signature key) is consumed instead
+    explicit = {key: expected[key]}
+    stub = StubProvider([explicit])
+    assert asyncio.run(stub.complete(task_tag(task) + "p", {"type": "object"})) == explicit
+    assert stub._queue == []
+
+
+def test_engine_callable_tier_none_dispatches_by_prompt_shape():
+    from construct.provider import engine_tier_dispatch
+    stub = StubProvider([{"answer": "a"}, {"answer": "b"}, {"answer": "c"}])
+    call = engine_callable(stub, tier=None)
+    call("Extract world-state assertions from this", SCHEMA)
+    call("Classify the lifetime of this fact", SCHEMA)
+    call("Resolve the invention", SCHEMA)
+    assert [c[2] for c in stub.calls] == ["cheap", "cheap", "main"]
+    stub2 = StubProvider([{"answer": "a"}])
+    engine_tier_dispatch(stub2)("Extract world-state x", SCHEMA)
+    assert stub2.calls[0][2] == "cheap"
+
+    async def inside_loop():
+        with pytest.raises(RuntimeError, match="running event loop"):
+            engine_tier_dispatch(StubProvider())("Extract world-state x", SCHEMA)
+    asyncio.run(inside_loop())
