@@ -1418,6 +1418,15 @@ def test_salient_tick_event_excluded():
         "tick event should not produce a first-time fuel line"
 
 
+def test_host_clock_events_never_wake_the_player_caused_generator():
+    # `clock_pass` writes canon kind=clock_fired; the escalation clocks' effect events are
+    # kind=pressure (caused_by the firing). Both are the host's own pacing, never salient
+    # (neither a "new kind of event" nor a causal ripple).
+    fired = _ev("clock_fired", "event:escalate_x_fired_7")
+    pressure = _ev("pressure", "event:pressure_x", caused_by=("event:escalate_x_fired_7",))
+    assert salient_moments([], [fired, pressure], set(), set()) == []
+
+
 def test_salient_caused_by_fires():
     # Signal 3: an event with non-empty caused_by → causal ripple → salient.
     ev = _ev("conflict", "event:conflict_1", caused_by=("event:prior",))
