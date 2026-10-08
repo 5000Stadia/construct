@@ -38,7 +38,7 @@ from typing import Any
 
 from construct import cohorts
 from construct.arc import io as arc_io
-from construct.arc.conditions import EventRow, Truth, atoms_of, evaluate
+from construct.arc.conditions import EventRow, Truth, evaluate
 from construct.arc.executor import (
     PLOT,
     SESSION,
@@ -453,7 +453,7 @@ def _sanitize_hook(hook: str) -> str:
 # --- shared mint path (all triggers) ------------------------------------
 
 def _mint_side_arc(world: Any, reads: Any, provider: Provider,
-                   trigger: str, fuel: str, source: str, side_arcs: list[Arc],
+                   trigger: str, fuel: str, source: str,
                    ctx: dict, turn: int,
                    main_protagonist: str, depth: int) -> tuple[Arc, str] | None:
     """The shared mint path for all three triggers (§E, §D).
@@ -540,7 +540,7 @@ def generate_from_fallout(world: Any, reads: Any, provider: Provider,
     main_protagonist = ctx.get("main_protagonist", "")
     return _mint_side_arc(world, reads, provider,
                           trigger="a thread just closed (regenerative)",
-                          fuel=fuel, source=source, side_arcs=side_arcs,
+                          fuel=fuel, source=source,
                           ctx=ctx, turn=turn,
                           main_protagonist=main_protagonist,
                           depth=parent_depth + 1)
@@ -563,7 +563,7 @@ def generate_opportunistic(world: Any, reads: Any, provider: Provider,
         f"  - {m}" for m in moments)
     return _mint_side_arc(world, reads, provider,
                           trigger="the player's actions opened a door (opportunistic)",
-                          fuel=fuel, source=source, side_arcs=side_arcs,
+                          fuel=fuel, source=source,
                           ctx=ctx, turn=turn,
                           main_protagonist=main_protagonist, depth=0)
 
@@ -587,6 +587,6 @@ def generate_ambient(world: Any, reads: Any, provider: Provider,
             f"present characters:\n{present}\nStyle: {style}")
     return _mint_side_arc(world, reads, provider,
                           trigger="the world has been quiet a while (ambient)",
-                          fuel=fuel, source=source, side_arcs=side_arcs,
+                          fuel=fuel, source=source,
                           ctx=ctx, turn=turn,
                           main_protagonist=main_protagonist, depth=0)

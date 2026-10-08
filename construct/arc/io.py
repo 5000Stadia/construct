@@ -35,13 +35,13 @@ _JSON_BLOB_ATTRS = frozenset({
     "gauge_index", "action_modifiers",
 })
 
+logger = logging.getLogger(__name__)
+
 #: The portfolio manifest entity — one row listing the active `arc:*` ids plus
 #: which one is the main (terminal-bearing) arc. The registry is "more named
 #: rows in `plot:main`", NOT a per-arc frame (every beat/clock/pin already
 #: namespaces by `arc_id` and statuses key by globally-unique entity id, so N
 #: arcs coexist in one frame). Absent → a single-arc world (backward compat).
-logger = logging.getLogger(__name__)
-
 _PORTFOLIO = "arc:portfolio"
 _MEMBERSHIP_ATTR_PREFIX = "member_"
 
