@@ -55,3 +55,18 @@ def test_display_names_and_empty_frame():
     assert "• Edmund Reed" in out
     empty = render_journal([], PROT, header="Day 1 | the study")
     assert "Day 1 | the study" in empty and "Nothing noted yet" in empty
+
+
+def test_protagonist_is_never_tagged_settled():
+    """B3: the protagonist is never a past chapter's answer — even when stale settled history
+    (recorded from the always-true placeholder premise) names them; real settled entities
+    still carry the tag."""
+    rows = [
+        Row(PROT, "role", "detective of the bureau", 1.0),
+        Row("person:rival", "standing", "the one who did it", 1.0),
+    ]
+    out = render_journal(rows, PROT, settled={PROT, "person:rival"})
+    you = next(ln for ln in out.splitlines() if ln.startswith("YOU —"))
+    assert "settled" not in you
+    rival = next(ln for ln in out.splitlines() if "Rival" in ln)
+    assert "settled (a past chapter's answer)" in rival
