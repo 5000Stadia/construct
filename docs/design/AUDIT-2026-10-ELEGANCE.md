@@ -122,3 +122,14 @@ Construct has asked for both to be ranked high.
 ## What to keep exactly as it is
 
 The five-verb porcelain boundary, three-valued truth with frozen atoms, the host `plot:` rows, coverage-as-effect, the drift family, the world-growth seam on ATOMIC-ACTIVATION, the transports' shared Session API, and the fail-closed concealment instinct. The instinct is right; bug #1 is its placeholder input, not the rule.
+
+## Approved proposal landed: knows: reads via pattern-buffer's frame-knowledge recipe (for Kabe's eye)
+
+A before/after over 72 worlds: 59 differ, and every differing line is a correction. Set members now all show, evidence rank holds, `same_as` identity holds, EVENT rows are no longer shown as knowledge, and pre-play rows are visible.
+
+Surprises:
+- **Fold-then-screen.** When the newest value of a key is concealed, nothing shows, where an older value used to stand in. This fails closed, but notebook entries can vanish (Harth in `emberroad.critic`). Say if you'd rather keep the stand-in.
+- On an engine-flagged tie the freshest side stands (the old behaviour), until pattern-buffer settles its tie rule.
+- `knows_about`, `knows_place`, `knows_person` and `likely_familiar_with` are not declared set-valued in `semantics.py`, so same-time rows tie.
+- `journal.py` still shows one member of a set.
+- `build_sheet` now takes about 0.1 s a turn on the largest world, up from about 10 ms.
