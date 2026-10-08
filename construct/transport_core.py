@@ -19,6 +19,7 @@ IO (`getUpdates`/`sendMessage`, file queues) and exactly-once persistence
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -60,6 +61,20 @@ def _affirmative(text: str) -> bool:
     t = (text or "").strip().lower().rstrip("!. ")
     return t in {"yes", "y", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm",
                  "do it", "exit", "quit", "leave", "new story", "start over"}
+
+_CANCEL_WORDS = ("cancel", "stop", "nvm", "never", "no")
+
+
+def _pick(answer: str, choices: dict[str, tuple[str, ...]]) -> str | None:
+    """Which ONE of `choices` did the answer pick? Matches the exact choice words as
+    WHOLE WORDS (never substrings: "yes" is not "wipe", "new" is not "redo", and a
+    word inside another word never counts). Returns None when no choice matches or
+    when two different choices both do — the caller re-asks and keeps the prompt
+    armed, so a destructive path never runs on an ambiguous answer."""
+    words = set(re.findall(r"[a-z0-9]+", (answer or "").lower()))
+    hit = {name for name, keys in choices.items() if words & set(keys)}
+    return next(iter(hit)) if len(hit) == 1 else None
+
 
 STATIC_REJECT = (
     "This Construct bot is invite-only. Send the CONS- invite code the operator "
@@ -255,21 +270,23 @@ class TransportCore:
         # the gitignored log dir. /dump snapshots it on demand (operator ask).
         self._log(ev, "USER", ev.text)
         low = text.lower()
-        if pid in self._pending_restart_notes:
-            decision = self._pending_restart_notes.pop(pid)
-            out = self._do_restart_notes(pid, ev, low, decision)  # already an Outbound
-            self._log(ev, "BOT", "\n".join(out.chunks))
-            return out
-        if pid in self._pending_restart_original:
-            self._pending_restart_original.discard(pid)
-            out = self._do_restart_original(pid, ev, low)  # already an Outbound
-            self._log(ev, "BOT", "\n".join(out.chunks))
-            return out
-        if pid in self._pending_restart:
-            self._pending_restart.discard(pid)
-            out = self._do_restart(pid, ev, low)  # already an Outbound
-            self._log(ev, "BOT", "\n".join(out.chunks))
-            return out
+        # The /restart confirm steps are DESTRUCTIVE: only an exact choice answers
+        # them. A COMMAND passes through (falls to command routing below) and leaves
+        # the prompt armed; an ambiguous answer is re-asked by the step's handler,
+        # which owns its own state (it disarms only on a decision).
+        if not low.startswith("/"):
+            if pid in self._pending_restart_notes:
+                out = self._do_restart_notes(pid, ev, low)  # already an Outbound
+                self._log(ev, "BOT", "\n".join(out.chunks))
+                return out
+            if pid in self._pending_restart_original:
+                out = self._do_restart_original(pid, ev, low)  # already an Outbound
+                self._log(ev, "BOT", "\n".join(out.chunks))
+                return out
+            if pid in self._pending_restart:
+                out = self._do_restart(pid, ev, low)  # already an Outbound
+                self._log(ev, "BOT", "\n".join(out.chunks))
+                return out
         if pid in self._pending_continue:
             # CONCLUDE→CONTINUE (founder 2026-07-02, auto-continue): the story ended; any
             # in-fiction message ROLLS INTO the next chapter. COMMANDS PASS THROUGH and keep
@@ -310,6 +327,10 @@ class TransportCore:
                 return out
             title = self._title_of(registry.scenario_for(self._conn, ev.platform,
                                                           ev.external_id))
+            # A fresh /restart supersedes any half-answered earlier one.
+            self._pending_restart.discard(pid)
+            self._pending_restart_original.discard(pid)
+            self._pending_restart_notes.pop(pid, None)
             if self._in_episodes(pid, ev):
                 # Multi-episode playthrough → the two depths are meaningful.
                 self._pending_restart.add(pid)
@@ -368,14 +389,23 @@ class TransportCore:
           character re-applied.
         - 'original' → go all the way back to the original scenario; ask step two
           (keep the same character, or redo the interview).
-        Anything else → cancel."""
+        'cancel' → keep playing. Anything else is ambiguous → re-ask (still armed)."""
         from construct.game import restore_episode_start
-        a = answer.strip().lower()
         plat, ext = ev.platform, ev.external_id
         scen = registry.scenario_for(self._conn, plat, ext)
-        if any(k in a for k in ("original", "very start", "very beginning",
-                                "all the way", "start start", "beginning beginning",
-                                "everything", "2")):
+        choice = _pick(answer, {"original": ("original", "2"),
+                                "episode": ("episode", "1"),
+                                "cancel": _CANCEL_WORDS})
+        if choice is None:
+            title = self._title_of(scen)
+            return self._reply(
+                ev, f"I didn't catch that — restarting erases your saved progress in "
+                    f"{title}. Answer with one word:\n• “episode” — restart just this "
+                    f"episode from its start (your character carries over).\n• "
+                    f"“original” — all the way back to the very start of the original "
+                    f"scenario.\n• “cancel” — keep playing.")
+        self._pending_restart.discard(pid)
+        if choice == "original":
             self._pending_restart_original.add(pid)
             return self._reply(
                 ev, "All the way back to the original. Do you want to keep the "
@@ -383,8 +413,7 @@ class TransportCore:
                     "interview from scratch?\n• “keep” — same character, fresh "
                     "world.\n• “redo” — start the character interview over.\n• "
                     "“cancel” — keep playing.")
-        if any(k in a for k in ("episode", "this", "current", "top", "again",
-                                "restart", "1")):
+        if choice == "episode":
             registry.set_started(self._conn, plat, ext, False)
             registry.clear_chargen(self._conn, plat, ext)
             mode = _valid_mode(registry.get_mode(self._conn, plat, ext))
@@ -406,17 +435,20 @@ class TransportCore:
         character (skip the Foyer); 'redo' → re-run the interview. Either way ALL
         episode progress + checkpoints drop. If the player has notes for this story,
         ask the keep/wipe question (step three) before acting; else act now. Anything
-        else → cancel."""
-        a = answer.strip().lower()
+        else (ambiguous) → re-ask, prompt stays armed."""
         plat, ext = ev.platform, ev.external_id
         scen = registry.scenario_for(self._conn, plat, ext)
-        if any(k in a for k in ("redo", "fresh", "scratch", "new", "interview",
-                                "again", "2")):
-            keep_character = False
-        elif any(k in a for k in ("keep", "same", "character", "elements", "1")):
-            keep_character = True
-        else:
+        choice = _pick(answer, {"keep": ("keep", "1"), "redo": ("redo", "2"),
+                                "cancel": _CANCEL_WORDS})
+        if choice is None:
+            return self._reply(
+                ev, "I didn't catch that — answer with one word:\n• “keep” — same "
+                    "character, fresh world.\n• “redo” — start the character interview "
+                    "over.\n• “cancel” — keep playing.")
+        self._pending_restart_original.discard(pid)
+        if choice == "cancel":
             return self._reply(ev, "Kept your game as is — carry on.")
+        keep_character = choice == "keep"
         if registry.list_notes(self._conn, plat, ext, scen):
             self._pending_restart_notes[pid] = {"keep_character": keep_character}
             return self._reply(
@@ -426,18 +458,24 @@ class TransportCore:
         return self._execute_restart_original(pid, ev, keep_character=keep_character,
                                               wipe_notes=False)
 
-    def _do_restart_notes(self, pid: str, ev: InboundEvent, answer: str,
-                          decision: dict) -> Outbound:
+    def _do_restart_notes(self, pid: str, ev: InboundEvent, answer: str) -> Outbound:
         """`/restart → original` step three — the notes: 'wipe' clears this story's
-        notes, 'keep' carries them into the fresh start. Ambiguous → keep (never
-        destroy by accident). 'cancel' aborts the whole restart (nothing dropped)."""
-        a = answer.strip().lower()
-        if any(k in a for k in ("cancel", "stop", "nvm", "never", "no,")):
+        notes, 'keep' carries them into the fresh start, 'cancel' aborts the whole
+        restart (nothing dropped). Anything ambiguous re-asks and stays armed: the
+        restart is never executed, nor notes destroyed, on a guess."""
+        choice = _pick(answer, {"keep": ("keep",), "wipe": ("wipe",),
+                                "cancel": _CANCEL_WORDS})
+        if choice is None:
+            return self._reply(
+                ev, "I didn't catch that — your notes for this story: answer with one "
+                    "word:\n• “keep” — keep your notes.\n• “wipe” — clear them.\n• "
+                    "“cancel” — don't restart after all.")
+        decision = self._pending_restart_notes.pop(pid, {})
+        if choice == "cancel":
             return self._reply(ev, "Kept your game as is — carry on.")
-        wipe = any(k in a for k in ("wipe", "clear", "clean", "delete", "yes"))
         return self._execute_restart_original(
             pid, ev, keep_character=decision.get("keep_character", False),
-            wipe_notes=wipe)
+            wipe_notes=choice == "wipe")
 
     def _execute_restart_original(self, pid: str, ev: InboundEvent, *,
                                   keep_character: bool, wipe_notes: bool) -> Outbound:
@@ -507,6 +545,19 @@ class TransportCore:
         Series engine flips when EPISODIC-CONTINUATION ships."""
         return False
 
+    def _clear_pending(self, pid: str) -> None:
+        """Disarm EVERY pending prompt for the player (leave-story confirm, the three
+        /restart steps, the chapter-end continue). The one place that knows the full
+        set: a player who leaves or enters a world must not carry a stale arm into
+        the next one (e.g. /exit after "End of Chapter" must not let the next
+        start-menu message build a new chapter). `_ooc_pressed` is an escalation
+        flag, not a prompt, so it is not touched here."""
+        self._pending_exit.discard(pid)
+        self._pending_restart.discard(pid)
+        self._pending_restart_original.discard(pid)
+        self._pending_restart_notes.pop(pid, None)
+        self._pending_continue.discard(pid)
+
     def _wipe_data(self, pid: str, ev: InboundEvent) -> None:
         """Clear THIS player's play DATA — slots, any built world, episode
         checkpoints, transcript, notes, in-memory session/pending — and reset their
@@ -526,11 +577,8 @@ class TransportCore:
         except Exception:
             logger.exception("wipe cleanup failed for %s", pid)
         self._sessions.pop(pid, None)
-        self._pending_exit.discard(pid)
+        self._clear_pending(pid)
         self._ooc_pressed.discard(pid)
-        self._pending_restart.discard(pid)
-        self._pending_restart_original.discard(pid)
-        self._pending_restart_notes.pop(pid, None)
         try:
             registry.clear_notes(self._conn, plat, ext)
         except Exception:
@@ -594,6 +642,7 @@ class TransportCore:
         registry.set_started(self._conn, ev.platform, ev.external_id, False)
         registry.clear_chargen(self._conn, ev.platform, ev.external_id)
         self._sessions.pop(pid, None)
+        self._clear_pending(pid)
         registry.set_creation(self._conn, ev.platform, ev.external_id, _empty_creation())
         self._send_welcome_image(ev)  # the projector image leads the welcome menu
         return ("Stepped out — your story is saved where you left it.\n\n" + GREETING)
@@ -1146,7 +1195,8 @@ class TransportCore:
         """Open `scenario` for the player (fresh copy, or resume the slot when
         fresh=False). A FRESH entry hands off to the FOYER (character creation)
         before turn one; a RESUME goes straight back into the story. The Atrium
-        state is cleared either way."""
+        state is cleared either way, as is every pending prompt."""
+        self._clear_pending(pid)
         try:
             session = self._sessions[pid] = self._session_factory(
                 scenario=scenario, player_id=pid, fresh=fresh, mode_override=mode)
