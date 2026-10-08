@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import operator
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Protocol, Union, runtime_checkable
 
 from construct.arc.truth import Truth, t_all, t_any, t_at_least, t_not
@@ -285,7 +286,12 @@ def evaluate(
     world: WorldReads,
     counters: PacingCounters | None = None,
 ) -> Truth:
-    """Three-valued evaluation of a condition expression."""
+    """Three-valued evaluation of a condition expression.
+
+    The short-circuiting walker (`t_all` / `t_any` stop at the first
+    deciding operand): the hot path. `explain` is its exhaustive sibling —
+    it visits every operand and keeps the per-node verdicts — and both share
+    `_eval_atom` and the `truth.t_*` tables, so they cannot disagree."""
     if isinstance(expr, Not):
         return t_not(evaluate(expr.operand, world, counters))
     if isinstance(expr, AllOf):
@@ -294,7 +300,60 @@ def evaluate(
         return t_any(evaluate(op, world, counters) for op in expr.operands)
     if isinstance(expr, AtLeast):
         return t_at_least(expr.k, [evaluate(op, world, counters) for op in expr.operands])
+    return _eval_atom(expr, world, counters)
 
+
+@dataclass(frozen=True)
+class Node:
+    """One node of an annotated evaluation: the expression, the verdict it
+    evaluated to, and the child nodes (one per operand, in order; none for an
+    atom). A fold over this tree is how the drift closure witness reads what
+    `evaluate` decided (audit-2026-10 arc F4)."""
+
+    expr: Expr
+    verdict: Truth
+    children: tuple["Node", ...] = ()
+
+
+def explain(
+    expr: Expr,
+    world: WorldReads,
+    counters: PacingCounters | None = None,
+    *,
+    leaf: Callable[[Atom], Truth | None] | None = None,
+) -> Node:
+    """`evaluate`, but exhaustive and annotated: returns the whole `Node`
+    tree. Every operand is visited (no short-circuit), so every atom leaf has
+    a verdict; `explain(...).verdict == evaluate(...)` for pure reads.
+
+    `leaf`, if given, is consulted for each atom first: a non-None return is
+    taken as that atom's verdict WITHOUT reading the world (the drift
+    clock-necessity probe forces every `ClockFired` FALSE this way)."""
+    if isinstance(expr, (Not, AllOf, AnyOf, AtLeast)):
+        operands = (expr.operand,) if isinstance(expr, Not) else expr.operands
+        kids = tuple(explain(op, world, counters, leaf=leaf) for op in operands)
+        verdicts = [k.verdict for k in kids]
+        if isinstance(expr, Not):
+            v = t_not(verdicts[0])
+        elif isinstance(expr, AllOf):
+            v = t_all(verdicts)
+        elif isinstance(expr, AnyOf):
+            v = t_any(verdicts)
+        else:
+            v = t_at_least(expr.k, verdicts)
+        return Node(expr, v, kids)
+    forced = leaf(expr) if leaf is not None else None
+    if forced is not None:
+        return Node(expr, forced)
+    return Node(expr, _eval_atom(expr, world, counters))
+
+
+def _eval_atom(
+    expr: Atom,
+    world: WorldReads,
+    counters: PacingCounters | None,
+) -> Truth:
+    """Evaluate one atom leaf against the world (and pacing counters)."""
     if isinstance(expr, StateIs):
         if not world.has_entity(expr.entity):
             return Truth.INDETERMINATE
