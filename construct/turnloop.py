@@ -2525,6 +2525,11 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
             return
         if minutes_now is None:
             return  # no diegetic clock → no honest elapsed floor → no tick
+        # PLAY HORIZON (same class as the Cx 259 NPC-sheet bind): every direct porcelain
+        # read below is confined to the horizon `live_reads` is already bound to, so a
+        # member's aftermath location / future-stamped knows:<member> row cannot reach
+        # the model whose `detail` is committed to canon. None = timeline head (no-op).
+        _h = getattr(live_reads, "_horizon", None)
         _nodes = (cast if isinstance(cast, dict)
                   else {n.node_id: n for n in cast}) if cast else {}
         if not _nodes:
@@ -2568,12 +2573,12 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                     continue  # never met — off-screen motion of a stranger isn't felt
                 if minutes_now - float(_seen) < _TICK_FLOOR_MIN:
                     continue
-                _loc = p.locate(nid)
+                _loc = p.locate(nid, as_of=_h)
                 _where = _loc[0] if _loc else ""
                 if _where == scene:
                     continue  # actually here — presence owns them
                 _sheet = json.dumps(p.snapshot(nid, frame=f"knows:{nid}",
-                                               lens="character_sheet"))[:1200]
+                                               lens="character_sheet", as_of=_h))[:1200]
                 members.append((nid, _where, _sheet))
             except Exception:  # noqa: BLE001
                 continue
@@ -2605,7 +2610,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
             # topology. A destination still qualifies only if its name/kind READS through the
             # horizon-bound canon surface (the same self-screen the semantic-bind roster
             # uses); everything else is not world-truth geography.
-            for _pid in world.porcelain.entities("canon", prefix="place:"):
+            for _pid in world.porcelain.entities("canon", prefix="place:", as_of=_h):
                 _pid = str(_pid or "")
                 if not _pid or _pid == scene or _pid in _excl:
                     continue
@@ -2644,7 +2649,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         # filter), so world-tick never had a companion concept to check.
         _tick_policy = CarrierMovePolicy(
             mode="world_tick", scene=scene, protagonist=arc.protagonist,
-            companions=frozenset(), anchored=frozenset(_anchored), horizon=None)
+            companions=frozenset(), anchored=frozenset(_anchored), horizon=_h)
         for t in (verdict.get("ticks") or []):
             mid = str((t or {}).get("member") or "")
             kind = str((t or {}).get("kind") or "")
@@ -2685,7 +2690,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                         try:
                             if live_reads.state(pid, "kind") is None:
                                 return False  # not canon-readable — not a real person here
-                            _ploc = p.locate(pid)
+                            _ploc = p.locate(pid, as_of=_h)
                             return not (_ploc and _ploc[0] == scene)
                         except Exception:  # noqa: BLE001
                             return False
@@ -4488,6 +4493,31 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         logger.info("journey held for deliberation: %s", trace.deliberating)
         return True
 
+    def _gated_move_commit(dest_id: str, label: str) -> None:
+        """The ONE route -> deliberate -> commit path for a destination that resolved to
+        an existing place (resolved, semantically bound, or known-place reuse): a blocked
+        way is not walked (no commit, obstruction on the trace); deliberation runs only
+        for a move that WOULD commit (Cx 465 #2); obscured commits but hedges."""
+        _seg = _route_obstruction(p, pre_chain[0] if pre_chain else None,
+                                  dest_id, as_of=_h)
+        if _seg and _seg.get("status") == "blocked":
+            trace.movement_status = "blocked"
+            trace.movement_obstruction = _seg
+            logger.info("movement blocked: %s -> %s (%s)", arc.protagonist,
+                        dest_id, _seg.get("evidence"))
+        elif _hold_for_deliberation(dest_id, label):
+            pass  # #102: held for the player's own weighing
+        else:
+            p.ingest_structured([{
+                "entity": arc.protagonist, "attribute": "in", "value": dest_id,
+                "value_type": "entity", "valid_from": turn_time(turn),
+            }], classify="batch")
+            trace.movement_status = _seg.get("status") if _seg else "clear"
+            if _seg:
+                trace.movement_obstruction = _seg
+            logger.info("player moved: %s -> %s (%s)", arc.protagonist, dest_id,
+                        trace.movement_status)
+
     if moves_to:
         # SEEK-A-PERSON unwrap (founder live 2026-07-01, "I go back to where Reed is"): the
         # "where X is" wrapper defeats refer's token match, so the move resolved NOTHING and the
@@ -4598,25 +4628,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # walked — the narrator explains why. `obscured` (state unknown) is
             # allowed but flagged so the prose can hedge; missing capture degrades
             # to obscured/clear, never a false hard-block.
-            origin = pre_chain[0] if pre_chain else None
-            seg = _route_obstruction(p, origin, target, as_of=_h)
-            if seg and seg.get("status") == "blocked":
-                trace.movement_status = "blocked"
-                trace.movement_obstruction = seg
-                logger.info("movement blocked: %s -> %s (%s)", arc.protagonist,
-                            target, seg.get("evidence"))
-            elif _hold_for_deliberation(target, moves_to):
-                pass  # #102 (Cx 465 #2): only a move that WOULD commit deliberates
-            else:
-                p.ingest_structured([{
-                    "entity": arc.protagonist, "attribute": "in", "value": target,
-                    "value_type": "entity", "valid_from": turn_time(turn),
-                }], classify="batch")
-                trace.movement_status = seg.get("status") if seg else "clear"
-                if seg:
-                    trace.movement_obstruction = seg
-                logger.info("player moved: %s -> %s (%s)", arc.protagonist, target,
-                            trace.movement_status)
+            _gated_move_commit(target, moves_to)
         elif cast and _names_undiscovered_dest(moves_to, _cbi, _undiscovered_offscene, _name_of):
             # ENTITLEMENT GATE for an UNRESOLVED name (Cx review #1): the gate above runs only on a
             # RESOLVED target, so a guessed/unresolved VARIANT of an undiscovered offscene suspect or
@@ -4783,16 +4795,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         moves_to,
                         set(scope or []) | ({pre_scene} if pre_scene else set())
                         | set(pre_chain or []),
-                        live_reads, _name_of)) and _known != pre_scene \
-                        and not _hold_for_deliberation(_known, moves_to):
+                        live_reads, _name_of)) and _known != pre_scene:
                     # reuse an already-KNOWN place by token ("my own office" → the existing
                     # office) so a return home doesn't mint a duplicate (founder cohesion test).
-                    p.ingest_structured([{
-                        "entity": arc.protagonist, "attribute": "in", "value": _known,
-                        "value_type": "entity", "valid_from": turn_time(turn),
-                    }], classify="batch")
-                    trace.movement_status = "clear"
-                    logger.info("move resolved to KNOWN place %s (reused, not minted)", _known)
+                    # SAME MOVEMENT GATES AS THE OTHER TRAVEL PATHS: route check, then
+                    # deliberation, then commit (a blocked way is never walked).
+                    _gated_move_commit(_known, moves_to)
                 elif _known == pre_scene:
                     trace.movement_status = "clear"  # naming the current place → already here
                     trace.same_place = True          # Cx 445: no time charge for a no-op
@@ -4854,25 +4862,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                             # no commit + obstruction on the trace; obscured → commit but hedge.
                             # Deliberation runs AFTER passability (Cx 465 #2): only a move
                             # that WOULD commit may render as a deadline choice.
-                            _seg = _route_obstruction(p, pre_chain[0] if pre_chain else None,
-                                                      _bound, as_of=_h)
-                            if _seg and _seg.get("status") == "blocked":
-                                trace.movement_status = "blocked"
-                                trace.movement_obstruction = _seg
-                                logger.info("bound move blocked: %s -> %s (%s)", arc.protagonist,
-                                            _bound, _seg.get("evidence"))
-                            elif _hold_for_deliberation(_bound, moves_to):
-                                pass  # #102: held for the player's own weighing
-                            else:
-                                p.ingest_structured([{
-                                    "entity": arc.protagonist, "attribute": "in", "value": _bound,
-                                    "value_type": "entity", "valid_from": turn_time(turn),
-                                }], classify="batch")
-                                trace.movement_status = _seg.get("status") if _seg else "clear"
-                                if _seg:
-                                    trace.movement_obstruction = _seg
-                                logger.info("move %r semantically BOUND to %s (%s)", moves_to,
-                                            _bound, trace.movement_status)
+                            _gated_move_commit(_bound, moves_to)
                     elif _amb:
                         # ASK, NEVER HALLUCINATE (founder 2026-07-04): an ambiguous
                         # destination gets a CLARIFY beat — the world asks which the player
@@ -7014,8 +7004,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             }.get(_grade, "somber — the goal is lost")
         # The movie epilogue: name the cast for fates, lift concealment, and HAVE FUN
         # revealing the interesting bits the player never uncovered (the dessert course).
-        cast = sorted({arc.protagonist}
-                      | {e for e in arc_entities(arc, live_reads) if e.startswith("person:")})
+        fate_cast = sorted({arc.protagonist}
+                           | {e for e in arc_entities(arc, live_reads) if e.startswith("person:")})
         reveal_scope = [e for e in (set(arc_entities(arc, live_reads)) | set(scope or []))
                         if e.startswith(("person:", "place:", "obj:", "fact:"))
                         and live_reads.has_entity(e)]
@@ -7048,7 +7038,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             + _beat1 +
             f"BEAT 2 — THE AFTERMATH ({flavor}): the settled wake. For the protagonist "
             f"(you) AND each of these characters, a fitting FATE — where they end up, what "
-            f"the outcome cost or won them: {cast}. A loss may carry an unexpected BOON "
+            f"the outcome cost or won them: {fate_cast}. A loss may carry an unexpected BOON "
             f"(a door opened, a truth freed, hope for a next time); a victory may carry a "
             f"lasting WOUND — when the shape says both, say both. Concealment lifts now "
             f"(the story is over): name what was hidden, savor what the player never "
@@ -7397,7 +7387,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             f"answer either. Deflect diegetically (the record is silent on that / it "
             f"isn't yours to know yet / that thread hasn't been pulled) and turn the "
             f"moment back to what is present and knowable. A deflection is NOT a flat "
-            f"refusal: whoever fields it reacts as a person would (see A PEOPLED WORLD) — "
+            f"refusal: whoever fields it reacts as a person would — "
             f"an accusation lands with feeling before any procedure is cited. This is "
             f"earned only through play.")
     elif improv_query:
@@ -7489,7 +7479,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "X, right?”) gets only the observable facts, honest uncertainty, or an "
             "in-world deflection. This neutrality is EPISTEMIC — about the evidence and "
             "the verdict — and is NOT a flattening of human feeling: the characters still "
-            "react with full emotion (see A PEOPLED WORLD), they simply do not give the "
+            "react with full emotion, they simply do not give the "
             "answer away. The player draws their own conclusions — let them, even when "
             "they are heading somewhere wrong. The truth is told only at the end, never "
             "coaxed out mid-play.")
