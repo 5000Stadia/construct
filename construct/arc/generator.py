@@ -83,6 +83,12 @@ ROUTINE_EVENT_KINDS: frozenset[str] = frozenset({
     "moment_missed", "absence_declined",
     # DRIFT-HANDLING D3 (§5): repair receipts are host bookkeeping too.
     "repair_committed", "repair_declined",
+    # The host's OWN pacing timer: `clock_pass` writes a canon `kind=clock_fired`
+    # event per firing, and the default escalation clocks' effect events are
+    # `kind=pressure` (game._build_arc). `_turn_salience` reads canon window events
+    # AFTER clock_pass, so without these the first escalation firing read as "a new
+    # kind of event" and woke the player-caused opportunistic generator.
+    "clock_fired", "pressure",
 })
 
 #: Diegetic-minute quiet threshold for the ambient trigger (§C, P2c).

@@ -13,6 +13,7 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -754,6 +755,26 @@ def navigate(counters: PacingCounters, delta_size: int,
     return choice
 
 
+def _is_placeholder_premise(atom: Any, protagonist: str) -> bool:
+    """True for the host's placeholder premise atom `StateIs(protagonist, "kind",
+    "person")` — the protagonist merely being a person, which conceals nothing."""
+    from construct.arc.conditions import StateIs
+
+    return (isinstance(atom, StateIs) and atom.entity == protagonist
+            and atom.attribute == "kind" and atom.value == "person")
+
+
+def _premise_keys(arc: Arc) -> set[tuple[str, str]]:
+    """Protected `(entity, attribute)` keys of the arc's premise, minus the
+    protagonist-is-a-person placeholder (see `arc_protected_keys`)."""
+    from construct.arc.conditions import InFrame, StateIs, atoms_of
+
+    return {(a.entity, a.attribute)
+            for a in atoms_of(arc.shape.premise)
+            if isinstance(a, (StateIs, InFrame))
+            and not _is_placeholder_premise(a, arc.protagonist)}
+
+
 def arc_protected_keys(arc: Arc, reads: Any = None) -> set[tuple[str, str]]:
     """The `(entity, attribute)` KEYS the hidden arc turns on — its beats'
     conditions + the destination + premise (GATED-INGEST-COHORT, momentous
@@ -768,7 +789,14 @@ def arc_protected_keys(arc: Arc, reads: Any = None) -> set[tuple[str, str]]:
     _beats = active_beats(reads, arc) if reads is not None else arc.beats
     exprs = [b.achievable_via for b in _beats]
     exprs += [b.unreachable_if for b in _beats if b.unreachable_if]
-    exprs += [arc.shape.world_condition, arc.shape.premise]
+    exprs += [arc.shape.world_condition]
+    # The premise folds in too, EXCEPT the host's placeholder `StateIs(protagonist,
+    # "kind", "person")` (game._build_arc stamps it on every arc). It is trivially
+    # true, hides no answer, and as a protected key it would turn the protagonist's
+    # own name into concealed vocabulary (value_leaks('Edith Marlowe has been your
+    # oldest friend') -> True). Any OTHER premise atom — even one on the
+    # protagonist, e.g. a secret parentage — stays protected.
+    keys.update(_premise_keys(arc))
     # PILLAR CLUE FACTS are load-bearing answers too (Cx 041): the genuine/false coverage
     # conditions reference the clue facts the player must EARN through play. Protect them so
     # no narrator path (incl. card-weaving's deliver_card) can promote/mirror an unearned
@@ -792,6 +820,14 @@ _CONCEAL_STOP = {"the", "a", "an", "of", "to", "is", "in", "on", "status", "kind
                  "name", "alias", "title", "fact", "event", "obj", "person", "place"}
 
 
+#: The one word tokenizer of the concealment vocabulary, used on BOTH sides (building the
+#: tokens, screening the text) so they cannot disagree: any run of letters/digits, so
+#: punctuation and `_`/`-`/`:` separators never hide a token. Same run as
+#: `turnloop._secret_word_set` (`[a-z0-9]+`), made unicode-aware so an accented name
+#: ('josé') is one word on both sides.
+_CONCEAL_WORD = re.compile(r"[^\W_]+")
+
+
 def concealed_tokens(keys: set[tuple[str, str]]) -> set[str]:
     """Distinctive tokens of the arc's HIDDEN facts — drawn from each protected entity id
     and attribute (NOT the value: a protected fact's value is often a public name, not itself
@@ -800,7 +836,7 @@ def concealed_tokens(keys: set[tuple[str, str]]) -> set[str]:
     toks: set[str] = set()
     for (e, a) in keys:
         for src in (str(e).split(":", 1)[-1], str(a)):
-            for t in src.replace("_", " ").replace("-", " ").lower().split():
+            for t in _CONCEAL_WORD.findall(src.lower()):
                 if len(t) > 3 and t not in _CONCEAL_STOP:
                     toks.add(t)
     return toks
@@ -813,7 +849,11 @@ def value_leaks(text: str, tokens: set[str]) -> bool:
     (Cx 337). Empty token set → fail-open False (a quiet/unprotected arc conceals nothing)."""
     if not tokens:
         return False
-    words = set(str(text).replace("_", " ").replace("-", " ").replace(":", " ").lower().split())
+    # TOTAL tokenizer (the same word run `turnloop._secret_word_set` uses; it can't
+    # be imported here — turnloop imports this module): punctuation ('the culprit,') must
+    # never leave a concealed token un-matched. `_`/`-`/`:` are non-alphanumeric, so
+    # id-style text ('person:edith_marlowe') still splits into its words.
+    words = set(_CONCEAL_WORD.findall(str(text).lower()))
     return bool(tokens & words)
 
 

@@ -55,7 +55,7 @@ class ReshapePlan:
     `frame_rows` apply only when the drawn tier LANDS; `consequence_rows` apply on
     any tier (the cost of a costly landing, or the fallout of a failure)."""
 
-    slug: str                                                    # → event:reshaped_<slug>
+    slug: str                                                    # → event:reshaped_<slug>_<turn>
     action_event: str = ""                                       # caused_by anchor (event:action_N)
     tier: str = "complete_success"                               # the drawn resolution tier
     state_rows: list[dict] = field(default_factory=list)         # APPENDED new current state
@@ -203,7 +203,9 @@ def reshape_canon(world: Any, plan: ReshapePlan, *, turn: int) -> ReshapeResult:
                 f"got {frame!r}. Refusing to commit — scoped witness knowledge must never "
                 "leak to canon.")
     vf = turn_time(turn)
-    event_id = f"event:reshaped_{plan.slug}"
+    # Per-occurrence id (like every other host event): a second reshape of the same
+    # target must not write onto the first event's entity.
+    event_id = f"event:reshaped_{plan.slug}_{turn}"
     canon: list[dict] = [
         {"entity": event_id, "attribute": "kind", "value": "canon_reshape", "valid_from": vf},
     ]
