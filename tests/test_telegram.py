@@ -18,7 +18,8 @@ import pytest
 from construct import loopback, registry, setup, telegram_bot
 from construct.provider import StubProvider
 from construct.transport_core import (
-    BUILD_HEADS_UP, GREETING, STATIC_REJECT, InboundEvent, TransportCore,
+    BUILD_HEADS_UP, GREETING, PENDING_CONTINUE, PENDING_EXIT, STATIC_REJECT, InboundEvent,
+    TransportCore,
     _humanize_stage, _interpret_mode, chunk)
 
 
@@ -679,7 +680,7 @@ class TestRouting:
         out2 = core.handle(_ev("telegram", "pr", "/ooc no really, do it"), now=NOW)
         assert prov.seen_pressed[-1] is True             # escalated
         assert "new scenario" in out2.chunks[0].lower()
-        assert "telegram:pr" in core._pending_exit                # a "yes" will exit
+        assert core._peek("telegram:pr", PENDING_EXIT)                # a "yes" will exit
         out3 = core.handle(_ev("telegram", "pr", "yes"), now=NOW)
         assert GREETING in out3.chunks[0]
         assert not registry.is_started(conn, "telegram", "pr")
@@ -1455,7 +1456,7 @@ class TestDeathTerminalTransport:
         text = "\n".join(out.chunks)
         assert "The End" in text
         assert "The story goes on" not in text
-        assert "telegram:dt1" not in core._pending_continue
+        assert not core._peek("telegram:dt1", PENDING_CONTINUE)
 
     def test_chapter_ending_still_arms_continue(self, conn):
         # regression guard: an ordinary chapter close keeps the auto-continue arm
@@ -1464,7 +1465,7 @@ class TestDeathTerminalTransport:
         out = core.handle(_ev("telegram", "dt2", "I name the culprit"), now=NOW)
         text = "\n".join(out.chunks)
         assert "End of Chapter" in text and "The story goes on" in text
-        assert "telegram:dt2" in core._pending_continue
+        assert core._peek("telegram:dt2", PENDING_CONTINUE)
 
 
 # ---- /remove: retire a world from the shelf (founder 2026-07-05) ----------
