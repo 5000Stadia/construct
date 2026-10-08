@@ -48,6 +48,42 @@ Under investigation in the same pass:
 - Host clocks possibly waking the player-caused generator.
 - The per-chapter `death_policy` and title being computed and then dropped. This may need a meta-format change, which would make it a proposal.
 
+### Outcome of tier 1 (merged into `polish-audit`, not into main, not pushed)
+
+Five branches, each with regression tests, and each test checked to fail before its fix:
+- `polish/concealment-arc`: bugs 1, 3 and 12, plus host clocks waking the generator.
+- `polish/turnloop`: bug 11, the dangling references, `fate_cast`, and the world-tick horizon. The horizon bug was confirmed with a test.
+- `polish/transport`: bugs 6, 7 and 8.
+- `polish/world`: bugs 2, 9 and 10, plus the epoch leak, unbuildable arcs, and the per-chapter title and death policy.
+- `polish/provider-cohorts`: bugs 4, 5 and 13's task tags.
+
+Behaviour that changes on purpose, for Kabe to see:
+- **The protagonist's name is no longer screened.** Relationships, grounding and family memories that were silently dropped now reach play. A genuine secret about the protagonist stays concealed (tested).
+- **`_serve_thread` reads the real cast on terminal turns.** It was always true, because `cast` had been rebound to a list. The monitor agreed it can go in.
+- **Known-place moves take the same route check and deliberation as the other two travel paths**, through one helper (`_gated_move_commit`) in place of three copies. A held known-place move no longer falls through to minting a new place.
+- **Restart confirmations take exact one-word answers.** `/help` and `/feedback` pass through, anything ambiguous is re-asked, and "no" cancels. On main, "yes" to "keep or wipe your notes?" wiped them.
+- **Telegram dead-letters a chat that fails permanently** (a 4xx other than 429) instead of blocking every player. Retryable failures still retry.
+- **Refused or incomplete model calls now fail with the server's reason**, and are no longer paid for twice through a wrong re-ask.
+- **The per-chapter title and death policy are stored as `session:episode` rows in the player's slot.** This is additive: a slot without the rows falls back to the scenario meta, and the meta format is unchanged.
+- **`continue_episode` computes everything first, then writes, and closes the world in `finally`.** It also retries an unbuildable arc proposal up to three times.
+
+Left as proposals:
+- **Make the continuation's writes one atomic `commit_set`.** That changes how construct calls the porcelain: the classify mode, frames spanning more than one frame argument, and reads interleaved between writes. See `polish/world`'s report.
+- **UTF-16 chunking and POST for Telegram.** For now an over-long chunk is dead-lettered, so the reply is lost instead of the chat wedging.
+
+### pattern-buffer's answer on the seam (colony m36d2dd, checked against engine code with repros)
+
+All three seam findings are real.
+1. **Host-control folding.** pattern-buffer proposes a **per-attribute durability pin** (`attr:<name> · durability`, read before the model) rather than a frame flag. It also found an engine bug: `fold_policy: last_write` is advertised but ignored. The spec goes to pbr after Kabe has seen it. Interim advice is `classify='rules'` on host-control writes; because that changes how construct calls the porcelain, it is a proposal here.
+2. **Tier routing.** Frozen **schema titles** become the task key. pattern-buffer is building this as polish, with no behaviour change. Construct will route on `schema['title']` and keep a drift test until then.
+3. **`locate()` co-asserts.** An additive `conflicting_facts` on `state()`. Then construct's re-fold goes, which pattern-buffer showed is less correct than `state()`.
+
+pattern-buffer's mirror findings that touch construct's play:
+- `refer` saves ambiguity picks as permanent aliases, so "the drawer" resolves to the wrong drawer forever;
+- a stale same-time tie blocks later moves.
+
+Construct has asked for both to be ranked high.
+
 ## Tier 2: polish worth doing next (behaviour-preserving, ranked by value per effort)
 
 1. **Type the turn's intent.** Classify returns a 26-field dict. Its defaults live about 4,000 lines away, across about 180 lines of loose locals in `run_turn`, and every field rule is written twice (schema and prompt). Fix: a `TurnIntent` dataclass. (cohorts F2, turnloop top-1; M)
