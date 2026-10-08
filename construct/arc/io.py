@@ -3,6 +3,10 @@
 The arc IS `plot:` rows (ARC-LAYER §2); the CLI is one-shot per turn, so
 the Arc object is reconstructed each turn from the frame. Condition
 expressions serialize to JSON strings stored as assertion values.
+
+The mid-play main-arc swap lives here too: `main_arc_swap_ops` + `commit_ops`
+write it as one atomic `commit_set` (tangent's adoption set is the other
+atomic writer of the manifest).
 """
 
 from __future__ import annotations
@@ -645,8 +649,9 @@ def portfolio_items(arc_ids: list[str], main_arc_id: str = "arc:main",
     sealed row — the durability classifier often marks these host-control rows
     CONSTITUTIVE, and a constitutive fold serves the EARLIEST visible row (marking
     the key conflicted), so a later `valid_from`/timeless write is silently ignored
-    after reopen. A mid-play writer MUST `world.porcelain.retract(...)` the visible
-    `arc:portfolio` rows first, THEN append (see `game.continue_episode`)."""
+    after reopen. A mid-play writer swaps the manifest through `main_arc_swap_ops`
+    (the visible control rows RETRACTED and the replacement asserted in ONE atomic
+    set), never a bare append."""
     if valid_from is None:
         meta = {"timeless": True}
     else:
@@ -676,32 +681,106 @@ def portfolio_add_items(reads, arc_id: str, frame: str = "plot:main",
     return portfolio_member_items(arc_id, frame=frame, valid_from=valid_from)
 
 
+#: The manifest's two CONTROL attributes: the rows a main-arc swap supersedes. The
+#: monotonic `member_*` registrations are never retracted.
+_MANIFEST_CONTROL = ("arc_ids", "main_arc")
+
+
+def assert_ops(items: list[dict], frame: str | None = None) -> list[dict]:
+    """`items` as `commit_set` assert ops. `frame` is a DEFAULT for unframed items,
+    exactly as `ingest_structured(frame=...)` treats it (per-item frames win), so a batch
+    moved from an ingest call into an atomic set lands in the same frame."""
+    return [{"op": "assert",
+             "item": dict(i) if frame is None or "frame" in i else {**i, "frame": frame}}
+            for i in items]
+
+
+def manifest_retract_ops(world, *, reason: str, frame: str = "plot:main") -> list[dict]:
+    """Retract ops for EVERY visible manifest control row (`arc_ids`, `main_arc`), read at
+    the timeline head as both mid-play swaps always read them. None visible (a legacy
+    single-arc world) gives no ops, and the swap simply asserts a manifest. Several
+    visible (a conflicted manifest an older writer left) are ALL retracted, so the swap
+    repairs the conflict instead of inheriting it. That tolerance is why the swaps do not
+    gate on `tangent.read_portfolio_state`: its PortfolioState fails closed on both cases,
+    which is right for an optional adoption and wrong for a swap that must happen."""
+    from construct.adapter import frame_facts
+    return [{"op": "retract", "assertion_id": row.id, "reason": reason}
+            for row in frame_facts(world, frame, entity=_PORTFOLIO)
+            if row.attribute in _MANIFEST_CONTROL]
+
+
+def main_arc_swap_ops(world, new_arc: Arc, arc_ids: list[str], *, valid_from: float,
+                      reason: str, frame: str = "plot:main") -> list[dict]:
+    """The ONE main-arc swap as ordered `commit_set` ops, in the shape tangent's adoption
+    set proved: retract every visible manifest control row FIRST (Cx 167: the constitutive
+    fold serves the EARLIEST visible row, so a bare append is ignored after reopen), then
+    assert the new arc's rows + discovery indexes, then the replacement manifest
+    (`arc_ids`, main = the new arc). It only READS. Hand the ops to `commit_ops`, alone or
+    inside a larger set, and a reader sees the old manifest and arc or the new ones:
+    never no manifest, never half an arc."""
+    return (manifest_retract_ops(world, reason=reason, frame=frame)
+            + assert_ops(arc_to_items(new_arc, frame=frame) + index_items(new_arc, frame=frame))
+            + assert_ops(portfolio_items(arc_ids, main_arc_id=new_arc.arc_id, frame=frame,
+                                         valid_from=valid_from)))
+
+
+def commit_ops(world, ops: list[dict], *, what: str):
+    """Commit `ops` as ONE all-or-none `commit_set` unit (ATOMIC-ACTIVATION-V1 §C), the
+    door every main-arc swap goes through. Per the engine source (porcelain/ingest/buffer):
+
+    * per-item frames are honoured (`frame=` only fills unframed items), so one set may
+      span `plot:main`, `session:main` and canon;
+    * classification is model-free: `classify="rules"`, the porcelain default and the
+      mode tangent's adoption set and growth activation use (guardrails, then STATE);
+    * a malformed op raises ValueError BEFORE any write; a gate skip or a raised
+      condition rolls the whole set back and only then raises `AtomicAbort`; a fault
+      after COMMIT, or an unconfirmable rollback, propagates raw because the set may be
+      durable, so it is never reported here as "nothing written".
+
+    Raises RuntimeError when the engine has no commit_set (refused before writing), when
+    it rolls the set back (chained from the `AtomicAbort`), or when its receipt is not
+    affirmative. A malformed op is a host bug and surfaces as the engine's ValueError,
+    also before any write. Returns the receipt."""
+    from patternbuffer import AtomicAbort
+
+    from construct.growth import _affirmative_success
+    p = world.porcelain
+    if not callable(getattr(p, "commit_set", None)):
+        raise RuntimeError(f"{what}: this engine has no commit_set; refused before "
+                           "writing (a non-atomic swap can leave no manifest)")
+    try:
+        receipt = p.commit_set(list(ops), classify="rules")
+    except AtomicAbort as abort:
+        raise RuntimeError(
+            f"{what}: the engine rolled the set back, nothing was written "
+            f"({abort.cause}: {abort.error or abort.skipped})") from abort
+    ok, reason, _rows = _affirmative_success(
+        receipt, sum(1 for op in ops if op.get("op") == "assert"))
+    if not ok:
+        raise RuntimeError(f"{what}: the engine did not affirm the commit ({reason})")
+    return receipt
+
+
 def replan_main_arc(world, new_arc, *, turn: int, frame: str = "plot:main") -> str:
     """Mid-episode arc RE-PLAN (WORLD-CHANGING-AGENCY step 4): install `new_arc` as
     the MAIN arc after a canon reshape made the old destination stale — WITHOUT an
     episode boundary. It does NOT write `event:episode_start`, checkpoint, or reset
     the terminal receipt (those belong to `game.continue_episode`); the world, the
-    player, and lived canon all carry on. Supersedes the sealed `arc:portfolio`
-    control rows via retract-then-append (Cx 167: a `valid_from` write alone is
-    silently ignored under the constitutive fold), installs the new arc's rows +
-    indexes, and points the manifest at it. Returns the new arc id; the caller
-    refreshes scene scope from the new arc's entities (the snap_scope item, Cx 207)."""
+    player, and lived canon all carry on. The new arc's rows + indexes, the retraction
+    of the sealed `arc:portfolio` control rows and the manifest pointing at the new arc
+    commit as ONE atomic set (`main_arc_swap_ops`): a failure leaves the old arc and
+    manifest exactly as they were. Returns the new arc id; the caller refreshes scene
+    scope from the new arc's entities (the snap_scope item, Cx 207)."""
     from construct.adapter import PorcelainWorldReads
     from construct.arc.executor import turn_time
-    vf = turn_time(turn)
     new_id = new_arc.arc_id
     ids = arc_ids_from_frame(PorcelainWorldReads(world), frame=frame)
     if new_id not in ids:
         ids = ids + [new_id]
-    world.porcelain.ingest_structured(
-        arc_to_items(new_arc, frame=frame) + index_items(new_arc, frame=frame), frame=frame)
-    from construct.adapter import frame_facts
-    for row in frame_facts(world, frame, entity=_PORTFOLIO):
-        if row.attribute in ("arc_ids", "main_arc"):
-            world.porcelain.retract(
-                row.id, "reshape replan: superseding the portfolio manifest")
-    world.porcelain.ingest_structured(
-        portfolio_items(ids, main_arc_id=new_id, frame=frame, valid_from=vf), frame=frame)
+    commit_ops(world, main_arc_swap_ops(
+        world, new_arc, ids, valid_from=turn_time(turn),
+        reason="reshape replan: superseding the portfolio manifest", frame=frame),
+        what="replan_main_arc")
     logger.info("replan_main_arc: main arc -> %s (mid-episode, no boundary)", new_id)
     return new_id
 

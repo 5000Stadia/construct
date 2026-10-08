@@ -2291,7 +2291,7 @@ class TestFullTurn:
         from pathlib import Path
         from patternbuffer import World
         from patternbuffer.testing import StubModel, rule_classifier_fallback
-        from construct.game import _episode_doorway
+        from construct.game import _plan_episode_doorway
         from construct.semantics import attribute_default
         from construct.clock import read_clock
         _rule = rule_classifier_fallback()
@@ -2312,7 +2312,12 @@ class TestFullTurn:
              "valid_from": 1010.0},  # the terminal scene — elsewhere
         ])
         _before = read_clock(w2).minutes
-        door = _episode_doorway(w2, PLAYER, 1000.0, 12)
+        _head = w2.buffer.head()
+        door, time_rows = _plan_episode_doorway(w2, PLAYER)
+        # PLANNED, not written: the time jump rides continue_episode's ONE atomic set
+        assert time_rows and w2.buffer.head() == _head
+        assert read_clock(w2).minutes == _before
+        w2.porcelain.commit_set([{"op": "assert", "item": r} for r in time_rows])
         assert read_clock(w2).minutes > _before             # TIME moved (engine truth)
         assert door == "place:far_end"                      # WHERE THE STORY ENDED
         assert w2.porcelain.locate(PLAYER)[0] == "place:far_end"   # nobody moved
@@ -2332,7 +2337,7 @@ class TestFullTurn:
             {"entity": "event:arc_outcome_12", "attribute": "kind",
              "value": "arc_won", "valid_from": 1010.0},
         ], frame="session:main")
-        assert _episode_doorway(w2, PLAYER, 1000.0, 13) == "place:far_end"
+        assert _plan_episode_doorway(w2, PLAYER).place == "place:far_end"
         # cr G-C r3: a NEWER nonterminal arc_* decoy must not decide —
         # only actual arc_won/arc_lost receipts are conclusions
         w2.porcelain.ingest_structured([
@@ -2343,13 +2348,13 @@ class TestFullTurn:
              "value": "place:study", "value_type": "literal",
              "valid_from": 1011.0},
         ], frame="session:main")
-        assert _episode_doorway(w2, PLAYER, 1000.0, 13) == "place:far_end"
+        assert _plan_episode_doorway(w2, PLAYER).place == "place:far_end"
         w2.porcelain.ingest_structured([
             {"entity": "event:arc_outcome_12",
              "attribute": "terminal_location",
              "value": "place:far_end", "value_type": "literal",
              "valid_from": 1010.0}], frame="session:main")
-        assert _episode_doorway(w2, PLAYER, 1000.0, 14) == "place:far_end"
+        assert _plan_episode_doorway(w2, PLAYER).place == "place:far_end"
         w2.close()
 
     def test_wrong_commitment_records_loss_even_when_frame_knows_truth(self, world):
