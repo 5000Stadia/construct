@@ -1,33 +1,21 @@
-"""Cohort output-schema self-consistency (pbeo review 2026-07-28, Item 4).
+"""Cohort output-schema self-consistency (pbeo review 2026-07-28, Item 4; audit
+2026-10 finding 12).
 
-pbeo's exact failure mode — a field the schema REQUIRES that every few-shot
-EXAMPLE omits — has no surface in Construct: cohort examples are prose inside
+pbeo's exact failure mode - a field the schema REQUIRES that every few-shot
+EXAMPLE omits - has no surface in Construct: cohort examples are prose inside
 prompt strings, not structured payloads handed to the model. The automatable
-cousin that DOES apply is the mechanical check pbeo actually advocated: run a
-guard against the schema itself rather than a reviewer's attention.
+cousin that DOES apply is a mechanical guard run against the schema itself
+rather than a reviewer's attention.
 
-This pins the one class of schema bug that is silently latent otherwise — a
-``required`` field the ``properties`` block never describes, so the model is told
-to emit a field the schema can't validate (or a typo'd requirement). It walks
-every ``*_SCHEMA`` constant in ``construct.cohorts`` recursively (nested objects
-and array ``items`` included).
+The rule lives in ONE place, ``construct.provider.lint_schema`` ("required" names
+must appear in "properties", an array must declare "items"); it also runs on
+every ``complete_sync`` call. This test only sweeps every ``*SCHEMA`` constant in
+``construct.cohorts`` through it, so a defective schema fails here and never on a
+live call, and keeps the "the sweep actually found schemas" sanity check.
 """
 
 import construct.cohorts as cohorts
-
-
-def _walk_object_schemas(node, path):
-    """Yield (path, required_set, property_names) for every object-typed schema
-    reachable from `node` (recursing through properties and array items)."""
-    if isinstance(node, dict):
-        if node.get("type") == "object":
-            props = node.get("properties") or {}
-            yield path, set(node.get("required") or []), set(props.keys())
-        for key, value in node.items():
-            yield from _walk_object_schemas(value, f"{path}.{key}")
-    elif isinstance(node, list):
-        for i, value in enumerate(node):
-            yield from _walk_object_schemas(value, f"{path}[{i}]")
+from construct.provider import lint_schema
 
 
 def _schema_constants():
@@ -39,19 +27,14 @@ def _schema_constants():
 
 
 def test_there_are_schema_constants_to_check():
-    # guard against the walker silently finding nothing (a passing check that
-    # checks nothing is worse than no check — pbeo lesson 4).
+    # guard against the sweep silently finding nothing (a passing check that
+    # checks nothing is worse than no check - pbeo lesson 4).
     names = [n for n, _ in _schema_constants()]
     assert len(names) >= 30, names
 
 
-def test_every_required_field_is_declared_in_properties():
+def test_every_cohort_schema_passes_the_provider_lint():
     """No cohort schema may require a field its `properties` block doesn't
-    describe, at any nesting depth."""
-    offenders = []
+    describe, or declare an array without `items`, at any nesting depth."""
     for name, schema in _schema_constants():
-        for path, required, props in _walk_object_schemas(schema, name):
-            missing = required - props
-            if missing:
-                offenders.append(f"{path}: required-not-in-properties {sorted(missing)}")
-    assert not offenders, "schema self-inconsistency:\n" + "\n".join(offenders)
+        lint_schema(schema, path=name)
