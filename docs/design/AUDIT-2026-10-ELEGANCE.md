@@ -133,3 +133,17 @@ Surprises:
 - `knows_about`, `knows_place`, `knows_person` and `likely_familiar_with` are not declared set-valued in `semantics.py`, so same-time rows tie.
 - `journal.py` still shows one member of a set.
 - `build_sheet` now takes about 0.1 s a turn on the largest world, up from about 10 ms.
+
+## Approved proposal landed: atomic chapter and replan swaps (for Kabe's eye)
+
+`continue_episode` and `replan_main_arc` each write in one `commit_set`, so a reader sees the old arc and manifest or the new ones, never a half-written swap. 34 failure-injection tests back it: against the old code, 24 of 26 faults left the slot half-written. The full suite passed on the branch (1352).
+
+Behaviour that changes:
+- **A write the engine refuses now fails the whole continuation, with nothing written.** Before, only that step was skipped. Rows the engine would skip are dropped in planning, so ordinary model slips still pass.
+- **These rows are now classified by the engine's rules,** not one by one by the model.
+
+Still not atomic:
+- the checkpoint copy after the commit;
+- reshape followed by replan, which lives in `turnloop.py`.
+
+Found, not fixed (a behaviour change, so your call): after a third chapter, the rows `session:episode.entry_epoch`, `session:episode.arc_scope` and `session:scope.independent_extra` tie at `valid_from` 0.0, and chapter 2's values win. The pre-change code did the same. The fix is to stamp them with the turn time, as `chapter_title` is.
