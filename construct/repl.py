@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import getpass
 import logging
-import sys
 import time
 
 from construct import registry
