@@ -597,7 +597,7 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
         "clue whose `fact` matches it EXACTLY (same entity/attribute/value), held by a reachable "
         "member at a LIVE-reachable reveal_condition ('none'/'pressure' to ask, 'examined'/"
         "'scrutiny' to inspect)." + beats_block + fix,
-        AUTHOR_CAST_SCHEMA, tier="main", deliberate=True, task="cast")
+        AUTHOR_CAST_SCHEMA, tier="main", deliberate=True, task="cas")
 
 
 #: The optional player seed is untrusted text — bound its length and quote
@@ -2688,7 +2688,7 @@ def adapt_decision(provider: Provider, pursued: str, *,
         "lane='decline'. It stays atmosphere; nothing is minted (the player isn't punished).\n"
         "- You only ROUTE an existing cause onto the player's path. NEVER invent or change the "
         "culprit, the answer, or add a new cause. When in genuine doubt, decline.",
-        ADAPT_DECISION_SCHEMA, tier="cheap", task="adapt")
+        ADAPT_DECISION_SCHEMA, tier="cheap", task="adp")
 
 
 #: The graded outcome space for a conclusory commitment (STORY-SHAPES.md win-model). The
@@ -3050,7 +3050,7 @@ def classify_death_policy(provider: Provider, genre: str, game_types: str,
         f"GENRE: {genre or '(unstated)'}\n"
         f"GAME TYPES: {game_types or '(unstated)'}\n"
         f"PREMISE: {premise or '(unstated)'}",
-        DEATH_POLICY_SCHEMA, tier="cheap", task="dpol")
+        DEATH_POLICY_SCHEMA, tier="cheap", task="dpl")
 
 
 WORLD_TICK_SCHEMA = {
@@ -3467,25 +3467,44 @@ def weave_pick(provider: Provider, scene: str, cards: list[str], floor_debt: lis
 #: harness caught the model spilling its JSON wrapper + reasoning into the `prose` value
 #: ('…seal."}  Wait final schema expected JSON object…'). Plain narration never contains
 #: these, so truncating the prose at the earliest marker safely strips the leaked tail.
-# Braces essentially never occur in narrative prose, so a bare '{' or '}' is a reliable
-# cut point for a leaked-JSON / degenerate tail — and it catches SMART-quote+brace
-# (`”}`) which the old straight-quote marker `"}` missed (live whodunit Turn 6: a
-# `dinner.”} swinenePCTSTR? … Actually final JSON has extra` degenerate model tail leaked
-# into the prose). Meta markers catch the model's "thinking out loud about the JSON" tail.
-_PROSE_STRUCT_MARKERS = ('}', '{', '"prose"', '⟦', '⟧')
+# A bare brace is NOT a safe cut point ("a brace {of pheasants}" is prose), so only
+# STRUCTURAL brace leaks cut (see `_brace_cut`): a JSON object opening (`{` then a quote),
+# a closing brace with no opener in the prose (the wrapper's own `}` — including the
+# SMART-quote `”}` of live whodunit Turn 6: `dinner.”} swinenePCTSTR? … Actually final
+# JSON has extra`), or a brace left open. A balanced `{...}` pair survives.
+_PROSE_STRUCT_MARKERS = ('"prose"', '⟦', '⟧')
+# Meta markers catch the model's "thinking out loud about the JSON" tail. Only phrases
+# that do not occur in ordinary English: 'it ends with' / 'the final has' were removed
+# (they cut "The corridor — it ends with a sealed hatch"); in the real leaks they sat
+# AFTER the wrapper's `}` and the structural cut already removes them.
 _PROSE_META_MARKERS = ('final schema', 'json object', 'output wrapper',
                        'expected json', 'schema expected', 'the response format',
-                       'final json', 'actually final', 'wait final', 'json has extra',
-                       'it ends with', 'the final has')
+                       'final json', 'actually final', 'wait final', 'json has extra')
+
+
+def _brace_cut(text: str) -> int:
+    """Index of the first structural brace leak, or len(text) if there is none."""
+    open_at: list[int] = []
+    for i, ch in enumerate(text):
+        if ch == '{':
+            if text[i + 1:].lstrip()[:1] in ('"', '“'):   # a JSON object opening
+                return i
+            open_at.append(i)
+        elif ch == '}':
+            if not open_at:
+                return i                                   # closer with no opener
+            open_at.pop()
+    return open_at[0] if open_at else len(text)            # a brace never closed
 
 
 def _clean_prose(text: str) -> str:
     """Strip a leaked JSON/meta tail from narrator prose (harness bug). Cuts at the
-    earliest control/meta marker and trims stray trailing quotes/braces. A no-op for
-    clean prose — these markers do not occur in normal narration."""
+    earliest structural/meta marker and trims the stray trailing quotes/braces the cut
+    exposes. Ordinary prose — em-dashes, "it ends with", closing dialogue quotes,
+    balanced braces — is returned untouched."""
     if not text:
         return text
-    cut = len(text)
+    cut = _brace_cut(text)
     low = text.lower()
     for m in _PROSE_STRUCT_MARKERS:
         i = text.find(m)
@@ -3495,6 +3514,8 @@ def _clean_prose(text: str) -> str:
         i = low.find(m)
         if i != -1:
             cut = min(cut, i)
+    if cut == len(text):
+        return text.rstrip() or text                       # nothing leaked
     cleaned = text[:cut].rstrip().rstrip('"{}').rstrip()
     return cleaned or text  # never return empty
 
