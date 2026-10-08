@@ -22,6 +22,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 
+from construct.adapter import state_value
+
 LEVEL_ATTR = "gauge_level"   # declared fold_policy=accrue in semantics.py
 LABEL_ATTR = "gauge_label"   # human phrasing for narrator surfacing (literal)
 FLOOR_ATTR = "gauge_floor"   # optional terminal/clamp bound (literal)
@@ -35,21 +37,11 @@ def gauge_id(slug: str) -> str:
     return slug if slug.startswith("gauge:") else f"gauge:{slug}"
 
 
-def _state_value(porcelain, entity: str, attribute: str, *, as_of: float | None = None):
-    try:
-        st = porcelain.state(entity, attribute, as_of=as_of)
-    except Exception:  # noqa: BLE001 — a frontier/unknown gauge reads as absent
-        return None
-    if isinstance(st, dict) and st.get("status") in ("known", "conflicted"):
-        return (st.get("fact") or {}).get("value")
-    return None
-
-
 def read_gauge(world, slug: str, *, as_of: float | None = None) -> float | None:
     """The gauge's current folded total, or None if never seeded. `as_of` (Cx 259): read at
     the play horizon. Gauges are host-authored at build/play coordinates (never source-stamped),
     so this is a no-op for horizon worlds — bound for a uniformly horizon-disciplined turn path."""
-    total = _state_value(world.porcelain, gauge_id(slug), LEVEL_ATTR, as_of=as_of)
+    total = state_value(world.porcelain, gauge_id(slug), LEVEL_ATTR, as_of=as_of)
     if isinstance(total, bool):
         return None
     if isinstance(total, (int, float)):
@@ -69,10 +61,10 @@ def seed_gauge(world, slug: str, baseline: float, *, label: str | None = None,
     deltas (the false-green bug). Runtime seeding re-establishes accrue."""
     gid = gauge_id(slug)
     rows: list[dict] = []
-    if _state_value(world.porcelain, gid, "kind") is None:
+    if state_value(world.porcelain, gid, "kind") is None:
         rows.append({"entity": gid, "attribute": "kind", "value": "gauge",
                      "timeless": True})
-    if _state_value(world.porcelain, gid, LEVEL_ATTR) is None:
+    if state_value(world.porcelain, gid, LEVEL_ATTR) is None:
         rows.append({"entity": gid, "attribute": LEVEL_ATTR,
                      "value": float(baseline), "value_type": "literal"})
     if label is not None:
@@ -94,7 +86,7 @@ def commit_gauge(world, slug: str, delta: float) -> None:
     if not delta:
         return
     gid = gauge_id(slug)
-    if _state_value(world.porcelain, gid, LEVEL_ATTR) is None:
+    if state_value(world.porcelain, gid, LEVEL_ATTR) is None:
         world.porcelain.ingest_structured(
             [{"entity": gid, "attribute": "kind", "value": "gauge", "timeless": True},
              {"entity": gid, "attribute": LEVEL_ATTR, "value": 0.0,

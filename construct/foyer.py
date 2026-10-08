@@ -18,7 +18,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from construct import cohorts, hostcontrol
+from construct import cohorts
+from construct.adapter import state_value  # noqa: F401 — re-exported (tests/scripts import it from here)
 from construct.provider import Provider
 
 logger = logging.getLogger(__name__)
@@ -84,21 +85,6 @@ def _ask_required(field: str) -> str:
     if field == "name":
         return "Before we step in — what name shall the world know you by? (or “you decide”)."
     return f"Before we step in — could you settle your {field}?"
-
-
-def state_value(porcelain: Any, entity: str, attribute: str,
-                *, as_of: float | None = None) -> str | None:
-    """The bare canon value for (entity, attribute), or None. `porcelain.state`
-    returns a structured `{status, fact:{value}}` dict — unwrap it the way
-    `adapter.PorcelainWorldReads.state` does (known/conflicted → the value).
-
-    `as_of` (B' S3): materialize as-of the play horizon, so scene/imagery reads see the
-    opening state, not the source aftermath. None (the default) = the timeline head."""
-    try:
-        st = porcelain.state(entity, attribute, as_of=as_of)
-    except Exception:
-        return None
-    return hostcontrol.collapse_state(st, entity, attribute)
 
 
 def world_anchors(world: Any, scope: list[str] | None, protagonist: str,

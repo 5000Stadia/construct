@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from construct import hostcontrol
+from construct.adapter import state_value
 
 DEFAULT_HOURS_PER_DAY = 24
 
@@ -163,14 +163,6 @@ ELAPSED_ATTR = "elapsed_minutes"          # declared fold_policy=accrue in seman
 CALENDAR_ENTITY = "time:calendar"
 
 
-def _state_value(porcelain, entity, attribute):
-    try:
-        st = porcelain.state(entity, attribute)
-    except Exception:
-        return None
-    return hostcontrol.collapse_state(st, entity, attribute)
-
-
 def _to_number(v) -> float | None:
     if isinstance(v, (int, float)):
         return float(v)
@@ -187,14 +179,14 @@ def _calendar_from(porcelain, entity: str) -> Calendar | None:
     founder). None if the entity establishes no time model."""
     import json
     for attr in ("calendar", "config"):
-        raw = _state_value(porcelain, entity, attr)
+        raw = state_value(porcelain, entity, attr)
         if raw:
             try:
                 return Calendar.from_dict(json.loads(raw) if isinstance(raw, str) else raw)
             except Exception:
                 pass
     for attr in ("hours_per_day", "day_hours", "day_length_hours"):
-        n = _to_number(_state_value(porcelain, entity, attr))
+        n = _to_number(state_value(porcelain, entity, attr))
         if n and n > 0:
             return Calendar(hours_per_day=int(n))
     return None
@@ -217,7 +209,7 @@ def read_clock(world, location: str | None = None) -> Clock:
     """The current diegetic moment: the folded elapsed total on the governing
     calendar (defaults: 0 minutes, Earth-like — so worlds with no clock seeded
     still read coherently)."""
-    total = _state_value(world.porcelain, ELAPSED_ENTITY, ELAPSED_ATTR)
+    total = state_value(world.porcelain, ELAPSED_ENTITY, ELAPSED_ATTR)
     minutes = int(total) if isinstance(total, (int, float)) else 0
     return Clock(minutes=minutes, calendar=governing_calendar(world, location))
 
@@ -233,10 +225,10 @@ def commit_elapsed(world, delta_minutes: int) -> None:
     # INDETERMINATE (never fires) if has_entity() is false for lack of a kind row. Checked
     # separately so an OLD world that already has elapsed minutes but no kind row is BACKFILLED
     # (Cx 182 #2 — the compatibility path), not just fresh worlds.
-    if _state_value(p, ELAPSED_ENTITY, "kind") is None:
+    if state_value(p, ELAPSED_ENTITY, "kind") is None:
         p.ingest_structured([{"entity": ELAPSED_ENTITY, "attribute": "kind",
                               "value": "clock", "timeless": True}])
-    if _state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) is None:
+    if state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) is None:
         p.ingest_structured([{"entity": ELAPSED_ENTITY, "attribute": ELAPSED_ATTR,
                               "value": 0, "value_type": "literal"}])
     p.ingest_structured([{"entity": ELAPSED_ENTITY, "attribute": ELAPSED_ATTR,
