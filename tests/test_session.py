@@ -973,3 +973,24 @@ def test_opening_names_the_containment_chain(tmp_path, monkeypatch):
                and "grief closed every other door" in p for p in _open_prompts), \
         "the authored place relationship must ride the grounding"
     s.close()
+
+
+def test_notebook_ignores_legacy_placeholder_settled_record(scenario):
+    # B3: slots continued BEFORE the fix hold a settled record built from `_build_arc`'s
+    # placeholder premise ("<protagonist> · kind · person — ANSWERED"); the notebook must not
+    # print "YOU — ... settled" for them.
+    import json as _json
+    s = Session.open(scenario, player_id="u1", fresh=True, provider=StubProvider([]))
+    s._world.porcelain.ingest_structured([
+        {"entity": PLAYER, "attribute": "role", "value": "the investigator",
+         "valid_from": turn_time(2)},
+    ], frame=PLAYER_FRAME)
+    s._world.porcelain.ingest_structured([
+        {"entity": "settled:episode_9", "attribute": "record",
+         "value": _json.dumps({"title": "The First Case", "outcome": "won",
+                               "settled": [f"{PLAYER} · kind · person — ANSWERED"]}),
+         "value_type": "literal", "valid_from": turn_time(9)}], frame="session:main")
+    out = s.journal()
+    s.close()
+    you = next(ln for ln in out.splitlines() if ln.startswith("YOU —"))
+    assert "settled" not in you

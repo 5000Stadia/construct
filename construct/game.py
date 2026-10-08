@@ -160,7 +160,9 @@ def _safe_player_id(player_id: str) -> str:
 def list_scenarios() -> list[dict]:
     out = []
     for path in sorted(WORLDS_DIR.glob("*.world")):
-        if path.name.endswith(".play.world"):
+        # playthrough slots AND episode-start checkpoints are per-player files, never
+        # scenarios (a checkpoint is `<name>.<pid>.ep.checkpoint.world`)
+        if path.name.endswith((".play.world", ".ep.checkpoint.world")):
             continue
         meta_path = path.with_suffix(".meta.json")
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
@@ -425,13 +427,28 @@ def _author_world_laws(provider: Provider, brief: str, reality: str,
     return survivors, settled
 
 
-def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
-                       spath: Path, endless: bool, on_stage=None,
-                       win_direction: str = "", play_as: str = "",
-                       game_types: list | None = None,
-                       source_step: float | None = None,
-                       laws: list | None = None,
-                       reality_register: str = "") -> dict:
+def _finalize_scenario(*args: Any, **kwargs: Any) -> dict:
+    """Shared session-zero tail (both creation paths) — see `_finalize_scenario_impl`.
+
+    SCOPED write context (Cx 383, extended to the build path): the impl raises the
+    entry-epoch contextvar for its own staging writes; that epoch must never outlive the
+    build — leaking it poisons `turn_time()` for whoever runs next in the process.
+    Restored in `finally`, the same way `continue_episode` does."""
+    from construct.arc import executor as _arc_executor
+    _epoch_tok = _arc_executor._ENTRY_EPOCH.set(_arc_executor._ENTRY_EPOCH.get())
+    try:
+        return _finalize_scenario_impl(*args, **kwargs)
+    finally:
+        _arc_executor._ENTRY_EPOCH.reset(_epoch_tok)
+
+
+def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provider,
+                            spath: Path, endless: bool, on_stage=None,
+                            win_direction: str = "", play_as: str = "",
+                            game_types: list | None = None,
+                            source_step: float | None = None,
+                            laws: list | None = None,
+                            reality_register: str = "") -> dict:
     """Shared session-zero tail (both creation paths): once canon is
     established, author the hidden arc over it (lint-gated), seed
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION.
@@ -687,7 +704,19 @@ def _finalize_scenario(world: Any, name: str, title: str, provider: Provider,
                if last_findings else "")
             + proto_feedback,
             ARC_SCHEMA, tier="main", deliberate=True, task="arc")
-        arc = _build_arc(proposal)
+        try:
+            arc = _build_arc(proposal)
+        except Exception as exc:  # noqa: BLE001 — a malformed proposal is a failed ATTEMPT
+            # (empty beats -> IndexError, an off-enum phase/weight -> ValueError, a missing
+            # key): author_replan guards the same build; here it counts against the retry
+            # loop instead of aborting the whole build.
+            logger.warning("arc proposal could not be built (attempt %d): %r",
+                           attempt + 1, exc)
+            proto_feedback = (
+                f"PRIOR ATTEMPT COULD NOT BE BUILT ({exc!r}): emit at least one beat, "
+                f"and every beat's phase/weight must be one of the schema's enum values.\n")
+            arc = None
+            continue
         findings = lint_arc(arc, reads)
         blocking = [f for f in findings if f.check != "2-paths"]
         if blocking:
@@ -2217,6 +2246,17 @@ def author_replan(world: Any, arc: Arc, provider: Provider, *,
     return ReplanOutcome("replanned", new_arc)
 
 
+def _is_placeholder_premise(atom: Any, protagonist: str | None) -> bool:
+    """True for `_build_arc`'s always-true PLACEHOLDER premise
+    `StateIs(<protagonist>, "kind", "person")`. It carries no answered question, so it must
+    never enter a chapter's settled (closed) history — otherwise the protagonist is recorded
+    as "a past chapter's answer" and the notebook prints `YOU — <name> — settled`."""
+    return (bool(protagonist)
+            and getattr(atom, "entity", None) == protagonist
+            and getattr(atom, "attribute", None) == "kind"
+            and getattr(atom, "value", None) == "person")
+
+
 def _build_arc(proposal: dict, arc_id: str = "arc:main") -> Arc:
     """Build an Arc from an authoring proposal. `arc_id` defaults to the main
     arc; a non-main (side) arc gets a per-arc refusal-clock id so two arcs never
@@ -2587,21 +2627,34 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         raise FileNotFoundError(f"no playthrough slot for {name!r} to continue")
     _emit(on_stage, "Reflecting on how your story ended")
     world = _world(slot, name, model=engine_tier_dispatch(provider))
-    reads = PorcelainWorldReads(world)
-    meta_path = scenario_path(name).with_suffix(".meta.json")
-    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-    # The episode's write origin (Cx 253 §4): for a HORIZON world the origin STAYS at
-    # `opening_as_of` — the new chapter's arc rows + turns advance the play horizon within the
-    # reserved band (turn_time(turn) = opening_as_of + turn supersedes prior); raising it above
-    # the source aftermath (compute_entry_epoch) would reintroduce the old above-everything
-    # behavior and re-expose future source rows. Legacy worlds keep the Cx-127 raise.
-    _opening = meta.get("opening_as_of")
-    epoch = float(_opening) if _opening is not None else compute_entry_epoch(world)
-    # SCOPED write context (Cx 383): the raised continuation epoch must never outlive this
-    # call — Session.open restores the per-slot epoch for actual play; leaking it poisons
-    # turn_time() for whoever runs next in the process (test order proved it).
-    _epoch_tok = set_entry_epoch(epoch)
+    # The slot's SQLite handle must never outlive this call on ANY path (a failed
+    # continuation in a long-running bot used to leak it): `_close_world` is idempotent and
+    # runs in the `finally`; the success path closes EARLY (before the file-copy checkpoint).
+    _world_open = True
+
+    def _close_world() -> None:
+        nonlocal _world_open
+        if _world_open:
+            _world_open = False
+            world.close()
+
+    _epoch_tok = None
     try:
+        reads = PorcelainWorldReads(world)
+        meta_path = scenario_path(name).with_suffix(".meta.json")
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        # The episode's write origin (Cx 253 §4): for a HORIZON world the origin STAYS at
+        # `opening_as_of` — the new chapter's arc rows + turns advance the play horizon within
+        # the reserved band (turn_time(turn) = opening_as_of + turn supersedes prior); raising
+        # it above the source aftermath (compute_entry_epoch) would reintroduce the old
+        # above-everything behavior and re-expose future source rows. Legacy worlds keep the
+        # Cx-127 raise.
+        _opening = meta.get("opening_as_of")
+        epoch = float(_opening) if _opening is not None else compute_entry_epoch(world)
+        # SCOPED write context (Cx 383): the raised continuation epoch must never outlive this
+        # call — Session.open restores the per-slot epoch for actual play; leaking it poisons
+        # turn_time() for whoever runs next in the process (test order proved it).
+        _epoch_tok = set_entry_epoch(epoch)
         turn = next_turn_number(world)
         prior_main_id = arc_io.main_arc_from_frame(reads)
         prior_arcs = arc_io.portfolio_from_frame(reads)
@@ -2615,7 +2668,6 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # #95 PERMANENCE (Cx 422): the story ended at the protagonist's death — there is
         # no next chapter, for anyone. Refused BEFORE any generator or prompt work.
         if prior_outcome == "died":
-            world.close()
             raise RuntimeError(
                 "this story ended at the protagonist's death — the world's story "
                 "rests; there is no next chapter")
@@ -2667,11 +2719,16 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # material, never a mystery to reopen. Recorded as a session literal (the notebook
         # and future opens read it) and fed to the generator with the explicit prohibition.
         _settled_lines: list[str] = []
+        _settled_item: dict | None = None
         try:
             if prior_main is not None:
                 for _atom in (getattr(prior_main.shape, "premise", None),
                               getattr(prior_main.shape, "world_condition", None)):
-                    _se, _sa = getattr(_atom, "entity", None), getattr(_atom, "attribute", None)
+                    # `_build_arc`'s PLACEHOLDER premise (the protagonist is a person) is
+                    # not a question the chapter answered — never closed history.
+                    if _is_placeholder_premise(_atom, prior_main.protagonist):
+                        continue
+                    _se, _sa =getattr(_atom, "entity", None), getattr(_atom, "attribute", None)
                     if _se and _sa:
                         _settled_lines.append(
                             f"{_se} · {_sa} · {getattr(_atom, 'value', '')} — ANSWERED")
@@ -2681,32 +2738,36 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                         and str(_row.attribute) == "weave_state"):
                     _settled_lines.append(f"{_row.entity}: {_row.value} — closed")
             _settled_lines = _settled_lines[:12]
-            world.porcelain.ingest_structured(
-                [{"entity": f"settled:episode_{turn}", "attribute": "record",
-                  "value": json.dumps({"title": prior_title,
-                                       "outcome": prior_outcome or "",
-                                       "settled": _settled_lines})[:4000],
-                  "value_type": "literal", "valid_from": turn_time(turn)}],
-                frame=SESSION)
+            # COMPUTED here, COMMITTED in the write phase below (after every model call).
+            _settled_item = {
+                "entity": f"settled:episode_{turn}", "attribute": "record",
+                "value": json.dumps({"title": prior_title,
+                                     "outcome": prior_outcome or "",
+                                     "settled": _settled_lines})[:4000],
+                "value_type": "literal", "valid_from": turn_time(turn),
+                "frame": SESSION}
         except Exception:  # noqa: BLE001 — settled history is enrichment, never a gate
             _settled_lines = []
+            _settled_item = None
         # ---- #96 S4: PERSONAL THREADS (Cx 414 constraint 4) -------------------------------
         # Promises made, bonds formed, debts incurred — first-class continuation fuel, not
         # lossy prose memory. One cheap structured extraction over the ledger; stored as a
         # session literal; named to the generator as threads to HONOR or consciously pay off.
         _personal: list[dict] = []
+        _personal_item: dict | None = None
         try:
             if history.strip():
                 _pt = cohorts.extract_personal_threads(provider, history)
                 _personal = [t for t in (_pt.get("threads") or [])
                              if isinstance(t, dict) and (t.get("thread") or "").strip()][:6]
                 if _personal:
-                    world.porcelain.ingest_structured(
-                        [{"entity": "session:personal_threads", "attribute": "record",
-                          "value": json.dumps(_personal)[:3000], "value_type": "literal",
-                          "valid_from": turn_time(turn)}], frame=SESSION)
+                    _personal_item = {
+                        "entity": "session:personal_threads", "attribute": "record",
+                        "value": json.dumps(_personal)[:3000], "value_type": "literal",
+                        "valid_from": turn_time(turn), "frame": SESSION}
         except Exception:  # noqa: BLE001 — threads are enrichment, never a gate
             _personal = []
+            _personal_item = None
         trigger = (
             "the previous chapter has closed and the SAME protagonist continues. Before you author, "
             "weigh two things. (1) WHAT DOES THE WORLD LOOK LIKE AS WE CONTINUE — what the last case "
@@ -2731,30 +2792,128 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                if _region_lines else "")
             + "\nGive the new chapter its OWN `title` — never the prior chapter's.")
         prior_protagonist = prior_main.protagonist if prior_main else None
-        proposal = cohorts.generate_arc(
-            provider, trigger=trigger,
-            fuel=fuel, available_ids=known_ids, style=meta.get("style", ""),
-            present_characters=", ".join(_known_people(world)) or "(carry the established cast)",
-            protagonist=prior_protagonist or "")
-        # HARD INVARIANT (Cx 138): the next chapter is the SAME protagonist's — the generator's prompt
-        # is pinned, but enforce it deterministically too (generate_arc descends from the side-arc
-        # author, which otherwise picks an NPC). Override the proposal's protagonist before building so
-        # a stray pick can never silently switch the player character out from under them.
-        if prior_protagonist:
-            proposal["protagonist"] = prior_protagonist
         new_id = f"arc:ep_{turn}"
-        new_arc = _build_arc(proposal, arc_id=new_id)
+        # A proposal that cannot be BUILT (empty beats -> IndexError, an off-enum phase ->
+        # ValueError, a non-dict) is a failed ATTEMPT, retried like the build path's arc loop
+        # — never an abort that strands a half-written chapter. Nothing is written yet.
+        new_arc = None
+        proposal: dict = {}
+        _build_note = ""
+        for _attempt in range(3):
+            proposal = cohorts.generate_arc(
+                provider, trigger=trigger + _build_note,
+                fuel=fuel, available_ids=known_ids, style=meta.get("style", ""),
+                present_characters=", ".join(_known_people(world))
+                or "(carry the established cast)",
+                protagonist=prior_protagonist or "")
+            try:
+                # HARD INVARIANT (Cx 138): the next chapter is the SAME protagonist's — the
+                # generator's prompt is pinned, but enforce it deterministically too
+                # (generate_arc descends from the side-arc author, which otherwise picks an
+                # NPC). Override the proposal's protagonist before building so a stray pick
+                # can never silently switch the player character out from under them.
+                if prior_protagonist:
+                    proposal["protagonist"] = prior_protagonist
+                new_arc = _build_arc(proposal, arc_id=new_id)
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("continuation arc proposal could not be built "
+                               "(attempt %d): %r", _attempt + 1, exc)
+                new_arc = None
+                _build_note = (f"\nPRIOR ATTEMPT COULD NOT BE BUILT ({exc!r}): emit at least "
+                               f"one beat, and every beat's phase/weight must be one of the "
+                               f"schema's enum values.")
+        if new_arc is None:
+            raise RuntimeError("the next chapter's arc could not be built after 3 attempts")
         if prior_protagonist and new_arc.protagonist != prior_protagonist:
             raise RuntimeError(
                 f"continuation protagonist drift: {new_arc.protagonist!r} != {prior_protagonist!r}")
+        all_ids = [a.arc_id for a in prior_arcs] + [new_id]
 
+        # ---- COMPUTE (continued): everything the write phase needs that is a READ or a MODEL
+        # CALL is settled here, before the first write (a failure past this point can only be
+        # an engine-write failure, never a model/parse failure). ----------------------------
+        # #96 S3 (Cx 414): the new chapter gets its OWN title — from the proposal, with a
+        # deterministic differ if the generator echoed the old one.
+        _new_title = (proposal.get("title") or "").strip()
+        if _new_title and _new_title.lower() != (prior_title or "").strip().lower():
+            _chapter_title = _new_title
+        elif prior_title:
+            _chapter_title = f"{prior_title} — Chapter {len(all_ids)}"
+        else:
+            _chapter_title = ""
+        # #95 (Cx 422): death_policy is PER-CHAPTER — re-derive against the new chapter's
+        # premise/hook (a shielded drawing-room story may go to war in ch3). Fail-open:
+        # a derivation hiccup keeps the prior chapter's policy.
+        _chapter_dp: str | None = None
+        _chapter_dp_reason = ""
+        try:
+            _dp = cohorts.classify_death_policy(
+                provider, meta.get("genre", ""),
+                ", ".join(meta.get("game_type") or []),
+                (proposal.get("hook") or proposal.get("theme") or meta.get("premise", "")))
+            _chapter_dp = (_dp.get("policy") or
+                           meta.get("death_policy", "shielded")).strip()
+            _chapter_dp_reason = (_dp.get("reason") or "").strip()
+        except Exception:  # noqa: BLE001
+            logger.exception("continuation death-policy re-derivation skipped")
+        # THE SHAPE RECEIPT is the continuation's truth (founder ruling): read the latest terminal
+        # event's grade/shape/basis rows (row-level — the receipt is session bookkeeping, not a fold).
+        _prior_shape: dict = {}
+        try:
+            from construct.adapter import frame_facts as _ffr
+            _rc_rows = [r for r in _ffr(world, SESSION)
+                        if str(r.entity).startswith("event:arc_outcome_")
+                        and r.attribute in ("grade", "outcome_shape", "basis")]
+            # group by the LATEST receipt ENTITY first (Cx 380: latest-row-per-attr could mix a
+            # stale prior grade with a newer receipt that lacks one), then read that entity's attrs.
+            _latest = max((str(r.entity) for r in _rc_rows),
+                          key=lambda e: int(e.rsplit("_", 1)[-1]) if e.rsplit("_", 1)[-1].isdigit()
+                          else -1, default=None)
+            for _r in _rc_rows:
+                if str(_r.entity) == _latest:
+                    _prior_shape[_r.attribute] = _r.value
+        except Exception:  # noqa: BLE001
+            _prior_shape = {}
+        # #96 S2 SURFACING (Cx 414): ONE unsurfaced consequence callback rides the bridge —
+        # the founder's newspaper seam (the world showing the player their effect). The
+        # presentation receipt keeps a strong callback deliberate, never accidental spam.
+        _callback = None
+        _callback_item: dict | None = None
+        try:
+            _cons = [e for _k in ("word_spreads", "reputation_changes", "debt_called",
+                                  "door_closed", "ally_returns")
+                     for e in reads.events(kind=_k)]
+            from construct.adapter import frame_facts as _ffu
+            _surfaced = {str(r.entity) for r in _ffu(world, SESSION,
+                                                     attribute="surfaced_turn")}
+            _fresh_cons = [e for e in _cons if e.event_id not in _surfaced]
+            if _fresh_cons:
+                _ev = max(_fresh_cons, key=lambda e: (getattr(e, "at", 0) or 0))
+                # row-level read: event-entity attrs never fold via state() (the shape-
+                # receipt precedent) — scan visible rows for the detail directly.
+                _dtl = next((str(r.value) for r in _ffu(world, "canon",
+                             entity=_ev.event_id, attribute="detail")), None)
+                _callback = (_ev.kind.replace("_", " ")
+                             + (f" — {_dtl}" if _dtl else ""))
+                _callback_item = {"entity": _ev.event_id, "attribute": "surfaced_turn",
+                                  "value": turn, "valid_from": turn_time(turn),
+                                  "frame": SESSION}
+        except Exception:  # noqa: BLE001 — the callback is enrichment, never a gate
+            _callback = None
+            _callback_item = None
+
+        # ---- COMMIT: the writes, back to back, no model call between them. ---------------
         _emit(on_stage, "Setting the new threads in motion")
+        # (#96 S3/S4) the settled-history record and the personal threads ride first.
+        _early = [i for i in (_settled_item, _personal_item) if i]
+        if _early:
+            world.porcelain.ingest_structured(_early, frame=SESSION)
         world.porcelain.ingest_structured(
             arc_io.arc_to_items(new_arc, frame=PLOT) + arc_io.index_items(new_arc, frame=PLOT),
             frame=PLOT)
         # The new arc becomes MAIN; the concluded arc stays in the portfolio as past (its terminal
         # receipt is now BEHIND the episode boundary, so it no longer ends the scenario).
-        all_ids = [a.arc_id for a in prior_arcs] + [new_id]
         # RETRACT the sealed portfolio rows, THEN append the replacement (Cx 167). The portfolio
         # rows are classified CONSTITUTIVE, and a constitutive fold does NOT recency-supersede —
         # PB serves the EARLIEST and marks the key conflicted, so neither a timeless nor a
@@ -2860,77 +3019,34 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         _epi_rows.append({"entity": "session:scope", "attribute": "independent_extra",
                           "value": json.dumps(sorted(set(_hook_ids))),
                           "value_type": "literal"})
+        # B2: the reopened Session reloads the SHARED scenario meta, so the new chapter's
+        # title / death policy (computed above) are persisted in THIS slot's session frame
+        # beside the epoch and scope rows; Session prefers them. A /restart to chapter one
+        # restores the pristine slot, which has none. The bridge callback's surfaced receipt
+        # (computed above) rides the same write.
+        if _chapter_title:
+            _epi_rows.append({"entity": "session:episode", "attribute": "chapter_title",
+                              "value": _chapter_title, "value_type": "literal",
+                              "valid_from": turn_time(turn)})
+        if _chapter_dp:
+            _epi_rows.append({"entity": "session:episode", "attribute": "death_policy",
+                              "value": _chapter_dp, "value_type": "literal",
+                              "valid_from": turn_time(turn)})
+        if _callback_item:
+            _epi_rows.append(_callback_item)
         world.porcelain.ingest_structured(_epi_rows, frame=SESSION)
-        # THE SHAPE RECEIPT is the continuation's truth (founder ruling): read the latest terminal
-        # event's grade/shape/basis rows (row-level — the receipt is session bookkeeping, not a fold).
-        _prior_shape: dict = {}
-        try:
-            from construct.adapter import frame_facts as _ffr
-            _rc_rows = [r for r in _ffr(world, SESSION)
-                        if str(r.entity).startswith("event:arc_outcome_")
-                        and r.attribute in ("grade", "outcome_shape", "basis")]
-            # group by the LATEST receipt ENTITY first (Cx 380: latest-row-per-attr could mix a
-            # stale prior grade with a newer receipt that lacks one), then read that entity's attrs.
-            _latest = max((str(r.entity) for r in _rc_rows),
-                          key=lambda e: int(e.rsplit("_", 1)[-1]) if e.rsplit("_", 1)[-1].isdigit()
-                          else -1, default=None)
-            for _r in _rc_rows:
-                if str(_r.entity) == _latest:
-                    _prior_shape[_r.attribute] = _r.value
-        except Exception:  # noqa: BLE001
-            _prior_shape = {}
-        # #96 S2 SURFACING (Cx 414): ONE unsurfaced consequence callback rides the bridge —
-        # the founder's newspaper seam (the world showing the player their effect). The
-        # presentation receipt keeps a strong callback deliberate, never accidental spam.
-        _callback = None
-        try:
-            _cons = [e for _k in ("word_spreads", "reputation_changes", "debt_called",
-                                  "door_closed", "ally_returns")
-                     for e in reads.events(kind=_k)]
-            from construct.adapter import frame_facts as _ffu
-            _surfaced = {str(r.entity) for r in _ffu(world, SESSION,
-                                                     attribute="surfaced_turn")}
-            _fresh_cons = [e for e in _cons if e.event_id not in _surfaced]
-            if _fresh_cons:
-                _ev = max(_fresh_cons, key=lambda e: (getattr(e, "at", 0) or 0))
-                # row-level read: event-entity attrs never fold via state() (the shape-
-                # receipt precedent) — scan visible rows for the detail directly.
-                _dtl = next((str(r.value) for r in _ffu(world, "canon",
-                             entity=_ev.event_id, attribute="detail")), None)
-                _callback = (_ev.kind.replace("_", " ")
-                             + (f" — {_dtl}" if _dtl else ""))
-                world.porcelain.ingest_structured(
-                    [{"entity": _ev.event_id, "attribute": "surfaced_turn",
-                      "value": turn, "valid_from": turn_time(turn)}], frame=SESSION)
-        except Exception:  # noqa: BLE001 — the callback is enrichment, never a gate
-            _callback = None
-        world.close()
+        _close_world()
 
         _emit(on_stage, "Opening the next chapter")
         checkpoint_episode_start(name, player_id)  # this episode's opening = the rollback point
         meta["main_arc"] = new_id
         meta["arc_ids"] = all_ids
         meta["entry_epoch"] = epoch
-        # #96 S3 (Cx 414): the new chapter gets its OWN title — from the proposal, with a
-        # deterministic differ if the generator echoed the old one.
-        _new_title = (proposal.get("title") or "").strip()
-        if _new_title and _new_title.lower() != (prior_title or "").strip().lower():
-            meta["title"] = _new_title
-        elif prior_title:
-            meta["title"] = f"{prior_title} — Chapter {len(all_ids)}"
-        # #95 (Cx 422): death_policy is PER-CHAPTER — re-derive against the new chapter's
-        # premise/hook (a shielded drawing-room story may go to war in ch3). Fail-open:
-        # a derivation hiccup keeps the prior chapter's policy.
-        try:
-            _dp = cohorts.classify_death_policy(
-                provider, meta.get("genre", ""),
-                ", ".join(meta.get("game_type") or []),
-                (proposal.get("hook") or proposal.get("theme") or meta.get("premise", "")))
-            meta["death_policy"] = (_dp.get("policy") or
-                                    meta.get("death_policy", "shielded")).strip()
-            meta["death_policy_reason"] = (_dp.get("reason") or "").strip()
-        except Exception:  # noqa: BLE001
-            logger.exception("continuation death-policy re-derivation skipped")
+        if _chapter_title:
+            meta["title"] = _chapter_title
+        if _chapter_dp:
+            meta["death_policy"] = _chapter_dp
+            meta["death_policy_reason"] = _chapter_dp_reason
         if _ep2_scope:                              # scope the new chapter to its OWN arc (Cx 189 #2)
             meta["arc_scope"] = _ep2_scope
         # The cold-open continuation note (founder, 2026-06-26): bridge WHERE THE LAST STORY LANDED to
@@ -2941,8 +3057,12 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
             prior_shape=_prior_shape, door_place=_door_place, callback=_callback)
         return meta
     finally:
-        from construct.arc import executor as _arc_executor
-        _arc_executor._ENTRY_EPOCH.reset(_epoch_tok)
+        # EVERY exit path (death refusal, model/parse failure, engine error, success) releases
+        # the epoch and the slot's SQLite handle.
+        if _epoch_tok is not None:
+            from construct.arc import executor as _arc_executor
+            _arc_executor._ENTRY_EPOCH.reset(_epoch_tok)
+        _close_world()
 
 
 def next_turn_number(world: Any) -> int:

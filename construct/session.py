@@ -257,6 +257,18 @@ class Session:
         self._entry_epoch = float(_slot_epoch if _slot_epoch is not None
                                   else (meta.get("entry_epoch", TURN_EPOCH) or TURN_EPOCH))
         set_entry_epoch(self._entry_epoch)
+        # PER-CHAPTER identity (B2): `game.continue_episode` re-derives the new chapter's
+        # title and death policy but the shared scenario meta (reloaded above) is chapter
+        # one's — the slot's session frame carries the current chapter's. Absent rows (a
+        # first chapter, a /restart to chapter one) leave the scenario meta untouched.
+        try:
+            _reads_ep = PorcelainWorldReads(self._world)
+            for _attr, _key in (("chapter_title", "title"), ("death_policy", "death_policy")):
+                _val = _reads_ep.state("session:episode", _attr, frame="session:main")
+                if isinstance(_val, str) and _val.strip():
+                    meta[_key] = _val.strip()
+        except Exception:
+            logger.exception("chapter identity read failed; falling back to scenario meta")
         self._meta = meta
         self._closed = False
         # TURN-LATENCY dumbfire: the prior turn's deferred bookkeeping (the post-narrate
@@ -406,6 +418,10 @@ class Session:
                         and str(r.attribute) == "record"):
                     rec = json.loads(str(r.value))
                     for line in rec.get("settled", []):
+                        # records written before the fix carry the placeholder premise
+                        # `<protagonist> · kind · person` — not an answered question.
+                        if str(line).startswith(f"{proto} · kind · person"):
+                            continue
                         tok = str(line).split(" · ", 1)[0].strip()
                         if ":" in tok:
                             _settled_ids.add(tok)

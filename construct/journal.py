@@ -72,7 +72,11 @@ def render_journal(rows: Iterable[Any], protagonist: str,
                     reverse=True)[:per_entity]
         # #96 S3 (Cx 414): a SETTLED entity's evidence is closed history, never an active
         # lead — the notebook says so plainly (the crew remembers its own resolutions).
-        _tag = " — settled (a past chapter's answer)" if ent in (settled or set()) else ""
+        # The protagonist is the one entity that is NEVER a past chapter's answer (older slots
+        # recorded the always-true placeholder premise `<protagonist> · kind · person` as
+        # settled history) — the YOU entry is never tagged settled.
+        _tag = (" — settled (a past chapter's answer)"
+                if ent in (settled or set()) and ent != protagonist else "")
         lines = [f"{bullet} {_name(ent)}{_tag}"]
         lines += [f"    {_attr_label(str(r.attribute))}: {str(r.value).strip()}" for r in rs]
         return lines
