@@ -189,24 +189,45 @@ class Outbound:
                               # (set ONLY on a scene change — see _scene_image)
 
 
-def chunk(text: str, limit: int) -> list[str]:
+def chunk(text: str, limit: int,
+          length: Callable[[str], int] = len) -> list[str]:
     """Split `text` into ≤`limit` pieces, never silently truncating (the
     Kernos-bot lesson). Prefers a newline boundary, then a hard cut. Always
     returns ≥1 chunk (empty text → one empty string, so a turn always
-    answers)."""
+    answers).
+
+    `length` measures a string against `limit` (default `len`, code points).
+    A transport whose limit counts something else passes its own measure — e.g.
+    Telegram counts UTF-16 code units. Cuts are always on code-point boundaries,
+    so a surrogate pair (any astral character) is never split."""
     text = text or ""
-    if len(text) <= limit:
+    if length(text) <= limit:
         return [text]
     chunks: list[str] = []
-    while len(text) > limit:
-        cut = text.rfind("\n", 0, limit)
+    while length(text) > limit:
+        fit = limit if length is len else _longest_fit(text, limit, length)
+        cut = text.rfind("\n", 0, fit)
         if cut <= 0:
-            cut = limit
+            cut = fit
         chunks.append(text[:cut])
         text = text[cut:].lstrip("\n")
     if text:
         chunks.append(text)
     return chunks or [""]
+
+
+def _longest_fit(text: str, limit: int, length: Callable[[str], int]) -> int:
+    """Largest prefix size k (in code points, ≥1) with length(text[:k]) ≤ limit.
+    `length` must be monotonic in the prefix. ≥1 so a limit smaller than one
+    character still makes progress."""
+    lo, hi = 1, min(len(text), limit)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if length(text[:mid]) <= limit:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
 
 
 class TransportCore:

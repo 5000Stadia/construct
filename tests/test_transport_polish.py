@@ -240,14 +240,20 @@ class _HTTP:
         self.failures = failures or {}
         self.sent = []
 
-    def get(self, url, params=None):
+    def post(self, url, json=None, **kw):
+        self.requests = getattr(self, "requests", [])
+        self.requests.append(("POST", url, json))
         if url.endswith("/sendMessage"):
-            fail = self.failures.get(str(params["chat_id"]))
+            fail = self.failures.get(str(json["chat_id"]))
             if isinstance(fail, Exception):
                 raise fail
             if fail:
                 return SimpleNamespace(status_code=fail, json=lambda: {"ok": False})
-            self.sent.append((str(params["chat_id"]), params["text"]))
+            self.sent.append((str(json["chat_id"]), json["text"]))
+        return SimpleNamespace(status_code=200, json=lambda: {"ok": True, "result": []})
+
+    def get(self, url, params=None):
+        assert not url.endswith("/sendMessage"), "sendMessage must be POST, not GET"
         return SimpleNamespace(status_code=200, json=lambda: {"ok": True, "result": []})
 
 
