@@ -78,6 +78,7 @@ from construct.arc.grammar import Arc, Phase, Rung, Weight
 from construct.arc import drift
 from construct.cast import beat_delivery_targets
 from construct.pins import resolve_active_pins
+from construct.intent import FAIL_OPEN as FAIL_INTENT, TurnIntent
 from construct.provider import Provider, ProviderError
 
 logger = logging.getLogger(__name__)
@@ -3984,27 +3985,6 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # ---- SERIAL SPINE -----------------------------------------------------
     # 1. Classify (cheap; fail-open to action). Movement intent + the assured-vs-
     #    uncertain resolution judgment ride the same call (no extra latency).
-    moves_to, requires = "", []
-    needs_test, uncertain_of = False, ""
-    mortal_risk = False     # #95: the move risks the protagonist's LIFE (classify judgment)
-    uses_knowledge = False  # SCENE-CONTEXT-SHAPE: protagonist-competence gate (Cx 247)
-    asks_self = False       # ADDRESSED INWARD: a self-question routes to the player's own memory
-    recalls = False         # #97: the player deliberately reaches into memory this turn
-    declares_memory = False  # #97 retcon: the recall ASSERTS new autobiography
-    reshape_attempt = False
-    commits, commitment = False, ""
-    takes = ""
-    drops = ""
-    examines_target = ""  # the ONE specific detail the player closely investigates (make-it-real gate)
-    addresses_present = True  # conservative default (task #5 + cr fail-open catch:
-    # a classify ProviderError must keep the rule-5 sole-NPC protection, never
-    # unbind the name — the signal only ever RELAXES on an explicit False)
-    moves_open = False        # WORLD-GROWTH G1 (cr piece-2 finding 1): the growth
-    _t_aim = ""               # G-A: the beat-1 declaration, fail-closed pre-try
-    seeks_encounter = False   # signals default False BEFORE the classify try —
-    # a ProviderError leaves them defined and closed; only a literal True from
-    # a successful verdict (strict_flag) ever raises them
-    asserts_or_reveals = True  # conservative default (TURN-LATENCY A-lite): keep extraction
     # A brief actor descriptor so `classify` can wave off a test for things this
     # character is plainly proficient at (ACTION-RESOLUTION §1). Cheap point reads.
     actor = ""
@@ -4083,83 +4063,35 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         or (getattr(_node, "surface_role", "") or _nid.split(":")[-1])
                     ask_candidates.append((_oid, _desc))
                     _ask_by_oid[_oid] = _clue
-    asks_targets: list = []
-    moved_with_ids: list = []
-    dismissed_ids: list = []
-    joins_ids: list = []
+    # The verdict's whole contract (defaults, kind gating, fail-open vs fail-closed) is
+    # TurnIntent's (construct/intent.py); the turn reads it here.
     try:
         with _phase(trace, "classify"):
             verdict = cohorts.classify(provider, player_input, actor=actor,
                                        ask_candidates=ask_candidates,
                                        npc_candidates=npc_candidates,
                                        laws=_laws_full)
-        kind = verdict["kind"]
-        # normalized ONCE at the classifier boundary (cr G2 r4): a
-        # whitespace-only destination is schema-valid but semantically
-        # blank — every downstream consumer (pipeline admission, the
-        # destination-less lane, its consequence guard) must see the SAME
-        # emptiness, or the zero-displacement bound gains a bypass.
-        moves_to = str(verdict.get("moves_to", "") or "").strip()
-        requires = [r for r in verdict.get("requires", []) if r]
-        needs_test = bool(verdict.get("needs_test")) and kind == "action"
-        uncertain_of = (verdict.get("uncertain_of") or "").strip()
-        mortal_risk = bool(verdict.get("mortal_risk")) and kind == "action"
-        reshape_attempt = bool(verdict.get("reshape_attempt")) and kind == "action"
-        commits = bool(verdict.get("commits")) and kind in ("action", "declaration")
-        commitment = (verdict.get("commitment") or "").strip() or player_input
-        takes = (verdict.get("takes") or "").strip()
-        drops = (verdict.get("drops") or "").strip()
-        examines_target = (verdict.get("examines_target") or "").strip()
-        asks_targets = [t for t in (verdict.get("asks_targets") or []) if t]
-        # #80 tuning (task #5): does this input actually ENGAGE a present
-        # person? Fail-open toward True (protection) when the field is
-        # absent — legacy stubs and older classify outputs keep today's
-        # behavior; only an explicit False lifts the sole-NPC over-hold.
-        addresses_present = bool(verdict.get("addresses_present", True))
-        # WORLD-GROWTH G1 triggers (spec §5): optional, FAIL-CLOSED — absent
-        # or malformed reads False and today's behavior is byte-identical.
-        # These alone authorize NOTHING: growth eligibility is conjunctive
-        # and ordered (growth.growth_eligibility), and its turnloop wiring
-        # is a separate reviewed slice.
-        from construct.growth import strict_flag as _strict
-        moves_open = _strict(verdict.get("moves_open")) and kind == "action"
-        seeks_encounter = (_strict(verdict.get("seeks_encounter"))
-                           and kind == "action")
-        # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids; only action
-        # turns move people; a candidate can't be both dismissed and brought along (dismissal
-        # is the stronger, explicit wording — it wins the conflict).
-        if kind == "action":
-            dismissed_ids = [_npc_by_oid[t] for t in (verdict.get("npcs_dismissed") or [])
-                             if t in _npc_by_oid]
-            moved_with_ids = [_npc_by_oid[t] for t in (verdict.get("moved_with") or [])
-                              if t in _npc_by_oid and _npc_by_oid[t] not in dismissed_ids]
-            # COMPANIONSHIP (#82, Cx 372/373): an invitation to stay with the player becomes
-            # STANDING canon state below — separate field, never overloading the per-move
-            # moved_with adjunct; dismissal wins the conflict here too.
-            joins_ids = [_npc_by_oid[t] for t in (verdict.get("joins") or [])
-                         if t in _npc_by_oid and _npc_by_oid[t] not in dismissed_ids]
-        # Default TRUE on absence (old stubs / schema-less classify) so extraction is never
-        # silently skipped where a fact could be asserted (protected-key licensing depends on it).
-        asserts_or_reveals = bool(verdict.get("asserts_or_reveals", True))
-        uses_knowledge = bool(verdict.get("uses_protagonist_knowledge")) and kind == "action"
-        # ADDRESSED INWARD (founder live 2026-07-03, "my own memories should answer here"):
-        # a question about the player's OWN life is CHECKED at classify — the mechanical
-        # route, not directive luck — and outranks the last-speaker convention downstream.
-        asks_self = bool(verdict.get("asks_self"))
-        # #97 THE REMEMBRANCER (Cx 434 constraint 1): the deliberate memory reach and the
-        # autobiography DECLARATION are distinct signals — never overloaded onto asks_self.
-        # `declaration` kind is ACCEPTED here (Cx 439 #1): the most literal retcon parse
-        # ("I remember my childhood friend John Johnson…") IS a declaration — of the
-        # player's own past, which is theirs to author; world-fact fiat stays denied below.
-        recalls = bool(verdict.get("recalls"))
-        declares_memory = (bool(verdict.get("declares_memory"))
-                           and kind in ("action", "declaration"))
-        from construct.tangent import declaration as _t_declaration
-        _t_aim = _t_declaration(verdict, kind=kind)
+        intent = TurnIntent.from_verdict(verdict, player_input)
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:
-        kind = "action"
+        intent = FAIL_INTENT
         trace.dropped_cohorts.append(f"classify ({exc})")
+    kind, moves_to, requires = intent.kind, intent.moves_to, list(intent.requires)
+    needs_test, uncertain_of = intent.needs_test, intent.uncertain_of
+    mortal_risk, reshape_attempt = intent.mortal_risk, intent.reshape_attempt
+    commits, commitment = intent.commits, intent.commitment
+    takes, drops, examines_target = intent.takes, intent.drops, intent.examines_target
+    asks_targets = list(intent.asks_targets)
+    addresses_present, asserts_or_reveals = intent.addresses_present, intent.asserts_or_reveals
+    moves_open, seeks_encounter = intent.moves_open, intent.seeks_encounter
+    uses_knowledge, asks_self = intent.uses_knowledge, intent.asks_self
+    recalls, declares_memory = intent.recalls, intent.declares_memory
+    _t_aim = intent.tangent_aim
+    # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids (only run_turn
+    # holds the map); TurnIntent already gated them to action turns, dismissal winning.
+    dismissed_ids = [_npc_by_oid[t] for t in intent.npcs_dismissed if t in _npc_by_oid]
+    moved_with_ids = [_npc_by_oid[t] for t in intent.moved_with if t in _npc_by_oid]
+    joins_ids = [_npc_by_oid[t] for t in intent.joins if t in _npc_by_oid]
     trace.classified = kind
     _cp("classified")
     # WORLD-GROWTH (cr wiring blocker 3): on a growth-SIGNAL turn every
