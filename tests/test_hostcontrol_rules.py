@@ -41,17 +41,6 @@ _PLOT_STAMPERS = {"arc_to_items", "index_items", "portfolio_items", "portfolio_a
                   "beat_to_items"}
 _MODEL_FREE = {"rules", "defer"}
 
-#: Build-time writes. `_finalize_scenario_impl` (whose arc-commit stage now lives in
-#: `_stage_commit_arc`, called from it) runs inside the porcelain's begin_build
-#: session, whose `seal_build` pass classifies what the session deferred (RULES-only by
-#: default; CONSTRUCT_FAST_CLASSIFY=0 sends the ambiguous remainder to the batch model).
-#: They are deliberately not switched per call here.
-_BUILD_SESSION = {
-    ("game.py", "_finalize_scenario_impl"),
-    ("game.py", "_stage_commit_arc"),
-    ("game.py", "_author_foreshadow_pins"),
-}
-
 
 def _host_control_calls():
     """Yield (relpath, function, call-node, classify-kwarg-or-None) for every
@@ -97,8 +86,6 @@ def test_every_host_control_write_is_model_free():
     `classify=` is fine there; `ingest_structured` must say `rules` (or `defer`)."""
     bad, seen = [], 0
     for rel, fname, call, classify in _host_control_calls():
-        if (Path(rel).name, fname) in _BUILD_SESSION:
-            continue
         seen += 1
         if call.func.attr == "commit_set" and classify is None:
             continue

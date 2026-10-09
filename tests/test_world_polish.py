@@ -335,3 +335,39 @@ def test_continue_releases_world_and_epoch_on_success(tmp_path, monkeypatch):
     before = executor.current_epoch()
     game.continue_episode(name, _ContProvider([_PROPOSAL]), player_id="u1")
     assert closed and executor.current_epoch() == before
+
+
+def test_three_continuations_chapter_rows_read_the_latest_chapter(tmp_path, monkeypatch):
+    """AUDIT-2026-10: continue_episode wrote session:episode.entry_epoch / .arc_scope and
+    session:scope.independent_extra WITHOUT a valid_from, so every continuation stamped them at
+    0.0 and they TIED (conflicted); after a third chapter the engine served chapter two's values.
+    Each must be stamped on the chapter's own turn axis, as chapter_title already is."""
+    from construct.adapter import PorcelainWorldReads
+    from construct.scenario_meta import PlaythroughState
+    name = _make_slot(tmp_path, monkeypatch)
+    metas = []
+    for i, entity in enumerate(("place:office", "place:annex", "place:cellar")):
+        w = _open_slot(name)               # the chapter is PLAYED before it is concluded:
+        w.porcelain.ingest_structured([    # turns advance the clock, new places become known
+            {"entity": entity, "attribute": "kind", "value": "room", "timeless": True},
+            {"entity": f"event:turn_{7 + i * 10}", "attribute": "kind", "value": "turn",
+             "valid_from": 1007.0 + i * 10}], frame=SESSION)
+        w.close()
+        prop = {**_PROPOSAL, "title": f"Ledger {i}",
+                "beats": [{**_PROPOSAL["beats"][0], "entity": entity}]}
+        metas.append(game.continue_episode(name, _ContProvider([prop]), player_id="u1"))
+    assert len({m["entry_epoch"] for m in metas}) == 3
+    w = _open_slot(name)
+    try:
+        reads = PorcelainWorldReads(w)
+        for entity, attribute in (("session:episode", "entry_epoch"),
+                                  ("session:episode", "arc_scope"),
+                                  ("session:scope", "independent_extra")):
+            st = w.porcelain.state(entity, attribute, frame=SESSION)
+            assert st["status"] == "known", (entity, attribute, st["status"])
+        assert float(reads.state("session:episode", "entry_epoch", frame=SESSION)) \
+            == metas[2]["entry_epoch"]
+        assert json.loads(reads.state("session:episode", "arc_scope", frame=SESSION)) == [PLAYER]
+        assert PlaythroughState.from_world({}, w).entry_epoch == metas[2]["entry_epoch"]
+    finally:
+        w.close()

@@ -173,6 +173,8 @@ class Session:
         # for deduction, relationship-vs-consequence for bond, …). Default deduction.
         _prof = shapes_for(meta.get("game_type"))
         self._judgment_type = (_prof or {}).get("judgment_type", "claim-vs-fact")
+        # The shape's OWN commitment_kind ("claim", "achieved_state", …) — what the stage gate names.
+        self._commitment_kind = (_prof or {}).get("commitment_kind", "")
         # The shape's cost_disposition — how pillar coverage is READ at the conclusion
         # (peril_redemption is the normal polarity; fail_forward inverts it for comedy).
         from construct.story_shapes import conclusion_profile, suspense_profile
@@ -1077,6 +1079,7 @@ class Session:
                               style=self._meta.get("style", ""),
                               play_style=self._play_style,
                               judgment_type=self._judgment_type,
+                              commitment_kind=self._commitment_kind,
                               cost_disposition=self._cost_disposition,
                               result_events=self._result_events,
                               terminal_owner=self._terminal_owner,

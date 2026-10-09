@@ -2430,6 +2430,43 @@ class TestFullTurn:
                       turn=13, scope=[PLAYER, "place:study"])
         assert not r2.trace.commitment_clarified     # gate did NOT re-fire
 
+    def test_stage_gate_prompt_carries_the_shapes_own_commitment_kind(self, world):
+        # AUDIT-2026-10 (commitment_kind mis-wiring): the stage gate must be told the ACTIVE SHAPE's
+        # own commitment_kind ('achieved_state' for a contest), never the judgment_type ('proof-vs-
+        # standard') that used to be passed in its place.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "the rival did it"},
+            {"specified": False, "missing": ["audience"], "clarification": "Say it to whom?"},
+            {"prose": "Your words find no one."},
+        ])
+        run_turn(world, arc, provider, "THE RIVAL DID IT", turn=12,
+                 scope=[PLAYER, "place:study"], judgment_type="proof-vs-standard",
+                 commitment_kind="achieved_state")
+        gate = next(p for (p, _s, _t) in provider.calls if task_of(p) == "csg")
+        assert "(achieved_state)" in gate
+        assert "proof-vs-standard" not in gate
+
+    def test_stage_gate_falls_back_to_judgment_type_when_shape_has_no_kind(self, world):
+        arc = make_arc()
+        seed_arc(world, arc)
+        world._extractions.append({"items": []})
+        world._extractions.append({"items": []})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": True, "commitment": "the rival did it"},
+            {"specified": False, "missing": ["audience"], "clarification": "Say it to whom?"},
+            {"prose": "Your words find no one."},
+        ])
+        run_turn(world, arc, provider, "THE RIVAL DID IT", turn=12,
+                 scope=[PLAYER, "place:study"], judgment_type="claim-vs-fact")
+        gate = next(p for (p, _s, _t) in provider.calls if task_of(p) == "csg")
+        assert "(claim-vs-fact)" in gate
+
     def test_ingest_raise_never_sinks_the_turn(self, world, monkeypatch):
         # #89 (eval: hedgetest's CLIMAX crashed on a PB declaration raise): any in-turn
         # ingest_structured raise drops its rows LOUDLY and the turn still ships prose.

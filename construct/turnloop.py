@@ -3994,6 +3994,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              scenario_mode: str = "endless", style: str = "",
              play_style: str = "",
              judgment_type: str = "claim-vs-fact",
+             commitment_kind: str = "",
              cost_disposition: str = "peril_redemption",
              result_events: dict | None = None,
              suspense: str = "general",
@@ -6199,7 +6200,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     str(canon_table.get((n, "name")) or humanize_id_last(n))
                     for n in npcs) if npcs else ""
                 _gate = cohorts.commitment_stage_gate(
-                    provider, player_input, commitment, _here, _who, judgment_type or "")
+                    provider, player_input, commitment, _here, _who,
+                    commitment_kind or judgment_type or "")
                 trace.cohort_calls.append("stage_gate:cheap")
                 if not _gate.get("specified", True):
                     commitment_clarified = (_gate.get("clarification") or "").strip() or (
