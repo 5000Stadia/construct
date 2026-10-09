@@ -134,7 +134,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
     # Turn-loop helpers still shared with run_turn. Imported at call time: turnloop
     # imports this module at load, so a module-level import back would be circular.
     from construct.turnloop import (
-        _PIN_CAP, _RECENT_TURNS, _convergence_directive, _snap_or_empty,
+        MovementStatus, _PIN_CAP, _RECENT_TURNS, _convergence_directive, _snap_or_empty,
     )
     # The turn state this half reads, bound to the names run_turn used, so the
     # body below is the original run_turn text.
@@ -370,7 +370,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
             "\nTHE MEMORY SITS ODDLY (render as felt tension, one beat, never a "
             "lecture; what is already established REMAINS the truth): "
             + "; ".join(_memory_tensions))
-    if trace.distance_unknown:
+    if trace.distance_unknown_route is not None:
         # #101 inversion (Cx 454): the map couldn't prove this was a local step — the
         # render is SCALE-NEUTRAL: true scale when the fiction establishes it, modest
         # when it doesn't; a flat map must never overdramatize "across the yard".
@@ -382,15 +382,15 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
             "arriving, with weather and effort as the scene holds them. Where the "
             "distance is NOT established, keep the transit brief and modest — never "
             "invent roads, distances, or landmarks the world hasn't given you.")
-    if trace.deliberating:
+    if trace.deliberation is not None:
         # #102 (founder-shaped): the weighing is the character's OWN MIND — second-person
         # deliberation ending on the open question; never a menu, never decided for them.
         briefing_parts.append(
             f"\nYOUR OWN MIND WEIGHS IT (render as ONE beat of second-person "
             f"deliberation, then stop — the player has NOT moved): they mean to set "
-            f"out for {trace.deliberating.split(' — ')[0]}, but the story's deadline "
+            f"out for {trace.deliberation.label}, but the story's deadline "
             f"stands against the time the way would take "
-            f"({trace.deliberating.split(' — ', 1)[-1]} — translate to FELT time, "
+            f"({trace.deliberation.weighing} — translate to FELT time, "
             f"never numbers). Voice it as their own thought — 'you consider it; but "
             f"if you go now, you may…' — and end on the open question: press on, or "
             f"see to what the deadline demands first? Their next word decides; if "
@@ -680,7 +680,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
                               f"{player_input}")
     if trace.movement_obstruction:
         seg = trace.movement_obstruction
-        if trace.movement_status == "blocked":
+        if trace.movement_status == MovementStatus.BLOCKED:
             ev = seg.get("evidence") or []
             facts = "; ".join(
                 f"{e.get('entity')} · {e.get('attribute')} · {e.get('value')}" for e in ev

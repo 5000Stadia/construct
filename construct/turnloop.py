@@ -23,6 +23,7 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Callable
 
 from construct import cohorts
@@ -505,19 +506,19 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         pipeline_outcome=growth_mod.PIPELINE_MISS if pipeline_miss else None,
         host_deny=host_deny or None)
     if host_deny:
-        trace.growth = f"denied:{host_deny}"  # the ONLY licensed quiet
+        _set_growth(trace, "denied", host_deny)  # the ONLY licensed quiet
         return False
     if mode is None:
         return False  # not growth territory — today's behavior, unchanged
     if not pre_chain or not str(pre_chain[0]).startswith("place:"):
-        trace.growth = "declined:no_origin"  # unplaced protagonist — a
+        _set_growth(trace, "declined", "no_origin")  # unplaced protagonist — a
         return False                         # structural miss, not a seam
     origin = pre_chain[0]
 
     # THE INVOCATION claims the turn's one generative act (spec §5) —
     # spent from here on, success or not.
     if not gen_slot.claim("assessor"):
-        trace.growth = "declined:slot_spent"
+        _set_growth(trace, "declined", "slot_spent")
         return False
     trace.growth_retry = True  # every exit below this line is an INVOKED
     # attempt: either activation flips it back off, or the caller seams.
@@ -526,7 +527,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     ancestry_ids = [c for c in pre_chain
                     if str(c).startswith(("place:", "region:"))]
     if not ancestry_ids:
-        trace.growth = "declined:no_ancestry"
+        _set_growth(trace, "declined", "no_ancestry")
         return False
 
     def _disp(eid: str) -> str:
@@ -562,21 +563,21 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         trace.cohort_calls.append("assessor_propose:main")
     except Exception as exc:  # noqa: BLE001 — provider failure = technical
         logger.warning("growth assessor failed: %s", exc)
-        trace.growth = "declined:provider_error"
+        _set_growth(trace, "declined", "provider_error")
         return False
 
     try:
         vocab = _growth_concealed_vocab(arc, live_reads)
     except GrowthVocabUnavailable as exc:
         logger.warning("growth concealment vocabulary unreadable: %s", exc)
-        trace.growth = "declined:concealment_unavailable"
+        _set_growth(trace, "declined", "concealment_unavailable")
         return False
     prop, why = growth_mod.validated_proposal(
         raw, mode=mode, n_ancestry_options=len(ancestry_ids),
         leaks=lambda text: bool(vocab & _secret_word_set(text)))
     if prop is None:
         logger.info("growth proposal declined: %s", why)
-        trace.growth = f"declined:{why}"
+        _set_growth(trace, "declined", why)
         return False
     if mode == "encounter" and not moves_to and prop.place is not None:
         # THE DESTINATION-LESS LANE'S CONSEQUENCE BOUND (spec §5.2, cr):
@@ -587,7 +588,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         # separately justified place+walk behavior.
         logger.info("growth proposal declined: destination-less lane "
                     "carries no place")
-        trace.growth = "declined:unlicensed:place.destinationless_lane"
+        _set_growth(trace, "declined", "unlicensed:place.destinationless_lane")
         return False
 
     _growth_h = getattr(live_reads, "_horizon", None)
@@ -641,7 +642,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         # snapshot is the same technical state as an unreadable identity
         # authority: decline and seam, never guess who travels (blocker 3)
         logger.warning("growth companion snapshot unreadable: %s", exc)
-        trace.growth = "declined:identity_unavailable"
+        _set_growth(trace, "declined", "identity_unavailable")
         return False
     # DISMISSAL WINS (cr re-review 1): a companion the player dismissed
     # THIS TURN must not be carried to the destination by the chunk — the
@@ -662,11 +663,11 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
             origin_action=player_input)
     except _IdentityUnavailable as exc:
         logger.warning("growth identity authority unreadable: %s", exc)
-        trace.growth = "declined:identity_unavailable"
+        _set_growth(trace, "declined", "identity_unavailable")
         return False
     if chunk is None:
         logger.info("growth assembly declined: %s", why)
-        trace.growth = f"declined:{why}"
+        _set_growth(trace, "declined", why)
         return False
 
     # DISMISSAL COHERENCE (cr wiring re-review 2): the dismissal state the
@@ -688,18 +689,18 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     result = growth_mod.activate_chunk(world.porcelain,
                                        list(chunk.items) + _dis_rows)
     if not result.ok:
-        trace.growth = result.reason
+        _set_growth(trace, "failed", result.reason)
         return False
     if _dis_at >= 0:
         staged.pop(_dis_at)   # committed with the chunk — the flush must
         trace.npcs_departed = list(dismissed or [])  # not double-write
-    trace.growth = f"activated:{chunk.place_id or chunk.person_id}"
+    _set_growth(trace, "activated", chunk.place_id or chunk.person_id)
     trace.growth_retry = False
     # an encounter WITHOUT a new place moves nobody — the meeting came TO
     # the road; movement status and chunk-ownership apply only to a walk
     if chunk.place_id:
         trace.growth_moved = [arc.protagonist, *companions]
-        trace.movement_status = "clear"
+        trace.movement_status = MovementStatus.CLEAR
     # doctrine 4: growth IS a development — the LWG ledger sees it (D-SOFT
     # must not teleport an arc carrier into the new scene on the same
     # turn; the drift pass ALSO reads trace.growth directly, so this
@@ -1101,6 +1102,94 @@ _PRONOUN_PHANTOM = {"you", "person:you", "i", "person:i", "me", "person:me",
 # promote-gate copy was stripped (verified-then-strip, Cx 313).
 
 
+class MovementStatus(StrEnum):
+    """`TurnTrace.movement_status`: how the player's movement resolved this turn. The values
+    are the historic receipt strings (a StrEnum compares, formats and serializes as its value),
+    so logs, --debug and persisted transcripts are unchanged; `NONE` ("") is no movement."""
+
+    NONE = ""
+    CLEAR = "clear"                # route passable (or naming the current place: already here)
+    BLOCKED = "blocked"            # a barred way; the obstruction rides on the trace
+    OBSCURED = "obscured"          # passable but hedged
+    DELIBERATING = "deliberating"  # held for the player's own weighing (#102)
+    UNDISCOVERED = "undiscovered"  # the destination is not yet known to the player
+    IN_SCENE = "in_scene"          # the destination is a person here: stay with the people
+    AMBIGUOUS = "ambiguous"        # more than one candidate: the clarify beat
+
+    def __repr__(self) -> str:  # the receipt reads as the plain string it always was
+        return repr(self.value)
+
+
+#: Statuses in which the player's move committed (the destination became their location).
+_MOVED_STATUSES = (MovementStatus.CLEAR, MovementStatus.OBSCURED)
+
+
+def _as_movement_status(raw: Any) -> MovementStatus:
+    """Coerce an engine route status to the enum; an unknown value falls back to the raw
+    string so a new engine status can never sink a turn."""
+    try:
+        return MovementStatus(raw)
+    except ValueError:
+        logger.warning("unknown movement status %r", raw)
+        return raw
+
+
+@dataclass(frozen=True)
+class GrowthOutcome:
+    """The typed form of the `TurnTrace.growth` receipt (WORLD-GROWTH): `kind` is one of
+    "" (not invoked), "denied", "declined", "activated", or "failed" (the atomic activation
+    did not land; `detail` is the engine's own reason). `str()` renders the receipt string
+    exactly, so `trace.growth == str(trace.growth_outcome)` always."""
+
+    kind: str = ""
+    detail: str = ""
+
+    @property
+    def activated(self) -> bool:
+        return self.kind == "activated"
+
+    def __str__(self) -> str:
+        if self.kind == "failed":
+            return self.detail
+        return f"{self.kind}:{self.detail}" if self.kind else ""
+
+
+def _set_growth(trace: "TurnTrace", kind: str, detail: str = "") -> None:
+    """Record a growth outcome: the typed field and its receipt string, together."""
+    trace.growth_outcome = GrowthOutcome(kind, detail)
+    trace.growth = str(trace.growth_outcome)
+
+
+def _route_arrow(route: tuple[str, str]) -> str:
+    """The `distance_unknown` receipt for an (origin, dest) pair: "place:a->place:b"."""
+    return f"{route[0]}->{route[1]}"
+
+
+@dataclass(frozen=True)
+class Deliberation:
+    """The typed form of the `TurnTrace.deliberating` receipt (#102): a journey held for the
+    player's own weighing. The briefing reads `label` and `weighing`; `str()` is the receipt
+    ("<label> — <weighing>")."""
+
+    dest: str | None     # the resolved destination id (None when the place is not yet minted)
+    label: str           # how the journey reads to the player
+    est_min: int         # the estimated minutes of travel
+    remaining_min: int   # the minutes left before the story's deadline
+
+    @property
+    def weighing(self) -> str:
+        return (f"roughly {self.est_min} minutes of travel against "
+                f"about {self.remaining_min} minutes left")
+
+    def __str__(self) -> str:
+        return f"{self.label} — {self.weighing}"
+
+
+#: TurnTrace fields that are typed siblings of a string receipt. They are READ by the turn
+#: and the briefing; the receipts they mirror are what `to_dict()` (--debug, logs) carries.
+_TYPED_SIBLINGS = ("growth_outcome", "distance_unknown_route", "deliberation")
+
+
 @dataclass
 class TurnTrace:
     """The --debug emission: a formatting of session/audit rows, never a
@@ -1124,7 +1213,7 @@ class TurnTrace:
     dropped_cohorts: list[str] = field(default_factory=list)
     furnished: list[str] = field(default_factory=list)
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
-    movement_status: str = ""  # route() passability: clear|blocked|obscured
+    movement_status: MovementStatus = MovementStatus.NONE  # how the move resolved (route() passability etc.)
     took: str = ""             # object the player took into possession this turn (obj.in=player)
     dropped: str = ""          # object the player set down this turn (obj.in=current place)
     move_debug: str = ""       # diagnostic: raw moves_to + refer outcome (why a move did/didn't commit)
@@ -1140,8 +1229,10 @@ class TurnTrace:
     peril: str = ""             # #95 debug: "staged"|"standing"|"cleared"|"" this turn
     vocative: str = ""          # #93 debug: "token->person:id (present|ABSENT)" when a title address resolved
     memory: str = ""            # #97 debug: the Remembrancer's stirred memory this turn (empty = silent)
-    distance_unknown: str = ""  # #101 inversion: "place:a->place:b" when the map can't prove a local move
-    deliberating: str = ""      # #102: the journey held for the player's own weighing (founder-shaped)
+    distance_unknown: str = ""  # #101 inversion: "place:a->place:b" when the map can't prove a local move (receipt)
+    distance_unknown_route: tuple[str, str] | None = None  # typed sibling of `distance_unknown`: (origin, dest)
+    deliberating: str = ""      # #102: the journey held for the player's own weighing (founder-shaped) (receipt)
+    deliberation: Deliberation | None = None  # typed sibling of `deliberating`
     journey_est: int = -1       # #102: a pre-commit elapsed estimate to reuse (never re-priced)
     journey_priceable: bool = False  # #113: the reused estimate is a TRAVEL price (minutes>0, no jump) — safe for the settle durability backstop
     same_place: bool = False    # a synonym for the current room bound already-here — no move, no time charge
@@ -1181,6 +1272,7 @@ class TurnTrace:
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
     drift: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, class) classified this turn (D-SOFT only)
     growth: str = ""  # WORLD-GROWTH receipt: "activated:<place_or_person_id>" | "declined:<reason>" | "activation_unavailable" | "denied:<deny>" | "" (not invoked)
+    growth_outcome: GrowthOutcome = field(default_factory=GrowthOutcome)  # typed sibling of `growth`
     growth_retry: bool = False  # an INVOKED growth attempt failed → the transport shows the non-diegetic retry seam (no world/clock change this turn)
     growth_moved: list = field(default_factory=list)  # ids the activated chunk moved (protagonist + companions) — 2b-ii must not re-write them
     tangent: str = ""  # G-A receipt: "pending:<aim>" | "adopted:<arc_id>" | "declined:<reason>" | "adoption_unavailable" | "cancelled" | "" (no tangent activity)
@@ -1194,7 +1286,9 @@ class TurnTrace:
     repair_directive: str = ""  # DRIFT-HANDLING D3 debug: the sanitized new-route hook
 
     def to_dict(self) -> dict:
-        return dict(self.__dict__)
+        """The receipts as plain data (--debug, logs). The typed siblings are left out: each is
+        derived from a receipt string that is already here."""
+        return {k: v for k, v in self.__dict__.items() if k not in _TYPED_SIBLINGS}
 
 
 @dataclass
@@ -2508,7 +2602,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
     - `detail` screened by concealed tokens AND protected condition VALUES (Cx 395);
     - closed event-kind set; ≤1 action per member; fail-open everywhere."""
     try:
-        if trace.movement_status not in ("clear", "obscured") or not scene \
+        if trace.movement_status not in _MOVED_STATUSES or not scene \
                 or scene == entry_scene:
             return
         if getattr(trace, "terminal", None) or getattr(trace, "concluded", False):
@@ -2794,7 +2888,7 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     drift pass never breaks a turn."""
     try:
         developing = bool(trace.clocks_fired or trace.beats_achieved or trace.reveals
-                          or str(trace.growth).startswith("activated:"))
+                          or trace.growth_outcome.activated)
         # ^ WORLD-GROWTH doctrine 4: a grown turn is a DEVELOPMENT — D-SOFT
         # must not teleport an arc carrier into the new scene on the same
         # turn. Read from the in-memory trace so the suppression holds even
@@ -3836,11 +3930,11 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
             # an already-here no-op (a synonym for the current room, Cx 445 wrinkle) is
             # NOT a move for time purposes — and the input's own move VERBS would still
             # hit the 6-minute bucket, so the no-op bucket is FORCED, not inferred.
-            _moved = trace.movement_status in ("clear", "obscured")
+            _moved = trace.movement_status in _MOVED_STATUSES
             _journey_priceable = False  # #113: is THIS turn's est a storable travel price?
             if trace.same_place:
                 est = {"advance_minutes": 1}
-            elif trace.distance_unknown:
+            elif trace.distance_unknown_route is not None:
                 # a pre-commit estimate (deliberation gate, #102) is REUSED — the same
                 # movement is never priced twice in one story beat; failing that, the
                 # route's stored canon precedent (#113) — the same journey is never
@@ -3852,7 +3946,7 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                     # (cr: a generic backstop must not poison a route with a jump estimate).
                     _journey_priceable = trace.journey_priceable
                 else:
-                    _o, _, _d = trace.distance_unknown.partition("->")
+                    _o, _d = trace.distance_unknown_route
                     _p_min = _stored_route_price(world, _o, _d)
                     est = {"advance_minutes": _p_min} if _p_min >= 0 else None
                     # stored-price reuse needs no backstop: durability is proven by the read.
@@ -3864,13 +3958,14 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                     hours_per_day=clock.calendar.hours_per_day,
                     phases=clock.calendar.phase_names,
                     action=player_input, narration=narration,
-                    distance_unknown=trace.distance_unknown,
+                    distance_unknown=(_route_arrow(trace.distance_unknown_route)
+                                      if trace.distance_unknown_route else ""),
                     route_evidence=(_route_price_evidence(world)
-                                    if trace.distance_unknown else ""))
+                                    if trace.distance_unknown_route else ""))
                 trace.cohort_calls.append("estimate_elapsed")
                 # a wait/jump estimate (phase jump, day skip, zero minutes) is NOT a
                 # travel price (#113 poison guard) — full dict in hand, checkable here.
-                _journey_priceable = (trace.distance_unknown != ""
+                _journey_priceable = (trace.distance_unknown_route is not None
                                       and int(est.get("advance_minutes") or 0) > 0
                                       and not est.get("jump_to_phase")
                                       and not est.get("jump_days"))
@@ -3881,8 +3976,8 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
             # pre-commit store leaves journey_est set (so this settle deliberately never
             # re-prices) yet no durable precedent. Store-if-absent, once, only when the
             # est source is proven travel-priceable.
-            if trace.distance_unknown and _journey_priceable:
-                _o, _, _d = trace.distance_unknown.partition("->")
+            if trace.distance_unknown_route is not None and _journey_priceable:
+                _o, _d = trace.distance_unknown_route
                 if _stored_route_price(world, _o, _d) < 0:
                     _store_route_price(world, _o, _d,
                                        int(est.get("advance_minutes") or 0), trace.turn)
@@ -4395,9 +4490,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                  "priceable": _priceable}),
             "value_type": "literal", "valid_from": turn_time(turn),
         }], frame=SESSION, classify="rules")
-        trace.movement_status = "deliberating"
-        trace.deliberating = (f"{label} — roughly {_est_min} minutes of travel against "
-                              f"about {int(_delib_deadline[0])} minutes left")
+        trace.movement_status = MovementStatus.DELIBERATING
+        trace.deliberation = Deliberation(dest_id, label, _est_min,
+                                          int(_delib_deadline[0]))
+        trace.deliberating = str(trace.deliberation)
         logger.info("journey held for deliberation: %s", trace.deliberating)
         return True
 
@@ -4409,7 +4505,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         _seg = _route_obstruction(p, pre_chain[0] if pre_chain else None,
                                   dest_id, as_of=_h)
         if _seg and _seg.get("status") == "blocked":
-            trace.movement_status = "blocked"
+            trace.movement_status = MovementStatus.BLOCKED
             trace.movement_obstruction = _seg
             logger.info("movement blocked: %s -> %s (%s)", arc.protagonist,
                         dest_id, _seg.get("evidence"))
@@ -4420,7 +4516,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 "entity": arc.protagonist, "attribute": "in", "value": dest_id,
                 "value_type": "entity", "valid_from": turn_time(turn),
             }], classify="batch")
-            trace.movement_status = _seg.get("status") if _seg else "clear"
+            trace.movement_status = (_as_movement_status(_seg.get("status")) if _seg
+                                     else MovementStatus.CLEAR)
             if _seg:
                 trace.movement_obstruction = _seg
             logger.info("player moved: %s -> %s (%s)", arc.protagonist, dest_id,
@@ -4483,7 +4580,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _gate = (_tnode is not None and _undiscovered_offscene(_tnode)) or any(
                 _undiscovered_offscene(n) for n in _cbi.values() if n.location == target)
             if _gate:
-                trace.movement_status = "undiscovered"
+                trace.movement_status = MovementStatus.UNDISCOVERED
                 logger.info("movement to undiscovered offscene target %s blocked "
                             "(no learned whereabouts)", target)
                 target = None
@@ -4512,7 +4609,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _in_scene_obj = bool(pre_scene and pre_scene in _tchain) or bool(
                 pre_chain and _tchain and _tchain[0] == pre_chain[0])
             if _dest_head(moves_to) in _FIXTURE_HEADS or _in_scene_obj:
-                trace.movement_status = "in_scene"
+                trace.movement_status = MovementStatus.IN_SCENE
                 logger.info("resolved non-place target %r (fixture/scene-object) — in-scene, not travel",
                             target)
             else:
@@ -4522,7 +4619,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # EXACT current-room naming (Cx 447 blocker): "I go to the study" while
             # standing in the study is a no-op — no relocation row, no route check,
             # and NO move-bucket time charge (the 445 wrinkle, now on ALL paths).
-            trace.movement_status = "clear"
+            trace.movement_status = MovementStatus.CLEAR
             trace.same_place = True
             target = None
             logger.info("move %r resolved to the CURRENT scene — already here", moves_to)
@@ -4538,11 +4635,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # RESOLVED target, so a guessed/unresolved VARIANT of an undiscovered offscene suspect or
             # their authored location would otherwise reach the mint and teleport the player near
             # them. Deny it here too — the narrator renders "you don't know where that is yet."
-            trace.movement_status = "undiscovered"
+            trace.movement_status = MovementStatus.UNDISCOVERED
             logger.info("unresolved move %r names an undiscovered offscene target; not minting",
                         moves_to)
         elif (_orig_status != "resolved" and not _orig_candidates
-              and trace.movement_status not in ("undiscovered", "blocked")
+              and trace.movement_status not in (MovementStatus.UNDISCOVERED, MovementStatus.BLOCKED)
               and not _move_touches_secret(moves_to, arc, live_reads)):
             # MOVEMENT PERMANENCE (founder: "I said I went to Harrow's office"): a GENUINE
             # zero-candidate miss — refer resolved nothing and offered no candidates — so the
@@ -4566,7 +4663,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # fixture is prose, not a structured feature). Navigable place heads ("office", "yard",
             # "lane", "kitchen") fall through to the mint and still travel (founder "Harrow's office").
             if _dest_head(moves_to) in _FIXTURE_HEADS:
-                trace.movement_status = "in_scene"  # no mint, no relocation — stay with the people
+                trace.movement_status = MovementStatus.IN_SCENE  # no mint, no relocation — stay with the people
                 logger.info("move %r is an in-scene fixture (head %r) — repositioning, not travel",
                             moves_to, _dest_head(moves_to))
             else:
@@ -4657,12 +4754,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     if _gseg and _gseg.get("status") == "ambiguous":
                         # #101 (Cx 445): an ambiguous locative tail ("in the village",
                         # two known villages) → the ask path, never a guessed mint.
-                        trace.movement_status = "ambiguous"
+                        trace.movement_status = MovementStatus.AMBIGUOUS
                         _move_clarify = str(moves_to)
                         logger.info("move %r container ambiguous — clarify beat (%s)",
                                     moves_to, _gseg.get("evidence"))
                     elif _gseg and _gseg.get("status") == "blocked":
-                        trace.movement_status = "blocked"
+                        trace.movement_status = MovementStatus.BLOCKED
                         trace.movement_obstruction = _gseg
                     elif _gseg and _gseg.get("status") == "grant_failed":
                         # engine trouble AFTER rows were written — an error
@@ -4676,7 +4773,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         # not bypass the confirmation beat
                         pass
                     elif granted:
-                        trace.movement_status = _gseg.get("status") if _gseg else "clear"
+                        trace.movement_status = (_as_movement_status(_gseg.get("status")) if _gseg
+                                             else MovementStatus.CLEAR)
                         if _gseg:
                             trace.movement_obstruction = _gseg
                     else:
@@ -4704,7 +4802,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # deliberation, then commit (a blocked way is never walked).
                     _gated_move_commit(_known, moves_to)
                 elif _known == pre_scene:
-                    trace.movement_status = "clear"  # naming the current place → already here
+                    trace.movement_status = MovementStatus.CLEAR  # naming the current place → already here
                     trace.same_place = True          # Cx 445: no time charge for a no-op
                 else:
                     # SEMANTIC BIND BEFORE MINT (Cx 354 A, founder phantom-scene incident): the
@@ -4753,7 +4851,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         if _bound == pre_scene:
                             # a synonym for the room they're STANDING IN — already here;
                             # no relocation row, no twin (the drawing-room incident).
-                            trace.movement_status = "clear"
+                            trace.movement_status = MovementStatus.CLEAR
                             trace.same_place = True  # Cx 445: no time charge for a no-op
                             logger.info("move %r bound to the CURRENT scene %s — already here",
                                         moves_to, _bound)
@@ -4769,13 +4867,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         # ASK, NEVER HALLUCINATE (founder 2026-07-04): an ambiguous
                         # destination gets a CLARIFY beat — the world asks which the player
                         # means, in-fiction; no mint, no relocation, no invented arrival.
-                        trace.movement_status = "ambiguous"
+                        trace.movement_status = MovementStatus.AMBIGUOUS
                         _move_clarify = str(moves_to)
                         logger.info("move %r ambiguous against roster — clarify beat, "
                                     "no mint, no relocation", moves_to)
                     else:
                         _do_grant()
-        elif trace.movement_status != "in_scene" and not trace.same_place:
+        elif trace.movement_status != MovementStatus.IN_SCENE and not trace.same_place:
             # an absorbed in-scene fixture / already-here no-op is handled, not a miss
             logger.warning("movement destination %r did not resolve (%s); "
                            "relying on extraction", moves_to, status)
@@ -4790,7 +4888,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # receipt, NO world/clock change, the honest non-diegetic retry seam.
     if (seeks_encounter and moves_open and kind == "action"
             and not moves_to
-            and not trace.movement_status and not trace.same_place):
+            and trace.movement_status == MovementStatus.NONE and not trace.same_place):
         # THE DESTINATION-LESS ENCOUNTER LANE (spec §5.2, amended with
         # cr): committed travel-until with no nameable destination. The
         # pipeline outcome is HOST-PROVEN vacuous (no mention → nothing
@@ -4894,7 +4992,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # (which already knows what a city or a kingdom is) prices it from the fiction.
     # The old disjoint-chain farness proxy, the settlement vocabulary, and the durable
     # journey event all retire: derived farness is never stored (Cx 454 hard rule).
-    if (trace.movement_status in ("clear", "obscured") and not trace.same_place
+    if (trace.movement_status in _MOVED_STATUSES and not trace.same_place
             and pre_chain):
         try:
             _post_chain = p.locate(arc.protagonist, as_of=_h) or []
@@ -4912,7 +5010,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # that prove nearness.
                     _near = _route_connects(p, pre_chain[0], _post_chain[0], as_of=_h)
                 if not _near:
-                    trace.distance_unknown = f"{pre_chain[0]}->{_post_chain[0]}"
+                    trace.distance_unknown_route = (pre_chain[0], _post_chain[0])
+                    trace.distance_unknown = _route_arrow(trace.distance_unknown_route)
                     logger.info("move distance UNKNOWN (map can't prove local): %s",
                                 trace.distance_unknown)
         except Exception as exc:  # noqa: BLE001 — detection is enrichment, never a gate
@@ -4929,8 +5028,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # WORLD-GROWTH: an activated chunk already moved every standing companion
     # in the SAME atomic set (§3 companion postcondition) — 2b-ii must not
     # re-write them (cr wiring: the chunk owns those rows).
-    if trace.movement_status in ("clear", "obscured") \
-            and not str(trace.growth).startswith("activated:"):
+    if trace.movement_status in _MOVED_STATUSES \
+            and not trace.growth_outcome.activated:
         for _pid in _npc_by_oid.values():
             if _pid in moved_with_ids or _pid in dismissed_ids:
                 continue
@@ -4945,7 +5044,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if trace.growth_moved:
         moved_with_ids = [i for i in moved_with_ids
                           if i not in set(trace.growth_moved)]
-    if moved_with_ids and trace.movement_status in ("clear", "obscured"):
+    if moved_with_ids and trace.movement_status in _MOVED_STATUSES:
         try:
             _post_chain = p.locate(arc.protagonist, as_of=_h)
             _new_scene = _post_chain[0] if _post_chain else None
