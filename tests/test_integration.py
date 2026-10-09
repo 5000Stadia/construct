@@ -4839,6 +4839,10 @@ def test_adjudication_denies_phantom_key(world):
                       turn=1)
     assert result.trace.adjudication.startswith("denied:")
     assert "no such key" in result.prose
+    # the denial brief names the scene, never its id (R20 run 3: "the cartwright_shed")
+    _brief = next(c[0] for c in provider.calls if "ADJUDICATION (binding)" in c[0])
+    _scene_line = next(l for l in _brief.splitlines() if l.startswith("SCENE:"))
+    assert "place:" not in _scene_line and "unresolved" not in _scene_line, _scene_line
     # the phantom action never entered canon
     assert world.porcelain.state("obj:iron_vault_key", "kind")["status"] == "unknown"
 
