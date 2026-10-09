@@ -9,25 +9,44 @@ here. This is host-side control data — never canon (PB boundary, Cx 025).
 """
 from __future__ import annotations
 
+from enum import StrEnum
+
+from construct.arc.grammar import CostDisposition, TerminalOwner
 from construct.play_styles import _norm
 from construct.play_styles_data import STYLE_CARDS
+
+
+class Shape(StrEnum):
+    """The nine story shapes. A member == its string, so every dict keyed or valued by a
+    shape name below is byte-identical to the bare-string spelling it replaces; a typo
+    is now an AttributeError at import instead of a silently dropped behavior."""
+    DEDUCTION = "deduction"
+    BOND = "bond"
+    ENDURANCE = "endurance"
+    CONTEST = "contest"
+    GAMBIT = "gambit"
+    DISCOVERY = "discovery"
+    MASTERY = "mastery"
+    FARCE = "farce"
+    TRANSFORMATION = "transformation"
+
 
 #: The nine shapes and their schema defaults (STORY-SHAPES.md §3/§4). Per-card profiles
 #: may override any field; these are the behavior defaults a shape carries.
 SHAPES: dict[str, dict] = {
-    "deduction": {
+    Shape.DEDUCTION: {
         "medium": "clues, evidence, testimony, contradictions, red herrings",
         "withheld_kind": "answer", "commitment_kind": "claim",
         "judgment_type": "claim-vs-fact", "payoff_kind": "reveal"},
-    "bond": {
+    Shape.BOND: {
         "medium": "emotional beats — vulnerability, friction, gesture, choice",
         "withheld_kind": "unearned_intimacy", "commitment_kind": "relational_state",
         "judgment_type": "relationship-vs-consequence", "payoff_kind": "connection_or_rupture"},
-    "endurance": {
+    Shape.ENDURANCE: {
         "medium": "mounting threat, scarcity, a clock",
         "withheld_kind": "relief", "commitment_kind": "achieved_state",
         "judgment_type": "action-vs-resistance", "payoff_kind": "outlast_escape_fall"},
-    "contest": {
+    Shape.CONTEST: {
         "medium": "escalating rounds against rivals; scouting, training, the climb",
         "withheld_kind": "the_proof", "commitment_kind": "achieved_state",
         # proof-vs-standard, NOT score-vs-objective: the scoreboard is a separate world
@@ -35,23 +54,23 @@ SHAPES: dict[str, dict] = {
         # (Rocky) is representable (CATALOG §0 finding 5). score-vs-objective re-couples
         # the win to the scoreboard and breaks that case.
         "judgment_type": "proof-vs-standard", "payoff_kind": "win_loss_proved"},
-    "gambit": {
+    Shape.GAMBIT: {
         "medium": "leverage, maneuver, complications, misdirection",
         "withheld_kind": "hand_and_twist", "commitment_kind": "executed_action",
         "judgment_type": "plan-vs-board", "payoff_kind": "lands_or_collapses"},
-    "discovery": {
+    Shape.DISCOVERY: {
         "medium": "the unfolding of place, cosmos, or meaning",
         "withheld_kind": "wonder", "commitment_kind": "understanding",
         "judgment_type": "arrival-vs-cost", "payoff_kind": "awe_understanding"},
-    "mastery": {
+    Shape.MASTERY: {
         "medium": "incremental competence, setbacks, a standard",
         "withheld_kind": "achievement", "commitment_kind": "achieved_state",
         "judgment_type": "artifact-or-system-state", "payoff_kind": "made_thing_or_run_system"},
-    "farce": {
+    Shape.FARCE: {
         "medium": "compounding complications, snowballing disorder",
         "withheld_kind": "blowup", "commitment_kind": "comic_resolution",
         "judgment_type": "comic-order", "payoff_kind": "punchline_comeuppance"},
-    "transformation": {
+    Shape.TRANSFORMATION: {
         "medium": "ordeal, choice, identity",
         "withheld_kind": "changed_self", "commitment_kind": "choice_identity",
         "judgment_type": "identity-vs-ordeal", "payoff_kind": "who_you_become"},
@@ -61,33 +80,33 @@ SHAPES: dict[str, dict] = {
 #: (ordeal/value-choice, NOT Discovery/Bond); Stewardship/Professional → Mastery (system/
 #: procedure subtype); Time/Reality → Discovery primary with a Deduction streak.
 FAMILY_SHAPE: dict[str, str] = {
-    "Investigation & Epistemics": "deduction",
-    "Puzzle, Escape & Decoding": "deduction",
-    "Communication, Collection & Interpretation": "deduction",
-    "Social, Relationship & Intimacy": "bond",
-    "Moral, Psychological & Literary Drama": "transformation",
-    "Survival, Scarcity & Endurance": "endurance",
-    "Horror, Dread & the Uncanny": "endurance",
-    "Action, Combat & Pursuit": "contest",
-    "Competition, Status & Proving Grounds": "contest",
-    "Politics, Factions & Institutions": "gambit",
-    "Schemes & Infiltration": "gambit",
-    "Transgression, Power & Ensemble Forms": "gambit",
-    "Exploration, Wonder & Place": "discovery",
-    "Time, Reality & Metafiction": "discovery",
-    "Mythic, Spiritual & Symbolic": "transformation",
-    "Creativity, Craft & Performance": "mastery",
-    "Stewardship, Building & Management": "mastery",
-    "Professional & Procedural Competence": "mastery",
-    "Comedy, Farce & Chaos": "farce",
+    "Investigation & Epistemics": Shape.DEDUCTION,
+    "Puzzle, Escape & Decoding": Shape.DEDUCTION,
+    "Communication, Collection & Interpretation": Shape.DEDUCTION,
+    "Social, Relationship & Intimacy": Shape.BOND,
+    "Moral, Psychological & Literary Drama": Shape.TRANSFORMATION,
+    "Survival, Scarcity & Endurance": Shape.ENDURANCE,
+    "Horror, Dread & the Uncanny": Shape.ENDURANCE,
+    "Action, Combat & Pursuit": Shape.CONTEST,
+    "Competition, Status & Proving Grounds": Shape.CONTEST,
+    "Politics, Factions & Institutions": Shape.GAMBIT,
+    "Schemes & Infiltration": Shape.GAMBIT,
+    "Transgression, Power & Ensemble Forms": Shape.GAMBIT,
+    "Exploration, Wonder & Place": Shape.DISCOVERY,
+    "Time, Reality & Metafiction": Shape.DISCOVERY,
+    "Mythic, Spiritual & Symbolic": Shape.TRANSFORMATION,
+    "Creativity, Craft & Performance": Shape.MASTERY,
+    "Stewardship, Building & Management": Shape.MASTERY,
+    "Professional & Procedural Competence": Shape.MASTERY,
+    "Comedy, Farce & Chaos": Shape.FARCE,
 }
 
 #: Family → default SECONDARY shapes (the blends Cx named).
 FAMILY_SECONDARY: dict[str, list[str]] = {
-    "Horror, Dread & the Uncanny": ["discovery"],
-    "Mythic, Spiritual & Symbolic": ["discovery"],
-    "Time, Reality & Metafiction": ["deduction"],
-    "Moral, Psychological & Literary Drama": ["bond"],
+    "Horror, Dread & the Uncanny": [Shape.DISCOVERY],
+    "Mythic, Spiritual & Symbolic": [Shape.DISCOVERY],
+    "Time, Reality & Metafiction": [Shape.DEDUCTION],
+    "Moral, Psychological & Literary Drama": [Shape.BOND],
 }
 
 #: Per-TYPE primary-shape overrides where a specific type breaks its family default.
@@ -100,23 +119,23 @@ TYPE_SHAPE: dict[str, str] = {}
 #: the narrator briefing so a romance builds intimacy (not clues) and a survival story
 #: withholds relief (not an answer).
 _SHAPE_LINE: dict[str, str] = {
-    "deduction": "Lay a trail of clues toward the hidden answer; reveal it ONLY when the "
+    Shape.DEDUCTION: "Lay a trail of clues toward the hidden answer; reveal it ONLY when the "
                  "player has assembled enough — never hand it over, and deflect demands for it.",
-    "bond": "Build the relationship through earned emotional beats; the connection (or "
+    Shape.BOND: "Build the relationship through earned emotional beats; the connection (or "
             "its rupture) must be EARNED — a premature declaration rings hollow and is rebuffed.",
-    "endurance": "Mount the threat and the scarcity; never grant easy relief or safety — "
+    Shape.ENDURANCE: "Mount the threat and the scarcity; never grant easy relief or safety — "
                  "survival is earned through play and may not come.",
-    "contest": "Escalate the challenge; the victory must be fought for, never gifted — and "
+    Shape.CONTEST: "Escalate the challenge; the victory must be fought for, never gifted — and "
                "the meaningful win may differ from the scoreboard.",
-    "gambit": "Let the scheme unfold through maneuver and complication; keep your hand and "
+    Shape.GAMBIT: "Let the scheme unfold through maneuver and complication; keep your hand and "
               "the twist concealed until it lands.",
-    "discovery": "Unfold the place and its meaning gradually; the wonder and the "
+    Shape.DISCOVERY: "Unfold the place and its meaning gradually; the wonder and the "
                  "understanding are earned through exploration, never front-loaded.",
-    "mastery": "Build competence through practice and setback; the achievement is earned by "
+    Shape.MASTERY: "Build competence through practice and setback; the achievement is earned by "
                "accumulation, never granted.",
-    "farce": "Compound the complications and let the chaos snowball toward the comic blowup "
+    Shape.FARCE: "Compound the complications and let the chaos snowball toward the comic blowup "
              "— don't resolve it early.",
-    "transformation": "Press the ordeal and the hard choices; the changed self must be "
+    Shape.TRANSFORMATION: "Press the ordeal and the hard choices; the changed self must be "
                       "earned and PROVEN by action, never merely declared.",
 }
 
@@ -137,21 +156,21 @@ _SHAPE_LINE: dict[str, str] = {
 #: falter: seizing evidence ended the story before the accusation could land). Reckoning shapes are
 #: commitment-owned; physical/comic-deadline shapes are world-event-owned. Card-level overrides later.
 SHAPE_CONCLUSION: dict[str, dict] = {
-    "deduction":      {"trigger": "pillars",        "cost_disposition": "peril_redemption", "clock": "none", "terminal_owner": "commitment"},
-    "bond":           {"trigger": "pillars",        "cost_disposition": "repair",           "clock": "none", "terminal_owner": "commitment"},
-    "endurance":      {"trigger": "event_deadline", "cost_disposition": "sacrifice",        "clock": "soft", "terminal_owner": "world_event"},
-    "contest":        {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none",
-                       "terminal_owner": "commitment",
+    Shape.DEDUCTION:      {"trigger": "pillars",        "cost_disposition": CostDisposition.PERIL_REDEMPTION, "clock": "none", "terminal_owner": TerminalOwner.COMMITMENT},
+    Shape.BOND:           {"trigger": "pillars",        "cost_disposition": CostDisposition.REPAIR,           "clock": "none", "terminal_owner": TerminalOwner.COMMITMENT},
+    Shape.ENDURANCE:      {"trigger": "event_deadline", "cost_disposition": CostDisposition.SACRIFICE,        "clock": "soft", "terminal_owner": TerminalOwner.WORLD_EVENT},
+    Shape.CONTEST:        {"trigger": "commitment",     "cost_disposition": CostDisposition.PERIL_REDEMPTION, "clock": "none",
+                       "terminal_owner": TerminalOwner.COMMITMENT,
                        # Contest has a LITERAL external-result axis (the old "scoreboard", finding 5)
                        # read alongside coverage. Now a marker only: the runtime reads declared canon
                        # Occurred result-events via meta["result_events"] (letters 131/132), authored
                        # per-arc in the #33 Contest pass — NOT a bespoke scoreboard. Dormant until then.
                        "has_literal_result": True},
-    "gambit":         {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none", "terminal_owner": "commitment"},
-    "discovery":      {"trigger": "pillars",        "cost_disposition": "sacrifice",        "clock": "none", "terminal_owner": "commitment"},
-    "mastery":        {"trigger": "commitment",     "cost_disposition": "peril_redemption", "clock": "none", "terminal_owner": "commitment"},
-    "farce":          {"trigger": "event_deadline", "cost_disposition": "fail_forward",     "clock": "soft", "terminal_owner": "world_event"},
-    "transformation": {"trigger": "choice",         "cost_disposition": "peril_redemption", "clock": "soft", "terminal_owner": "commitment"},
+    Shape.GAMBIT:         {"trigger": "commitment",     "cost_disposition": CostDisposition.PERIL_REDEMPTION, "clock": "none", "terminal_owner": TerminalOwner.COMMITMENT},
+    Shape.DISCOVERY:      {"trigger": "pillars",        "cost_disposition": CostDisposition.SACRIFICE,        "clock": "none", "terminal_owner": TerminalOwner.COMMITMENT},
+    Shape.MASTERY:        {"trigger": "commitment",     "cost_disposition": CostDisposition.PERIL_REDEMPTION, "clock": "none", "terminal_owner": TerminalOwner.COMMITMENT},
+    Shape.FARCE:          {"trigger": "event_deadline", "cost_disposition": CostDisposition.FAIL_FORWARD,     "clock": "soft", "terminal_owner": TerminalOwner.WORLD_EVENT},
+    Shape.TRANSFORMATION: {"trigger": "choice",         "cost_disposition": CostDisposition.PERIL_REDEMPTION, "clock": "soft", "terminal_owner": TerminalOwner.COMMITMENT},
 }
 
 
@@ -161,7 +180,7 @@ SHAPE_CONCLUSION: dict[str, dict] = {
 #: leans into it, governed by NARRATION-DISCIPLINE). Host-side control data, never canon.
 #: Each element: {"name", "element" (one-line directive), "channels": ("author"|"narrator", ...)}.
 SHAPE_SIGNATURE: dict[str, list[dict]] = {
-    "deduction": [
+    Shape.DEDUCTION: [
         {"name": "red_herrings", "channels": ("author", "narrator"),
          "element": "plant at least one false lead with a tell; the narrator may improvise more "
                     "live, each one debunkable in play (never a dead-end)"},
@@ -174,7 +193,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
         {"name": "the_earned_reveal", "channels": ("narrator",),
          "element": "reveal only when the player has assembled enough — never hand it over"},
     ],
-    "bond": [
+    Shape.BOND: [
         {"name": "earned_intimacy_beats", "channels": ("narrator",),
          "element": "build connection through vulnerability and gesture — never a declared shortcut"},
         {"name": "real_friction_that_tests", "channels": ("author", "narrator"),
@@ -193,7 +212,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
                     "there, never at street, neighborhood, or city scale; a bond is built "
                     "in a place small enough to share"},
     ],
-    "endurance": [
+    Shape.ENDURANCE: [
         {"name": "mounting_threat", "channels": ("narrator",),
          "element": "escalate the pressure; never grant easy relief or safety"},
         {"name": "scarcity_and_resource_pressure", "channels": ("author", "narrator"),
@@ -205,7 +224,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
         {"name": "the_glimpsed_dread", "channels": ("narrator",),
          "element": "the threat is felt before it is seen (horror blend)"},
     ],
-    "contest": [
+    Shape.CONTEST: [
         {"name": "escalating_rounds", "channels": ("narrator",),
          "element": "each challenge harder than the last; the victory is fought for, never gifted"},
         {"name": "the_worthy_rival", "channels": ("author", "narrator"),
@@ -215,7 +234,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
         {"name": "scoreboard_vs_meaning", "channels": ("narrator",),
          "element": "the meaningful win may differ from the literal result"},
     ],
-    "gambit": [
+    Shape.GAMBIT: [
         {"name": "factions_with_competing_agendas", "channels": ("author",),
          "element": "real players whose interests cross"},
         {"name": "the_plan_and_its_execution", "channels": ("author", "narrator"),
@@ -225,7 +244,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
         {"name": "the_concealed_twist_or_betrayal", "channels": ("author", "narrator"),
          "element": "planted, kept hidden until it lands"},
     ],
-    "discovery": [
+    Shape.DISCOVERY: [
         {"name": "gradual_unfolding", "channels": ("narrator",),
          "element": "place and meaning revealed in layers, never front-loaded"},
         {"name": "the_sense_of_wonder", "channels": ("narrator",),
@@ -237,7 +256,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
         {"name": "the_cost_of_knowing", "channels": ("author", "narrator"),
          "element": "understanding has a price; arrival is not free"},
     ],
-    "mastery": [
+    Shape.MASTERY: [
         {"name": "incremental_competence", "channels": ("narrator",),
          "element": "skill accrues through practice; it is never granted"},
         {"name": "setbacks_that_teach", "channels": ("author", "narrator"),
@@ -247,7 +266,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
         {"name": "the_made_thing_or_run_system", "channels": ("author",),
          "element": "a concrete artifact or system is the payoff"},
     ],
-    "farce": [
+    Shape.FARCE: [
         {"name": "mistaken_identity_or_cross_purposes", "channels": ("author", "narrator"),
          "element": "a misunderstanding engine seeded and stoked"},
         {"name": "compounding_complications", "channels": ("narrator",),
@@ -257,7 +276,7 @@ SHAPE_SIGNATURE: dict[str, list[dict]] = {
         {"name": "false_coverage_is_engine_live", "channels": ("author",),
          "element": "the comic premise running is the desired state, not a failure"},
     ],
-    "transformation": [
+    Shape.TRANSFORMATION: [
         {"name": "the_old_self_made_legible", "channels": ("author",),
          "element": "establish the starting self and its temptation up front, so the change can be proven against it"},
         {"name": "the_defining_choice", "channels": ("author", "narrator"),

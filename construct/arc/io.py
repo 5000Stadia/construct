@@ -17,7 +17,8 @@ from dataclasses import fields
 
 from construct.arc import conditions as C
 from construct.arc.grammar import (
-    Arc, Beat, Clock, ConclusionShape, Gauge, Phase, Pillar, Pin, Rung, Weight,
+    Arc, Beat, BeatStatus, Clock, ClockStatus, ConclusionShape, Gauge, Phase, Pillar, Pin,
+    Rearm, Rung, Weight,
 )
 
 #: The pin fields persisted as plot rows / cache keys (one row per field).
@@ -40,6 +41,40 @@ _JSON_BLOB_ATTRS = frozenset({
 })
 
 logger = logging.getLogger(__name__)
+
+#: How the arc rows store a boolean (audit 2026-10 arc F7: the storage is a string, and
+#: changing it would be a format change, so it stays; the encode/decode lives HERE, once).
+#: Two encodings exist today, both round-tripped byte-for-byte:
+#: * "true"/"false" (`pillar.required`, `gauge.terminal_on_floor`): written both ways,
+#:   read back with ABSENCE meaning TRUE (`decode_bool`);
+#: * "yes"/absent (`pin.escalates`, a generated arc's `generated` mark): written only
+#:   when true (`YES`; a reader tests `is_yes`).
+BOOL_TRUE = "true"
+BOOL_FALSE = "false"
+YES = "yes"
+
+
+def encode_bool(value: bool) -> str:
+    """A bool as its stored "true"/"false" string."""
+    return BOOL_TRUE if value else BOOL_FALSE
+
+
+def decode_bool(raw) -> bool:
+    """A stored "true"/"false" back to a bool; an absent/empty row reads TRUE (the
+    safe default for `required` and `terminal_on_floor`)."""
+    return (raw or BOOL_TRUE) != BOOL_FALSE
+
+
+def _plain(value):
+    """A str-subclass value (a StrEnum member) as the exact plain `str` a row stores;
+    every other value passes through. Keeps enum members out of the ingest items."""
+    return str(value) if isinstance(value, str) else value
+
+
+def is_yes(raw) -> bool:
+    """True for the stored "yes" flag (absent = False)."""
+    return raw == YES
+
 
 #: The portfolio manifest entity — one row listing the active `arc:*` ids plus
 #: which one is the main (terminal-bearing) arc. The registry is "more named
@@ -131,7 +166,7 @@ def arc_to_items(arc: Arc, frame: str = "plot:main") -> list[dict]:
     items += [
         {"entity": shape.shape_id, "attribute": "kind", "value": "conclusion_shape",
          "timeless": True},
-        {"entity": shape.shape_id, "attribute": "delta_type", "value": shape.delta_type,
+        {"entity": shape.shape_id, "attribute": "delta_type", "value": _plain(shape.delta_type),
          "timeless": True},
         {"entity": shape.shape_id, "attribute": "tension",
          "value": json.dumps(list(shape.tension)), "timeless": True},
@@ -171,7 +206,7 @@ def _beat_rows(beat: Beat, arc_id: str) -> list[dict]:
          "timeless": True},
         {"entity": beat.beat_id, "attribute": "achievable_via",
          "value": json.dumps(expr_to_obj(beat.achievable_via)), "timeless": True},
-        {"entity": beat.beat_id, "attribute": "status", "value": "pending"},
+        {"entity": beat.beat_id, "attribute": "status", "value": BeatStatus.PENDING.value},
     ]
     if beat.unreachable_if is not None:
         rows.append({"entity": beat.beat_id, "attribute": "unreachable_if",
@@ -246,7 +281,7 @@ def pillar_to_items(pillar: Pillar, arc_id: str) -> list[dict]:
         {"entity": pillar.pillar_id, "attribute": "label", "value": pillar.label,
          "timeless": True},
         {"entity": pillar.pillar_id, "attribute": "required",
-         "value": "true" if pillar.required else "false", "timeless": True},
+         "value": encode_bool(pillar.required), "timeless": True},
     ]
     if pillar.genuine_via is not None:
         items.append({"entity": pillar.pillar_id, "attribute": "genuine_via",
@@ -266,10 +301,10 @@ def pin_to_items(pin: Pin, arc_id: str) -> list[dict]:
         val = getattr(pin, field_name)
         if val is not None:
             items.append({"entity": pin.pin_id, "attribute": field_name,
-                          "value": val, "timeless": True})
+                          "value": _plain(val), "timeless": True})
     if pin.escalates:  # written only when true → read back as a clean truthiness
         items.append({"entity": pin.pin_id, "attribute": "escalates",
-                      "value": "yes", "timeless": True})
+                      "value": YES, "timeless": True})
     return items
 
 
@@ -291,7 +326,7 @@ def gauge_to_items(gauge: Gauge, arc_id: str) -> list[dict]:
         {"entity": gauge.gauge_id, "attribute": "base_delta", "value": gauge.base_delta,
          "timeless": True},
         {"entity": gauge.gauge_id, "attribute": "terminal_on_floor",
-         "value": "true" if gauge.terminal_on_floor else "false", "timeless": True},
+         "value": encode_bool(gauge.terminal_on_floor), "timeless": True},
         {"entity": gauge.gauge_id, "attribute": "costly_band", "value": gauge.costly_band,
          "timeless": True},
         {"entity": gauge.gauge_id, "attribute": "action_modifiers",
@@ -314,7 +349,7 @@ def _gauge_from_reads(get, gauge_id: str) -> Gauge:
         floor=_as_float(get(gauge_id, "floor")) or 0.0,
         base_delta=_as_float(get(gauge_id, "base_delta")) or 0.0,
         ceiling=_as_float(get(gauge_id, "ceiling")),
-        terminal_on_floor=(get(gauge_id, "terminal_on_floor") or "true") != "false",
+        terminal_on_floor=decode_bool(get(gauge_id, "terminal_on_floor")),
         costly_band=_as_float(get(gauge_id, "costly_band")) or 0.25,
         action_modifiers=mods,
     )
@@ -394,9 +429,9 @@ def clock_to_items(clock: Clock, arc_id: str) -> list[dict]:
          "value": json.dumps(expr_to_obj(clock.fires_when)), "timeless": True},
         {"entity": clock.clock_id, "attribute": "effects",
          "value": json.dumps(list(clock.effects)), "timeless": True},
-        {"entity": clock.clock_id, "attribute": "rearm", "value": clock.rearm,
+        {"entity": clock.clock_id, "attribute": "rearm", "value": _plain(clock.rearm),
          "timeless": True},
-        {"entity": clock.clock_id, "attribute": "status", "value": "armed"},
+        {"entity": clock.clock_id, "attribute": "status", "value": ClockStatus.ARMED.value},
     ]
     if clock.bound_to:
         items.append({"entity": clock.clock_id, "attribute": "bound_to",
@@ -472,7 +507,7 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
             effects=tuple(json.loads(effects)),
             bound_to=get(cid, "bound_to"),
             rung=Rung(rung_val) if rung_val else None,
-            rearm=get(cid, "rearm") or "once",
+            rearm=get(cid, "rearm") or Rearm.ONCE,
         )
         # rung may not materialize at scale; the last-indexed clock IS the
         # refusal clock by construction, so identify it by position too.
@@ -527,7 +562,7 @@ def _pillar_from_reads(get, pillar_id: str) -> Pillar:
     return Pillar(
         pillar_id=pillar_id,
         label=get(pillar_id, "label") or "",
-        required=(get(pillar_id, "required") or "true") != "false",
+        required=decode_bool(get(pillar_id, "required")),
         genuine_via=expr_from_obj(json.loads(g)) if g else None,
         false_via=expr_from_obj(json.loads(f)) if f else None,
     )
@@ -583,7 +618,7 @@ def _clock_to_cache(c: Clock) -> dict:
     return {
         "clock_id": c.clock_id, "fires_when": expr_to_obj(c.fires_when),
         "effects": list(c.effects), "bound_to": c.bound_to,
-        "rung": c.rung.value if c.rung else None, "rearm": c.rearm,
+        "rung": c.rung.value if c.rung else None, "rearm": _plain(c.rearm),
     }
 
 
@@ -592,7 +627,7 @@ def _clock_from_cache(d: dict) -> Clock:
         clock_id=d["clock_id"], fires_when=expr_from_obj(d["fires_when"]),
         effects=tuple(d["effects"]), bound_to=d.get("bound_to"),
         rung=Rung(d["rung"]) if d.get("rung") else None,
-        rearm=d.get("rearm", "once"),
+        rearm=d.get("rearm", Rearm.ONCE),
     )
 
 

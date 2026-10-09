@@ -14,7 +14,10 @@ from __future__ import annotations
 from typing import Any
 
 from construct.arc.conditions import Truth, evaluate
-from construct.arc.grammar import Arc, Phase, Pillar
+from construct.arc.grammar import (
+    Arc, BeatStatus, CostDisposition, Coverage, DeltaType, Outcome, OutcomeShape, Phase,
+    Pillar, WorldEvent,
+)
 from construct.arc.supersession import active_beats, resolve_beat_id
 from construct.arc.timeline import PLOT
 
@@ -33,7 +36,7 @@ def arc_concluded(reads: Any, arc: Arc) -> bool:
     return evaluate(ClockFired(refusal), reads) is Truth.TRUE
 
 
-def arc_outcome(reads: Any, arc: Arc) -> str | None:
+def arc_outcome(reads: Any, arc: Arc) -> Outcome | None:
     """Win/loss classification (WIN-LOSS-CONDITIONS §10), evaluated after the
     full tick. **Total priority, won-first:** `"won"` if the destination's
     `world_condition` holds — reaching the climax is the stronger, more specific
@@ -46,11 +49,11 @@ def arc_outcome(reads: Any, arc: Arc) -> str | None:
     from construct.arc.conditions import ClockFired
 
     if evaluate(arc.shape.world_condition, reads) is Truth.TRUE:
-        return "won"
+        return Outcome.WON
     if evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE:
-        return "lost"
+        return Outcome.LOST
     if arc.failure_when is not None and evaluate(arc.failure_when, reads) is Truth.TRUE:
-        return "lost"
+        return Outcome.LOST
     return None
 
 
@@ -58,22 +61,22 @@ def arc_outcome(reads: Any, arc: Arc) -> str | None:
 #: Tri-state coverage of a causal pillar, computed host-side from the player
 #: frame. The conclusory scene is the NARRATED EFFECT of this coverage; it is
 #: never a win/loss gate.
-COVERAGE = ("genuine", "false", "unfilled")
+COVERAGE: tuple[Coverage, ...] = (Coverage.GENUINE, Coverage.FALSE, Coverage.UNFILLED)
 
 
-def pillar_coverage(reads: Any, pillar: Pillar) -> str:
+def pillar_coverage(reads: Any, pillar: Pillar) -> Coverage:
     """Coverage of ONE pillar from the player frame. 'genuine' wins a tie with
     'false' — a real cause established trumps a lingering red herring."""
     if pillar.genuine_via is not None and \
             evaluate(pillar.genuine_via, reads) is Truth.TRUE:
-        return "genuine"
+        return Coverage.GENUINE
     if pillar.false_via is not None and \
             evaluate(pillar.false_via, reads) is Truth.TRUE:
-        return "false"
-    return "unfilled"
+        return Coverage.FALSE
+    return Coverage.UNFILLED
 
 
-def arc_coverage(reads: Any, arc: Arc) -> dict[str, str]:
+def arc_coverage(reads: Any, arc: Arc) -> dict[str, Coverage]:
     """{pillar_id: coverage} across all the arc's pillars (host-side; the engine
     never infers pillar coverage). Empty when the arc declares no pillars."""
     return {p.pillar_id: pillar_coverage(reads, p) for p in arc.pillars}
@@ -87,9 +90,9 @@ def coverage_summary(reads: Any, arc: Arc) -> dict:
     not; `sound` = every required pillar GENUINELY covered (a clean case)."""
     cov = arc_coverage(reads, arc)
     required = [p.pillar_id for p in arc.pillars if p.required]
-    genuine = [pid for pid in required if cov[pid] == "genuine"]
-    false = [pid for pid in required if cov[pid] == "false"]
-    unfilled = [pid for pid in required if cov[pid] == "unfilled"]
+    genuine = [pid for pid in required if cov[pid] == Coverage.GENUINE]
+    false = [pid for pid in required if cov[pid] == Coverage.FALSE]
+    unfilled = [pid for pid in required if cov[pid] == Coverage.UNFILLED]
     return {
         "coverage": cov,
         "required": required,
@@ -102,7 +105,7 @@ def coverage_summary(reads: Any, arc: Arc) -> dict:
 
 
 def conclusion_from_coverage(summary: dict, *,
-                             cost_disposition: str = "peril_redemption",
+                             cost_disposition: str = CostDisposition.PERIL_REDEMPTION,
                              world_event: str | None = None,
                              cost_weight: float = 0.0) -> dict | None:
     """Map pillar coverage → the conclusory OUTCOME_SHAPE, as the EFFECT of the causes
@@ -134,53 +137,56 @@ def conclusion_from_coverage(summary: dict, *,
     all_genuine, complete = summary["sound"], summary["complete"]
     high_cost = cost_weight >= 0.5
 
-    if cost_disposition == "fail_forward":
+    if cost_disposition == CostDisposition.FAIL_FORWARD:
         # Comedy inverts: false == the comic engine is LIVE (the desired blowup); genuine ==
         # defused (anticlimax); unfilled == never lit (damp squib). A false-fill is SUCCESS,
         # never a wrong case → wrong_case is always False. `cost_weight` here must be
         # collateral-derived, NOT false-count (the caller honors this — Cx 027 blocker 3).
         live, unlit = len(false_), len(unfilled)
         if live == len(required):
-            outcome = "costly_victory" if high_cost else "triumph"  # comeuppance vs warm
+            outcome = (OutcomeShape.COSTLY_VICTORY if high_cost
+                       else OutcomeShape.TRIUMPH)  # comeuppance vs warm
             basis = "comic engine fully live → " + ("comeuppance" if high_cost else "warm blowup")
         elif live >= 1:
-            outcome, basis = "partial", "a near-miss collision; some fuses lit"
+            outcome, basis = OutcomeShape.PARTIAL, "a near-miss collision; some fuses lit"
         elif unlit == len(required):
-            outcome, basis = "quiet_failure", "the damp squib — nothing was ever lit"
+            outcome, basis = OutcomeShape.QUIET_FAILURE, "the damp squib — nothing was ever lit"
         else:
-            outcome, basis = "partial", "the anticlimax — everything tidily defused"
-        effect_sound = outcome in ("triumph", "costly_victory", "partial")
+            outcome, basis = OutcomeShape.PARTIAL, "the anticlimax — everything tidily defused"
+        effect_sound = outcome in (OutcomeShape.TRIUMPH, OutcomeShape.COSTLY_VICTORY,
+                                   OutcomeShape.PARTIAL)
         return {"outcome": outcome, "sound": all_genuine, "effect_sound": effect_sound,
                 "wrong_case": False, "basis": basis}
 
     # Normal polarity (genuine is the sound fill; a false-filled required cause = wrong case).
     wrong_case = bool(false_)
     if all_genuine:
-        if world_event == "loss":  # Rocky: proved on the causes, the external result went against
-            outcome, basis = "costly_victory", \
+        if world_event == WorldEvent.LOSS:  # Rocky: proved on the causes, the external result went against
+            outcome, basis = OutcomeShape.COSTLY_VICTORY, \
                 "proved on the causes, though the external result went against"
         else:
-            outcome = "costly_victory" if high_cost else "triumph"
+            outcome = (OutcomeShape.COSTLY_VICTORY if high_cost
+                       else OutcomeShape.TRIUMPH)
             basis = "all causes genuinely established" + (" at heavy cost" if high_cost else "")
     elif complete:  # every required pillar covered, but ≥1 falsely → a wrong/mixed case lands
-        outcome, basis = "bittersweet", \
+        outcome, basis = OutcomeShape.BITTERSWEET, \
             "the case concludes but rests on a false cause — it lands wrongly"
-    elif world_event == "win" and genuine:  # a scoreboard win on an unsound case = hollow
-        outcome, basis = "bittersweet", \
+    elif world_event == WorldEvent.WIN and genuine:  # a scoreboard win on an unsound case = hollow
+        outcome, basis = OutcomeShape.BITTERSWEET, \
             "won the external result, but the proof was never truly earned"
     elif genuine:  # partial progress, some causes still open at a forced close
-        outcome, basis = "partial", "some causes established, others left open"
+        outcome, basis = OutcomeShape.PARTIAL, "some causes established, others left open"
     elif false_:  # built only on red herrings
-        outcome, basis = "failure", "the case rests entirely on false causes"
+        outcome, basis = OutcomeShape.FAILURE, "the case rests entirely on false causes"
     else:  # nothing established
-        outcome, basis = "quiet_failure", "the causes were never established"
+        outcome, basis = OutcomeShape.QUIET_FAILURE, "the causes were never established"
     return {"outcome": outcome, "sound": all_genuine, "effect_sound": all_genuine,
             "wrong_case": wrong_case, "basis": basis}
 
 
 #: TRANSFORMATION reconciliation (CATALOG §0 finding 4): the arc's ConclusionShape
 #: `delta_type` should DERIVE from pillar coverage, not be declared in parallel.
-def delta_type_from_coverage(summary: dict) -> str | None:
+def delta_type_from_coverage(summary: dict) -> DeltaType | None:
     """Derive the character-delta type from pillar coverage (Transformation). All causes
     genuine → `drive_inverted` (the change holds); partial-genuine → `desire_renounced`
     (turned from the old life, repair unfinished); else None (no inversion — the old self
@@ -189,9 +195,9 @@ def delta_type_from_coverage(summary: dict) -> str | None:
     if not (summary.get("required") or []):
         return None
     if summary["sound"]:
-        return "drive_inverted"
+        return DeltaType.DRIVE_INVERTED
     if summary["genuine"]:
-        return "desire_renounced"
+        return DeltaType.DESIRE_RENOUNCED
     return None
 
 
@@ -201,8 +207,9 @@ def delta_type_from_coverage(summary: dict) -> str | None:
 #: `arc_lifecycle` stay binary internally. `pyrrhic` was collapsed into
 #: `costly_victory` (overlap destabilizes the judge — Cx Q-S1). The free
 #: `outcome_gloss` carries the specifics.
-OUTCOME_SHAPES = ("triumph", "costly_victory", "bittersweet",
-                  "partial", "failure", "quiet_failure")
+OUTCOME_SHAPES: tuple[OutcomeShape, ...] = (
+    OutcomeShape.TRIUMPH, OutcomeShape.COSTLY_VICTORY, OutcomeShape.BITTERSWEET,
+    OutcomeShape.PARTIAL, OutcomeShape.FAILURE, OutcomeShape.QUIET_FAILURE)
 
 _PHASE_ORDER = {Phase.SETUP: 0, Phase.RISING: 1, Phase.CRISIS: 2,
                 Phase.CLIMAX: 3, Phase.FALLING: 4}
@@ -218,7 +225,7 @@ def climax_ready(reads: Any, arc: Arc) -> bool:
     # counts via its replacement).
     got = sum(1 for bid in arc.climax_ready_beats
               if reads.state(resolve_beat_id(reads, bid), "status",
-                             frame=PLOT) == "achieved")
+                             frame=PLOT) == BeatStatus.ACHIEVED)
     return got >= arc.climax_ready_k
 
 
@@ -231,7 +238,7 @@ def current_phase(reads: Any, arc: Arc) -> Phase:
     if climax_ready(reads, arc):
         return Phase.CLIMAX
     achieved = [b.phase for b in active_beats(reads, arc)
-                if reads.state(b.beat_id, "status", frame=PLOT) == "achieved"]
+                if reads.state(b.beat_id, "status", frame=PLOT) == BeatStatus.ACHIEVED]
     if not achieved:
         return Phase.SETUP
     return max(achieved, key=lambda p: _PHASE_ORDER[p])
