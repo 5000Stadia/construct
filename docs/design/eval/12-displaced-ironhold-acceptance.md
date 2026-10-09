@@ -103,3 +103,5 @@ Where the remaining time is, largest first:
 4. **Player-input ingest.** 13–30 s on turns that assert something. The A-lite skip already avoids it on pure questions.
 
 R23 is not built tonight. These are its starting numbers.
+
+A later engine change to watch: pattern-buffer's REFER-LEARNING-V1 (batch D, 2026-10-09) stops pinning an ambiguous reference to one entity, so each ambiguous phrase costs a tier-2 cheap call when it comes up. Expect a few seconds on turns that name an ambiguous thing; check it in the next probe's movement and adjudication timings.
