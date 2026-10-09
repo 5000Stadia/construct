@@ -22,11 +22,11 @@ Two halves live here, both deterministic (the model calls are in `cohorts`):
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from construct import cohorts
 from construct.resolve import is_proper_named
+from construct.text import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +149,7 @@ def build_sheet(world: Any, protagonist: str, arc: Any,
 
 
 def _slug(text: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_")
-    return s[:40] or "unnamed"
+    return slugify(text or "")[:40] or "unnamed"
 
 
 def _standing_values(world: Any, entity: str, attribute: str, frame: str) -> list[str]:

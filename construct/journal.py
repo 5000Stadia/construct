@@ -13,6 +13,8 @@ import logging
 import re
 from typing import Any, Callable, Iterable
 
+from construct.text import humanize_id_title
+
 logger = logging.getLogger(__name__)
 
 #: Frame rows that are machinery or render seasoning, not something the character would
@@ -21,10 +23,6 @@ logger = logging.getLogger(__name__)
 _SKIP_ATTRS = {"kind", "alias", "in", "feel", "current_occupant", "known_as"}
 
 _ENTITY_ID = re.compile(r"^[a-z_]+:[\w-]+$")
-
-
-def _humanize(entity_id: str) -> str:
-    return entity_id.split(":", 1)[-1].replace("_", " ").title()
 
 
 def _attr_label(attribute: str) -> str:
@@ -62,7 +60,7 @@ def render_journal(rows: Iterable[Any], protagonist: str,
 
     def _name(ent: str) -> str:
         nm = name_of(ent) if name_of else None
-        return str(nm) if nm else _humanize(ent)
+        return str(nm) if nm else humanize_id_title(ent)
 
     def _freshness(ent: str) -> float:
         return max((getattr(r, "valid_from", None) or 0.0) for r in by_entity[ent])

@@ -17,6 +17,7 @@ from typing import Any
 
 from construct.arc.conditions import PacingCounters, Truth, evaluate
 from construct.arc.grammar import Arc, Phase, Rung, Weight
+from construct.text import human_name
 
 # --- the executor was split along four seams (audit 2026-10 tier 2 #7); every name
 # --- below is RE-EXPORTED so `from construct.arc.executor import X` keeps working.
@@ -256,12 +257,11 @@ _DEFAULT_FALLOUT = ("arc_unresolved",
                     "{say}'s story closed unresolved — the stakes linger.")
 
 
-def _human(entity: str) -> str:
-    """A readable name for an entity id, for the narrator directive (not stored). A `person:` slug
-    is a proper NAME → Title-Case it (founder blind test: 'clara_vale' addressed as lowercase 'clara
-    vale'); obj/place stay lowercase so prose reads naturally ('you lift the brass token')."""
-    local = entity.split(":", 1)[-1].replace("_", " ")
-    return local.title() if str(entity).startswith("person:") else local
+#: A readable name for an entity id, for the narrator directive (not stored): a `person:` slug
+#: is a proper NAME, so it is Title-Cased (founder blind test: 'clara_vale' addressed as
+#: lowercase 'clara vale'); obj/place stay lowercase so prose reads naturally ('you lift the
+#: brass token'). It lives in the text toolkit; the old name stays importable here.
+_human = human_name
 
 
 #: The settled-death vocabulary (word-boundary matched). Deliberately NARROW:

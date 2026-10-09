@@ -30,6 +30,10 @@ from construct.scenario_meta import (
     InputAuthority, PlaythroughState, ScenarioMeta, ScenarioMode,
 )
 from construct.adapter import PorcelainWorldReads, state_value
+from construct.text import (
+    ID_SEPARATORS, human_name, humanize_id, humanize_id_last, humanize_typed_id, id_local,
+    split_words,
+)
 from construct.turnloop import TurnTrace, run_turn, terminal_outcome
 
 logger = logging.getLogger(__name__)
@@ -337,7 +341,7 @@ class Session:
         where = ""
         if loc:
             where = (state_value(self._world.porcelain, loc, "name", as_of=self._horizon())
-                     or loc.split(":", 1)[-1].replace("_", " "))
+                     or humanize_id(loc))
         return f"{when} | {where}" if where else when
 
     def journal(self) -> str:
@@ -420,7 +424,7 @@ class Session:
             proto = self._arc.protagonist
             p = self._world.porcelain
             _h = self._horizon()  # the opening horizon (Cx 255): role/name/defaults at the start
-            name = state_value(p, proto, "name", as_of=_h) or proto.split(":")[-1].replace("_", " ")
+            name = state_value(p, proto, "name", as_of=_h) or humanize_id_last(proto)
             role = (state_value(p, proto, "role", as_of=_h)
                     or state_value(p, proto, "kind", as_of=_h) or "")
             defaults = {a: v for a in _DETAIL_ATTRS
@@ -592,8 +596,8 @@ class Session:
             return min(namelike, key=len)            # the tightest name-like handle
         s = str(entity)
         if ":" in s:
-            local = s.split(":", 1)[-1].replace("_", " ")   # humanized id beats a descriptive clause
-            return local.title() if s.startswith("person:") else local  # person slug = a proper name
+            # a humanized id beats a descriptive clause; a person slug is a proper name
+            return human_name(s)
         return (vals["alias"] + vals["title"] + [s])[0]
 
     def _opening_narration(self, intro: str) -> str:
@@ -931,9 +935,7 @@ class Session:
             s = str(x)
             if s in names:
                 return names[s]
-            if ":" in s and s.split(":", 1)[0] in ("person", "place", "obj", "fact", "event"):
-                return s.split(":", 1)[-1].replace("_", " ")
-            return s
+            return humanize_typed_id(s)
 
         # CONCEAL the arc's load-bearing facts from the cold open — the same
         # (entity, attribute) keys the turn loop protects (the beats' conditions,
@@ -992,9 +994,8 @@ class Session:
         concealed = self._concealed_tokens()
 
         def _leaks(text: str, ev: str) -> bool:
-            blob = (f"{text} {ev.split(':', 1)[-1]}"
-                    .replace("_", " ").replace("-", " ").replace(":", " ").lower())
-            words = set(blob.split())
+            words = set(split_words(f"{text} {id_local(ev)}", seps=ID_SEPARATORS,
+                                    lower="last"))
             return bool(concealed & words)
 
         return [t for e, t in threads.items() if not _leaks(t, e)][:limit]
@@ -1245,7 +1246,7 @@ class Session:
                         continue
             except Exception:
                 continue
-            name = state_value(p, e, "name", as_of=_h) or e.split(":", 1)[-1].replace("_", " ")
+            name = state_value(p, e, "name", as_of=_h) or humanize_id(e)
             kind = (state_value(p, e, "kind", as_of=_h) or "").strip()
             if e.startswith("person:"):
                 cond = " ".join(filter(None, (

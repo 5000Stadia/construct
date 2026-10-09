@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from construct.arc.executor import turn_time
+from construct.text import slugify_per_char
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +80,7 @@ class ReshapeResult:
 
 
 def _slug(text: str) -> str:
-    keep = [c if (c.isalnum() or c == "_") else "_" for c in (text or "").lower()]
-    return "".join(keep).strip("_") or "reshape"
+    return slugify_per_char(text or "") or "reshape"
 
 
 def plan_from_proposal(proposal: dict, *, tier: str, action_event: str = "",

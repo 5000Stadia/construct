@@ -51,6 +51,7 @@ from construct.arc.executor import (
 from construct.arc.grammar import LIFECYCLE_TERMINALS, Arc, Phase  # noqa: F401
 from construct.arc.lint import lint_arc
 from construct.provider import Provider
+from construct.text import slugify_keep_underscores
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +156,7 @@ def _id_slug(s: str) -> str:
     embedded colons/odd characters as malformed — a reason like
     'lint:1-referents' or a source like 'event:arc_terminal_x' must be slugged
     before riding an id. The RAW string still travels as the row VALUE."""
-    import re
-    return re.sub(r"[^a-z0-9_]+", "_", (s or "").lower()).strip("_") or "x"
+    return slugify_keep_underscores(s or "") or "x"
 
 
 def _lineage_exhausted(reads: Any, source: str) -> bool:
