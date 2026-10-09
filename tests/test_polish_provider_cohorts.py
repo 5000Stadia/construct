@@ -259,3 +259,44 @@ def test_clean_prose_still_strips_reserved_task_markers():
 
 def test_clean_prose_still_strips_meta_reasoning_without_braces():
     assert _clean_prose("The door opens. Wait final schema expected") == "The door opens."
+
+
+# --------------------------------------------------------------------------
+# R20 probe find — a server-side stream error is passing, so it is retried
+# --------------------------------------------------------------------------
+
+def test_server_error_stream_is_transient_but_request_errors_are_not():
+    from construct.provider import ProviderTransientError
+    probe_event = {"type": "error", "error": {"type": "server_error", "code": "server_error",
+                   "message": "An error occurred while processing your request. You can retry "
+                              "your request."}}
+    with pytest.raises(ProviderTransientError):
+        _collect([probe_event])
+    for code in ("rate_limit_exceeded", "overloaded"):
+        with pytest.raises(ProviderTransientError):
+            _collect([{"type": "error", "code": code, "message": "x"}])
+    with pytest.raises(ProviderTransportError) as ei:
+        _collect([{"type": "response.failed", "response": {
+            "status": "failed", "error": {"code": "invalid_prompt", "message": "boom"}}}])
+    assert not isinstance(ei.value, ProviderTransientError)
+
+
+def test_one_server_error_is_retried_to_success(tmp_path, monkeypatch):
+    """The probe turn's classify lost the player's move to a single server_error that was
+    not retried. Now the bounded transient retry re-sends it and the call succeeds."""
+    provider = CodexProvider(auth_path=tmp_path / "absent.json")
+    calls = {"n": 0}
+    schema = {"type": "object", "properties": {"prose": {"type": "string"}}, "required": ["prose"]}
+
+    async def once(prompt, schema_, tier, deliberate=False):
+        calls["n"] += 1
+        events = ([{"type": "error", "error": {"code": "server_error", "message": "retry me"}}]
+                  if calls["n"] == 1 else [_completed('{"prose": "ok"}')])
+        return await CodexProvider._collect_sse_text(_FakeResp(events))
+
+    provider._call_once = once
+    import construct.provider as P
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(P.asyncio, "sleep", lambda *a, **k: real_sleep(0))
+    assert asyncio.run(provider.complete("p", schema)) == {"prose": "ok"}
+    assert calls["n"] == 2
