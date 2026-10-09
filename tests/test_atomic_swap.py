@@ -189,7 +189,7 @@ class _Fault:
             fault.in_unit = precall is not None
             fault.staged_rows = buffer.head() - (precall or 0)
 
-        def item(self, it):
+        def item(self, it, *a, **kw):  # the engine may pass more (pb batch B: call_frame)
             if not fault.fired and fault.match("assert", it):
                 _arm(self._buffer)
                 if fault.mode == "skip":
@@ -199,7 +199,7 @@ class _Fault:
                 raise RuntimeError("injected fault")
             if not fault.fired:
                 fault.ops_before += 1
-            return real_item(self, it)
+            return real_item(self, it, *a, **kw)
 
         def retract(self, target, reason):
             if not fault.fired and fault.match("retract", {"reason": reason}):
