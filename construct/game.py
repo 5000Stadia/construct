@@ -2447,7 +2447,8 @@ def _episode_fuel(reads: Any, prior_arc: Arc, prior_title: str = "",
         latest = max((e for e in terms if e.at is not None), key=lambda e: e.at, default=None)
         if latest is not None:
             for e in (x for x in reads.events() if latest.event_id in (x.caused_by or ())):
-                threads.append(f"an unresolved consequence of the last case: {e.kind.replace('_', ' ')}")
+                threads.append("an unresolved consequence of the last case"
+                               + (f": {e.kind.replace('_', ' ')}" if e.kind else ""))
     except Exception:  # fuel is best-effort — never sink the continuation
         logger.exception("episode fuel: consequence read failed")
     try:
