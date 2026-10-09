@@ -147,3 +147,13 @@ Still not atomic:
 - reshape followed by replan, which lives in `turnloop.py`.
 
 Found, not fixed (a behaviour change, so your call): after a third chapter, the rows `session:episode.entry_epoch`, `session:episode.arc_scope` and `session:scope.independent_extra` tie at `valid_from` 0.0, and chapter 2's values win. The pre-change code did the same. The fix is to stamp them with the turn time, as `chapter_title` is.
+
+## Landed: arc vocabularies as StrEnums (tier 2 #8, first half) and classify=rules on host-control writes (approved)
+
+- **StrEnums.** Phases, weights, rungs, beat, clock and lifecycle status, outcomes, coverage, delta types, story shapes and adapt lanes are now `StrEnum`s. Their values are the stored strings, so every saved arc round-trips byte-identical (3 real worlds plus a 16-case matrix). `LIFECYCLE_TERMINALS` is defined once. The `"true"`/`"false"` codec now lives in one place.
+- **classify=rules on host-control writes.** 47 host-control writes are switched. The model now judges 0 host-control rows a turn, against 17 before. Under an adversarial model the old code stored those rows CONSTITUTIVE (earliest wins), and a beat re-fired. They are now STATE (last write wins). A static guard test keeps new host-control writes off the model.
+
+Found, for Kabe:
+- **`commitment_kind` is mis-wired (a real bug; the fix changes model input).** Each story shape's own commitment kind is never read. The stage-gate prompt gets the game type's judgement instead ("claim-vs-fact" where the shape says "claim").
+- **Six build-time host-control writes in `game.py`** are model-free by default (`seal_build(model=False)`), but go to the model if `CONSTRUCT_FAST_CLASSIFY=0`. Switching them to `rules` is a one-line change each.
+- **Dead fields in `SHAPES`:** `medium`, `withheld_kind`, `payoff_kind`, and the `SHAPE_CONCLUSION` keys `trigger`, `clock` and `has_literal_result`.
