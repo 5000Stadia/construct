@@ -4272,9 +4272,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                             as_of=_h, laws=_laws_full)
         if denial:
             trace.adjudication = f"denied: {denial}"
+            # the scene by its NAME, never its id (R20 run 3: "with the cartwright_shed behind you")
+            _scene_name = ((read_str(live_reads, pre_scene) or humanize_id_last(pre_scene))
+                           if pre_scene else "an unresolved place")
             prose = cohorts.narrate(
                 provider,
-                f"SCENE: you are at {pre_scene or 'an unresolved place'}.\n"
+                f"SCENE: you are at {_scene_name}.\n"
                 f"THE PLAYER ATTEMPTED: {player_input}\n"
                 f"ADJUDICATION (binding): the attempt FAILS — {denial}. "
                 f"Render the failure honestly and diegetically; the world "
@@ -4295,6 +4298,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                  "value": prose[:2400], "valid_from": turn_time(turn)},
             ], frame=SESSION, classify="rules")  # receipt + archive — RULES, no LM (Cx 268)
             _cp("early_return")
+            _write_mechanics_log(arc, turn, player_input, prose, trace)  # a denied turn is a turn
             return TurnResult(prose=prose, trace=trace)
 
     # 2. Ingest the player's effect. FAIL-OPEN on a text-extraction schema violation
@@ -7224,6 +7228,8 @@ def _write_mechanics_log(arc: Arc, turn: int, player_input: str, prose: str,
             f"generated={_g('generated') or '-'}",
             f"- cohorts fired: {_g('cohort_calls') or '-'}",
             f"- dropped: {_g('dropped_cohorts') or '-'}",
+            f"- movement: status={_g('movement_status') or '-'}  same_place={_g('same_place')}  "
+            f"debug={_g('move_debug') or '-'}  obstruction={_g('movement_obstruction') or '-'}",
             f"- time: {_g('time_now')} (+{_g('time_advanced')}m)  "
             f"pins={_g('pins') or '-'}  quarantined={_g('quarantined') or '-'}",
             f"- timings(s): {_g('timings') or '-'}",
