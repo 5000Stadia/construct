@@ -157,3 +157,12 @@ Found, for Kabe:
 - **`commitment_kind` is mis-wired (a real bug; the fix changes model input).** Each story shape's own commitment kind is never read. The stage-gate prompt gets the game type's judgement instead ("claim-vs-fact" where the shape says "claim").
 - **Six build-time host-control writes in `game.py`** are model-free by default (`seal_build(model=False)`), but go to the model if `CONSTRUCT_FAST_CLASSIFY=0`. Switching them to `rules` is a one-line change each.
 - **Dead fields in `SHAPES`:** `medium`, `withheld_kind`, `payoff_kind`, and the `SHAPE_CONCLUSION` keys `trigger`, `clock` and `has_literal_result`.
+
+## Settled by the monitor under tonight's approval, and fixed (merged to main locally)
+
+1. **`commitment_kind`.** The stage gate now gets the active shape's own commitment kind. It falls back to the game type's judgement only when the shape has none.
+2. **Chapter rows.** `entry_epoch`, `arc_scope` and `independent_extra` are stamped with the turn time, so a third chapter no longer reads chapter 2's values.
+3. **Build-time host-control writes.** The six build-time host-control writes now use `classify="rules"`. The static guard no longer exempts the build session.
+4. **Fold-then-screen** stays failing closed. Kabe can ask for the stand-in later.
+
+Each fix has a test that fails on the old code. Main's suite: 1528 passed, 1 skipped.
