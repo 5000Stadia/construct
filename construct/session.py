@@ -521,7 +521,7 @@ class Session:
             wishes = (wishes + [text])[-6:]
             p.ingest_structured([{"entity": "session:wishes", "attribute": "list",
                                   "value": json.dumps(wishes), "value_type": "literal"}],
-                                frame="session:main")
+                                frame="session:main", classify="rules")
 
     def goal_statement(self) -> str | None:
         """The non-spoiling player-facing aim, shown only in win_loss mode.
@@ -1385,7 +1385,7 @@ class Session:
                              | set(self._read_independent_extra()))),
                          "value_type": "literal",
                          "valid_from": _tt(next_turn_number(self._world))},
-                    ], frame="session:main")
+                    ], frame="session:main", classify="rules")
                 except Exception:
                     logger.exception("independent-scope persist failed (in-memory set stands)")
             scope = self._independent_scope | self._beat_scope
@@ -1433,7 +1433,7 @@ def _entry_as_of(world: Any, requested: float | None, fresh: bool) -> float | No
             p.ingest_structured(
                 [{"entity": _ENTRY, "attribute": "kind", "value": "entry",
                   "valid_from": float(requested)}],
-                frame=_SESSION_FRAME)
+                frame=_SESSION_FRAME, classify="rules")
         return requested
     for ev in p.events(kind="entry", frame=_SESSION_FRAME):
         t = ev.get("t")

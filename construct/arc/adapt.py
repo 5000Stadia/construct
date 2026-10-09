@@ -82,12 +82,12 @@ def _record(world: Any, *, turn: int, lane: str, pillar_id: str, reason: str,
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": (reason or "")[:200],
          "valid_from": turn_time(turn)},
-    ], frame=PLOT)
+    ], frame=PLOT, classify="rules")
     # budget count (session) — the literal running total of applied adaptations
     world.porcelain.ingest_structured([
         {"entity": "adapt:ledger", "attribute": "used", "value": int(new_used),
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def apply_adaptation(world: Any, decision: dict, *, protagonist: str, turn: int,

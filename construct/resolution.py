@@ -85,7 +85,7 @@ def draw_tier(reads: Any, p: Any, *, seed_source: int | None = None) -> str:
         {"entity": _DECK_ENTITY, "attribute": "seed", "value": str(seed), "timeless": True},
         {"entity": _DECK_ENTITY, "attribute": "cursor", "value": str(cursor + 1),
          "timeless": True},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     return tier
 
 

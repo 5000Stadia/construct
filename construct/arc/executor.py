@@ -94,7 +94,7 @@ def clock_pass(world: Any, arc: Arc, reads: Any, counters: PacingCounters,
         if clock.rearm != "repeat":
             plot_items.append({"entity": clock.clock_id, "attribute": "status",
                                "value": "fired", "valid_from": turn_time(turn)})
-        world.porcelain.ingest_structured(plot_items, frame=PLOT)
+        world.porcelain.ingest_structured(plot_items, frame=PLOT, classify="rules")
         fired.append(clock.clock_id)
         logger.info("clock fired: %s (rung=%s)", clock.clock_id,
                     clock.rung.value if clock.rung else "-")
@@ -136,7 +136,7 @@ def beat_pass(world: Any, arc: Arc, reads: Any,
             except Exception:  # noqa: BLE001 — the close stands; D-HARD covers it
                 logger.warning("closure witness failed for %s (classifies D-HARD)",
                                beat.beat_id, exc_info=True)
-            world.porcelain.ingest_structured(rows, frame=PLOT)
+            world.porcelain.ingest_structured(rows, frame=PLOT, classify="rules")
             closed.append(beat.beat_id)
             logger.warning("beat closed (unreachable): %s — repair is post-v1; "
                            "the refusal clock backstops", beat.beat_id)
@@ -147,12 +147,12 @@ def beat_pass(world: Any, arc: Arc, reads: Any,
                  "valid_from": turn_time(turn)},
                 {"entity": beat.beat_id, "attribute": "justified_by",
                  "value": json.dumps({"turn": turn}), "valid_from": turn_time(turn)},
-            ], frame=PLOT)
+            ], frame=PLOT, classify="rules")
             mark = f"event:beat_mark_{beat.beat_id.split(':', 1)[1]}_{turn}"
             world.porcelain.ingest_structured([
                 {"entity": mark, "attribute": "kind", "value": "beat_achieved",
                  "valid_from": turn_time(turn)},
-            ], frame=SESSION)
+            ], frame=SESSION, classify="rules")
             achieved.append(beat.beat_id)
             logger.info("beat achieved: %s", beat.beat_id)
             if beat.correlates is not None:
@@ -373,7 +373,7 @@ def set_lifecycle(world: Any, arc: Arc, value: str, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": arc.arc_id, "attribute": "lifecycle", "value": value,
          "valid_from": turn_time(turn)},
-    ], frame=PLOT)
+    ], frame=PLOT, classify="rules")
 
 
 def emit_fallout(world: Any, arc: Arc, lifecycle: str, turn: int) -> Fallout:
