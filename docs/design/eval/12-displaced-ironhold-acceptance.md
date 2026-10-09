@@ -54,7 +54,33 @@ Fresh build with all of run 1's fixes. Chapter 1 played 11 turns. The player wor
 
 The ranking holds: the serial salience window is the largest block before the reply, then narration, then the settle tail after it.
 
-Run 3 (these fixes, a fresh build) follows.
+## Run 3 — FAIL (criterion 1); the last run tonight, by the monitor's stop rule
+
+Fresh build on main `020f38d`, with run 2's fixes. The build was a different world: Ewan Vale, condemned cartwright, in the cartwright shed with the fortress captain, the chaplain and a deathwatch orderly over a dead reeve. Chapter 1 played 11 turns. The player investigated for seven turns (the orderly's sighting, the chaplain's satchel, a copied ledger scrap with a cartwright's mark), then tried to leave: the yard and river road, the north pier, then the wash-house. **The arc never became ready** (lifecycle `active`, act I, throughout), so there was no conclusory moment to take, and chapter 2 never ran. Canon kept the player in `place:cartwright_shed` all chapter, a built place, so criterion 2 fails too.
+
+What happened, in order of weight:
+
+1. **Too little room for this world's arc.** This build opened as an investigation, and the player spent seven turns on it. No escape beat fired before the 11-turn schedule ran out. That is not a defect by itself (the founder's rule: no turn cap, the chapter ends on its climax). But it means the probe's fixed 11 turns can't judge a build whose escape needs a longer run. **For Kabe:** whether the acceptance probe should run until readiness, with a much higher ceiling, rather than to a fixed count.
+2. **The walk-out never moved the player.** Turn 8 ("turn from the shed door into the yard, and take the river road") left canon in the shed. The prose reads like the deliberation hold, where a journey is held for the player to weigh it ("If you're for the pier, know what you're stepping toward"). The mechanics log did not record movement, so this can't be confirmed. **Fixed (diagnostic):** the log now records movement status, and denied turns reach it.
+3. **A refused claim also swallowed the move.** Turn 9 ("go down to the north pier, show my seal …") was refused whole, because the player has no seal. The refusal is right; losing the walk to the pier with it is the cost. Not changed tonight: this is the reviewed "a failed precondition does not commit" rule.
+4. **An object-named destination dropped the move again.** Turn 10 ("make for the wash-house lamps") resolved to `obj:wash_house_lamps`, and the move was dropped under the same rule that dropped run 2's hauler (Cx 327). **For Kabe, with the conveyance question:** a destination named by an object could take the player to that object's place, as a move to a person already takes them to the person's place.
+5. **"I lower the scrap" was refused (turn 7)** as if the scrap were elsewhere. The fiction's one scrap had split into four canon entities (`obj:scrap`, `obj:copied_scrap`, `obj:chaplains_scrap`, `doc:anselm_scrap`), none of them carried by the player. Separately, the player's own inner coat was minted with no location. This is an identity and anchoring gap in extraction, and it is not a small fix. The critic filed it twice (both notes are on the action-refusal bar, not WHERE).
+6. **The refusal named the scene by its id** ("with the cartwright_shed behind you"). **Fixed:** the denial brief now uses the scene's name.
+7. **One character, two ids.** `person:anselm_roake` and `person:brother_anselm` both took NPC turns every turn. This is the cast/canon identity collision lesson again, at build time. It also costs time: one more serial cheap call per turn.
+8. **Engine inversion rows** are visible here too (`person:ewan_vale held_by doc:gallows_ledger`, `worn_by obj:felt_cap`). This is pattern-buffer's GATE-INVERSE-ALIAS, pending with pbr.
+
+### R23 timings, run 3 (9 instrumented turns)
+
+Player-felt 38–125 s, climbing as the cast grew; typically 80–115 s. Salience window 13–64 s, with four NPC turns run back to back, one of them the duplicate chaplain. Narrate 16–36 s. Settle tail 37–50 s. Classify 3–10 s. The ranking is unchanged: the serial salience window first.
+
+## Where R20 stands for the morning
+
+Three runs, three fails on criterion 1, for three different reasons: a lost retry (fixed), a missed conclusory move (fixed), and an arc that needed more turns than the probe gives. The world-growth half did work in run 2 (`place:river_road` was minted in play). The open design questions, all Kabe's:
+- conveyances, and object-named destinations;
+- whether the probe should run to readiness rather than to a fixed count;
+- the identity split of carried things (run 3, item 5).
+
+No run 4 tonight.
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
