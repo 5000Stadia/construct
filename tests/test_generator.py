@@ -1392,6 +1392,23 @@ def test_salient_spine_touch_value_fires():
     assert lines
 
 
+def test_engine_identity_merge_is_never_salient():
+    # pattern-buffer's events() one-reader (R22) surfaces identity_merge events; a merge is
+    # engine bookkeeping, not a moment, even the first one and even with a cause
+    ev = _ev("identity_merge", "event:merge_1", caused_by=("event:reconcile",))
+    assert salient_moments([], [ev], set(), set()) == []
+
+
+def test_an_untyped_event_is_not_a_new_kind_but_can_still_ripple():
+    # R22 surfaces extractor events typed only 'event', or with no kind: by kind they say
+    # nothing new, but a caused_by ripple is still a real consequence landing
+    assert salient_moments([], [_ev("event", "event:night_bell"), _ev("", "event:runner_arrival")],
+                           set(), set()) == []
+    rip = salient_moments([], [_ev("event", "event:wet_trail", caused_by=("event:drag",))],
+                          set(), set())
+    assert len(rip) == 1 and "rippled" in rip[0]
+
+
 def test_salient_first_time_kind():
     # Signal 2: a new event kind not in prior_kinds → salient.
     ev = _ev("confrontation", "event:confrontation_1")
