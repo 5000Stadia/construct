@@ -41,11 +41,11 @@ from construct.arc.executor import (
     LIFECYCLE_TERMINALS,
     PLOT,
     SESSION,
-    arc_concluded,
     arc_entities,
     arc_lifecycle,
     arc_outcome,
     arc_protected_keys,
+    arc_status,
     beat_pass,
     clock_pass,
     climax_ready,
@@ -6023,8 +6023,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # the accusation could land). Such an arc concludes only on (a) refusal, (b) a landed commitment
     # [below], or (c) the post-climax window expiring (the reckoning never came). WORLD-EVENT-owned
     # shapes (endurance/farce) keep the direct world_condition terminal — unchanged.
-    from construct.arc.conditions import Truth as _Truth
-    from construct.arc.conditions import evaluate as _evaluate
+    # ONE derivation for this read-only block (no write lands between here and the
+    # `trace.concluded` marker); the commitment ingest further down moves world_condition, so
+    # the lifecycle/outcome block below re-derives from fresh reads, never from this status.
+    _arc_st = arc_status(live_reads, arc)
     _commitment_owned = terminal_owner == "commitment"
     # DIEGETIC-CLOCK CONCLUSION (founder ruling 2026-06-25; Cx 173): turns are FREE — NO turn-count
     # ever forces a conclusion. A commitment-owned arc with no authored deadline stays READY forever;
@@ -6036,14 +6038,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # family dynamics, open-ended romance, slice-of-life) has no conclusion to steer toward, so it
     # never gets the nudge — it just plays on.
     _reckoning_ready = _commitment_owned and scenario_mode == "win_loss" and (
-        climax_ready(live_reads, arc)
-        or _evaluate(arc.shape.world_condition, live_reads) is _Truth.TRUE)
-    _authored_failure = (arc.failure_when is not None
-                         and _evaluate(arc.failure_when, live_reads) is _Truth.TRUE)
-    concluded = arc_concluded(live_reads, arc)
+        _arc_st.climax_ready or _arc_st.world_true)
+    _authored_failure = _arc_st.failure_holds
+    concluded = _arc_st.concluded
     if _commitment_owned:
         # world_condition is READINESS, not a conclusion. The only forced close is an authored
         # failure (deadline/loss event); the commitment's own terminal is handled below.
+        # (This per-terminal-owner override stays HERE, not in `ArcStatus`: `arc_concluded`
+        # is also read by `current_phase`/`conclusive_eligible`/briefing, which must keep
+        # treating a met world_condition as FALLING for every shape; pushing the owner into
+        # the status would change those results.)
         concluded = _authored_failure
     trace.concluded = concluded
     if concluded and not _conclusion_recorded(live_reads):

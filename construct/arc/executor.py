@@ -27,9 +27,9 @@ from construct.arc.timeline import (  # noqa: F401
     set_entry_epoch, turn_time)
 from construct.arc.supersession import active_beats, resolve_beat_id  # noqa: F401
 from construct.arc.conclusion import (  # noqa: F401
-    COVERAGE, OUTCOME_SHAPES, _PHASE_ORDER, arc_concluded, arc_coverage, arc_outcome,
-    climax_ready, conclusion_from_coverage, coverage_summary, current_phase,
-    delta_type_from_coverage, pillar_coverage)
+    COVERAGE, OUTCOME_SHAPES, _PHASE_ORDER, ArcStatus, arc_concluded, arc_coverage,
+    arc_outcome, arc_status, climax_ready, conclusion_from_coverage, coverage_summary,
+    current_phase, delta_type_from_coverage, pillar_coverage)
 from construct.arc.concealment import (  # noqa: F401
     _CONCEAL_STOP, _CONCEAL_WORD, _is_placeholder_premise, _premise_keys, arc_entities,
     arc_protected_keys, concealed_tokens, value_leaks)
@@ -195,16 +195,16 @@ def conclusive_eligible(reads: Any, arc: Arc, *, contract: str,
     Story contract; in CRISIS/CLIMAX/FALLING (or a refusal/foreclosure path is
     live); minimum arc progress; and a candidate event this turn. The post-climax
     window expiring is itself a candidate, so it can fire with no fresh event."""
-    from construct.arc.conditions import ClockFired
     if contract != "story":
         return False
-    refusal_fired = evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE
-    foreclosed = _required_unreachable(reads, arc)
-    phase = current_phase(reads, arc)
+    st = arc_status(reads, arc)  # one derivation: phase/climax/foreclosure share their reads
+    refusal_fired = st.refusal_fired
+    foreclosed = st.foreclosed
+    phase = st.phase
     if not (phase in (Phase.CRISIS, Phase.CLIMAX, Phase.FALLING)
             or refusal_fired or foreclosed):
         return False
-    if not (climax_ready(reads, arc) or foreclosed or refusal_fired):
+    if not (st.climax_ready or foreclosed or refusal_fired):
         return False
     return candidate.any()
 
@@ -300,50 +300,18 @@ def person_can_act(reads: Any, entity: str) -> bool:
 def _required_unreachable(reads: Any, arc: Arc) -> bool:
     """Is a REQUIRED beat closed (its `unreachable_if` fired)? The path-foreclosed
     half of `incompletable`. Reads beat statuses `beat_pass` already wrote."""
-    for beat in active_beats(reads, arc):
-        if beat.weight is Weight.REQUIRED and \
-                reads.state(beat.beat_id, "status", frame=PLOT) == "closed":
-            # a closure whose beat has been SUPERSEDED is repaired, not
-            # foreclosed — active_beats already swapped it out, so any closed
-            # beat still HERE is genuinely unrepaired (§3 R4).
-            return True
-    return False
+    return arc_status(reads, arc).foreclosed
 
 
 def _repair_exhausted(reads: Any, arc: Arc) -> bool:
-    """Is repair exhausted? DRIFT-HANDLING D3 completes the P1 reservation:
-    exhausted == the universal refusal backstop has fired, OR the arc's
-    repair BUDGET is spent (committed replace/re-open repairs counted off the
-    durable `repair_charge_<n>` plot rows — atomic with each repair's own
-    batch, cr D3 blocker 5). A freshly-closed required beat with
-    budget remaining and the refusal armed is NOT incompletable — the hard
-    rule (PB letter 072 §5): incompletable is repair-EXHAUSTED, never
-    first-unreachable. Note `_required_unreachable` (above) already sees only
-    UNREPAIRED closures — a superseded/reopened beat left the closed set."""
-    from construct.arc.conditions import ClockFired
-    if evaluate(ClockFired(arc.refusal_clock.clock_id), reads) is Truth.TRUE:
-        return True
-    from construct.arc.drift import REPAIR_BUDGET, repair_spent
-    return repair_spent(reads, arc.arc_id) >= REPAIR_BUDGET
+    """Is repair exhausted? The refusal backstop has fired OR the arc's repair budget
+    is spent (DRIFT-HANDLING D3; see `ArcStatus.repair_exhausted`)."""
+    return arc_status(reads, arc).repair_exhausted
 
 
 def _cancelled(reads: Any, arc: Arc) -> bool:
-    """Was this arc explicitly cancelled (a host-written `event:arc_cancelled_<id>`
-    in the session frame)? Reserved authoring escape hatch — no P1 path emits it
-    automatically. Read via `events()` (a D3 round-3 oracle exposed the
-    latent defect here: an `event:`-classified row never folds through
-    `state()` — the `_last_try_turn` lesson — so the old state() read could
-    never see a naturally-written cancellation); the state() fallback keeps
-    any legacy non-event-classified row honored."""
-    slug = arc.arc_id.split(":", 1)[1]
-    eid = f"event:arc_cancelled_{slug}"
-    try:
-        if any(e.event_id == eid
-               for e in reads.events(kind="arc_cancelled", frame=SESSION)):
-            return True
-    except Exception:  # noqa: BLE001 — fall through to the legacy read
-        pass
-    return reads.state(eid, "kind", frame=SESSION) == "arc_cancelled"
+    """Was this arc explicitly cancelled? (See `ArcStatus.cancelled`.)"""
+    return arc_status(reads, arc).cancelled
 
 
 def arc_lifecycle(reads: Any, arc: Arc) -> str:
@@ -352,16 +320,7 @@ def arc_lifecycle(reads: Any, arc: Arc) -> str:
     is checked BEFORE `lost` so a foreclosed path is named precisely rather than
     read as a mere timeout; both require the refusal backstop, so the ordering
     only refines the diagnosis. Derived each tick; the host persists transitions."""
-    outcome = arc_outcome(reads, arc)
-    if outcome == "won":
-        return "won"
-    if _cancelled(reads, arc):
-        return "cancelled"
-    if _required_unreachable(reads, arc) and _repair_exhausted(reads, arc):
-        return "incompletable"
-    if outcome == "lost":
-        return "lost"
-    return "active"
+    return arc_status(reads, arc).lifecycle
 
 
 def stored_lifecycle(reads: Any, arc: Arc) -> str:
