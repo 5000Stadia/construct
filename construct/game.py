@@ -1754,15 +1754,19 @@ def _author_foreshadow_pins(world: Any, clues: list[tuple[str, str]]) -> None:
     from construct.arc.io import pin_to_items
     p = world.porcelain
     try:
-        # pin_index is stored as a JSON-list literal, but read it defensively:
-        # state() may hand back the raw string, an already-parsed list, or nothing.
-        raw = p.state("arc:main", "pin_index", frame="plot:main")
-        if isinstance(raw, str):
-            existing = json.loads(raw or "[]")
-        elif isinstance(raw, list):
-            existing = raw
-        else:
-            existing = []  # absent or unexpected shape → start clean (fail-open)
+        # The visible pin_index rows (the arc commit already wrote one). state() returns a
+        # status dict, never the bare list, so read the rows themselves and union their ids.
+        from construct.adapter import frame_facts
+        from construct.arc.io import assert_ops, commit_ops
+        index_rows = [r for r in frame_facts(world, "plot:main", entity="arc:main")
+                      if r.attribute == "pin_index"]
+        existing: list[str] = []
+        for r in index_rows:
+            try:
+                ids = json.loads(r.value) if isinstance(r.value, str) else list(r.value or [])
+            except (TypeError, ValueError):
+                ids = []
+            existing += [x for x in ids if x not in existing]
         new_ids, items = [], []
         for i, (entity, feel) in enumerate(clues):
             pin_id = f"pin:clue_{_slug(entity)}_{i}"
@@ -1773,11 +1777,16 @@ def _author_foreshadow_pins(world: Any, clues: list[tuple[str, str]]) -> None:
                       directive=feel, anchor=entity, severity=0.6, escalates=True)
             items += pin_to_items(pin, "arc:main")
             new_ids.append(pin_id)
-        p.ingest_structured(items, frame="plot:main", classify="rules")
-        p.ingest_structured([{"entity": "arc:main", "attribute": "pin_index",
+        # One all-or-none set: the pins, then the index REPLACED (retract every visible row,
+        # assert the union). A bare append left two timeless rows; the fold served the
+        # earliest ('[]'), so foreshadow pins were never indexed and never fired.
+        ops = (assert_ops(items, frame="plot:main")
+               + [{"op": "retract", "assertion_id": r.id, "reason": "pin_index replaced"}
+                  for r in index_rows]
+               + assert_ops([{"entity": "arc:main", "attribute": "pin_index",
                               "value": json.dumps(existing + new_ids),
-                              "value_type": "literal", "timeless": True}],
-                            frame="plot:main", classify="rules")
+                              "value_type": "literal", "timeless": True}], frame="plot:main"))
+        commit_ops(world, ops, what="foreshadow pins")
         logger.info("flavor: %d foreshadow pins authored", len(new_ids))
     except Exception as exc:
         logger.warning("foreshadow-pin authoring skipped: %s", exc)

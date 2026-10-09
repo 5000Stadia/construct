@@ -393,3 +393,34 @@ def test_ingest_stops_with_the_real_cause_when_every_chunk_fails(tmp_path, monke
     prose.write_text("# A Book\n\n## One\n\nThe first chapter.\n\n## Two\n\nThe second chapter.\n")
     with pytest.raises(RuntimeError, match="every one of .* chunk.*model not supported"):
         game.create_scenario_from_ingest("failfast", prose, StubProvider([]))
+
+
+import pytest as _pytest
+
+
+@_pytest.mark.parametrize("in_build", [False, True])
+def test_foreshadow_pins_replace_the_index_instead_of_conflicting(tmp_path, in_build):
+    """R20 probe find: the pin_index append left two timeless rows, the fold served the
+    earliest ('[]'), and the authored foreshadow pins were never indexed. Now the index is
+    replaced (retract + union), reads 'known', and keeps any pins already indexed."""
+    import json as _json
+    from construct import game
+    w = game._world(tmp_path / "pins.world", "pins")
+    p = w.porcelain
+    try:
+        if in_build:
+            p.begin_build(at=1.0)
+        p.ingest_structured([{"entity": "arc:main", "attribute": "pin_index",
+                              "value": _json.dumps(["pin:authored_0"]), "value_type": "literal",
+                              "timeless": True}], frame="plot:main", classify="rules")
+        game._author_foreshadow_pins(w, [("person:anne", "a candle burns low near her"),
+                                         ("place:hall", "the hall's clock is wrong")])
+        if in_build:
+            p.seal_build(model=False)
+        st = p.state("arc:main", "pin_index", frame="plot:main")
+        assert st["status"] == "known", st
+        ids = _json.loads(st["fact"]["value"])
+        assert ids[0] == "pin:authored_0" and len(ids) == 3
+        assert all(i.startswith("pin:clue_") for i in ids[1:])
+    finally:
+        w.close()
