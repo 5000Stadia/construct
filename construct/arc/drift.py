@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from construct.arc.conditions import (
-    AllOf, AnyOf, AtLeast, ClockFired, Expr, Not, Truth, evaluate,
+    AllOf, AnyOf, Atom, AtLeast, ClockFired, Expr, Node, Not, Truth, explain,
 )
 from construct.arc.executor import PLOT, SESSION, turn_time
 from construct.arc.grammar import Rung
@@ -170,7 +170,7 @@ def mark_nudge(world: Any, thread: str, minutes_now: float, turn: int) -> None:
          "value": thread, "valid_from": turn_time(turn)},
         {"entity": "session:drift", "attribute": "last_nudge_min",
          "value": minutes_now, "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def relocation_receipt(reads: Any, beat_id: str) -> dict | None:
@@ -206,7 +206,7 @@ def mark_relocation(world: Any, beat_id: str, old_staging: str | None,
          "value": new_staging, "valid_from": turn_time(turn)},
         {"entity": f"session:relocated_{slug}", "attribute": "old_staging",
          "value": old_staging or "", "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift relocation committed: %s -> %s (beat %s)",
                 old_staging, new_staging, beat_id)
 
@@ -244,45 +244,24 @@ def _clock_firing_event(reads: Any, atom: ClockFired) -> str | None:
     return rows[atom.n - 1].event_id
 
 
-def _true_leaves(expr: Expr, reads: Any, out_true: list, out_unknown: list,
-                 out_false: list) -> Truth:
-    """Walk `expr` recording the DECIDING leaves per shape (§2): AnyOf records
-    its TRUE branches' leaves; AllOf all leaves; AtLeast the satisfied leaves;
-    Not records the negated subtree's evaluation (cr D2 finding 5: a FALSE
-    leaf under a Not is what MADE the Not true — it persists in
-    `false_leaves`, so a `Not(StateIs(...))` closure witness is never empty).
+def _witness_leaves(node: Node, reads: Any, out_true: list, out_unknown: list,
+                    out_false: list) -> None:
+    """Fold an annotated evaluation (`conditions.explain`) into the witness
+    leaf lists, in operand (pre-)order. Every atom leaf is recorded under its
+    OWN verdict wherever it sits — AnyOf's TRUE branches, AllOf's leaves,
+    AtLeast's satisfied leaves, and the FALSE leaf under a Not (cr D2 finding
+    5: that FALSE leaf is what MADE the Not true, so it persists in
+    `false_leaves` and a `Not(StateIs(...))` closure witness is never empty).
     UNKNOWN/INDETERMINATE atoms are recorded as UNKNOWN wherever encountered.
-    Returns the node's own three-valued truth (identical to `evaluate` — the
-    walk IS an evaluation, just one that remembers)."""
-    if isinstance(expr, Not):
-        # the child's leaves record under their OWN truth; the flip is above them
-        v = _true_leaves(expr.operand, reads, out_true, out_unknown, out_false)
-        return {Truth.TRUE: Truth.FALSE, Truth.FALSE: Truth.TRUE}.get(
-            v, Truth.INDETERMINATE)
-    if isinstance(expr, (AllOf, AnyOf, AtLeast)):
-        verdicts = [_true_leaves(op, reads, out_true, out_unknown, out_false)
-                    for op in expr.operands]
-        if isinstance(expr, AllOf):
-            if any(v is Truth.FALSE for v in verdicts):
-                return Truth.FALSE
-            if any(v is Truth.INDETERMINATE for v in verdicts):
-                return Truth.INDETERMINATE
-            return Truth.TRUE
-        if isinstance(expr, AnyOf):
-            if any(v is Truth.TRUE for v in verdicts):
-                return Truth.TRUE
-            if any(v is Truth.INDETERMINATE for v in verdicts):
-                return Truth.INDETERMINATE
-            return Truth.FALSE
-        trues = sum(1 for v in verdicts if v is Truth.TRUE)
-        unknowns = sum(1 for v in verdicts if v is Truth.INDETERMINATE)
-        if trues >= expr.k:
-            return Truth.TRUE
-        if trues + unknowns >= expr.k:
-            return Truth.INDETERMINATE
-        return Truth.FALSE
-    # an atom leaf: evaluate it once and remember where it landed.
-    verdict = evaluate(expr, reads)
+    The tree is the evaluation itself, so the verdicts here can never drift
+    from `evaluate`'s."""
+    expr = node.expr
+    if isinstance(expr, (Not, AllOf, AnyOf, AtLeast)):
+        # a connective is never a leaf — even an operand-less one
+        for child in node.children:
+            _witness_leaves(child, reads, out_true, out_unknown, out_false)
+        return
+    verdict = node.verdict
     leaf: dict = {"kind": type(expr).__name__, "key": _leaf_key(expr)}
     if getattr(expr, "entity", None):
         # the addressed entity, machine-readable (cr round-3 blocker 2: a
@@ -297,51 +276,22 @@ def _true_leaves(expr: Expr, reads: Any, out_true: list, out_unknown: list,
         out_unknown.append(leaf)
     else:
         out_false.append(leaf)  # persists the Not-negated subtree (finding 5)
-    return verdict
 
 
-def _evaluate_clocks_false(expr: Expr, reads: Any) -> Truth:
-    """`evaluate` with every ClockFired leaf FORCED FALSE — the clock-necessity
-    probe (§2): if the closure still stands without any clock, the clock was
-    incidental and the closure is NOT clock-caused."""
-    if isinstance(expr, ClockFired):
-        return Truth.FALSE
-    if isinstance(expr, Not):
-        v = _evaluate_clocks_false(expr.operand, reads)
-        return {Truth.TRUE: Truth.FALSE, Truth.FALSE: Truth.TRUE}.get(
-            v, Truth.INDETERMINATE)
-    if isinstance(expr, AllOf):
-        vs = [_evaluate_clocks_false(op, reads) for op in expr.operands]
-        if any(v is Truth.FALSE for v in vs):
-            return Truth.FALSE
-        if any(v is Truth.INDETERMINATE for v in vs):
-            return Truth.INDETERMINATE
-        return Truth.TRUE
-    if isinstance(expr, AnyOf):
-        vs = [_evaluate_clocks_false(op, reads) for op in expr.operands]
-        if any(v is Truth.TRUE for v in vs):
-            return Truth.TRUE
-        if any(v is Truth.INDETERMINATE for v in vs):
-            return Truth.INDETERMINATE
-        return Truth.FALSE
-    if isinstance(expr, AtLeast):
-        vs = [_evaluate_clocks_false(op, reads) for op in expr.operands]
-        trues = sum(1 for v in vs if v is Truth.TRUE)
-        unknowns = sum(1 for v in vs if v is Truth.INDETERMINATE)
-        if trues >= expr.k:
-            return Truth.TRUE
-        if trues + unknowns >= expr.k:
-            return Truth.INDETERMINATE
-        return Truth.FALSE
-    return evaluate(expr, reads)
+def _forcing_clocks_false(atom: Atom) -> Truth | None:
+    """`explain` leaf override for the clock-necessity probe (§2): every
+    ClockFired leaf FORCED FALSE — if the closure still stands without any
+    clock, the clock was incidental and the closure is NOT clock-caused."""
+    return Truth.FALSE if isinstance(atom, ClockFired) else None
 
 
-def _driving_entities(expr: Expr, reads: Any, want: Truth) -> set[str]:
-    """The entities whose leaves PARTICIPATE IN PROVING `evaluate(expr) is
-    want` — polarity-aware (cr round-4 blocker 1: a TRUE `Not(StateIs(...))`
-    closure is driven by its FALSE child leaf; unioning all false leaves
-    would over-invalidate compound shapes where many FALSE branches are
-    non-deciding). Shape semantics mirror the witness walker's:
+def _driving_entities(node: Node, want: Truth) -> set[str]:
+    """The entities whose leaves PARTICIPATE IN PROVING that the node's
+    expression evaluates to `want` — polarity-aware (cr round-4 blocker 1: a
+    TRUE `Not(StateIs(...))` closure is driven by its FALSE child leaf;
+    unioning all false leaves would over-invalidate compound shapes where
+    many FALSE branches are non-deciding). Folds the annotated tree, reading
+    each operand's verdict off its child node:
 
     - Not flips the wanted polarity onto its child;
     - AllOf proving TRUE: every operand participates; proving FALSE: only
@@ -353,13 +303,14 @@ def _driving_entities(expr: Expr, reads: Any, want: Truth) -> set[str]:
 
     Returns the addressed entities of the participating atoms; empty when
     the expression does not in fact evaluate to `want`."""
+    expr = node.expr
     flip = {Truth.TRUE: Truth.FALSE, Truth.FALSE: Truth.TRUE}
     if isinstance(expr, Not):
-        return _driving_entities(expr.operand, reads, flip.get(want, want))
+        return _driving_entities(node.children[0], flip.get(want, want))
     if isinstance(expr, (AllOf, AnyOf, AtLeast)):
         out: set[str] = set()
-        for op in expr.operands:
-            v = evaluate(op, reads)
+        for child in node.children:
+            v = child.verdict
             if isinstance(expr, AllOf):
                 take = (want is Truth.TRUE) or (v is Truth.FALSE)
             elif isinstance(expr, AnyOf):
@@ -371,10 +322,10 @@ def _driving_entities(expr: Expr, reads: Any, want: Truth) -> set[str]:
                 # the wanted polarity (AllOf-TRUE: all children TRUE;
                 # AllOf-FALSE: the FALSE deciders; AnyOf mirrored; AtLeast
                 # by construction) — so the want passes through unchanged.
-                out |= _driving_entities(op, reads, want)
+                out |= _driving_entities(child, want)
         return out
     # atom: participates iff it actually evaluates to the wanted polarity
-    if evaluate(expr, reads) is want and getattr(expr, "entity", None):
+    if node.verdict is want and getattr(expr, "entity", None):
         return {expr.entity}
     return set()
 
@@ -389,11 +340,13 @@ def closure_witness_of(unreachable_if: Expr, reads: Any, turn: int) -> dict:
     out_true: list = []
     out_unknown: list = []
     out_false: list = []
-    _true_leaves(unreachable_if, reads, out_true, out_unknown, out_false)
+    tree = explain(unreachable_if, reads)
+    _witness_leaves(tree, reads, out_true, out_unknown, out_false)
     has_true_clock = any(l.get("kind") == "ClockFired" for l in out_true)
     clock_caused = bool(
         has_true_clock
-        and _evaluate_clocks_false(unreachable_if, reads) is not Truth.TRUE)
+        and explain(unreachable_if, reads,
+                    leaf=_forcing_clocks_false).verdict is not Truth.TRUE)
     return {
         "true_leaves": out_true,
         "unknown_leaves": out_unknown,
@@ -403,7 +356,7 @@ def closure_witness_of(unreachable_if: Expr, reads: Any, turn: int) -> dict:
         # a dead holder cannot carry the clue past his own death even when
         # his death registered as a FALSE leaf under a Not.
         "driving_entities": sorted(
-            _driving_entities(unreachable_if, reads, Truth.TRUE)),
+            _driving_entities(tree, Truth.TRUE)),
         "clock_caused": clock_caused,
         "firing_events": [l["firing_event"] for l in out_true
                           if l.get("kind") == "ClockFired"
@@ -477,7 +430,7 @@ def mark_moment(world: Any, beat_id: str, event_id: str, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": f"session:moment_{slug}", "attribute": "done",
          "value": event_id, "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def callback_rows(beat_id: str, affected: list[str], directive: str,
@@ -539,7 +492,7 @@ def mark_callback_surfaced(world: Any, callback_entity: str, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": callback_entity, "attribute": "status", "value": "surfaced",
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def record_absence_declined(world: Any, turn: int, beat_id: str, reason: str) -> None:
@@ -554,7 +507,7 @@ def record_absence_declined(world: Any, turn: int, beat_id: str, reason: str) ->
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("absence-consequence declined (turn %d, beat %s): %s",
                 turn, beat_id, reason)
 
@@ -574,7 +527,7 @@ def record_relocate_declined(world: Any, turn: int, beat_id: str, reason: str) -
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift relocation declined (turn %d, beat %s): %s", turn, beat_id, reason)
 
 
@@ -649,7 +602,7 @@ def mark_repair(world: Any, arc_id: str, beat_id: str, new_beat_id: str,
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "mode", "value": mode,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift repair committed (%s): %s -> %s (arc %s, turn %d)",
                 mode, beat_id, new_beat_id, arc_id, turn)
 
@@ -666,5 +619,5 @@ def record_repair_declined(world: Any, turn: int, beat_id: str, reason: str) -> 
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift repair declined (turn %d, beat %s): %s", turn, beat_id, reason)

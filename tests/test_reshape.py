@@ -88,10 +88,10 @@ def test_reshape_mints_event_with_caused_by_and_restages(tmp_path):
     w = _world(tmp_path / "r2.world")
     res = reshape_canon(w, _revive_plan(), turn=5)
     reads = PorcelainWorldReads(w)
-    assert res.event_id == "event:reshaped_angus_revived"
+    assert res.event_id == "event:reshaped_angus_revived_5"
     # the reshape event is a canon event with an explicit caused_by → the action
     evs = reads.events(kind="canon_reshape")
-    assert [e.event_id for e in evs] == ["event:reshaped_angus_revived"]
+    assert [e.event_id for e in evs] == ["event:reshaped_angus_revived_5"]
     assert "event:action_5" in evs[0].caused_by
     # re-staged → now locatable in the world
     assert "place:oil_store" in (reads.location_chain("person:angus") or [])
@@ -314,3 +314,22 @@ def test_plan_from_proposal_drops_malformed_optional_rows():
     assert plan.restage_rows == []        # malformed dropped, no crash
     assert plan.frame_rows == []
     assert plan.action_event == "event:action_9"  # explicit anchor wins
+
+
+def test_second_reshape_of_same_target_gets_its_own_event(tmp_path):
+    # revive (turn 5) -> dies again -> revive (turn 9): the second reshape must be a
+    # SEPARATE event, not rows written onto the first event's entity.
+    import dataclasses
+    w = _world(tmp_path / "r_twice.world")
+    first = reshape_canon(w, _revive_plan(), turn=5)
+    again = dataclasses.replace(_revive_plan(), action_event="event:action_9")
+    second = reshape_canon(w, again, turn=9)
+    assert first.event_id == "event:reshaped_angus_revived_5"
+    assert second.event_id == "event:reshaped_angus_revived_9"
+    reads = PorcelainWorldReads(w)
+    evs = {e.event_id: e for e in reads.events(kind="canon_reshape")}
+    assert set(evs) == {first.event_id, second.event_id}
+    # each event keeps ITS OWN cause (a merged entity would carry both)
+    assert tuple(evs[first.event_id].caused_by) == ("event:action_5",)
+    assert tuple(evs[second.event_id].caused_by) == ("event:action_9",)
+    w.close()

@@ -38,7 +38,7 @@ from typing import Any
 
 from construct import cohorts
 from construct.arc import io as arc_io
-from construct.arc.conditions import EventRow, Truth, atoms_of, evaluate
+from construct.arc.conditions import EventRow, Truth, evaluate
 from construct.arc.executor import (
     PLOT,
     SESSION,
@@ -48,9 +48,10 @@ from construct.arc.executor import (
     stored_lifecycle,
     turn_time,
 )
-from construct.arc.grammar import Arc, Phase
+from construct.arc.grammar import LIFECYCLE_TERMINALS, Arc, Phase  # noqa: F401
 from construct.arc.lint import lint_arc
 from construct.provider import Provider
+from construct.text import slugify_keep_underscores
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,6 @@ GEN_DEPTH_CAP = 2
 #: Min turns since the last generation ATTEMPT before another may fire (paced
 #: off the lineage receipt, NOT the live thread count — Cx #2).
 GEN_COOLDOWN = 2
-
-LIFECYCLE_TERMINALS = ("won", "lost", "cancelled", "incompletable")
 
 #: Routine bookkeeping event kinds excluded from the "first-time kind" salience
 #: signal — internal host/engine events are not player-caused developments (§A).
@@ -83,6 +82,12 @@ ROUTINE_EVENT_KINDS: frozenset[str] = frozenset({
     "moment_missed", "absence_declined",
     # DRIFT-HANDLING D3 (§5): repair receipts are host bookkeeping too.
     "repair_committed", "repair_declined",
+    # The host's OWN pacing timer: `clock_pass` writes a canon `kind=clock_fired`
+    # event per firing, and the default escalation clocks' effect events are
+    # `kind=pressure` (game._build_arc). `_turn_salience` reads canon window events
+    # AFTER clock_pass, so without these the first escalation firing read as "a new
+    # kind of event" and woke the player-caused opportunistic generator.
+    "clock_fired", "pressure",
 })
 
 #: Diegetic-minute quiet threshold for the ambient trigger (§C, P2c).
@@ -106,7 +111,7 @@ def _last_try_turn(reads: Any) -> int:
 def _active_generated(reads: Any, side_arcs: list[Arc]) -> int:
     n = 0
     for a in side_arcs:
-        if reads.state(a.arc_id, "generated", frame=PLOT) == "yes" and \
+        if arc_io.is_yes(reads.state(a.arc_id, "generated", frame=PLOT)) and \
                 stored_lifecycle(reads, a) not in LIFECYCLE_TERMINALS:
             n += 1
     return n
@@ -151,8 +156,7 @@ def _id_slug(s: str) -> str:
     embedded colons/odd characters as malformed — a reason like
     'lint:1-referents' or a source like 'event:arc_terminal_x' must be slugged
     before riding an id. The RAW string still travels as the row VALUE."""
-    import re
-    return re.sub(r"[^a-z0-9_]+", "_", (s or "").lower()).strip("_") or "x"
+    return slugify_keep_underscores(s or "") or "x"
 
 
 def _lineage_exhausted(reads: Any, source: str) -> bool:
@@ -355,7 +359,7 @@ def _mark_development(world: Any, minutes_now: float, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": "session:ambient", "attribute": "last_development_min",
          "value": minutes_now, "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 # --- guard writes -------------------------------------------------------
@@ -367,7 +371,7 @@ def _record_decline(world: Any, turn: int, reason: str) -> None:
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("generation declined (turn %d): %s", turn, reason)
 
 
@@ -375,7 +379,7 @@ def _mark_exhausted(world: Any, source: str, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": f"gen:exhausted_{_id_slug(source)}", "attribute": "kind",
          "value": "exhausted_for_generation", "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def _record_attempt(world: Any, arc: Arc, source: str, depth: int, fp: str,
@@ -388,13 +392,13 @@ def _record_attempt(world: Any, arc: Arc, source: str, depth: int, fp: str,
          "value": arc.arc_id, "valid_from": turn_time(turn)},
         {"entity": f"gen:fp:{fp}", "attribute": "kind", "value": "gen_fingerprint",
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     # The provenance on the arc itself (plot) — lineage + depth for the cap.
     world.porcelain.ingest_structured([
         {"entity": arc.arc_id, "attribute": "generated", "value": "yes", "timeless": True},
         {"entity": arc.arc_id, "attribute": "generated_from", "value": source, "timeless": True},
         {"entity": arc.arc_id, "attribute": "gen_depth", "value": depth, "timeless": True},
-    ], frame=PLOT)
+    ], frame=PLOT, classify="rules")
 
 
 # --- coherence preflight (guard #5) -------------------------------------
@@ -447,7 +451,7 @@ def _sanitize_hook(hook: str) -> str:
 # --- shared mint path (all triggers) ------------------------------------
 
 def _mint_side_arc(world: Any, reads: Any, provider: Provider,
-                   trigger: str, fuel: str, source: str, side_arcs: list[Arc],
+                   trigger: str, fuel: str, source: str,
                    ctx: dict, turn: int,
                    main_protagonist: str, depth: int) -> tuple[Arc, str] | None:
     """The shared mint path for all three triggers (§E, §D).
@@ -500,9 +504,10 @@ def _mint_side_arc(world: Any, reads: Any, provider: Provider,
     # never a rewrite of the sealed arc_ids list) + the provenance/receipts.
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc, frame=PLOT) + arc_io.index_items(arc, frame=PLOT),
-        frame=PLOT)
+        frame=PLOT, classify="rules")
     world.porcelain.ingest_structured(
-        arc_io.portfolio_add_items(reads, arc_id, valid_from=turn_time(turn)), frame=PLOT)
+        arc_io.portfolio_add_items(reads, arc_id, valid_from=turn_time(turn)),
+        frame=PLOT, classify="rules")
     _record_attempt(world, arc, source, depth, fp, turn)
     logger.info("generated arc %s from %s (depth %d)", arc_id, source, depth)
     return arc, _sanitize_hook(proposal.get("hook") or "")
@@ -534,7 +539,7 @@ def generate_from_fallout(world: Any, reads: Any, provider: Provider,
     main_protagonist = ctx.get("main_protagonist", "")
     return _mint_side_arc(world, reads, provider,
                           trigger="a thread just closed (regenerative)",
-                          fuel=fuel, source=source, side_arcs=side_arcs,
+                          fuel=fuel, source=source,
                           ctx=ctx, turn=turn,
                           main_protagonist=main_protagonist,
                           depth=parent_depth + 1)
@@ -557,7 +562,7 @@ def generate_opportunistic(world: Any, reads: Any, provider: Provider,
         f"  - {m}" for m in moments)
     return _mint_side_arc(world, reads, provider,
                           trigger="the player's actions opened a door (opportunistic)",
-                          fuel=fuel, source=source, side_arcs=side_arcs,
+                          fuel=fuel, source=source,
                           ctx=ctx, turn=turn,
                           main_protagonist=main_protagonist, depth=0)
 
@@ -581,6 +586,6 @@ def generate_ambient(world: Any, reads: Any, provider: Provider,
             f"present characters:\n{present}\nStyle: {style}")
     return _mint_side_arc(world, reads, provider,
                           trigger="the world has been quiet a while (ambient)",
-                          fuel=fuel, source=source, side_arcs=side_arcs,
+                          fuel=fuel, source=source,
                           ctx=ctx, turn=turn,
                           main_protagonist=main_protagonist, depth=0)

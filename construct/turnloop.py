@@ -23,6 +23,7 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Callable
 
 from construct import cohorts
@@ -34,18 +35,18 @@ from construct.resolve import (
 )
 from construct.adapter import PorcelainWorldReads, frame_facts
 from construct.gauge import (
-    apply_gauge_terminals, gauge_coloring, gauge_lines, gauge_pass,
+    apply_gauge_terminals, gauge_coloring, gauge_pass,
 )
 from construct.reshape import apply_reshape
 from construct.arc.executor import (
     LIFECYCLE_TERMINALS,
     PLOT,
     SESSION,
-    arc_concluded,
     arc_entities,
     arc_lifecycle,
     arc_outcome,
     arc_protected_keys,
+    arc_status,
     beat_pass,
     clock_pass,
     climax_ready,
@@ -60,7 +61,13 @@ from construct.arc.executor import (
     stored_lifecycle,
     turn_time,
 )
-from construct.arc.executor import _human as _human_entity
+from construct.text import (
+    CLAUSE_PUNCT, EDGE_PUNCT, ID_SEPARATORS, WORD_PUNCT, alnum_words, human_name_typed_id,
+    humanize_id, humanize_id_last, humanize_id_title, id_stem_parts, name_or_humanized_id,
+    name_text_or_humanized_id, read_str, respace, slugify, slugify_per_char, split_words,
+    table_or_read_name,
+)
+from construct.text import human_name as _human_entity
 from construct.arc.generator import (
     AMBIENT_QUIET_MIN,
     _last_development_min,
@@ -78,7 +85,9 @@ from construct.arc.grammar import Arc, Phase, Rung, Weight
 from construct.arc import drift
 from construct.cast import beat_delivery_targets
 from construct.pins import resolve_active_pins
+from construct.intent import FAIL_OPEN as FAIL_INTENT, TurnIntent
 from construct.provider import Provider, ProviderError
+from construct.briefing import BriefingInputs, build_briefing, build_briefing_rulings
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +164,8 @@ def _secret_tokens(arc: Arc, reads: Any, public: set[str]) -> set[str]:
         except Exception:
             v = None
         for src in (a, v if isinstance(v, str) else ""):
-            for t in (str(src).replace(":", " ").replace("_", " ")
-                      .replace("-", " ").lower().split()):
-                if len(t) > 3 and t not in _SECRET_STOP:
-                    toks.add(t)
+            toks.update(split_words(str(src), seps=ID_SEPARATORS, lower="last",
+                                    min_len=4, stop=_SECRET_STOP))
     return toks - public
 
 
@@ -166,8 +173,7 @@ def _secret_word_set(text: str) -> set[str]:
     """TOTAL word tokenizer (Cx 274): split on ANY non-alphanumeric run, so punctuation
     ('the map!', 'map;', 'key?') can never leave a protected token un-matched. Used on BOTH
     sides of the secret-take guard so the two tokenizations are identical."""
-    return {t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
-            if len(t) > 1 and t not in _SECRET_STOP}
+    return set(alnum_words(text or "", min_len=2, stop=_SECRET_STOP))
 
 
 def _take_touches_secret(takes: str, arc: Arc, reads: Any) -> bool:
@@ -338,7 +344,7 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         # the explicit cancel: the deed walked back to the old story
         try:
             p.ingest_structured(tangent_mod.cancel_rows(at=turn_time(turn)),
-                                frame=SESSION, classify="batch")
+                                frame=SESSION, classify="rules")
             trace.tangent = "cancelled"
             logger.info("tangent pending cancelled (the deed walked back)")
         except Exception as exc:  # noqa: BLE001 — expiry will lapse it
@@ -438,13 +444,13 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     # neither is story structure; expiry would lapse a surviving pending)
     try:
         p.ingest_structured(tangent_mod.cancel_rows(at=turn_time(turn)),
-                            frame=SESSION, classify="batch")
+                            frame=SESSION, classify="rules")
         title = str(proposal.get("title") or "").strip()
         if title:
             p.ingest_structured([{
                 "entity": "session:episode", "attribute": "title",
                 "value": title, "valid_from": turn_time(turn)}],
-                frame=SESSION, classify="batch")
+                frame=SESSION, classify="rules")
     except Exception:  # noqa: BLE001
         trace.dropped_cohorts.append("tangent_post_adoption bookkeeping")
     logger.info("tangent ADOPTED: %s (%r)", new_id, pending.aim)
@@ -500,19 +506,19 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         pipeline_outcome=growth_mod.PIPELINE_MISS if pipeline_miss else None,
         host_deny=host_deny or None)
     if host_deny:
-        trace.growth = f"denied:{host_deny}"  # the ONLY licensed quiet
+        _set_growth(trace, "denied", host_deny)  # the ONLY licensed quiet
         return False
     if mode is None:
         return False  # not growth territory — today's behavior, unchanged
     if not pre_chain or not str(pre_chain[0]).startswith("place:"):
-        trace.growth = "declined:no_origin"  # unplaced protagonist — a
+        _set_growth(trace, "declined", "no_origin")  # unplaced protagonist — a
         return False                         # structural miss, not a seam
     origin = pre_chain[0]
 
     # THE INVOCATION claims the turn's one generative act (spec §5) —
     # spent from here on, success or not.
     if not gen_slot.claim("assessor"):
-        trace.growth = "declined:slot_spent"
+        _set_growth(trace, "declined", "slot_spent")
         return False
     trace.growth_retry = True  # every exit below this line is an INVOKED
     # attempt: either activation flips it back off, or the caller seams.
@@ -521,16 +527,11 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     ancestry_ids = [c for c in pre_chain
                     if str(c).startswith(("place:", "region:"))]
     if not ancestry_ids:
-        trace.growth = "declined:no_ancestry"
+        _set_growth(trace, "declined", "no_ancestry")
         return False
 
     def _disp(eid: str) -> str:
-        try:
-            v = live_reads.state(eid, "name")
-        except Exception:
-            v = None
-        return v if isinstance(v, str) and v else \
-            eid.split(":", 1)[-1].replace("_", " ")
+        return name_or_humanized_id(live_reads, eid)
 
     try:
         from construct.clock import read_clock as _rc
@@ -562,21 +563,21 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         trace.cohort_calls.append("assessor_propose:main")
     except Exception as exc:  # noqa: BLE001 — provider failure = technical
         logger.warning("growth assessor failed: %s", exc)
-        trace.growth = "declined:provider_error"
+        _set_growth(trace, "declined", "provider_error")
         return False
 
     try:
         vocab = _growth_concealed_vocab(arc, live_reads)
     except GrowthVocabUnavailable as exc:
         logger.warning("growth concealment vocabulary unreadable: %s", exc)
-        trace.growth = "declined:concealment_unavailable"
+        _set_growth(trace, "declined", "concealment_unavailable")
         return False
     prop, why = growth_mod.validated_proposal(
         raw, mode=mode, n_ancestry_options=len(ancestry_ids),
         leaks=lambda text: bool(vocab & _secret_word_set(text)))
     if prop is None:
         logger.info("growth proposal declined: %s", why)
-        trace.growth = f"declined:{why}"
+        _set_growth(trace, "declined", why)
         return False
     if mode == "encounter" and not moves_to and prop.place is not None:
         # THE DESTINATION-LESS LANE'S CONSEQUENCE BOUND (spec §5.2, cr):
@@ -587,7 +588,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         # separately justified place+walk behavior.
         logger.info("growth proposal declined: destination-less lane "
                     "carries no place")
-        trace.growth = "declined:unlicensed:place.destinationless_lane"
+        _set_growth(trace, "declined", "unlicensed:place.destinationless_lane")
         return False
 
     _growth_h = getattr(live_reads, "_horizon", None)
@@ -641,7 +642,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         # snapshot is the same technical state as an unreadable identity
         # authority: decline and seam, never guess who travels (blocker 3)
         logger.warning("growth companion snapshot unreadable: %s", exc)
-        trace.growth = "declined:identity_unavailable"
+        _set_growth(trace, "declined", "identity_unavailable")
         return False
     # DISMISSAL WINS (cr re-review 1): a companion the player dismissed
     # THIS TURN must not be carried to the destination by the chunk — the
@@ -662,11 +663,11 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
             origin_action=player_input)
     except _IdentityUnavailable as exc:
         logger.warning("growth identity authority unreadable: %s", exc)
-        trace.growth = "declined:identity_unavailable"
+        _set_growth(trace, "declined", "identity_unavailable")
         return False
     if chunk is None:
         logger.info("growth assembly declined: %s", why)
-        trace.growth = f"declined:{why}"
+        _set_growth(trace, "declined", why)
         return False
 
     # DISMISSAL COHERENCE (cr wiring re-review 2): the dismissal state the
@@ -688,18 +689,18 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     result = growth_mod.activate_chunk(world.porcelain,
                                        list(chunk.items) + _dis_rows)
     if not result.ok:
-        trace.growth = result.reason
+        _set_growth(trace, "failed", result.reason)
         return False
     if _dis_at >= 0:
         staged.pop(_dis_at)   # committed with the chunk — the flush must
         trace.npcs_departed = list(dismissed or [])  # not double-write
-    trace.growth = f"activated:{chunk.place_id or chunk.person_id}"
+    _set_growth(trace, "activated", chunk.place_id or chunk.person_id)
     trace.growth_retry = False
     # an encounter WITHOUT a new place moves nobody — the meeting came TO
     # the road; movement status and chunk-ownership apply only to a walk
     if chunk.place_id:
         trace.growth_moved = [arc.protagonist, *companions]
-        trace.movement_status = "clear"
+        trace.movement_status = MovementStatus.CLEAR
     # doctrine 4: growth IS a development — the LWG ledger sees it (D-SOFT
     # must not teleport an arc carrier into the new scene on the same
     # turn; the drift pass ALSO reads trace.growth directly, so this
@@ -811,7 +812,7 @@ def _is_pressing(text_low: str, *, needs_test: bool) -> bool:
         return True
     if "?" in text_low:
         return True
-    toks = set(text_low.replace("?", " ").replace(",", " ").replace(".", " ").split())
+    toks = set(split_words(text_low, seps=CLAUSE_PUNCT, lower="never"))
     return bool(toks & _PRESSURE_VERBS) or bool(toks & _PROBE_SIGNALS)
 
 
@@ -835,7 +836,7 @@ def _is_scrutiny(text_low: str) -> bool:
     `_is_pressing`)? True when an examine/inspect/search-class verb is present, OR a close-
     inspection adverb ('look closely/carefully at …'). A bare 'look around'/'notice' is a glance,
     not scrutiny. Gates `scrutiny` object-clues; a glance earns only `examined`-level clues."""
-    toks = set(text_low.replace(",", " ").replace(".", " ").replace("?", " ").split())
+    toks = set(split_words(text_low, seps=CLAUSE_PUNCT, lower="never"))
     if toks & _EXAMINE_VERBS:
         return True
     return any(adv in text_low for adv in _SCRUTINY_ADVERBS)
@@ -876,9 +877,7 @@ _ROLE_NOUNS = frozenset({
 
 def _words(s: str) -> list[str]:
     """Lowercased word tokens, punctuation stripped (so 'Dr. Ames,' → ['dr','ames'])."""
-    for ch in ",.;:!?\"'()[]—-":
-        s = s.replace(ch, " ")
-    return s.lower().split()
+    return split_words(s, seps=WORD_PUNCT, lower="last")
 
 
 def _names_entity(entity: str, text_low: str, name: str = "", role: str = "") -> bool:
@@ -897,7 +896,7 @@ def _names_entity(entity: str, text_low: str, name: str = "", role: str = "") ->
     text_toks = set(_words(text_low))
     cands: set[str] = set()
     # Name + id-stem tokens are fully addressable identity (they ARE the person's name).
-    stem = entity.split(":", 1)[-1].replace("_", " ")
+    stem = humanize_id(entity)
     for src_toks in (_words(stem), _words(name)):
         for tok in src_toks:
             if len(tok) > 2 and tok not in _NAME_NOISE:
@@ -1103,6 +1102,94 @@ _PRONOUN_PHANTOM = {"you", "person:you", "i", "person:i", "me", "person:me",
 # promote-gate copy was stripped (verified-then-strip, Cx 313).
 
 
+class MovementStatus(StrEnum):
+    """`TurnTrace.movement_status`: how the player's movement resolved this turn. The values
+    are the historic receipt strings (a StrEnum compares, formats and serializes as its value),
+    so logs, --debug and persisted transcripts are unchanged; `NONE` ("") is no movement."""
+
+    NONE = ""
+    CLEAR = "clear"                # route passable (or naming the current place: already here)
+    BLOCKED = "blocked"            # a barred way; the obstruction rides on the trace
+    OBSCURED = "obscured"          # passable but hedged
+    DELIBERATING = "deliberating"  # held for the player's own weighing (#102)
+    UNDISCOVERED = "undiscovered"  # the destination is not yet known to the player
+    IN_SCENE = "in_scene"          # the destination is a person here: stay with the people
+    AMBIGUOUS = "ambiguous"        # more than one candidate: the clarify beat
+
+    def __repr__(self) -> str:  # the receipt reads as the plain string it always was
+        return repr(self.value)
+
+
+#: Statuses in which the player's move committed (the destination became their location).
+_MOVED_STATUSES = (MovementStatus.CLEAR, MovementStatus.OBSCURED)
+
+
+def _as_movement_status(raw: Any) -> MovementStatus:
+    """Coerce an engine route status to the enum; an unknown value falls back to the raw
+    string so a new engine status can never sink a turn."""
+    try:
+        return MovementStatus(raw)
+    except ValueError:
+        logger.warning("unknown movement status %r", raw)
+        return raw
+
+
+@dataclass(frozen=True)
+class GrowthOutcome:
+    """The typed form of the `TurnTrace.growth` receipt (WORLD-GROWTH): `kind` is one of
+    "" (not invoked), "denied", "declined", "activated", or "failed" (the atomic activation
+    did not land; `detail` is the engine's own reason). `str()` renders the receipt string
+    exactly, so `trace.growth == str(trace.growth_outcome)` always."""
+
+    kind: str = ""
+    detail: str = ""
+
+    @property
+    def activated(self) -> bool:
+        return self.kind == "activated"
+
+    def __str__(self) -> str:
+        if self.kind == "failed":
+            return self.detail
+        return f"{self.kind}:{self.detail}" if self.kind else ""
+
+
+def _set_growth(trace: "TurnTrace", kind: str, detail: str = "") -> None:
+    """Record a growth outcome: the typed field and its receipt string, together."""
+    trace.growth_outcome = GrowthOutcome(kind, detail)
+    trace.growth = str(trace.growth_outcome)
+
+
+def _route_arrow(route: tuple[str, str]) -> str:
+    """The `distance_unknown` receipt for an (origin, dest) pair: "place:a->place:b"."""
+    return f"{route[0]}->{route[1]}"
+
+
+@dataclass(frozen=True)
+class Deliberation:
+    """The typed form of the `TurnTrace.deliberating` receipt (#102): a journey held for the
+    player's own weighing. The briefing reads `label` and `weighing`; `str()` is the receipt
+    ("<label> — <weighing>")."""
+
+    dest: str | None     # the resolved destination id (None when the place is not yet minted)
+    label: str           # how the journey reads to the player
+    est_min: int         # the estimated minutes of travel
+    remaining_min: int   # the minutes left before the story's deadline
+
+    @property
+    def weighing(self) -> str:
+        return (f"roughly {self.est_min} minutes of travel against "
+                f"about {self.remaining_min} minutes left")
+
+    def __str__(self) -> str:
+        return f"{self.label} — {self.weighing}"
+
+
+#: TurnTrace fields that are typed siblings of a string receipt. They are READ by the turn
+#: and the briefing; the receipts they mirror are what `to_dict()` (--debug, logs) carries.
+_TYPED_SIBLINGS = ("growth_outcome", "distance_unknown_route", "deliberation")
+
+
 @dataclass
 class TurnTrace:
     """The --debug emission: a formatting of session/audit rows, never a
@@ -1126,7 +1213,7 @@ class TurnTrace:
     dropped_cohorts: list[str] = field(default_factory=list)
     furnished: list[str] = field(default_factory=list)
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
-    movement_status: str = ""  # route() passability: clear|blocked|obscured
+    movement_status: MovementStatus = MovementStatus.NONE  # how the move resolved (route() passability etc.)
     took: str = ""             # object the player took into possession this turn (obj.in=player)
     dropped: str = ""          # object the player set down this turn (obj.in=current place)
     move_debug: str = ""       # diagnostic: raw moves_to + refer outcome (why a move did/didn't commit)
@@ -1142,8 +1229,10 @@ class TurnTrace:
     peril: str = ""             # #95 debug: "staged"|"standing"|"cleared"|"" this turn
     vocative: str = ""          # #93 debug: "token->person:id (present|ABSENT)" when a title address resolved
     memory: str = ""            # #97 debug: the Remembrancer's stirred memory this turn (empty = silent)
-    distance_unknown: str = ""  # #101 inversion: "place:a->place:b" when the map can't prove a local move
-    deliberating: str = ""      # #102: the journey held for the player's own weighing (founder-shaped)
+    distance_unknown: str = ""  # #101 inversion: "place:a->place:b" when the map can't prove a local move (receipt)
+    distance_unknown_route: tuple[str, str] | None = None  # typed sibling of `distance_unknown`: (origin, dest)
+    deliberating: str = ""      # #102: the journey held for the player's own weighing (founder-shaped) (receipt)
+    deliberation: Deliberation | None = None  # typed sibling of `deliberating`
     journey_est: int = -1       # #102: a pre-commit elapsed estimate to reuse (never re-priced)
     journey_priceable: bool = False  # #113: the reused estimate is a TRAVEL price (minutes>0, no jump) — safe for the settle durability backstop
     same_place: bool = False    # a synonym for the current room bound already-here — no move, no time charge
@@ -1183,6 +1272,7 @@ class TurnTrace:
     briefing: str = ""  # the FULL assembled narrator briefing (the directives that drove the prose) — mechanics log
     drift: list = field(default_factory=list)  # DRIFT-HANDLING D1: (beat_id, class) classified this turn (D-SOFT only)
     growth: str = ""  # WORLD-GROWTH receipt: "activated:<place_or_person_id>" | "declined:<reason>" | "activation_unavailable" | "denied:<deny>" | "" (not invoked)
+    growth_outcome: GrowthOutcome = field(default_factory=GrowthOutcome)  # typed sibling of `growth`
     growth_retry: bool = False  # an INVOKED growth attempt failed → the transport shows the non-diegetic retry seam (no world/clock change this turn)
     growth_moved: list = field(default_factory=list)  # ids the activated chunk moved (protagonist + companions) — 2b-ii must not re-write them
     tangent: str = ""  # G-A receipt: "pending:<aim>" | "adopted:<arc_id>" | "declined:<reason>" | "adoption_unavailable" | "cancelled" | "" (no tangent activity)
@@ -1196,7 +1286,9 @@ class TurnTrace:
     repair_directive: str = ""  # DRIFT-HANDLING D3 debug: the sanitized new-route hook
 
     def to_dict(self) -> dict:
-        return dict(self.__dict__)
+        """The receipts as plain data (--debug, logs). The typed siblings are left out: each is
+        derived from a receipt string that is already here."""
+        return {k: v for k, v in self.__dict__.items() if k not in _TYPED_SIBLINGS}
 
 
 @dataclass
@@ -1807,7 +1899,7 @@ def _store_route_price(world: Any, a: str | None, b: str, minutes: int, turn: in
             "value": json.dumps({"o": a or "", "d": b, "est": int(minutes),
                                  "turn": turn}),
             "value_type": "literal", "valid_from": turn_time(turn),
-        }], frame=SESSION, classify="batch")
+        }], frame=SESSION, classify="rules")
         return any(r.get("entity") == "session:journey_price" and r.get("attribute") == key
                    for r in _receipt_rows(receipt))
     except Exception:  # noqa: BLE001 — anchoring is best-effort
@@ -1929,12 +2021,11 @@ def _mint_held_object(world: Any, protagonist: str, description: str,
     allow. We always mint a fresh id, never reusing/mutating an existing entity. Returns the
     new id, or None if the write didn't land. Shared by the equipment grant (produce gear)
     and the take grant (pick an ordinary object out of the scene)."""
-    words = (description or "").lower().split()
+    words = split_words(description or "")
     while words and words[0] in {"my", "the", "a", "an", "your", "his", "her",
                                  "their", "its", "some"}:
         words.pop(0)
-    slug = "".join(c if (c.isalnum() or c == "_") else "_"
-                   for c in "_".join(words)).strip("_") or "thing"
+    slug = slugify_per_char("_".join(words)) or "thing"
     reads = PorcelainWorldReads(world)
     hint = (hint or "").strip()
     item_id = hint if (hint.startswith("obj:") and not reads.has_entity(hint)) else f"obj:{slug}"
@@ -2047,8 +2138,7 @@ def _dest_head(moves_to: str) -> str:
     """The HEAD noun of a move destination phrase, for the fixture/place split (Cx 325). Strips lead
     words, then takes the last word of the core noun phrase BEFORE any locative tail ('rain barrel by
     the shed' → 'barrel'; 'back lane by the warehouse sheds' → 'lane'; 'the table' → 'table')."""
-    words = [w.strip(".,;:!?'\"") for w in (moves_to or "").lower().split()]
-    words = [w for w in words if w]
+    words = split_words(moves_to or "", strip=EDGE_PUNCT)
     while words and words[0] in _MOVE_LEAD_STOP:
         words.pop(0)
     core = []
@@ -2133,24 +2223,21 @@ def _embedded_container(moves_to: str, roster: list) -> tuple[str, str] | None:
     place inside the established one (chain-containment presence then colocates honestly).
     Deterministic; None on no/ambiguous match or when the phrase IS the container."""
     phrase = (moves_to or "").lower()
-    ptoks = {t for t in re.split(r"[^a-z0-9]+", phrase) if len(t) > 3 and t not in _EMBED_STOP}
+    ptoks = set(alnum_words(phrase, min_len=4, stop=_EMBED_STOP))
     if not ptoks:
         return None
     best: tuple[int, str, set] | None = None
     tied = False
     for pid, _label in roster or []:
-        stoks = {t for t in str(pid).split(":", 1)[-1].split("_")
-                 if len(t) > 3 and t not in _EMBED_STOP}
+        stoks = set(id_stem_parts(str(pid), min_len=4, stop=_EMBED_STOP))
         # Cx 449: name/kind evidence widens the HIT surface (place:north named "North
         # Village" is findable by "village"). Match strength must still be EARNED:
         # either the original slug ratio holds, or the hit covers at least half the
         # place's NAME tokens — a lone kind-word brush ("...a rain-wet yard") never
         # qualifies a container on its own.
         _lcore = str(_label).split(" (the room", 1)[0]
-        ltoks = {t for t in re.split(r"[^a-z0-9]+", _lcore.lower())
-                 if len(t) > 3 and t not in _EMBED_STOP}
-        ntoks = {t for t in re.split(r"[^a-z0-9]+", _lcore.split(" — ", 1)[0].lower())
-                 if len(t) > 3 and t not in _EMBED_STOP}
+        ltoks = set(alnum_words(_lcore, min_len=4, stop=_EMBED_STOP))
+        ntoks = set(alnum_words(_lcore.split(" — ", 1)[0], min_len=4, stop=_EMBED_STOP))
         hit = (stoks | ltoks) & ptoks
         score = len(hit)
         _strong = ((stoks and score * 2 >= len(stoks))
@@ -2169,9 +2256,8 @@ def _embedded_container(moves_to: str, roster: list) -> tuple[str, str] | None:
     # a tail must carry a DISTINCTIVE token of its own — "back to the study" leaves only
     # the stop-word "back", which is the reuse path's business ("go back"), not a nest.
     tails = [s for s in segments
-             if not (hit & {t for t in re.split(r"[^a-z0-9]+", s) if t})
-             and any(len(t) > 3 and t not in _EMBED_STOP
-                     for t in re.split(r"[^a-z0-9]+", s))]
+             if not (hit & set(alnum_words(s)))
+             and alnum_words(s, min_len=4, stop=_EMBED_STOP)]
     if not tails:
         return None  # the whole phrase names the container — nothing to nest
     return container, tails[-1]
@@ -2243,16 +2329,15 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
                         (moves_to or "").strip(), re.IGNORECASE)
         if _loc and _loc.group(1).strip():
             _child, _tail = _loc.group(1).strip(), _loc.group(2).strip().rstrip(".,;")
-            _ttoks = {t for t in re.split(r"[^a-z0-9]+", _tail.lower()) if len(t) > 3}
+            _ttoks = set(alnum_words(_tail, min_len=4))
 
             def _place_evidence(pid: str, lb: str) -> set:
                 # Cx 449 blocker: the container must match on WORLD FACTS (name/kind
                 # in the roster label), never only on how the id happens to be worded
                 # — place:north with name "North Village" IS a village.
                 _core = str(lb).split(" (the room", 1)[0]  # drop the current-room marker
-                return ({t for t in str(pid).split(":", 1)[-1].split("_") if len(t) > 3}
-                        | {t for t in re.split(r"[^a-z0-9]+", _core.lower())
-                           if len(t) > 3})
+                return (set(id_stem_parts(str(pid), min_len=4))
+                        | set(alnum_words(_core, min_len=4)))
 
             _thits = [pid for pid, _lb in (roster or [])
                       if _ttoks & _place_evidence(pid, _lb)]
@@ -2263,15 +2348,14 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
             if len(_thits) == 1:
                 container, moves_to = _thits[0], _child
             else:
-                _tkind = _tail.lower().split()[-1]
+                _tkind = split_words(_tail)[-1]
                 _mint_container = (_tail, _tkind if _tkind in _PLACE_LIKE_KINDS
                                    else "place")
                 moves_to = _child
-    words = (moves_to or "").lower().split()
-    while words and words[0].strip(".,;:!?'\"") in _MOVE_LEAD_STOP:
+    words = split_words(moves_to or "")
+    while words and words[0].strip(EDGE_PUNCT) in _MOVE_LEAD_STOP:
         words.pop(0)
-    slug = "".join(c if (c.isalnum() or c == "_") else "_"
-                   for c in "_".join(words)).strip("_")
+    slug = slugify_per_char("_".join(words))
     if slug in _DEICTIC_DEST:
         # deictic/directional ("go back", "go inside") — not a named place; let the narrator
         # handle it against the real geography rather than mint `place:back` / `place:inside`.
@@ -2307,7 +2391,7 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
         # so the child nests honestly — place:consulting_room IN place:village, never
         # place:consulting_room_in_the_village.
         _tail_phrase, _tail_kind = _mint_container
-        _tslug = re.sub(r"[^a-z0-9]+", "_", _tail_phrase.lower()).strip("_")
+        _tslug = slugify(_tail_phrase)
         if _tslug and _tslug not in _DEICTIC_DEST:
             container = f"place:{_tslug}"
             if not reads.has_entity(container):
@@ -2518,13 +2602,18 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
     - `detail` screened by concealed tokens AND protected condition VALUES (Cx 395);
     - closed event-kind set; ≤1 action per member; fail-open everywhere."""
     try:
-        if trace.movement_status not in ("clear", "obscured") or not scene \
+        if trace.movement_status not in _MOVED_STATUSES or not scene \
                 or scene == entry_scene:
             return
         if getattr(trace, "terminal", None) or getattr(trace, "concluded", False):
             return
         if minutes_now is None:
             return  # no diegetic clock → no honest elapsed floor → no tick
+        # PLAY HORIZON (same class as the Cx 259 NPC-sheet bind): every direct porcelain
+        # read below is confined to the horizon `live_reads` is already bound to, so a
+        # member's aftermath location / future-stamped knows:<member> row cannot reach
+        # the model whose `detail` is committed to canon. None = timeline head (no-op).
+        _h = getattr(live_reads, "_horizon", None)
         _nodes = (cast if isinstance(cast, dict)
                   else {n.node_id: n for n in cast}) if cast else {}
         if not _nodes:
@@ -2568,12 +2657,12 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                     continue  # never met — off-screen motion of a stranger isn't felt
                 if minutes_now - float(_seen) < _TICK_FLOOR_MIN:
                     continue
-                _loc = p.locate(nid)
+                _loc = p.locate(nid, as_of=_h)
                 _where = _loc[0] if _loc else ""
                 if _where == scene:
                     continue  # actually here — presence owns them
                 _sheet = json.dumps(p.snapshot(nid, frame=f"knows:{nid}",
-                                               lens="character_sheet"))[:1200]
+                                               lens="character_sheet", as_of=_h))[:1200]
                 members.append((nid, _where, _sheet))
             except Exception:  # noqa: BLE001
                 continue
@@ -2605,7 +2694,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
             # topology. A destination still qualifies only if its name/kind READS through the
             # horizon-bound canon surface (the same self-screen the semantic-bind roster
             # uses); everything else is not world-truth geography.
-            for _pid in world.porcelain.entities("canon", prefix="place:"):
+            for _pid in world.porcelain.entities("canon", prefix="place:", as_of=_h):
                 _pid = str(_pid or "")
                 if not _pid or _pid == scene or _pid in _excl:
                     continue
@@ -2619,8 +2708,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                     pass
                 if not _nm and not _kd:
                     continue  # not canon-readable at the horizon — not a destination
-                _places.append((_pid, str(_nm) if _nm
-                                else _pid.split(":", 1)[-1].replace("_", " ")))
+                _places.append((_pid, str(_nm) if _nm else humanize_id(_pid)))
         except Exception:  # noqa: BLE001
             pass
         verdict = cohorts.world_tick(
@@ -2644,7 +2732,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
         # filter), so world-tick never had a companion concept to check.
         _tick_policy = CarrierMovePolicy(
             mode="world_tick", scene=scene, protagonist=arc.protagonist,
-            companions=frozenset(), anchored=frozenset(_anchored), horizon=None)
+            companions=frozenset(), anchored=frozenset(_anchored), horizon=_h)
         for t in (verdict.get("ticks") or []):
             mid = str((t or {}).get("member") or "")
             kind = str((t or {}).get("kind") or "")
@@ -2685,7 +2773,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                         try:
                             if live_reads.state(pid, "kind") is None:
                                 return False  # not canon-readable — not a real person here
-                            _ploc = p.locate(pid)
+                            _ploc = p.locate(pid, as_of=_h)
                             return not (_ploc and _ploc[0] == scene)
                         except Exception:  # noqa: BLE001
                             return False
@@ -2800,7 +2888,7 @@ def _drift_pass(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     drift pass never breaks a turn."""
     try:
         developing = bool(trace.clocks_fired or trace.beats_achieved or trace.reveals
-                          or str(trace.growth).startswith("activated:"))
+                          or trace.growth_outcome.activated)
         # ^ WORLD-GROWTH doctrine 4: a grown turn is a DEVELOPMENT — D-SOFT
         # must not teleport an arc carrier into the new scene on the same
         # turn. Read from the in-memory trace so the suppression holds even
@@ -3034,18 +3122,10 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     if not subjects:
         drift.record_absence_declined(world, turn, beat_id, "nothing_grounded")
         return False
-    try:
-        _sname = str(live_reads.state(staged_scene, "name") or "")
-    except Exception:  # noqa: BLE001
-        _sname = ""
-    _swhere = _sname or staged_scene.split(":", 1)[-1].replace("_", " ")
+    _swhere = name_text_or_humanized_id(live_reads, staged_scene)
 
     def _display(pid: str) -> str:
-        try:
-            nm = str(live_reads.state(pid, "name") or "")
-        except Exception:  # noqa: BLE001
-            nm = ""
-        return nm or pid.split(":", 1)[-1].replace("_", " ")
+        return name_text_or_humanized_id(live_reads, pid)
 
     # per-subject closed lapse predicates PLUS (licensed only) the verbatim
     # authored occurrence — ALL subject rows kept, the note appended (cr r4
@@ -3123,7 +3203,7 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     cb_rows = drift.callback_rows(beat_id, affected, callback_line,
                                   moment_id, turn)
     try:
-        cb_receipt = world.porcelain.ingest_structured(cb_rows, frame=SESSION)
+        cb_receipt = world.porcelain.ingest_structured(cb_rows, frame=SESSION, classify="rules")
         cb_confirmed, _ = confirmed_batch(cb_rows, _receipt_rows(cb_receipt),
                                           cap=len(cb_rows))
         cb_ok = len(cb_confirmed) == len(cb_rows)
@@ -3203,7 +3283,7 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         _hname = ""
     _hdesc = str(_hname or getattr(carrier_node, "surface_role", "")
                  or getattr(carrier_node, "shape_role", "")
-                 or carrier_node.node_id.split(":", 1)[-1].replace("_", " "))
+                 or humanize_id(carrier_node.node_id))
     holder_line = (f"{carrier_node.node_id} ({_hdesc}) — currently at "
                    f"{old_staging or 'an unknown place'}"
                    + ("" if carrier_node.node_id in present_ids
@@ -3503,10 +3583,9 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 _ent = getattr(_a, "entity", None)
                 if _ent:
                     try:
-                        _en = str(live_reads.state(_ent, "name")
-                                  or _ent.split(":", 1)[-1].replace("_", " "))
+                        _en = str(live_reads.state(_ent, "name") or humanize_id(_ent))
                     except Exception:  # noqa: BLE001
-                        _en = _ent.split(":", 1)[-1].replace("_", " ")
+                        _en = humanize_id(_ent)
                     _attr = getattr(_a, 'attribute', 'its state')
                     threads.append(
                         f"the road turns on the standing state of {_en} "
@@ -3537,8 +3616,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             threads = list(dict.fromkeys(threads))  # dedupe repeated shapes
             for _h in live_holders:
                 try:
-                    _hn = str(live_reads.state(_h, "name")
-                              or _h.split(":", 1)[-1].replace("_", " "))
+                    _hn = str(live_reads.state(_h, "name") or humanize_id(_h))
                     _hr = str(live_reads.state(_h, "role") or "")
                     _hl = (p.locate(_h, as_of=horizon) or [None])[0]
                     _hln = (str(live_reads.state(_hl, "name") or _hl)
@@ -3546,7 +3624,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                     threads.append(", ".join(x for x in (
                         _hn, _hr, f"presently at {_hln}" if _hln else "") if x))
                 except Exception:  # noqa: BLE001 — one thread line, best-effort
-                    threads.append(_h.split(":", 1)[-1].replace("_", " "))
+                    threads.append(humanize_id(_h))
             dest_desc = (f"{getattr(beat.achievable_via, 'entity', beat_id)} · "
                          f"{getattr(beat.achievable_via, 'attribute', 'delivery')}")
             pick = cohorts.repair_arc(provider, beat_id, dest_desc, threads,
@@ -3592,7 +3670,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
          "value": new_id, "valid_from": turn_time(turn), "frame": PLOT},
     ]
     try:
-        receipt = world.porcelain.ingest_structured(rows)
+        receipt = world.porcelain.ingest_structured(rows, classify="rules")
         confirmed, _ = confirmed_batch(rows, _receipt_rows(receipt), cap=len(rows))
         ok = len(confirmed) == len(rows)
     except Exception:  # noqa: BLE001
@@ -3654,15 +3732,17 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
 def _protagonist_tokens(protagonist: str) -> list[str]:
     """Name fragments that mark third-person rendering of the player
     ('person:marn' -> 'marn'). Deterministic guard input (letter 025)."""
-    slug = protagonist.split(":", 1)[-1]
-    return [t for t in slug.replace("-", "_").split("_") if len(t) > 2]
+    return id_stem_parts(protagonist, hyphens=True, min_len=3)
+
+
+#: Apostrophes, comma, period and semicolon read as spaces when looking for the player's
+#: name in the narration.
+_PROTAGONIST_NAME_SEPS = "’',.;"
 
 
 def names_protagonist(text: str, protagonist: str) -> bool:
-    lowered = f" {text.lower()} "
-    return any(f" {tok}" in lowered.replace("’", " ").replace("'", " ")
-               .replace(",", " ").replace(".", " ").replace(";", " ")
-               for tok in _protagonist_tokens(protagonist))
+    lowered = f" {respace(text, seps=_PROTAGONIST_NAME_SEPS)} "
+    return any(f" {tok}" in lowered for tok in _protagonist_tokens(protagonist))
 
 
 def _conclusion_recorded(reads: Any) -> bool:
@@ -3850,11 +3930,11 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
             # an already-here no-op (a synonym for the current room, Cx 445 wrinkle) is
             # NOT a move for time purposes — and the input's own move VERBS would still
             # hit the 6-minute bucket, so the no-op bucket is FORCED, not inferred.
-            _moved = trace.movement_status in ("clear", "obscured")
+            _moved = trace.movement_status in _MOVED_STATUSES
             _journey_priceable = False  # #113: is THIS turn's est a storable travel price?
             if trace.same_place:
                 est = {"advance_minutes": 1}
-            elif trace.distance_unknown:
+            elif trace.distance_unknown_route is not None:
                 # a pre-commit estimate (deliberation gate, #102) is REUSED — the same
                 # movement is never priced twice in one story beat; failing that, the
                 # route's stored canon precedent (#113) — the same journey is never
@@ -3866,7 +3946,7 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                     # (cr: a generic backstop must not poison a route with a jump estimate).
                     _journey_priceable = trace.journey_priceable
                 else:
-                    _o, _, _d = trace.distance_unknown.partition("->")
+                    _o, _d = trace.distance_unknown_route
                     _p_min = _stored_route_price(world, _o, _d)
                     est = {"advance_minutes": _p_min} if _p_min >= 0 else None
                     # stored-price reuse needs no backstop: durability is proven by the read.
@@ -3878,13 +3958,14 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                     hours_per_day=clock.calendar.hours_per_day,
                     phases=clock.calendar.phase_names,
                     action=player_input, narration=narration,
-                    distance_unknown=trace.distance_unknown,
+                    distance_unknown=(_route_arrow(trace.distance_unknown_route)
+                                      if trace.distance_unknown_route else ""),
                     route_evidence=(_route_price_evidence(world)
-                                    if trace.distance_unknown else ""))
+                                    if trace.distance_unknown_route else ""))
                 trace.cohort_calls.append("estimate_elapsed")
                 # a wait/jump estimate (phase jump, day skip, zero minutes) is NOT a
                 # travel price (#113 poison guard) — full dict in hand, checkable here.
-                _journey_priceable = (trace.distance_unknown != ""
+                _journey_priceable = (trace.distance_unknown_route is not None
                                       and int(est.get("advance_minutes") or 0) > 0
                                       and not est.get("jump_to_phase")
                                       and not est.get("jump_days"))
@@ -3895,8 +3976,8 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
             # pre-commit store leaves journey_est set (so this settle deliberately never
             # re-prices) yet no durable precedent. Store-if-absent, once, only when the
             # est source is proven travel-priceable.
-            if trace.distance_unknown and _journey_priceable:
-                _o, _, _d = trace.distance_unknown.partition("->")
+            if trace.distance_unknown_route is not None and _journey_priceable:
+                _o, _d = trace.distance_unknown_route
                 if _stored_route_price(world, _o, _d) < 0:
                     _store_route_price(world, _o, _d,
                                        int(est.get("advance_minutes") or 0), trace.turn)
@@ -3979,27 +4060,6 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # ---- SERIAL SPINE -----------------------------------------------------
     # 1. Classify (cheap; fail-open to action). Movement intent + the assured-vs-
     #    uncertain resolution judgment ride the same call (no extra latency).
-    moves_to, requires = "", []
-    needs_test, uncertain_of = False, ""
-    mortal_risk = False     # #95: the move risks the protagonist's LIFE (classify judgment)
-    uses_knowledge = False  # SCENE-CONTEXT-SHAPE: protagonist-competence gate (Cx 247)
-    asks_self = False       # ADDRESSED INWARD: a self-question routes to the player's own memory
-    recalls = False         # #97: the player deliberately reaches into memory this turn
-    declares_memory = False  # #97 retcon: the recall ASSERTS new autobiography
-    reshape_attempt = False
-    commits, commitment = False, ""
-    takes = ""
-    drops = ""
-    examines_target = ""  # the ONE specific detail the player closely investigates (make-it-real gate)
-    addresses_present = True  # conservative default (task #5 + cr fail-open catch:
-    # a classify ProviderError must keep the rule-5 sole-NPC protection, never
-    # unbind the name — the signal only ever RELAXES on an explicit False)
-    moves_open = False        # WORLD-GROWTH G1 (cr piece-2 finding 1): the growth
-    _t_aim = ""               # G-A: the beat-1 declaration, fail-closed pre-try
-    seeks_encounter = False   # signals default False BEFORE the classify try —
-    # a ProviderError leaves them defined and closed; only a literal True from
-    # a successful verdict (strict_flag) ever raises them
-    asserts_or_reveals = True  # conservative default (TURN-LATENCY A-lite): keep extraction
     # A brief actor descriptor so `classify` can wave off a test for things this
     # character is plainly proficient at (ACTION-RESOLUTION §1). Cheap point reads.
     actor = ""
@@ -4007,9 +4067,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         proto = arc.protagonist
         bits = [live_reads.state(proto, a) for a in ("role", "kind", "background")]
         actor = "; ".join(b for b in bits if isinstance(b, str) and b) \
-            or proto.split(":")[-1].replace("_", " ")
+            or humanize_id_last(proto)
     except Exception:
-        actor = arc.protagonist.split(":")[-1].replace("_", " ")
+        actor = humanize_id_last(arc.protagonist)
     # BEAT-DELIVERY half 2 (topic-aware ASK delivery, Cx 125): assemble the ENTRY-scene
     # present clue-bearing cast's pursuable disclosures as OPAQUE candidates so `classify`
     # can match the player's QUESTION to the right one (the ASK twin of examines_target).
@@ -4050,7 +4110,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 _nm = live_reads.state(_pid, "name")
             except Exception:
                 pass
-            _desc = str(_nm) if _nm else _pid.split(":", 1)[-1].replace("_", " ").title()
+            _desc = str(_nm) if _nm else humanize_id_title(_pid)
             _node = (cast or {}).get(_pid) if hasattr(cast or {}, "get") else None
             if _node is not None and getattr(_node, "surface_role", ""):
                 _desc += f" ({_node.surface_role})"
@@ -4078,83 +4138,35 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         or (getattr(_node, "surface_role", "") or _nid.split(":")[-1])
                     ask_candidates.append((_oid, _desc))
                     _ask_by_oid[_oid] = _clue
-    asks_targets: list = []
-    moved_with_ids: list = []
-    dismissed_ids: list = []
-    joins_ids: list = []
+    # The verdict's whole contract (defaults, kind gating, fail-open vs fail-closed) is
+    # TurnIntent's (construct/intent.py); the turn reads it here.
     try:
         with _phase(trace, "classify"):
             verdict = cohorts.classify(provider, player_input, actor=actor,
                                        ask_candidates=ask_candidates,
                                        npc_candidates=npc_candidates,
                                        laws=_laws_full)
-        kind = verdict["kind"]
-        # normalized ONCE at the classifier boundary (cr G2 r4): a
-        # whitespace-only destination is schema-valid but semantically
-        # blank — every downstream consumer (pipeline admission, the
-        # destination-less lane, its consequence guard) must see the SAME
-        # emptiness, or the zero-displacement bound gains a bypass.
-        moves_to = str(verdict.get("moves_to", "") or "").strip()
-        requires = [r for r in verdict.get("requires", []) if r]
-        needs_test = bool(verdict.get("needs_test")) and kind == "action"
-        uncertain_of = (verdict.get("uncertain_of") or "").strip()
-        mortal_risk = bool(verdict.get("mortal_risk")) and kind == "action"
-        reshape_attempt = bool(verdict.get("reshape_attempt")) and kind == "action"
-        commits = bool(verdict.get("commits")) and kind in ("action", "declaration")
-        commitment = (verdict.get("commitment") or "").strip() or player_input
-        takes = (verdict.get("takes") or "").strip()
-        drops = (verdict.get("drops") or "").strip()
-        examines_target = (verdict.get("examines_target") or "").strip()
-        asks_targets = [t for t in (verdict.get("asks_targets") or []) if t]
-        # #80 tuning (task #5): does this input actually ENGAGE a present
-        # person? Fail-open toward True (protection) when the field is
-        # absent — legacy stubs and older classify outputs keep today's
-        # behavior; only an explicit False lifts the sole-NPC over-hold.
-        addresses_present = bool(verdict.get("addresses_present", True))
-        # WORLD-GROWTH G1 triggers (spec §5): optional, FAIL-CLOSED — absent
-        # or malformed reads False and today's behavior is byte-identical.
-        # These alone authorize NOTHING: growth eligibility is conjunctive
-        # and ordered (growth.growth_eligibility), and its turnloop wiring
-        # is a separate reviewed slice.
-        from construct.growth import strict_flag as _strict
-        moves_open = _strict(verdict.get("moves_open")) and kind == "action"
-        seeks_encounter = (_strict(verdict.get("seeks_encounter"))
-                           and kind == "action")
-        # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids; only action
-        # turns move people; a candidate can't be both dismissed and brought along (dismissal
-        # is the stronger, explicit wording — it wins the conflict).
-        if kind == "action":
-            dismissed_ids = [_npc_by_oid[t] for t in (verdict.get("npcs_dismissed") or [])
-                             if t in _npc_by_oid]
-            moved_with_ids = [_npc_by_oid[t] for t in (verdict.get("moved_with") or [])
-                              if t in _npc_by_oid and _npc_by_oid[t] not in dismissed_ids]
-            # COMPANIONSHIP (#82, Cx 372/373): an invitation to stay with the player becomes
-            # STANDING canon state below — separate field, never overloading the per-move
-            # moved_with adjunct; dismissal wins the conflict here too.
-            joins_ids = [_npc_by_oid[t] for t in (verdict.get("joins") or [])
-                         if t in _npc_by_oid and _npc_by_oid[t] not in dismissed_ids]
-        # Default TRUE on absence (old stubs / schema-less classify) so extraction is never
-        # silently skipped where a fact could be asserted (protected-key licensing depends on it).
-        asserts_or_reveals = bool(verdict.get("asserts_or_reveals", True))
-        uses_knowledge = bool(verdict.get("uses_protagonist_knowledge")) and kind == "action"
-        # ADDRESSED INWARD (founder live 2026-07-03, "my own memories should answer here"):
-        # a question about the player's OWN life is CHECKED at classify — the mechanical
-        # route, not directive luck — and outranks the last-speaker convention downstream.
-        asks_self = bool(verdict.get("asks_self"))
-        # #97 THE REMEMBRANCER (Cx 434 constraint 1): the deliberate memory reach and the
-        # autobiography DECLARATION are distinct signals — never overloaded onto asks_self.
-        # `declaration` kind is ACCEPTED here (Cx 439 #1): the most literal retcon parse
-        # ("I remember my childhood friend John Johnson…") IS a declaration — of the
-        # player's own past, which is theirs to author; world-fact fiat stays denied below.
-        recalls = bool(verdict.get("recalls"))
-        declares_memory = (bool(verdict.get("declares_memory"))
-                           and kind in ("action", "declaration"))
-        from construct.tangent import declaration as _t_declaration
-        _t_aim = _t_declaration(verdict, kind=kind)
+        intent = TurnIntent.from_verdict(verdict, player_input)
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:
-        kind = "action"
+        intent = FAIL_INTENT
         trace.dropped_cohorts.append(f"classify ({exc})")
+    kind, moves_to, requires = intent.kind, intent.moves_to, list(intent.requires)
+    needs_test, uncertain_of = intent.needs_test, intent.uncertain_of
+    mortal_risk, reshape_attempt = intent.mortal_risk, intent.reshape_attempt
+    commits, commitment = intent.commits, intent.commitment
+    takes, drops, examines_target = intent.takes, intent.drops, intent.examines_target
+    asks_targets = list(intent.asks_targets)
+    addresses_present, asserts_or_reveals = intent.addresses_present, intent.asserts_or_reveals
+    moves_open, seeks_encounter = intent.moves_open, intent.seeks_encounter
+    uses_knowledge, asks_self = intent.uses_knowledge, intent.asks_self
+    recalls, declares_memory = intent.recalls, intent.declares_memory
+    _t_aim = intent.tangent_aim
+    # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids (only run_turn
+    # holds the map); TurnIntent already gated them to action turns, dismissal winning.
+    dismissed_ids = [_npc_by_oid[t] for t in intent.npcs_dismissed if t in _npc_by_oid]
+    moved_with_ids = [_npc_by_oid[t] for t in intent.moved_with if t in _npc_by_oid]
+    joins_ids = [_npc_by_oid[t] for t in intent.joins if t in _npc_by_oid]
     trace.classified = kind
     _cp("classified")
     # WORLD-GROWTH (cr wiring blocker 3): on a growth-SIGNAL turn every
@@ -4301,11 +4313,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # `obj:pencil in person:you`). The resolver binds mentions to present entities, binds
                 # deixis to the protagonist, mints one typed entity for genuine novelty, drops the rest.
                 def _pin_name(e: str) -> str:
-                    try:
-                        v = live_reads.state(e, "name")
-                    except Exception:
-                        v = None
-                    return v if isinstance(v, str) else ""
+                    return read_str(live_reads, e)
                 _pin_cands = (set(scope or []) | set(_pre_held) | set(pre_chain or [])
                               | ({pre_scene} if pre_scene else set()) | {arc.protagonist})
                 # pov= (PB SHAPE-FIX 4c, #108): the player's "I" IS the protagonist —
@@ -4422,7 +4430,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         advance never re-prices the same movement."""
         if _delib_deadline is None:
             return False
-        _dest_key = dest_id or re.sub(r"[^a-z0-9]+", "_", str(label).lower()).strip("_")
+        _dest_key = dest_id or slugify(str(label))
         if dest_id:
             if dest_id == pre_scene:
                 return False
@@ -4481,12 +4489,39 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "value": json.dumps({"est": _est_min, "turn": turn,
                                  "priceable": _priceable}),
             "value_type": "literal", "valid_from": turn_time(turn),
-        }], frame=SESSION, classify="batch")
-        trace.movement_status = "deliberating"
-        trace.deliberating = (f"{label} — roughly {_est_min} minutes of travel against "
-                              f"about {int(_delib_deadline[0])} minutes left")
+        }], frame=SESSION, classify="rules")
+        trace.movement_status = MovementStatus.DELIBERATING
+        trace.deliberation = Deliberation(dest_id, label, _est_min,
+                                          int(_delib_deadline[0]))
+        trace.deliberating = str(trace.deliberation)
         logger.info("journey held for deliberation: %s", trace.deliberating)
         return True
+
+    def _gated_move_commit(dest_id: str, label: str) -> None:
+        """The ONE route -> deliberate -> commit path for a destination that resolved to
+        an existing place (resolved, semantically bound, or known-place reuse): a blocked
+        way is not walked (no commit, obstruction on the trace); deliberation runs only
+        for a move that WOULD commit (Cx 465 #2); obscured commits but hedges."""
+        _seg = _route_obstruction(p, pre_chain[0] if pre_chain else None,
+                                  dest_id, as_of=_h)
+        if _seg and _seg.get("status") == "blocked":
+            trace.movement_status = MovementStatus.BLOCKED
+            trace.movement_obstruction = _seg
+            logger.info("movement blocked: %s -> %s (%s)", arc.protagonist,
+                        dest_id, _seg.get("evidence"))
+        elif _hold_for_deliberation(dest_id, label):
+            pass  # #102: held for the player's own weighing
+        else:
+            p.ingest_structured([{
+                "entity": arc.protagonist, "attribute": "in", "value": dest_id,
+                "value_type": "entity", "valid_from": turn_time(turn),
+            }], classify="batch")
+            trace.movement_status = (_as_movement_status(_seg.get("status")) if _seg
+                                     else MovementStatus.CLEAR)
+            if _seg:
+                trace.movement_obstruction = _seg
+            logger.info("player moved: %s -> %s (%s)", arc.protagonist, dest_id,
+                        trace.movement_status)
 
     if moves_to:
         # SEEK-A-PERSON unwrap (founder live 2026-07-01, "I go back to where Reed is"): the
@@ -4534,11 +4569,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         def _name_of(e: str) -> str:
             # Display name at the play horizon (the canon snapshot isn't built until step 3, after
             # movement) — live_reads is horizon-bound and returns the unwrapped value or None.
-            try:
-                v = live_reads.state(e, "name")
-            except Exception:
-                return ""
-            return v if isinstance(v, str) else ""
+            return read_str(live_reads, e)
 
         def _undiscovered_offscene(n) -> bool:
             return (getattr(n, "presence", "") == "offscene" and bool(getattr(n, "location", ""))
@@ -4549,7 +4580,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _gate = (_tnode is not None and _undiscovered_offscene(_tnode)) or any(
                 _undiscovered_offscene(n) for n in _cbi.values() if n.location == target)
             if _gate:
-                trace.movement_status = "undiscovered"
+                trace.movement_status = MovementStatus.UNDISCOVERED
                 logger.info("movement to undiscovered offscene target %s blocked "
                             "(no learned whereabouts)", target)
                 target = None
@@ -4578,7 +4609,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _in_scene_obj = bool(pre_scene and pre_scene in _tchain) or bool(
                 pre_chain and _tchain and _tchain[0] == pre_chain[0])
             if _dest_head(moves_to) in _FIXTURE_HEADS or _in_scene_obj:
-                trace.movement_status = "in_scene"
+                trace.movement_status = MovementStatus.IN_SCENE
                 logger.info("resolved non-place target %r (fixture/scene-object) — in-scene, not travel",
                             target)
             else:
@@ -4588,7 +4619,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # EXACT current-room naming (Cx 447 blocker): "I go to the study" while
             # standing in the study is a no-op — no relocation row, no route check,
             # and NO move-bucket time charge (the 445 wrinkle, now on ALL paths).
-            trace.movement_status = "clear"
+            trace.movement_status = MovementStatus.CLEAR
             trace.same_place = True
             target = None
             logger.info("move %r resolved to the CURRENT scene — already here", moves_to)
@@ -4598,35 +4629,17 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # walked — the narrator explains why. `obscured` (state unknown) is
             # allowed but flagged so the prose can hedge; missing capture degrades
             # to obscured/clear, never a false hard-block.
-            origin = pre_chain[0] if pre_chain else None
-            seg = _route_obstruction(p, origin, target, as_of=_h)
-            if seg and seg.get("status") == "blocked":
-                trace.movement_status = "blocked"
-                trace.movement_obstruction = seg
-                logger.info("movement blocked: %s -> %s (%s)", arc.protagonist,
-                            target, seg.get("evidence"))
-            elif _hold_for_deliberation(target, moves_to):
-                pass  # #102 (Cx 465 #2): only a move that WOULD commit deliberates
-            else:
-                p.ingest_structured([{
-                    "entity": arc.protagonist, "attribute": "in", "value": target,
-                    "value_type": "entity", "valid_from": turn_time(turn),
-                }], classify="batch")
-                trace.movement_status = seg.get("status") if seg else "clear"
-                if seg:
-                    trace.movement_obstruction = seg
-                logger.info("player moved: %s -> %s (%s)", arc.protagonist, target,
-                            trace.movement_status)
+            _gated_move_commit(target, moves_to)
         elif cast and _names_undiscovered_dest(moves_to, _cbi, _undiscovered_offscene, _name_of):
             # ENTITLEMENT GATE for an UNRESOLVED name (Cx review #1): the gate above runs only on a
             # RESOLVED target, so a guessed/unresolved VARIANT of an undiscovered offscene suspect or
             # their authored location would otherwise reach the mint and teleport the player near
             # them. Deny it here too — the narrator renders "you don't know where that is yet."
-            trace.movement_status = "undiscovered"
+            trace.movement_status = MovementStatus.UNDISCOVERED
             logger.info("unresolved move %r names an undiscovered offscene target; not minting",
                         moves_to)
         elif (_orig_status != "resolved" and not _orig_candidates
-              and trace.movement_status not in ("undiscovered", "blocked")
+              and trace.movement_status not in (MovementStatus.UNDISCOVERED, MovementStatus.BLOCKED)
               and not _move_touches_secret(moves_to, arc, live_reads)):
             # MOVEMENT PERMANENCE (founder: "I said I went to Harrow's office"): a GENUINE
             # zero-candidate miss — refer resolved nothing and offered no candidates — so the
@@ -4650,14 +4663,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # fixture is prose, not a structured feature). Navigable place heads ("office", "yard",
             # "lane", "kitchen") fall through to the mint and still travel (founder "Harrow's office").
             if _dest_head(moves_to) in _FIXTURE_HEADS:
-                trace.movement_status = "in_scene"  # no mint, no relocation — stay with the people
+                trace.movement_status = MovementStatus.IN_SCENE  # no mint, no relocation — stay with the people
                 logger.info("move %r is an in-scene fixture (head %r) — repositioning, not travel",
                             moves_to, _dest_head(moves_to))
             else:
                 # a DEICTIC destination ("back", "outside") is geography, never a reference
                 # to a named roster place — skip the bind, let the mint path refuse as before.
-                _slug_probe = re.sub(r"[^a-z0-9]+", "_",
-                                     str(moves_to).lower()).strip("_")
+                _slug_probe = slugify(str(moves_to))
                 _deictic = _slug_probe in _DEICTIC_DEST
                 # THE KNOWN-WORLD PLACE ROSTER, built FIRST (Cx 356 / Cx 390): scope alone
                 # misses authored geography (production bodycase scope holds ONE place, not
@@ -4699,8 +4711,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                     _bits.append(str(_v))
                             if not _bits and _pid not in set(scope or []):
                                 continue  # not horizon-present/readable — not a bind target
-                            _label = " — ".join(_bits) or _pid.split(":", 1)[-1] \
-                                .replace("_", " ")
+                            _label = " — ".join(_bits) or humanize_id(_pid)
                             # THE CURRENT SCENE IS A BIND TARGET (founder live, the
                             # drawing-room twin): a synonym for the room the player is
                             # STANDING IN ("the drawing room" in an established parlor)
@@ -4743,12 +4754,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     if _gseg and _gseg.get("status") == "ambiguous":
                         # #101 (Cx 445): an ambiguous locative tail ("in the village",
                         # two known villages) → the ask path, never a guessed mint.
-                        trace.movement_status = "ambiguous"
+                        trace.movement_status = MovementStatus.AMBIGUOUS
                         _move_clarify = str(moves_to)
                         logger.info("move %r container ambiguous — clarify beat (%s)",
                                     moves_to, _gseg.get("evidence"))
                     elif _gseg and _gseg.get("status") == "blocked":
-                        trace.movement_status = "blocked"
+                        trace.movement_status = MovementStatus.BLOCKED
                         trace.movement_obstruction = _gseg
                     elif _gseg and _gseg.get("status") == "grant_failed":
                         # engine trouble AFTER rows were written — an error
@@ -4762,7 +4773,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         # not bypass the confirmation beat
                         pass
                     elif granted:
-                        trace.movement_status = _gseg.get("status") if _gseg else "clear"
+                        trace.movement_status = (_as_movement_status(_gseg.get("status")) if _gseg
+                                             else MovementStatus.CLEAR)
                         if _gseg:
                             trace.movement_obstruction = _gseg
                     else:
@@ -4783,18 +4795,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         moves_to,
                         set(scope or []) | ({pre_scene} if pre_scene else set())
                         | set(pre_chain or []),
-                        live_reads, _name_of)) and _known != pre_scene \
-                        and not _hold_for_deliberation(_known, moves_to):
+                        live_reads, _name_of)) and _known != pre_scene:
                     # reuse an already-KNOWN place by token ("my own office" → the existing
                     # office) so a return home doesn't mint a duplicate (founder cohesion test).
-                    p.ingest_structured([{
-                        "entity": arc.protagonist, "attribute": "in", "value": _known,
-                        "value_type": "entity", "valid_from": turn_time(turn),
-                    }], classify="batch")
-                    trace.movement_status = "clear"
-                    logger.info("move resolved to KNOWN place %s (reused, not minted)", _known)
+                    # SAME MOVEMENT GATES AS THE OTHER TRAVEL PATHS: route check, then
+                    # deliberation, then commit (a blocked way is never walked).
+                    _gated_move_commit(_known, moves_to)
                 elif _known == pre_scene:
-                    trace.movement_status = "clear"  # naming the current place → already here
+                    trace.movement_status = MovementStatus.CLEAR  # naming the current place → already here
                     trace.same_place = True          # Cx 445: no time charge for a no-op
                 else:
                     # SEMANTIC BIND BEFORE MINT (Cx 354 A, founder phantom-scene incident): the
@@ -4843,7 +4851,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         if _bound == pre_scene:
                             # a synonym for the room they're STANDING IN — already here;
                             # no relocation row, no twin (the drawing-room incident).
-                            trace.movement_status = "clear"
+                            trace.movement_status = MovementStatus.CLEAR
                             trace.same_place = True  # Cx 445: no time charge for a no-op
                             logger.info("move %r bound to the CURRENT scene %s — already here",
                                         moves_to, _bound)
@@ -4854,36 +4862,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                             # no commit + obstruction on the trace; obscured → commit but hedge.
                             # Deliberation runs AFTER passability (Cx 465 #2): only a move
                             # that WOULD commit may render as a deadline choice.
-                            _seg = _route_obstruction(p, pre_chain[0] if pre_chain else None,
-                                                      _bound, as_of=_h)
-                            if _seg and _seg.get("status") == "blocked":
-                                trace.movement_status = "blocked"
-                                trace.movement_obstruction = _seg
-                                logger.info("bound move blocked: %s -> %s (%s)", arc.protagonist,
-                                            _bound, _seg.get("evidence"))
-                            elif _hold_for_deliberation(_bound, moves_to):
-                                pass  # #102: held for the player's own weighing
-                            else:
-                                p.ingest_structured([{
-                                    "entity": arc.protagonist, "attribute": "in", "value": _bound,
-                                    "value_type": "entity", "valid_from": turn_time(turn),
-                                }], classify="batch")
-                                trace.movement_status = _seg.get("status") if _seg else "clear"
-                                if _seg:
-                                    trace.movement_obstruction = _seg
-                                logger.info("move %r semantically BOUND to %s (%s)", moves_to,
-                                            _bound, trace.movement_status)
+                            _gated_move_commit(_bound, moves_to)
                     elif _amb:
                         # ASK, NEVER HALLUCINATE (founder 2026-07-04): an ambiguous
                         # destination gets a CLARIFY beat — the world asks which the player
                         # means, in-fiction; no mint, no relocation, no invented arrival.
-                        trace.movement_status = "ambiguous"
+                        trace.movement_status = MovementStatus.AMBIGUOUS
                         _move_clarify = str(moves_to)
                         logger.info("move %r ambiguous against roster — clarify beat, "
                                     "no mint, no relocation", moves_to)
                     else:
                         _do_grant()
-        elif trace.movement_status != "in_scene" and not trace.same_place:
+        elif trace.movement_status != MovementStatus.IN_SCENE and not trace.same_place:
             # an absorbed in-scene fixture / already-here no-op is handled, not a miss
             logger.warning("movement destination %r did not resolve (%s); "
                            "relying on extraction", moves_to, status)
@@ -4898,7 +4888,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # receipt, NO world/clock change, the honest non-diegetic retry seam.
     if (seeks_encounter and moves_open and kind == "action"
             and not moves_to
-            and not trace.movement_status and not trace.same_place):
+            and trace.movement_status == MovementStatus.NONE and not trace.same_place):
         # THE DESTINATION-LESS ENCOUNTER LANE (spec §5.2, amended with
         # cr): committed travel-until with no nameable destination. The
         # pipeline outcome is HOST-PROVEN vacuous (no mention → nothing
@@ -4941,7 +4931,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 tangent_mod.pending_rows(_t_aim, turn=turn,
                                          action=player_input,
                                          at=turn_time(turn)),
-                frame=SESSION, classify="batch")
+                frame=SESSION, classify="rules")
             trace.tangent = f"pending:{_t_aim}"
             logger.info("tangent declared (beat 1): %r", _t_aim)
         except Exception as exc:  # noqa: BLE001 — the receipt is retryable
@@ -5002,7 +4992,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # (which already knows what a city or a kingdom is) prices it from the fiction.
     # The old disjoint-chain farness proxy, the settlement vocabulary, and the durable
     # journey event all retire: derived farness is never stored (Cx 454 hard rule).
-    if (trace.movement_status in ("clear", "obscured") and not trace.same_place
+    if (trace.movement_status in _MOVED_STATUSES and not trace.same_place
             and pre_chain):
         try:
             _post_chain = p.locate(arc.protagonist, as_of=_h) or []
@@ -5020,7 +5010,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # that prove nearness.
                     _near = _route_connects(p, pre_chain[0], _post_chain[0], as_of=_h)
                 if not _near:
-                    trace.distance_unknown = f"{pre_chain[0]}->{_post_chain[0]}"
+                    trace.distance_unknown_route = (pre_chain[0], _post_chain[0])
+                    trace.distance_unknown = _route_arrow(trace.distance_unknown_route)
                     logger.info("move distance UNKNOWN (map can't prove local): %s",
                                 trace.distance_unknown)
         except Exception as exc:  # noqa: BLE001 — detection is enrichment, never a gate
@@ -5037,8 +5028,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # WORLD-GROWTH: an activated chunk already moved every standing companion
     # in the SAME atomic set (§3 companion postcondition) — 2b-ii must not
     # re-write them (cr wiring: the chunk owns those rows).
-    if trace.movement_status in ("clear", "obscured") \
-            and not str(trace.growth).startswith("activated:"):
+    if trace.movement_status in _MOVED_STATUSES \
+            and not trace.growth_outcome.activated:
         for _pid in _npc_by_oid.values():
             if _pid in moved_with_ids or _pid in dismissed_ids:
                 continue
@@ -5053,7 +5044,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     if trace.growth_moved:
         moved_with_ids = [i for i in moved_with_ids
                           if i not in set(trace.growth_moved)]
-    if moved_with_ids and trace.movement_status in ("clear", "obscured"):
+    if moved_with_ids and trace.movement_status in _MOVED_STATUSES:
         try:
             _post_chain = p.locate(arc.protagonist, as_of=_h)
             _new_scene = _post_chain[0] if _post_chain else None
@@ -5120,11 +5111,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # spawning a twin `obj:pencil_1` (the live bug: `refer` missed it by name; the bounded
             # token matcher catches it; one identity authority shared with the prose resolver).
             def _live_name(e: str) -> str:
-                try:
-                    v = live_reads.state(e, "name")
-                except Exception:
-                    v = None
-                return v if isinstance(v, str) else ""
+                return read_str(live_reads, e)
             _take_cands = (set(scope or []) | set(_pre_held)
                            | set(pre_chain or []) | ({pre_scene} if pre_scene else set()))
             _bound, _why = bind_or_mint(takes, kind="obj", candidates=_take_cands,
@@ -5231,7 +5218,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         p.ingest_structured([
             {"entity": f"event:arc_touch_{turn}", "attribute": "kind",
              "value": "arc_touch", "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # arc-touch marker — bookkeeping
+        ], frame=SESSION, classify="rules")  # arc-touch marker — bookkeeping
 
     # 4. World tick (strict order; beats LAST). Atoms read LIVE canon
     #    directly: per-key folds are ~0.2ms post-engine-037 (were seconds
@@ -5422,13 +5409,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 _ncands.add(npc)
 
                 def _npc_name(e: str, _ct=canon_table) -> str:
-                    v = _ct.get((e, "name"))
-                    if not isinstance(v, str):
-                        try:
-                            v = live_reads.state(e, "name")
-                        except Exception:
-                            v = None
-                    return v if isinstance(v, str) else ""
+                    return table_or_read_name(_ct, live_reads, e)
                 _nraw = p.extract(decision["action"], scene=scene, extract="lean",
                                   pov=npc)  # read-only; the NPC's own "I" (PB 4c)
                 _nres, _nrec = resolve_rows(_nraw, scene=_ncands, protagonist=arc.protagonist,
@@ -5461,8 +5442,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         if _vtok:
             _vh, _vcount = _title_holder(canon_table, _vtok, arc.protagonist)
             if _vh:
-                _voc_name = str(canon_table.get((_vh, "name")) or
-                                _vh.split(":", 1)[-1].replace("_", " ").title())
+                _voc_name = str(canon_table.get((_vh, "name")) or humanize_id_title(_vh))
                 if _vh in npcs:
                     _voc_holder = _vh
                     trace.vocative = f"{_vtok}->{_vh} (present)"
@@ -5791,7 +5771,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         [{"entity": f"card:{card_id}", "attribute": "weave_state",
                           "value": "hook_proposed"},
                          {"entity": "weave:pacing", "attribute": "last_turn", "value": turn}],
-                        frame=SESSION, classify="batch")
+                        frame=SESSION, classify="rules")
         except Exception as exc:  # governance must never sink the turn
             trace.dropped_cohorts.append(f"weave_pick ({exc})")
 
@@ -5864,7 +5844,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     {"entity": "session:peril", "attribute": "cause",
                      "value": (uncertain_of or player_input)[:200],
                      "valid_from": turn_time(turn)},
-                ], frame=SESSION, classify="batch")
+                ], frame=SESSION, classify="rules")
                 _death_staged = True
                 trace.peril = "staged"
             elif _peril_scene and (not mortal_risk
@@ -5875,7 +5855,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([
                     {"entity": "session:peril", "attribute": "scene", "value": "",
                      "valid_from": turn_time(turn)},
-                ], frame=SESSION, classify="batch")
+                ], frame=SESSION, classify="rules")
                 trace.peril = "cleared"
             elif _peril_standing and mortal_risk:
                 trace.peril = "standing"
@@ -6082,10 +6062,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         s = str(x)
         if s in names:
             return names[s]
-        if ":" in s and s.split(":", 1)[0] in ("person", "place", "obj", "fact", "event"):
-            local = s.split(":", 1)[-1].replace("_", " ")
-            return local.title() if s.startswith("person:") else local  # person slug = a proper name
-        return s
+        return human_name_typed_id(s)  # person slug = a proper name
 
     # LOCATION FILTER (founder live: "the tape followed us everywhere"): scene facts are the
     # player-frame snapshot over the WHOLE arc scope, so a learned-but-ELSEWHERE entity (a clue
@@ -6145,8 +6122,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # the accusation could land). Such an arc concludes only on (a) refusal, (b) a landed commitment
     # [below], or (c) the post-climax window expiring (the reckoning never came). WORLD-EVENT-owned
     # shapes (endurance/farce) keep the direct world_condition terminal — unchanged.
-    from construct.arc.conditions import Truth as _Truth
-    from construct.arc.conditions import evaluate as _evaluate
+    # ONE derivation for this read-only block (no write lands between here and the
+    # `trace.concluded` marker); the commitment ingest further down moves world_condition, so
+    # the lifecycle/outcome block below re-derives from fresh reads, never from this status.
+    _arc_st = arc_status(live_reads, arc)
     _commitment_owned = terminal_owner == "commitment"
     # DIEGETIC-CLOCK CONCLUSION (founder ruling 2026-06-25; Cx 173): turns are FREE — NO turn-count
     # ever forces a conclusion. A commitment-owned arc with no authored deadline stays READY forever;
@@ -6158,21 +6137,23 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # family dynamics, open-ended romance, slice-of-life) has no conclusion to steer toward, so it
     # never gets the nudge — it just plays on.
     _reckoning_ready = _commitment_owned and scenario_mode == "win_loss" and (
-        climax_ready(live_reads, arc)
-        or _evaluate(arc.shape.world_condition, live_reads) is _Truth.TRUE)
-    _authored_failure = (arc.failure_when is not None
-                         and _evaluate(arc.failure_when, live_reads) is _Truth.TRUE)
-    concluded = arc_concluded(live_reads, arc)
+        _arc_st.climax_ready or _arc_st.world_true)
+    _authored_failure = _arc_st.failure_holds
+    concluded = _arc_st.concluded
     if _commitment_owned:
         # world_condition is READINESS, not a conclusion. The only forced close is an authored
         # failure (deadline/loss event); the commitment's own terminal is handled below.
+        # (This per-terminal-owner override stays HERE, not in `ArcStatus`: `arc_concluded`
+        # is also read by `current_phase`/`conclusive_eligible`/briefing, which must keep
+        # treating a met world_condition as FALLING for every shape; pushing the owner into
+        # the status would change those results.)
         concluded = _authored_failure
     trace.concluded = concluded
     if concluded and not _conclusion_recorded(live_reads):
         p.ingest_structured([
             {"entity": f"event:conclusion_{turn}", "attribute": "kind",
              "value": "conclusion", "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # conclusion marker — bookkeeping
+        ], frame=SESSION, classify="rules")  # conclusion marker — bookkeeping
 
     # Win/loss termination (WIN-LOSS §10): STRICTLY in `win_loss` mode (founder
     # ruling) — endless/freeplay never terminate. On the first won/lost, write
@@ -6213,10 +6194,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _asked = "miss"  # can't read the receipt → don't gate (fail-open)
         if not _asked:
             try:
-                _here = str(canon_table.get((scene, "name")) or
-                            (scene or "").split(":")[-1].replace("_", " "))
+                _here = str(canon_table.get((scene, "name")) or humanize_id_last(scene or ""))
                 _who = ", ".join(
-                    str(canon_table.get((n, "name")) or n.split(":")[-1].replace("_", " "))
+                    str(canon_table.get((n, "name")) or humanize_id_last(n))
                     for n in npcs) if npcs else ""
                 _gate = cohorts.commitment_stage_gate(
                     provider, player_input, commitment, _here, _who, judgment_type or "")
@@ -6228,7 +6208,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     p.ingest_structured([{
                         "entity": "session:clarification", "attribute": "asked",
                         "value": f"turn_{turn}", "valid_from": turn_time(turn)}],
-                        frame=SESSION, classify="batch")
+                        frame=SESSION, classify="rules")
                     logger.info("commitment clarification beat (missing: %s)",
                                 _gate.get("missing"))
             except Exception as exc:  # noqa: BLE001 — never block the commitment path
@@ -6286,7 +6266,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              "value": "commitment", "valid_from": turn_time(turn)},
             {"entity": f"event:commitment_{turn}", "attribute": "grade",
              "value": commitment_grade, "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # commitment marker — bookkeeping
+        ], frame=SESSION, classify="rules")  # commitment marker — bookkeeping
     trace.commitment = commitment if commits else ""
     trace.commitment_grade = commitment_grade
     trace.commitment_bounced = commitment_bounced
@@ -6373,7 +6353,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                  "valid_from": turn_time(turn)},
                 {"entity": _rcpt, "attribute": "agent", "value": arc.protagonist,
                  "value_type": "entity", "valid_from": turn_time(turn)},
-            ], frame=SESSION, classify="batch")
+            ], frame=SESSION, classify="rules")
             set_lifecycle(world, arc, "lost", turn)
         else:
             _rcpt = f"event:arc_outcome_{turn}"
@@ -6404,7 +6384,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     {"entity": _rcpt, "attribute": "basis",
                      "value": conc.get("basis", ""), "valid_from": turn_time(turn)},
                 ]
-            p.ingest_structured(_shape_rows, frame=SESSION, classify="batch")
+            p.ingest_structured(_shape_rows, frame=SESSION, classify="rules")
             set_lifecycle(world, arc, main_life, turn)
         # COMMITMENT-AS-EFFECT slice 3 (Cx 105 #5): a HOLLOW/unjust main landing writes a CONCRETE
         # canon consequence — the fallout the next episode grows from — anchored via `caused_by` to
@@ -6684,662 +6664,72 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         wishes = json.loads(live_reads.state("session:wishes", "list", frame=SESSION) or "[]")
     except (ValueError, TypeError):
         wishes = []
-    story_so_far = ""
-    if _recent:
-        beats = []
-        for e in _recent[-_RECENT_TURNS:]:
-            if e.get("player"):
-                beats.append(f"› You: {e['player']}")
-            if e.get("prose"):
-                beats.append(e["prose"])
-        story_so_far = "\n\n".join(beats)
     _cp("generator_done")
-    briefing_parts = []
-    if play_style:
-        # The game-type directive (GAME-TYPES.md): WHAT KIND of game this is — what
-        # to hand-wave vs. dramatize, the tension posture. Maintained every turn so
-        # the agent's awareness of the experience never lapses. A directive, not a
-        # toggle matrix (founder).
-        briefing_parts.append(f"{play_style}\n")
-    if wishes:
-        # The player floated these OUT OF CHARACTER (`/ooc`) and the engine agreed to
-        # try. Weave ONE in only where it fits naturally and serves the story — never
-        # if it would spoil or derail the trajectory or the game type's payoff. Let
-        # them go otherwise; they are wishes, not instructions.
-        briefing_parts.append(
-            "PLAYER'S OUT-OF-CHARACTER WISHES (rule of cool — realize one where it "
-            "fits naturally and deepens the story; NEVER if it would spoil or derail "
-            "the trajectory or the game type's climax; otherwise let it pass):\n"
-            + "\n".join(f"- {w}" for w in wishes[-4:]) + "\n")
-    if style:
-        # The world-level voice overlay (NARRATIVE-FLAVOR-INGEST): HOW to write,
-        # distilled once at ingest. Shapes voice/tone only — never adds facts.
-        briefing_parts.append(
-            f"STYLE (render the grounded world in this voice — tone only, never "
-            f"new facts): {style}\n")
-    # WORLD-GROWTH G3: the NEAREST-ANCESTOR region card — grown territory
-    # remembers WHY it exists (the assessment that grew it) and what the
-    # player did arriving; chapter ten reads what chapter two wrote. Two
-    # point reads, only when the scene actually sits under a card.
-    try:
-        _gregion = next((c for c in (chain or [])
-                         if str(c).startswith("region:")), None)
-        if _gregion:
-            _gstyle = live_reads.state(_gregion, "style")
-            _gorigin = live_reads.state(_gregion, "origin")
-            trace.point_reads += 2
-            if isinstance(_gstyle, str) and _gstyle.strip():
-                briefing_parts.append(
-                    "THIS TERRITORY (grown where the player walked — its "
-                    "remembered voice; texture and society follow it, "
-                    "never the abandoned map's): " + _gstyle.strip()
-                    + (f" (Its origin — the player's own act, quoted: "
-                       f"\"{_gorigin.strip()}\".)"
-                       if isinstance(_gorigin, str) and _gorigin.strip()
-                       else "") + "\n")
-    except Exception:  # noqa: BLE001 — a briefing garnish, never a gate
-        trace.dropped_cohorts.append("region_voice_read failed")
-    if narrative_memory:
-        briefing_parts.append(
-            f"NARRATIVE MEMORY (the arc so far — standing dynamics, recurring "
-            f"themes, unresolved threads; lower-resolution than the recent beats "
-            f"below, but the through-line to honour):\n{narrative_memory}\n")
-    if story_so_far:
-        briefing_parts.append(
-            f"THE STORY SO FAR (recent beats, in detail — your short-term memory of "
-            f"what just happened; continue naturally, do not repeat or re-establish "
-            f"what's here):\n{story_so_far}\n")
-    if trace.time_now:
-        # The diegetic hour, on THIS place's calendar — let it shape the light, who's
-        # about, what's open; never state it as a clock readout.
-        briefing_parts.append(
-            f"THE TIME (render its FEEL — light, sounds, who is about — never as a "
-            f"clock): {trace.time_now}\n")
-    # THE LOCATION ANCHOR (task #10, critic campaign 2026-07-11 run 2,
-    # verified): canon had committed a move three turns earlier, yet the
-    # narrator re-placed the scene in the prior room ("There is no yard
-    # gate in the briefing room"). The WHERE gets the same explicit force
-    # the PRESENT CHARACTERS block gives the WHO — one line, every turn.
-    # The label is PLAYER-FRAME-scoped (cr: a canon-only name the player
-    # never learned must not ride into prose — the same frame discipline
-    # as the scene-name resolver above); with no established name the
-    # anchor goes name-free, keeping its anti-regression force.
-    if scene:
-        _scene_nm = str(names.get(scene) or "")
-        _at = (f"YOU ARE AT: {_scene_nm}." if _scene_nm
-               else "YOU ARE AT the place you now stand in.")
-        briefing_parts.append(
-            f"{_at} The scene is HERE and only here — if "
-            f"earlier exchanges happened in another room, that place is "
-            f"BEHIND you now; never re-place this scene, its doors, or its "
-            f"furniture in an earlier location. Travel that was narrated "
-            f"has happened.\n")
-    briefing_parts += [
-        # The narrator never sees internal frame ids — only the scene as it stands.
-        "THE SCENE RIGHT NOW (what is true and present here):",
-        "\n".join(scene_lines) or "(nothing established here yet — the grid shows through)",
-    ]
-    if scene_features:
-        # Navigable sub-features of this place (PLACE-FEATURE; part_of-children),
-        # distinct from the things merely in the room.
-        briefing_parts.append("\nFEATURES OF THIS PLACE (its sub-features/"
-                              "structures): " + ", ".join(scene_features))
-    if _world_laws or _reality_line:
-        # WORLD LAWS (#105, Cx 470 ruling 4): the constitution rides a RESERVED
-        # lane AHEAD of the capped pins — a busy turn's clue/social/temporal
-        # pins can never push a law out of the narrator's standing awareness.
-        # Disclosure-split (founder): understood laws are open lived context;
-        # discovered laws bind silently, their edges woven, never named. The
-        # reality register's contract rides the same lane (no-law case incl.).
-        _lane = "\n".join(p for p in (_reality_line,
-                                      _laws_mod.law_lines(_world_laws)) if p)
-        briefing_parts.append("\n" + _lane)
-        trace.laws = [str(law.get("name") or "") for law in _world_laws]
-    if active_pins:
-        pin_lines = [f"[{ap.pin.scope_kind}] {ap.pin.directive}"
-                     for ap in active_pins[:_PIN_CAP]]
-        briefing_parts.append(
-            "\nPINNED AWARENESS (foreground these — what is true and pressing "
-            "here, ordered by urgency; weave in diegetically, do not list):\n"
-            + "\n".join(pin_lines))
-    # GAUGE surfacing (GAUGE §4): the live numeric constraint IS the tension. Urgency is
-    # derived this turn from the folded level vs the floor (distance_to_floor/range, Cx 150)
-    # — never stored. Ordered most-urgent first; the narrator dramatizes it, never prints a HUD.
-    _glines = sorted(gauge_lines(arc, world, as_of=_h), key=lambda t: t[2])
-    if _glines:
-        def _phrase(u: float) -> str:
-            return ("all but gone — act now" if u <= 0.1 else "critical" if u <= 0.25
-                    else "running low" if u <= 0.5 else "holding")
-        briefing_parts.append(
-            "\nLIVE PRESSURE (foreground this mounting constraint diegetically — let it "
-            "tighten the scene; do NOT print a number/HUD unless the fiction shows a gauge):\n"
-            + "\n".join(f"- {g.label}: {int(round(lvl))} ({_phrase(u)})"
-                        for g, lvl, u in _glines))
-    if weave_directive:
-        # Story governance (CARD-WEAVING.md): weave the chosen card at its seam. Replaces
-        # the passive cast-threads nudge; on 'let_run' there is no directive (serve the path).
-        briefing_parts.append(weave_directive)
-    if learned:
-        # Interview delivery (§8): the NPC reveals these pieces THIS turn, in character,
-        # in response to the player's questioning — deliver them as dialogue/disclosure,
-        # not as a fact dump, and never name them as "clues".
-        reveal_lines = [f"{_human_entity(npc)} reveals: {a.replace('_', ' ')} "
-                        f"of {_human_entity(e)} is {_human_entity(str(v))}"
-                        for (npc, clue) in learned for (e, a, v) in [clue.surface_fact]]
-        briefing_parts.append(
-            "\nWHAT IS LEARNED THIS TURN (the questioned character discloses it now, in "
-            "character — weave it into their reply, do not list or label it):\n"
-            + "\n".join(reveal_lines))
-    if adapt_directives:
-        # make-it-real (NARRATION-DISCIPLINE.md): the player's pursued thread became the path
-        # to an unfilled cause. Render the reveal as their OWN deduction from the detail they
-        # chose — never a redirect back to the authored clue, never a witness lecture.
-        briefing_parts.extend(adapt_directives)
-    if asks_self:
-        # ADDRESSED INWARD (founder 2026-07-03): the classify CHECKED that this question is
-        # about the player's own life — the mechanical route that outranks last-speaker.
-        briefing_parts.append(
-            "\nADDRESSED INWARD (binding): the player's question is about their OWN life, "
-            "memory, or circumstances — their own memory answers it, in second person, from "
-            "what they know (plus ordinary plausible autobiography under the improv rules). "
-            "If the memory holds NO answer, honest uncertainty IS the answer — 'you turn it "
-            "over and find nothing certain' is grounded in the moment and valid; never "
-            "fabricate, and never hand the question to someone else because the memory came "
-            "up empty. No present character answers it for them; someone may ADD what they "
-            "uniquely know (an arrangement made, a message sent) only AFTER the memory has "
-            "spoken.")
-    if memory_result and memory_result.get("stirs") and (memory_result.get("memory") or "").strip():
-        # #97 THE REMEMBRANCER: the mind's contribution rides the briefing as felt
-        # second-person interiority — PROPORTION-bound (a flicker, not a flashback).
-        trace.memory = str(memory_result.get("memory") or "")[:300]
-        _feel = (memory_result.get("feeling") or "").strip()
-        briefing_parts.append(
-            "\nYOUR OWN MIND THIS TURN (weave as FELT memory in second person — a "
-            "flicker, not a flashback; never a recital, never dialogue, never an "
-            "action): " + trace.memory
-            + (f" — felt as {_feel}." if _feel else ""))
-    if _memory_tensions:
-        # #97 contradiction rule (Cx 434 constraint 5): a quarantined collision is
-        # surfaced as in-fiction tension — the FIRST established truth stands.
-        briefing_parts.append(
-            "\nTHE MEMORY SITS ODDLY (render as felt tension, one beat, never a "
-            "lecture; what is already established REMAINS the truth): "
-            + "; ".join(_memory_tensions))
-    if trace.distance_unknown:
-        # #101 inversion (Cx 454): the map couldn't prove this was a local step — the
-        # render is SCALE-NEUTRAL: true scale when the fiction establishes it, modest
-        # when it doesn't; a flat map must never overdramatize "across the yard".
-        briefing_parts.append(
-            "\nMOVEMENT AT ITS TRUE SCALE (render the travel honestly): the player "
-            "moved between places whose distance the map does not establish. Render "
-            "the movement at the scale the FICTION has established — a walk down a "
-            "lane is a beat; a ride to another town is departing, the way, and "
-            "arriving, with weather and effort as the scene holds them. Where the "
-            "distance is NOT established, keep the transit brief and modest — never "
-            "invent roads, distances, or landmarks the world hasn't given you.")
-    if trace.deliberating:
-        # #102 (founder-shaped): the weighing is the character's OWN MIND — second-person
-        # deliberation ending on the open question; never a menu, never decided for them.
-        briefing_parts.append(
-            f"\nYOUR OWN MIND WEIGHS IT (render as ONE beat of second-person "
-            f"deliberation, then stop — the player has NOT moved): they mean to set "
-            f"out for {trace.deliberating.split(' — ')[0]}, but the story's deadline "
-            f"stands against the time the way would take "
-            f"({trace.deliberating.split(' — ', 1)[-1]} — translate to FELT time, "
-            f"never numbers). Voice it as their own thought — 'you consider it; but "
-            f"if you go now, you may…' — and end on the open question: press on, or "
-            f"see to what the deadline demands first? Their next word decides; if "
-            f"they choose the road, it will not be questioned again.")
-    if _move_clarify:
-        # ASK, NEVER HALLUCINATE (founder 2026-07-04): the destination was ambiguous —
-        # render ONE in-world clarify beat (a companion asking "which do you mean?",
-        # the narrator putting the fork plainly); the player has NOT moved; do not
-        # invent an arrival or pick for them.
-        briefing_parts.append(
-            f"\nTHE DESTINATION IS UNCLEAR (render as ONE brief in-world beat, then "
-            f"stop — the player has NOT moved): they said they were going to "
-            f"\"{_move_clarify}\", and more than one known place could be meant. Have "
-            f"the world ask which they mean — a present character's natural question, "
-            f"or the narrator laying out the fork plainly. Never guess, never invent "
-            f"an arrival.")
-    if _voc_holder:
-        # #93 (Cx 404 C): the player addressed a unique canon title-holder who IS here —
-        # the address binds to them, outranking the last-speaker convention.
-        briefing_parts.append(
-            f"\nSPOKEN TO BY TITLE (binding): the player's address names a title held "
-            f"by {_voc_name} — the words go to THEM, not to whoever spoke last. They "
-            f"have the floor and answer in their own voice.")
-    elif _voc_absent:
-        # #93 (Cx 404 C): the addressed title-holder is NOT here — never re-route
-        # their floor to whoever is; render the honest not-here beat.
-        briefing_parts.append(
-            f"\nCALLED FOR SOMEONE NOT HERE (binding): the player's address names a "
-            f"title held by {_voc_name} — who is NOT present. No one here answers FOR "
-            f"them, takes the question in their stead, or volunteers their knowledge; "
-            f"render the address landing on their absence honestly (the room notes it; "
-            f"someone may say plainly they are not here, and where they might be found "
-            f"if that is established). Never teleport them in.")
-    if commitment_clarified:
-        # #88A: the decisive move needs a concrete stage before it can be judged — render ONE
-        # in-world clarification beat (a character asking, the empty room answering); do NOT
-        # resolve or conclude anything this turn; the player's NEXT attempt is taken as given.
-        briefing_parts.append(
-            "\nTHE DECISIVE MOVE NEEDS ITS STAGE (render this as ONE in-world beat, then stop): "
-            + commitment_clarified)
-    if commitment_bounced:
-        # COMMITMENT-AS-EFFECT slice 1: the player tried to force the finale before the causes are
-        # covered. The world DECLINES to conclude on it — NOT a failure, a "not yet": the authority
-        # won't act on what's unproven, the threads don't connect, the declaration rings premature.
-        # Render that diegetically and leave the player IN the story to keep working. Never end here.
-        briefing_parts.append(
-            "\nTHE COMMITMENT DOES NOT LAND (render this, do NOT end the story): the player has "
-            "moved to conclude — but they have NOT yet earned/proven it on what they've actually "
-            "established. Show the world declining, in-genre and without a lecture: the authority "
-            "won't act on so little, the case/claim doesn't hold up, the moment rings premature — "
-            "and the player is left to keep going (there is more to uncover/earn). This is 'not "
-            "yet,' NOT a defeat; do not narrate an ending or a verdict.")
-    if discovered:
-        # Discovery affordance (§3c layer 3): the player now knows where to find these
-        # off-scene people. Offer the route diegetically (the witness mentions where they
-        # are); the player can GO there next. Pacing/bookkeeping, not a stored route flag.
-        seek_lines = [f"{_human_entity(ref)} can be found at {_human_entity(loc)}"
-                      for (ref, loc) in discovered]
-        briefing_parts.append(
-            "\nA LEAD OPENS (the player just learned where to find someone not present — let "
-            "it surface naturally, e.g. the witness says where they are; the player may now go "
-            "to them). Surface it as a CONTINUATION of what this conversation has already "
-            "established: if the person is already under discussion, the speaker simply ADDS "
-            "where to find them — never a recognition beat ('Mr So-and-so? I know that name!') "
-            "for a name the conversation, or the speaker themselves, already raised:\n"
-            + "\n".join(seek_lines))
-    if terminal and died:
-        # #95 THE FALL + THE TESTAMENT (DEATH-TESTAMENT.md, Cx 422): the death receipt
-        # owns the terminal render — a THIRD branch selected BEFORE the reckoning/
-        # settling ternary is ever consulted. Honest, staged, never a gotcha or a score.
-        _dcast = sorted({arc.protagonist}
-                        | {e for e in arc_entities(arc, live_reads) if e.startswith("person:")})
-        _dscope = [e for e in (set(arc_entities(arc, live_reads)) | set(scope or []))
-                   if e.startswith(("person:", "place:", "obj:", "fact:"))
-                   and live_reads.has_entity(e)]
-        _dreveal = [f"{f['entity']} · {f['attribute']} · {f['value']}"
-                    for f in _snap_or_empty(p, sorted(_dscope), as_of=_h).get("facts", [])
-                    if f["entity"] != arc.protagonist][:20]
-        briefing_parts.append(
-            "\nTHE STORY ENDS HERE — THE PROTAGONIST FALLS. The staged mortal risk the "
-            "player walked into has claimed them; render it truthfully, in TWO BEATS, "
-            "separated by a line containing only '⸻':\n"
-            "BEAT 1 — THE FALL: the death rendered honestly, in scene, at the pace of "
-            "the moment — the world answers the player's last move as it truly falls. "
-            "NO rescue invented, NO cutaway, NO scolding, NO miraculous reprieve.\n"
-            "BEAT 2 — THE TESTAMENT: the world after them, and their effect on it. "
-            "What they changed that STAYS changed; what they left undone; the promises "
-            "and bonds left forever open — named as testament, not bookkeeping ('she "
-            "waited at the rail end after close; he never came'). A fitting fate for "
-            f"each of these, as the player's passing touches them: {_dcast}. "
-            "Concealment lifts now (the story is over): name what was hidden, what "
-            "they never learned. Close every thread; open nothing; this world's story "
-            "ends with them.")
-        if _dreveal:
-            briefing_parts.append(
-                "\nTHE TRUTH (revealed at the curtain — weave in what lands):\n"
-                + "\n".join(_dreveal))
-    elif terminal:
-        # Phase 4 flavor: when the arc declares pillars, the ending's character is the
-        # EFFECT of pillar coverage (STORY-SHAPES §0a) — the narrated consequence of the
-        # causes, never "you won/lost". Falls back to the commitment grade for legacy
-        # (pillar-less) arcs so existing worlds are unchanged.
-        _shape_flavor = {
-            "triumph": "triumphant and earned — the causes came together soundly",
-            "costly_victory": "a hard-won, costly close — reached, but the toll shows",
-            "bittersweet": "bittersweet and ironic — it lands, but on a flawed footing; "
-                           "the truth the player missed festers",
-            "partial": "partial and unfinished — some of it resolved, much left open",
-            "failure": "a failure that lands as consequence — the causes never came together",
-            "quiet_failure": "a quiet, muted close — the moment passed, the causes unmet",
-        }
-        if conc:
-            _grade = conc["outcome"]
-            flavor = _shape_flavor[conc["outcome"]] + f" ({conc['basis']})"
-        else:
-            # Legacy grade-aware flavor (pillar-less arcs): vindication / near-miss /
-            # ironic-wrong / hollow-pyrrhic.
-            _grade = commitment_grade or ("won" if outcome == "won" else "lost")
-            flavor = {
-                "vindicated": "triumphant and earned — they got it right",
-                "partial": "bittersweet — right in the main, but incomplete",
-                "wrong": "ironic and quietly devastating — they were confident and WRONG",
-                "pyrrhic": "a hollow victory — right, but at a cost that outweighs it",
-                "won": "triumphant but earned — the goal is reached",
-                "lost": "somber — the goal is lost, the chance gone",
-            }.get(_grade, "somber — the goal is lost")
-        # The movie epilogue: name the cast for fates, lift concealment, and HAVE FUN
-        # revealing the interesting bits the player never uncovered (the dessert course).
-        cast = sorted({arc.protagonist}
-                      | {e for e in arc_entities(arc, live_reads) if e.startswith("person:")})
-        reveal_scope = [e for e in (set(arc_entities(arc, live_reads)) | set(scope or []))
-                        if e.startswith(("person:", "place:", "obj:", "fact:"))
-                        and live_reads.has_entity(e)]
-        reveal = [f"{f['entity']} · {f['attribute']} · {f['value']}"
-                  for f in _snap_or_empty(p, sorted(reveal_scope), as_of=_h).get("facts", [])
-                  if f["entity"] != arc.protagonist][:20]
-        _ending_tag = conc["outcome"] if conc else f"{outcome}; grade: {_grade}"
-        # S1 (#96, Cx 414 constraint 1): the ending voice BRANCHES on whether a player
-        # commitment landed. A commitment-owned close gets the RECKONING scene; a silent /
-        # world-event / authored-failure close gets a SETTLING beat — the world registering
-        # the matter closing, with NO verdict, accusation, grade, or scene of judgment
-        # (the invisible flip was the bug; a courtroom the player never convened is another).
-        _commitment_landed = bool(commitment_grade)
-        _beat1 = (
-            "BEAT 1 — THE RECKONING SCENE: the player's decisive move LANDS where and as "
-            "they staged it, and the world ANSWERS it, in scene — faces, voices, the "
-            "moment turning. A wrong or failed move gets a SCENE too (the accusation "
-            "landing on the wrong man, the room knowing it), never an explanation.\n"
-            if _commitment_landed else
-            "BEAT 1 — THE SETTLING: no decisive move was spoken, and none is invented — "
-            "the world simply REGISTERS the matter closing, in scene: the thing found, "
-            "the danger passed, the machinery of consequence starting to turn on its own "
-            "(word carried, a door barred, men arriving). NO verdict, NO accusation, NO "
-            "judgment scene — something completes and is SEEN to complete.\n")
-        briefing_parts.append(
-            f"\nTHE STORY ENDS HERE ({_ending_tag}). This conclusion is the EFFECT of what "
-            f"the player did and left undone — narrate it as consequence, never as a "
-            f"score. Render the close in TWO BEATS, separated by a line containing only "
-            f"'⸻' (the close must breathe — never one compressed breath):\n"
-            + _beat1 +
-            f"BEAT 2 — THE AFTERMATH ({flavor}): the settled wake. For the protagonist "
-            f"(you) AND each of these characters, a fitting FATE — where they end up, what "
-            f"the outcome cost or won them: {cast}. A loss may carry an unexpected BOON "
-            f"(a door opened, a truth freed, hope for a next time); a victory may carry a "
-            f"lasting WOUND — when the shape says both, say both. Concealment lifts now "
-            f"(the story is over): name what was hidden, savor what the player never "
-            f"uncovered — the secret walked past, the red herrings' truth. Close every "
-            f"thread; apply NO new pressure, open NO new hooks.")
-        # The twist fires when the player committed to a MISTAKEN case (a false-filled
-        # required cause → conc["wrong_case"]), or, for legacy arcs, a 'wrong' grade. NB it
-        # uses wrong_case, NOT `not sound`: a triumphant Farce is all-false (sound=False) but
-        # NOT a wrong case, so it must not trip the twist (Cx 027 blocker 3). The wrong cause
-        # lands, then the real truth surfaces at the curtain.
-        _wrong_case = (conc["wrong_case"] if conc else commitment_grade == "wrong")
-        if commitment and _wrong_case:
-            briefing_parts.append(
-                f"\nTHE TWIST (the player's case was not sound — land it like Sherlock going "
-                f"over his notes): they concluded “{commitment}”, but the truth is "
-                f"otherwise. Reveal the REAL answer and why their read was mistaken — the "
-                f"clue they misread, what was really going on. This is the payoff, not a "
-                f"scolding.")
-        if reveal:
-            briefing_parts.append(
-                "\nTHE TRUTH (revealed at the curtain — the full picture, including what "
-                "the player never learned; weave in what lands):\n" + "\n".join(reveal))
-    elif concluded and not endless:
-        _aftermath = "the world responds to the player in the settled wake of the " \
-                     "story's end, applying no new dramatic pressure."
-        if conc:  # the resolution's character is the EFFECT of pillar coverage
-            _aftermath = (f"the close is {conc['outcome']} — {conc['basis']}. Render it as "
-                          f"the consequence of the causes the player did and didn't "
-                          f"establish, in the settled wake; apply no new pressure.")
-        briefing_parts.append("\nTHE ARC HAS RESOLVED — render this turn as "
-                              "aftermath/denouement: " + _aftermath)
-    else:
-        # CONVERGENCE (CONVERGENCE-TO-CONCLUSION.md; founder "all roads lead to the
-        # conclusion"): act-aware pull toward the climax + relocate-the-beat-to-the-
-        # player. Only while the arc is live (not terminal, not concluded — those own
-        # the close). Dramatic pull only; never reveals the answer.
-        # peril/thriller stories amplify the suspense build-up; everything else gets the gentler
-        # general mounting-stakes (founder; Cx 113: a genre-HAZARD signal — survival/horror/combat
-        # → 'peril' — NOT cost_disposition, which over-fired for mastery/contest/discovery).
-        _act, _conv = _convergence_directive(current_phase(live_reads, arc),
-                                             climax_ready(live_reads, arc),
-                                             peril=(suspense == "peril"))
-        trace.act = _act
-        if _conv:
-            briefing_parts.append(_conv)
-        if _reckoning_ready:
-            # THE DECISIVE MOMENT IS AT HAND (Cx 141; tone made story-agnostic): this commitment-
-            # owned arc is ripe — what it was building toward is reachable now — but the CURTAIN is
-            # the player's conclusory move, WHATEVER this story's "IT" is: a deduction's accusation,
-            # a romance's confession, a bond's reconciliation, a choice owned or renounced. Phrase it
-            # in THIS story's register, not a thriller's. Steer toward it without forcing or revealing.
-            briefing_parts.append(
-                "\nTHE DECISIVE MOMENT IS WITHIN REACH — what this story has been building toward is "
-                "now available to the player; what remains is THEIR conclusory move (in this story's "
-                "own register: a declaration, a confession, a choice, naming a truth, the decisive "
-                "act). Bring the moment to a head and make it FEEL available and weighty — but do NOT "
-                "make it for them, and do not reveal anything hidden. The curtain is theirs to draw. "
-                "SAY IT ONCE: if your recent turns already voiced this pressure ('the case now comes "
-                "down to…', 'the hour demands…'), do NOT restate it — hold it quietly instead (a "
-                "detail, a look, a silence carries the same weight without the sermon).")
-    if fallout_directives:
-        # A side arc died/resolved this turn (LIVING-WORLD-GENERATOR §3): the
-        # world acknowledges it as a real beat in the wake — never a silent stall,
-        # never a game-over for the player. The standing consequence is already in
-        # canon; this just renders the world noticing.
-        briefing_parts.append(
-            "\nA STORY THREAD HAS CLOSED (render diegetically, as the world "
-            "reacting in passing — a real beat, NOT the end of YOUR story; "
-            "acknowledge it and move on):\n"
-            + "\n".join(f"- {d}" for d in fallout_directives))
-    if gen_hooks:
-        # A new development the living world threw up this turn (P2): surface it
-        # as it ARRIVES in the scene — diegetic, never a system announcement.
-        briefing_parts.append(
-            "\nA NEW DEVELOPMENT ARRIVES (render diegetically, in the moment — a "
-            "fresh hook entering the scene, not a menu):\n"
-            + "\n".join(f"- {h}" for h in gen_hooks))
-    # AUTHORITATIVE PLAYER IDENTITY (founder 2026-06-30: "player name wins, fully"). The player's
-    # interview-set name/pronouns are the SINGLE source of truth — they must WIN over any authored-
-    # default personal name/gender baked into premise/background prose or the entity id. State it
-    # explicitly and instruct supersession, so the cast addresses the player by THEIR chosen identity,
-    # not the authored "Clara Vale". (The whole interview propagates: name + pronouns + the you_lines
-    # facts below carry background/role.)
-    # Read identity through the FOLDED POINT READ (Cx 320): `name` is set-valued, so a stale
-    # narrator-polluted `name="Miss Vale"` row coexists with the player's `name="Bradford Clemense"`;
-    # the snapshot dict (`canon_table`) collapses to the LAST member, but `state()` serves the
-    # authoritative winner. Carry pronouns + background + role from canon too (the Foyer writes them
-    # there; the player-frame YOU block misses them).
-    def _id_attr(a: str) -> str:
-        try:
-            v = live_reads.state(arc.protagonist, a)
-        except Exception:
-            v = None
-        return str(v) if isinstance(v, str) else ""
-    _pname = _id_attr("name") or _disp(arc.protagonist)
-    _ppron = _id_attr("pronouns") or _id_attr("gender")
-    _pbg = _id_attr("background")
-    _prole = _id_attr("role")
-    if _pname:
-        _id_head = (f"\nTHE PLAYER CHARACTER IS {_pname}"
-                    + (f" ({_ppron})" if _ppron else "")
-                    + ". That is WHO they are — not how to address them every line (founder: the "
-                      "full name in every reply reads canned). Refer to them the way people "
-                      "actually would in this world and moment: plain 'you', a title ('sir', "
-                      "'inspector'), a surname, or nothing at all — the full name only where a "
-                      "person would naturally use it (a formal introduction, a pointed moment)"
-                    + (f"; {_ppron} pronouns throughout" if _ppron else "")
-                    + ". If any premise/background/context text uses a DIFFERENT personal name or "
-                      "gender for the protagonist, that is a stale authored default for the SAME "
-                      f"person — never use the other name."
-                    + (f"\n- their role: {_prole}" if _prole else "")
-                    + (f"\n- what brought them here: {_pbg}" if _pbg else ""))
-        briefing_parts.append(_id_head)
-    if you_lines:
-        briefing_parts.append("\nYOU (the player character; never a third party):\n"
-                              + "\n".join(you_lines))
-    if terminal or (concluded and not endless):
-        # CLOSE TURN (Cx 139 #2): the epilogue/aftermath directive above OWNS the render. The
-        # player's act is the FINAL beat folding INTO the close — NOT "render exactly this, no
-        # more", which fought and beat the epilogue (the narrator rendered the action, never the
-        # curtain). Fold it in so the denouement is what lands.
-        briefing_parts.append(
-            f"\nTHE PLAYER'S LAST ACT (the move that brings the curtain down — render it as the "
-            f"final beat that FOLDS INTO the epilogue/aftermath above, not as the whole turn; the "
-            f"close owns the scene): {player_input}")
-    else:
-        briefing_parts.append(f"\nTHE PLAYER JUST DID (render exactly this, no more): "
-                              f"{player_input}")
-    if trace.movement_obstruction:
-        seg = trace.movement_obstruction
-        if trace.movement_status == "blocked":
-            ev = seg.get("evidence") or []
-            facts = "; ".join(
-                f"{e.get('entity')} · {e.get('attribute')} · {e.get('value')}" for e in ev
-            ) or "the way is obstructed"
-            briefing_parts.append(
-                f"\nMOVEMENT BLOCKED (render diegetically): the player tried to go there "
-                f"but the way is barred — {facts}. Show the attempt and why it fails; "
-                f"the player does NOT arrive.")
-        else:  # obscured
-            briefing_parts.append(
-                "\nMOVEMENT UNCERTAIN (render diegetically): the state of the way can't be "
-                "confirmed — render the passage as ambiguous; do NOT assert it is clearly open.")
-    if trace.reveals:
-        pairs = "; ".join(f"{a} is {b}" for a, b in trace.reveals)
-        briefing_parts.append(
-            f"\nREVEAL (render as the player's dawning recognition this turn): {pairs}. "
-            f"Two figures the player took for separate are one. Dramatize the realization; "
-            f"don't state it as a flat fact.")
-    # WHAT THE PLAYER CARRIES (object permanence — founder: "a mug from the bar doesn't not
-    # exist"): the objects in the protagonist's possession (taken or granted), so the narrator
-    # grounds on what's in hand and never re-narrates a held thing back where it came from.
-    # Read from canon contents; best-effort, never sinks a turn.
-    try:
-        _held = [h for h in p.contents(arc.protagonist, as_of=_h) if str(h).startswith("obj:")]
-    except Exception:
-        _held = []
-    if _held:
-        def _held_name(h: str) -> str:
-            nm = canon_table.get((h, "name"))
-            if not nm:
-                try:
-                    nm = live_reads.state(h, "name")
-                except Exception:
-                    nm = None
-            return str(nm or _human_entity(h))
-        briefing_parts.append(
-            "\nWHAT YOU ARE CARRYING (in hand or on your person right now — honor this; never "
-            "narrate one of these back where it was taken from). This list is EXCLUSIVE: it is "
-            "everything on your person — anything NOT named here (incl. a thing you earlier set "
-            "down/handed off/left behind) is NOT carried; do not narrate it as pocketed or in hand: "
-            + ", ".join(_held_name(h) for h in _held))
-    if trace.dropped:
-        # DROP ACKNOWLEDGMENT (Cx 299 non-blocking): a thing set down THIS turn left the player's
-        # hands and stays where it was left — so the narrator doesn't re-pocket it from transcript
-        # memory next turn (the founder's "object follows me" family). Names the object + the place.
-        _dropped_canon = canon_table.get((trace.dropped, "name"))
-        if not _dropped_canon:
-            try:
-                _dropped_canon = live_reads.state(trace.dropped, "name")
-            except Exception:
-                _dropped_canon = None
-        _dropped_nm = str(_dropped_canon or _human_entity(trace.dropped))
-        _here_nm = str(canon_table.get((pre_scene, "name")) or _human_entity(pre_scene)) if pre_scene else "here"
-        briefing_parts.append(
-            f"\nJUST SET DOWN (no longer carried — it STAYS here, at {_here_nm}; do not narrate it "
-            f"back in hand or pocket): {_dropped_nm}")
-    if npcs:
-        # WHO IS PRESENT (continuity guard — Cx 091 #1): name EVERY present character, not just
-        # the ones who speak this turn. A silent present NPC (standing quietly, watching) was
-        # surfacing only as raw fact triples and the narrator could erase them ("the doctor is
-        # the only one here") — a coherence break against the cold open. Speakers carry their
-        # wants; the rest are simply named as present so they can't vanish.
-        # COMPANION TEXTURE (#82/#85): the standing `accompanying` state marks who is WITH the
-        # player by their own agreement — a companion, not a bystander. Surfaced so the render
-        # gives them living texture: they react, notice, and may interject unprompted.
-        _companions = set(trace.npcs_joined)
-        # THE HOMONYM TRIPWIRE (founder, 2026-07-12 — the park-forever
-        # trigger made observable): two same-named cast CO-PRESENT is the
-        # rare event the background-homonym park waits on, and the narrator
-        # would resolve it silently rather than report it. Telemetry only —
-        # zero prompt weight, zero narrative effect; fires the ledger/triage
-        # review that builds the "known for X" epithet against a real scene.
-        _by_name: dict = {}
-        for _hn in npcs:
-            _nm = str(canon_table.get((_hn, "name")) or "").strip().lower()
-            if _nm:
-                _by_name.setdefault(_nm, []).append(_hn)
-        for _nm, _ids in _by_name.items():
-            if len(_ids) > 1:
-                trace.present_homonyms.append((_nm, sorted(_ids)))
-                logger.warning("present homonyms in scene %s: %r share the "
-                               "display name %r (the park-forever tripwire)",
-                               scene, sorted(_ids), _nm)
-        for n in npcs:
-            if n in _companions:
-                continue
-            try:
-                if live_reads.state(n, "accompanying") == arc.protagonist:
-                    _companions.add(n)
-            except Exception:  # noqa: BLE001
-                pass
-        present_lines = []
-        from construct.arc.executor import person_can_act as _brief_can_act
-        for n in npcs:
-            nm = str(canon_table.get((n, "name")) or _human_entity(n))
-            # NARRATOR LIVENESS (task #8, the D3 acceptance finding): the
-            # authority layer already refuses a settled-dead person every
-            # delivery/action channel, but the scene brief still listed them
-            # as an interlocutor and the narrator improvised their dialogue.
-            # Same shared predicate; the BODY stays present — it is a fact of
-            # the scene — but it can never speak or act.
-            if not _brief_can_act(live_reads, n):
-                present_lines.append(
-                    f"the body of {nm}: DEAD — present as a body only. The "
-                    f"dead do not speak, move, gesture, or answer; render "
-                    f"the body's stillness and the room around it.")
-                continue
-            # CAST IDENTITY (#87): the authored pronouns ride the presence line so the
-            # narration can never drift a character's gender between scenes.
-            _pn = canon_table.get((n, "pronouns"))
-            if not _pn:
-                try:
-                    _pn = live_reads.state(n, "pronouns")
-                except Exception:  # noqa: BLE001
-                    _pn = None
-            if _pn:
-                nm += f" ({_pn})"
-            _tag = " [COMPANION — with the player by agreement]" if n in _companions else ""
-            intent = npc_turn_results.get(n)
-            if intent and intent.get("speaks") and intent.get("intent"):
-                line = f"{nm}{_tag}: wants {intent['intent']}"
-                if intent.get("line_hint"):
-                    line += f" (voice: {intent['line_hint']})"
-                present_lines.append(line)
-            else:
-                present_lines.append(f"{nm}{_tag}: present, silent for now (do NOT remove them "
-                                     f"from the scene — they remain here unless they visibly "
-                                     f"leave)")
-        _companion_note = (
-            " A COMPANION travels with the player and lives in the scene: they react to what "
-            "happens, notice things in their own competence, and may interject or murmur an "
-            "aside UNPROMPTED — a quick beat, not a speech; they never narrate the player and "
-            "never dominate the turn." if _companions else "")
-        briefing_parts.append(
-            "\nPRESENT CHARACTERS (ONLY these characters are here right now — keep every one in "
-            "the scene; play the ones with wants, keep the rest present even if quiet; anyone else "
-            "from earlier scenes is elsewhere — do not stage them here):"
-            + _companion_note + "\n"
-            + "\n".join(present_lines))
-    else:
-        # PRESENCE TRUTH WHEN ALONE (founder 2026-07-01 "why are nell and grieves here???" / Cx 354
-        # B2): with an EMPTY colocated set the briefing used to say NOTHING about presence, so the
-        # narrator rode the transcript window and resurrected departed cast. State the engine truth.
-        briefing_parts.append(
-            "\nPRESENT CHARACTERS: none besides you. Do not stage earlier characters here, and do "
-            "not have an absent person arrive, speak, or be recalled doing things in this place — "
-            "the world's map says who is where; if the player seeks someone absent, the way to "
-            "them is going there or sending word, never their sudden appearance.")
-    if nudge_directive:
-        briefing_parts.append(f"\nPACING DIRECTIVE (weave in diegetically): {nudge_directive}")
-    if trace.repair_directive:
-        # DRIFT-HANDLING D3 (§3 R4): emitted ONLY after the replacement batch
-        # receipt-confirmed — the new route exists in plot truth before the
-        # narrator seeds it.
-        briefing_parts.append(f"\n{trace.repair_directive}")
-    if trace.relocate_directive:
-        # DRIFT-HANDLING D1 (§3 R2 step 3): emitted ONLY after a confirmed carrier-move
-        # commit (or no move needed at all) — presence truth already moved, so this
-        # directive can never contradict canon.
-        briefing_parts.append(f"\n{trace.relocate_directive}")
+    # The narrator briefing (construct/briefing.py): two read-only halves around the
+    # consequence callback, which stays here because surfacing one WRITES its status.
+    _brief = BriefingInputs(
+        world=world,
+        p=p,
+        live_reads=live_reads,
+        horizon=_h,
+        arc=arc,
+        player_input=player_input,
+        scope=scope,
+        endless=endless,
+        style=style,
+        play_style=play_style,
+        suspense=suspense,
+        death_policy=death_policy,
+        world_laws=_world_laws,
+        reality_line=_reality_line,
+        recent=_recent,
+        narrative_memory=narrative_memory,
+        wishes=wishes,
+        chain=chain,
+        scene=scene,
+        pre_scene=pre_scene,
+        scene_features=scene_features,
+        scene_lines=scene_lines,
+        you_lines=you_lines,
+        names=names,
+        canon_table=canon_table,
+        protagonist_display=_disp(arc.protagonist),
+        active_pins=active_pins,
+        npcs=npcs,
+        npc_turn_results=npc_turn_results,
+        weave_directive=weave_directive,
+        learned=learned,
+        adapt_directives=adapt_directives,
+        asks_self=asks_self,
+        memory_result=memory_result,
+        memory_tensions=_memory_tensions,
+        move_clarify=_move_clarify,
+        voc_holder=_voc_holder,
+        voc_absent=_voc_absent,
+        voc_name=_voc_name,
+        commitment=commitment,
+        commitment_clarified=commitment_clarified,
+        commitment_bounced=commitment_bounced,
+        commitment_grade=commitment_grade,
+        discovered=discovered,
+        nudge_directive=nudge_directive,
+        terminal=terminal,
+        died=died,
+        concluded=concluded,
+        conc=conc,
+        outcome=outcome,
+        reckoning_ready=_reckoning_ready,
+        fallout_directives=fallout_directives,
+        gen_hooks=gen_hooks,
+        grounding_runway=_grounding_runway,
+        improv_query=improv_query,
+        needs_test=needs_test,
+        resolved_tier=_resolved_tier,
+        uncertain_of=uncertain_of,
+        death_staged=_death_staged,
+        mortal_risk=mortal_risk,
+    )
+    briefing_parts = build_briefing(_brief, trace)
     # ---- DRIFT-HANDLING D2 (§3 R3 point 3): DEFERRED consequence callbacks —
     # a pending callback surfaces the turn the player TOUCHES its affected
     # people/places (the newspaper-front-page ruling: felt on contact, never an
@@ -7365,139 +6755,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             break  # one callback per turn
     except Exception:  # noqa: BLE001 — callbacks are opportunistic
         logger.warning("callback scan skipped", exc_info=True)
-    if _grounding_runway and not (trace.clocks_fired or trace.beats_achieved
-                                  or trace.terminal or trace.concluded):
-        # ...unless a hand-authored turn-1 clock/beat/terminal genuinely fired — then the story
-        # HAS arrived and the "settle a beat first" framing would contradict it (Cx 280 nit).
-        briefing_parts.append(
-            "\nGROUNDING RUNWAY (CHARACTER-GROUNDING, founder): this is the player's first beat — "
-            "they are still settling into WHO and WHERE they are (their own space, their role, the "
-            "ordinary texture of their world). Keep it GROUNDED and low-pressure; answer what they "
-            "do. Do NOT introduce the inciting incident, the case, or any call-to-action this turn "
-            "unless the PLAYER reaches for it — let them inhabit their world a moment first. The "
-            "story arrives next beat.")
-    deflect_secret = False
-    if improv_query:
-        public_name_toks = {t for nm in names.values()
-                            for t in nm.lower().replace("-", " ").split()}
-        secret_toks = _secret_tokens(arc, live_reads, public_name_toks)
-        qtoks = set(improv_query.lower().replace("?", " ").replace(",", " ")
-                    .replace(".", " ").split())
-        deflect_secret = bool(secret_toks & qtoks)
-    if improv_query and deflect_secret:
-        # The fallen-through question probes the mystery's HIDDEN answer directly
-        # (Cx 022 blocking #2). Do NOT improvise here — improvisation could brush the
-        # secret. Deflect deterministically; the concealment block below names what's
-        # protected, this just keeps the narrator from trying to answer it at all.
-        trace.adjudication = "deflect: question probes a concealed arc fact"
-        briefing_parts.append(
-            f"\nWITHHELD QUESTION (do NOT improvise an answer): the player asked "
-            f"“{improv_query}”, which reaches for something they have NOT uncovered. Do "
-            f"not answer, confirm, deny, or hint at it — and do NOT invent a substitute "
-            f"answer either. Deflect diegetically (the record is silent on that / it "
-            f"isn't yours to know yet / that thread hasn't been pulled) and turn the "
-            f"moment back to what is present and knowable. A deflection is NOT a flat "
-            f"refusal: whoever fields it reacts as a person would (see A PEOPLED WORLD) — "
-            f"an accusation lands with feeling before any procedure is cited. This is "
-            f"earned only through play.")
-    elif improv_query:
-        briefing_parts.append(
-            f"\nUNDER-DETERMINED QUESTION — IMPROVISE, but the WORLD'S INTEGRITY COMES "
-            f"FIRST: the player asked “{improv_query}” and the record doesn't spell it out. "
-            f"Answer as what THIS character would plainly know — a long-term resident knows "
-            f"the local geography, where people eat, the neighbors, the routines.\n"
-            f"  • If the thing plausibly EXISTS here but simply isn't written down yet, "
-            f"AFFIRM it and invent consistent specifics (a name, a direction, a few streets "
-            f"over) that fit this world.\n"
-            f"  • BUT if the player names something that does NOT fit this world — an "
-            f"anachronism or an out-of-setting thing (a 'pizza joint' in a rationed off-world "
-            f"colony; a smartphone in a medieval vale) — do NOT fabricate it to match them. "
-            f"Gently CORRECT in-world: there is no such thing here; name what this world has "
-            f"in its place ('no pizza joint in Anchor — people eat at the ration canteen') "
-            f"and let the player adapt to the world. Improvise the WORLD AS IT REALLY IS; "
-            f"never bend its nature to the player's assumption.\n"
-            f"Never a flat 'you can't say' for ordinary, knowable things; only a genuinely "
-            f"SECRET answer is withheld (deflect diegetically). What you establish becomes "
-            f"real (it will be remembered).")
-    # Uncertain action → REUSE the tier drawn earlier (EVENT-OCCURS-FIRING reorder, Cx 115 — one
-    # draw per turn, bound BEFORE beat firing) and tell the narrator WHAT happens (succeed/fail +
-    # the twist); it improvises HOW. Assured actions never draw — they just succeed.
-    if needs_test and _resolved_tier and _resolved_tier != "assured":
-        briefing_parts.append("\n" + resolution.directive(_resolved_tier, uncertain_of))
-    # ---- #95 mortal-risk render directives (DEATH-TESTAMENT.md, Cx 422) ---------------
-    # Staged-never-a-gotcha: the first life-risking turn makes the stakes UNMISTAKABLE
-    # and lands short of death; policy shields/premise-folds override a fatal draw.
-    if _death_staged and not died:
-        briefing_parts.append(
-            "\nMORTAL STAKES (render, binding): this move risks the player character's "
-            "LIFE, and they must SEE that plainly — make the lethal stakes unmistakable "
-            "in the scene (the drop, the blade, the fire — concretely). This turn the "
-            "move lands SHORT of death: a near-miss, a wound, pinned, thrown back — the "
-            "world's honest warning shot. If they press on into this peril, it can kill.")
-    elif (mortal_risk and _resolved_tier == "terrible_failure" and not died
-          and death_policy in ("premise", "shielded")):
-        # Cx 426: shielded/premise never stage a peril marker, so their fatal-draw
-        # directives fire on the risk itself — the policy IS the contract, no
-        # persistence needed (a mortal chapter's fatal draw is handled above/at death).
-        if death_policy == "premise":
-            briefing_parts.append(
-                "\nDEATH, TRANSFORMED (render, binding): the move kills the player "
-                "character — render the death honestly, and then the story's own "
-                "premise transforms it (the loop resets, the ghost persists, the "
-                "mechanism catches them) exactly as this story's premise established. "
-                "The death is real and felt; the premise, not a rescue, is what answers "
-                "it. The story continues.")
-        else:  # shielded — the genre's contract caps the price below death
-            briefing_parts.append(
-                "\nTHE PRICE STOPS SHORT OF DEATH (render, binding): the failure lands "
-                "hard — a wound, capture, ruin, a door slammed — in this genre's own "
-                "conventions, but it does NOT kill the player character. Make the cost "
-                "real and lasting; never a lethal beat.")
-    if trace.tangent_directive:
-        # G-A: the adoption landed this turn — the world answers the
-        # player's declared story (spec: the hook is a wiring output)
-        briefing_parts.append("\n" + trace.tangent_directive)
-    if trace.reshape:
-        # The act reshaped the world (committed pre-render). Tell the narrator the new
-        # truth so prose matches canon; the sanctioned rows are licensed past the gate.
-        briefing_parts.append(
-            "\nWHAT THE ACT CHANGED (binding — the player's action reshaped the world; "
-            "render this as real and match it exactly): " + trace.reshape)
-    if trace.events_fired:
-        # an authored act-beat fired this turn — it is now BINDING canon (Cx 115 #1); render it as
-        # having happened, never contradict it.
-        briefing_parts.append(
-            "\nWHAT JUST HAPPENED (binding — the player's action brought this about; render it as "
-            "real, do not walk it back): "
-            + "; ".join(k.replace("_", " ") for k in trace.events_fired))
-    # CONCEALMENT = STRUCTURAL ABSENCE (Kernos 076 Q2 / Cx 023 blocking #1): the narrator
-    # is NOT handed the arc's hidden answer. It is briefed ONLY from the player frame, so
-    # it cannot leak what it never sees. (Replaces the old _concealment_directive, which
-    # fed the narrator the answer + "don't reveal" — the vault-with-a-sticky-note the mesh
-    # ruled against, MORE leakable, not less. The strict promotion gate below stays as a
-    # cheap backstop; the secret-question deflection guard above still fires.)
-    # In HOLD-MODE (the story isn't concluding this turn) add the NEUTRAL-NARRATOR
-    # discipline (Kernos Q4 / Cx blocking #2) — load-bearing for "the player may be
-    # wrong": present evidence flatly, never weight a theory toward a verdict.
-    hold_mode = not terminal and not (concluded and not endless)
-    if hold_mode:
-        briefing_parts.append(
-            "\nNEUTRAL ON THE ANSWER (binding): stay neutral about the mystery's "
-            "SOLUTION — present clues and misleading-but-true detail alike WITHOUT "
-            "weighting them, and never confirm, deny, hint, wink at, or tonally tilt "
-            "toward the player's theory or any conclusion; a leading question (“so it was "
-            "X, right?”) gets only the observable facts, honest uncertainty, or an "
-            "in-world deflection. This neutrality is EPISTEMIC — about the evidence and "
-            "the verdict — and is NOT a flattening of human feeling: the characters still "
-            "react with full emotion (see A PEOPLED WORLD), they simply do not give the "
-            "answer away. The player draws their own conclusions — let them, even when "
-            "they are heading somewhere wrong. The truth is told only at the end, never "
-            "coaxed out mid-play.")
-        # The DM's CARD: the hidden destination to FORESHADOW toward (card model). Gives
-        # the narrator the answer so it can lay a convergent trail; "weave, don't blurt".
-        dest = _destination_directive(arc, live_reads)
-        if dest:
-            briefing_parts.append(dest)
+    briefing_parts += build_briefing_rulings(_brief, trace)
     briefing = "\n".join(briefing_parts)
     trace.briefing = briefing  # captured for the mechanics log (the directives → the prose)
 
@@ -7554,11 +6812,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         pre_keys = {(row["entity"], row["attribute"]) for row in receipt_rows}
         pre_entities = {row["entity"] for row in receipt_rows}
         briefing_keys = set(player_table)
-        license_tokens = set(
-            f"{briefing}\n{player_input}".lower()
-            .replace("’", "").replace("'", "")
-            .replace(",", " ").replace(".", " ").replace(";", " ").replace(":", " ")
-            .split())
+        license_tokens = set(split_words(f"{briefing}\n{player_input}",
+                                         seps=",.;:", drop="’'"))
 
         def _licensed(entity: str, attribute: str) -> bool:
             # Licensed = the narrator was GIVEN it: a briefing/player key, an entity
@@ -7568,8 +6823,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 return True
             if entity in pre_entities or entity == scene:
                 return True
-            name_tokens = entity.split(":", 1)[-1].replace("-", "_").split("_")
-            return all(tok in license_tokens for tok in name_tokens if tok)
+            return all(tok in license_tokens
+                       for tok in id_stem_parts(entity, hyphens=True))
 
         canon_before = dict(canon_table)  # established values BEFORE this render
         # `defer`: don't durability-classify the QUARANTINE staging — these rows are
@@ -7607,13 +6862,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             pass
 
         def _resolve_name_of(e: str) -> str:
-            v = canon_table.get((e, "name"))
-            if not isinstance(v, str):
-                try:
-                    v = live_reads.state(e, "name")
-                except Exception:
-                    v = None
-            return v if isinstance(v, str) else ""
+            return table_or_read_name(canon_table, live_reads, e)
         try:
             with _phase(trace, "post_extract"):
                 _raw = p.extract(prose, scene=scene, extract="lean",
@@ -7824,7 +7073,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         p.ingest_structured([
             {"entity": f"event:turn_{turn}", "attribute": "concealment_audit",
              "value": trace.concealment_audit, "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # bookkeeping (audit) — no durability (K 077)
+        ], frame=SESSION, classify="rules")  # bookkeeping (audit) — no durability (K 077)
 
         # Append this beat to the rolling transcript (the narrator's short-term memory).
         # Beats past the verbatim window age out; once a BATCH has accumulated, fold
@@ -7844,7 +7093,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([
                     {"entity": _MEMORY, "attribute": "text", "value": updated["memory"][:6000],
                      "value_type": "literal", "valid_from": turn_time(turn)},
-                ], frame=SESSION, classify="batch")  # narrative memory literal — no durability
+                ], frame=SESSION, classify="rules")  # narrative memory literal — no durability
                 _recent = _recent[-_RECENT_TURNS:]  # aged beats now live in memory
                 trace.cohort_calls.append("compact_memory:main")
             except Exception as exc:  # noqa: BLE001 — never break the turn on memory
@@ -7855,7 +7104,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             {"entity": _TRANSCRIPT, "attribute": "recent",
              "value": json.dumps(_recent), "value_type": "literal",
              "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # transcript literal — no durability
+        ], frame=SESSION, classify="rules")  # transcript literal — no durability
 
         # Advance diegetic time POST-RENDER for the normal case (richer estimate — it can use the
         # narration), UNLESS a time-deadline arc already advanced it early (Cx 173 #3) so the deadline
@@ -7879,7 +7128,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([
                     {"entity": _n, "attribute": "last_seen_min", "value": _mins_now,
                      "valid_from": turn_time(turn)} for _n in npcs
-                ], frame=SESSION, classify="batch")
+                ], frame=SESSION, classify="rules")
             except Exception:  # noqa: BLE001
                 logger.debug("last-seen markers skipped", exc_info=True)
         if not _grounding_runway:

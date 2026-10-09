@@ -1,0 +1,7621 @@
+{
+ "cap_enforcement": {
+  "codex": "ProviderTransportError: payload 40KB exceeds the 40KB Codex transport cap \u2014 the briefing composer owns b",
+  "openai": "ProviderTransportError: payload 40KB exceeds the 40KB OpenAI transport cap \u2014 the briefing composer owns "
+ },
+ "codex_env_only/codex": {
+  "auth_error": "ProviderAuthError: no Codex credential at /nonexistent/auth.json \u2014 run `codex login`",
+  "auth_fix": "run `codex login`",
+  "base_url": "https://codex.example/api",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "minimal",
+  "cheap_model": "cx-cheap",
+  "describe": "codex/cx-main+cx-cheap",
+  "endpoint_path": "/codex/responses",
+  "label": "Codex",
+  "main_effort": "medium",
+  "main_model": "cx-main",
+  "schema_strict": false,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "codex_env_only/openai": {
+  "auth_error": "ProviderAuthError: no OpenAI API key \u2014 set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "auth_fix": "set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "base_url": "https://api.openai.com",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "minimal",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "openai/gpt-5.5+gpt-5.4-mini",
+  "endpoint_path": "/v1/responses",
+  "label": "OpenAI",
+  "main_effort": "medium",
+  "main_model": "gpt-5.5",
+  "schema_strict": true,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "default_provider": {
+  "None": "OpenAIProvider",
+  "codex": "CodexProvider",
+  "openai": "OpenAIProvider"
+ },
+ "default_timeouts": {
+  "cheap": 180.0,
+  "main": 300.0
+ },
+ "defaults/codex": {
+  "auth_error": "ProviderAuthError: no Codex credential at /nonexistent/auth.json \u2014 run `codex login`",
+  "auth_fix": "run `codex login`",
+  "base_url": "https://chatgpt.com/backend-api",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "codex/gpt-5.5+gpt-5.4-mini",
+  "endpoint_path": "/codex/responses",
+  "label": "Codex",
+  "main_effort": "low",
+  "main_model": "gpt-5.5",
+  "schema_strict": false,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "defaults/openai": {
+  "auth_error": "ProviderAuthError: no OpenAI API key \u2014 set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "auth_fix": "set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "base_url": "https://api.openai.com",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "openai/gpt-5.5+gpt-5.4-mini",
+  "endpoint_path": "/v1/responses",
+  "label": "OpenAI",
+  "main_effort": "low",
+  "main_model": "gpt-5.5",
+  "schema_strict": true,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "everything/codex": {
+  "auth_error": "ProviderAuthError: no Codex credential at /nonexistent/auth.json \u2014 run `codex login`",
+  "auth_fix": "run `codex login`",
+  "base_url": "https://codex.example/api",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-cheap",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "cx-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "medium",
+  "cheap_model": "cx-cheap",
+  "describe": "codex/cx-main+cx-cheap",
+  "endpoint_path": "/codex/responses",
+  "label": "Codex",
+  "main_effort": "high",
+  "main_model": "cx-main",
+  "schema_strict": false,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "everything/openai": {
+  "auth": {
+   "access": "sk-all"
+  },
+  "auth_fix": "set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "base_url": "https://oa.example",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "medium",
+  "cheap_model": "oa-mini",
+  "describe": "openai/oa-main+oa-mini",
+  "endpoint_path": "/v1/responses",
+  "headers": {
+   "Authorization": "Bearer sk-all",
+   "Content-Type": "application/json",
+   "accept": "text/event-stream",
+   "session_id": "sess-fixed",
+   "x-client-request-id": "sess-fixed"
+  },
+  "label": "OpenAI",
+  "main_effort": "high",
+  "main_model": "oa-main",
+  "schema_strict": true,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  },
+  "user_agent_prefix": ""
+ },
+ "global_reasoning_override/codex": {
+  "auth_error": "ProviderAuthError: no Codex credential at /nonexistent/auth.json \u2014 run `codex login`",
+  "auth_fix": "run `codex login`",
+  "base_url": "https://chatgpt.com/backend-api",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "codex/gpt-5.5+gpt-5.4-mini",
+  "endpoint_path": "/codex/responses",
+  "label": "Codex",
+  "main_effort": "low",
+  "main_model": "gpt-5.5",
+  "schema_strict": false,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "global_reasoning_override/openai": {
+  "auth_error": "ProviderAuthError: no OpenAI API key \u2014 set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "auth_fix": "set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "base_url": "https://api.openai.com",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "minimal",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "openai/gpt-5.5+gpt-5.4-mini",
+  "endpoint_path": "/v1/responses",
+  "label": "OpenAI",
+  "main_effort": "low",
+  "main_model": "gpt-5.5",
+  "schema_strict": true,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "hard_bound": 900.0,
+ "kwargs/codex": {
+  "auth_error": "ProviderAuthError: no Codex credential at /nonexistent/auth.json \u2014 run `codex login`",
+  "auth_fix": "run `codex login`",
+  "base_url": "https://k.example",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "medium",
+  "cheap_model": "c",
+  "describe": "codex/m+c",
+  "endpoint_path": "/codex/responses",
+  "label": "Codex",
+  "main_effort": "high",
+  "main_model": "m",
+  "schema_strict": false,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 5.0
+  }
+ },
+ "kwargs/openai": {
+  "auth": {
+   "access": "sk-kw"
+  },
+  "auth_fix": "set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "base_url": "https://k.example",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "c",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "m",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "medium",
+  "cheap_model": "c",
+  "describe": "openai/m+c",
+  "endpoint_path": "/v1/responses",
+  "headers": {
+   "Authorization": "Bearer sk-kw",
+   "Content-Type": "application/json",
+   "accept": "text/event-stream",
+   "session_id": "sess-fixed",
+   "x-client-request-id": "sess-fixed"
+  },
+  "label": "OpenAI",
+  "main_effort": "high",
+  "main_model": "m",
+  "schema_strict": true,
+  "timeouts": {
+   "cheap": 7.0,
+   "main": 300.0
+  },
+  "user_agent_prefix": ""
+ },
+ "non_gpt5_models/codex": {
+  "auth_error": "ProviderAuthError: no Codex credential at /nonexistent/auth.json \u2014 run `codex login`",
+  "auth_fix": "run `codex login`",
+  "base_url": "https://chatgpt.com/backend-api",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "codex/other-model+gpt-5.4-mini",
+  "endpoint_path": "/codex/responses",
+  "label": "Codex",
+  "main_effort": "low",
+  "main_model": "other-model",
+  "schema_strict": false,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "non_gpt5_models/openai": {
+  "auth_error": "ProviderAuthError: no OpenAI API key \u2014 set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "auth_fix": "set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "base_url": "https://api.openai.com",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "other-model",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "openai/other-model+gpt-5.4-mini",
+  "endpoint_path": "/v1/responses",
+  "label": "OpenAI",
+  "main_effort": "low",
+  "main_model": "other-model",
+  "schema_strict": true,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "openai_env_only/codex": {
+  "auth_error": "ProviderAuthError: no Codex credential at /nonexistent/auth.json \u2014 run `codex login`",
+  "auth_fix": "run `codex login`",
+  "base_url": "https://chatgpt.com/backend-api",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.4-mini",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "medium",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "low",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "gpt-5.5",
+    "prompt_cache_key": "sess-fixed",
+    "reasoning": {
+     "effort": "high",
+     "summary": "auto"
+    },
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "gpt-5.4-mini",
+  "describe": "codex/gpt-5.5+gpt-5.4-mini",
+  "endpoint_path": "/codex/responses",
+  "label": "Codex",
+  "main_effort": "low",
+  "main_model": "gpt-5.5",
+  "schema_strict": false,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  }
+ },
+ "openai_env_only/openai": {
+  "auth": {
+   "access": "sk-env"
+  },
+  "auth_fix": "set OPENAI_API_KEY (or opt in to subscription auth with CONSTRUCT_PROVIDER=codex)",
+  "base_url": "https://oa.example",
+  "bodies": {
+   "cheap|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "cheap|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-mini",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|delib|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'plain '": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "plain prompt",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6nar\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6nar\u27e7\nnarrate",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   },
+   "main|fast|'\u27e6opn\u27e7\\n'": {
+    "include": [
+     "reasoning.encrypted_content"
+    ],
+    "input": [
+     {
+      "content": "\u27e6opn\u27e7\nopen",
+      "role": "user"
+     }
+    ],
+    "instructions": "Answer with a single JSON object conforming exactly to the required schema. No prose outside the JSON.",
+    "model": "oa-main",
+    "prompt_cache_key": "sess-fixed",
+    "store": false,
+    "stream": true,
+    "text": {
+     "format": {
+      "name": "output",
+      "schema": {
+       "additionalProperties": false,
+       "properties": {
+        "answer": {
+         "type": "string"
+        },
+        "opt": {
+         "type": [
+          "integer",
+          "null"
+         ]
+        }
+       },
+       "required": [
+        "answer",
+        "opt"
+       ],
+       "type": "object"
+      },
+      "strict": true,
+      "type": "json_schema"
+     }
+    }
+   }
+  },
+  "cheap_effort": "low",
+  "cheap_model": "oa-mini",
+  "describe": "openai/oa-main+oa-mini",
+  "endpoint_path": "/v1/responses",
+  "headers": {
+   "Authorization": "Bearer sk-env",
+   "Content-Type": "application/json",
+   "accept": "text/event-stream",
+   "session_id": "sess-fixed",
+   "x-client-request-id": "sess-fixed"
+  },
+  "label": "OpenAI",
+  "main_effort": "low",
+  "main_model": "oa-main",
+  "schema_strict": true,
+  "timeouts": {
+   "cheap": 180.0,
+   "main": 300.0
+  },
+  "user_agent_prefix": ""
+ },
+ "payload_cap": 40960
+}

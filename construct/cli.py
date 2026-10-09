@@ -1,6 +1,7 @@
 """The player CLI (docs/design/CLI.md, Kernos letters 017/019/032).
 
-Two surfaces over ONE turn function (`construct.turnloop.run_turn`):
+Two player surfaces over ONE `construct.Session` (every turn goes through
+`Session.turn`, never a separate turn function):
 
 - `construct play <scenario>` — the interactive REPL: load/resume once,
   then read → turn → print, line after line, until you exit. This is
@@ -8,6 +9,10 @@ Two surfaces over ONE turn function (`construct.turnloop.run_turn`):
 - `construct turn <scenario> "<input>"` — the one-shot command, intact
   for scripting, tests, and the live-tester. The REPL is a loop around
   this same machinery, never a reimplementation.
+
+Bare `construct` (the `shell`) and `construct start` (conversational session
+zero) are further entry surfaces over the same Session and transport core;
+the chat transports (Telegram, Discord, loopback) reach it the same way.
 """
 
 from __future__ import annotations
@@ -569,8 +574,7 @@ def _cmd_turn(args: argparse.Namespace) -> int:
 
 
 def _cmd_import(args: argparse.Namespace) -> int:
-    from construct.library import (ingest_document, scan_import_folder,
-                                   watch_import_folder)
+    from construct.library import ingest_document, watch_import_folder
     def _stage(msg: str) -> None:
         print(msg, flush=True)
     if args.watch:

@@ -23,7 +23,7 @@ import time
 from typing import Callable
 
 from construct import registry
-from construct.transport_core import InboundEvent, TransportCore
+from construct.transport_core import InboundEvent, TransportCore, chunk
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,40 @@ TYPING_REFRESH_SECONDS = 4.0   # Telegram shows "typing…" ~5s — refresh unde
 TYPING_MAX_SECONDS = 90.0      # cover model-call waits (chiefly the architect's
 #                                final turn before a build), not the whole multi-
 #                                minute build (which streams its own [k/N] progress)
+
+
+OUTBOX_FAILED = 2         # outbox.sent value for a dead-lettered (permanently undeliverable) row
+
+
+def utf16_len(text: str) -> int:
+    """Length of `text` in UTF-16 code units — how Telegram counts its 4096 limit
+    (an astral character such as most emoji is 2 units, though 1 Python char)."""
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def chunk_for_telegram(text: str) -> list[str]:
+    """`chunk` measured in UTF-16 units: every piece fits sendMessage, and no
+    surrogate pair is split. Pure-BMP (e.g. ASCII) text chunks exactly as `chunk`
+    does with the code-point length."""
+    return chunk(text, MSG_LIMIT, length=utf16_len)
+
+
+class TelegramSendError(RuntimeError):
+    """A failed `sendMessage`, classified so the outbox knows whether to retry.
+
+    `status` is the HTTP status (None when no response arrived: network error,
+    timeout, unparseable body). `permanent` is True only for a 4xx other than 429
+    — the request itself is refused (blocked bot, chat not found, bad request)
+    and resending the identical row can never succeed. Everything else (429, 5xx,
+    network errors) is transient and retried with the serve loop's backoff."""
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def permanent(self) -> bool:
+        return self.status is not None and 400 <= self.status < 500 and self.status != 429
 
 
 def _keep_typing(client, chat_id: str, stop: threading.Event) -> None:
@@ -80,17 +114,21 @@ class TelegramClient:
 
     def send_message(self, chat_id: str, text: str) -> None:
         """Send one message; RAISE (redacted) on any non-ok response so the
-        caller does NOT mark it sent — a 429/Bad Request must be retried, not
-        silently dropped (Codex review)."""
+        caller does NOT mark it sent — a 429 must be retried, not silently dropped
+        (Codex review). Raises `TelegramSendError`, whose `permanent` flag tells the
+        outbox whether a retry can ever succeed (a 4xx other than 429: no)."""
         try:
-            resp = self._http.get(f"{self._base}/sendMessage",
-                                  params={"chat_id": chat_id, "text": text})
+            # POST + JSON body (not GET query params): long text in a URL runs into
+            # URL-length limits. Parameters are unchanged (no parse_mode is used).
+            resp = self._http.post(f"{self._base}/sendMessage",
+                                   json={"chat_id": chat_id, "text": text})
             ok = resp.json().get("ok", False)
             status = getattr(resp, "status_code", 200)
         except Exception as exc:
-            raise RuntimeError(self._redact(str(exc))) from None
+            raise TelegramSendError(self._redact(str(exc))) from None
         if not ok or status >= 400:
-            raise RuntimeError(self._redact(f"sendMessage failed (status={status})"))
+            raise TelegramSendError(
+                self._redact(f"sendMessage failed (status={status})"), status=status)
 
     def send_photo(self, chat_id: str, photo_path: str, caption: str = "") -> bool:
         """Upload a local image (multipart) to a chat — the SCENE-IMAGERY picture
@@ -144,8 +182,29 @@ def flush_outbox(conn, client: TelegramClient) -> None:
     """Resend any reply chunks recorded but not yet confirmed sent (a restart
     resumes here — the turn is NOT re-run)."""
     for row in registry.pending_outbox(conn, PLATFORM):
+        _deliver(conn, client, row)
+
+
+def _deliver(conn, client: TelegramClient, row) -> None:
+    """Send one outbox row and settle it. A TRANSIENT failure (429, 5xx, network)
+    raises, leaving the row pending for the serve loop's backoff retry. A PERMANENT
+    one (a 4xx other than 429: the user blocked the bot, chat not found, a bad
+    request) can never succeed on resend, so the row is dead-lettered — marked
+    failed, logged, skipped — instead of wedging every other player's delivery
+    behind it. Errors the client did not classify (plain exceptions) stay
+    transient: when unsure, retry."""
+    try:
         client.send_message(row["chat_id"], row["text"])
-        registry.mark_sent(conn, PLATFORM, row["update_id"], row["seq"])
+    except TelegramSendError as exc:
+        if not exc.permanent:
+            raise
+        logger.error("telegram: dead-lettering outbox row update=%s seq=%s chat=%s "
+                     "(permanent send failure, status=%s): %s",
+                     row["update_id"], row["seq"], row["chat_id"], exc.status, exc)
+        conn.execute("UPDATE outbox SET sent=? WHERE platform=? AND update_id=? AND seq=?",
+                     (OUTBOX_FAILED, PLATFORM, row["update_id"], row["seq"]))
+        return
+    registry.mark_sent(conn, PLATFORM, row["update_id"], row["seq"])
 
 
 def process_updates(conn, core: TransportCore, client: TelegramClient,
@@ -173,7 +232,10 @@ def process_updates(conn, core: TransportCore, client: TelegramClient,
             finally:
                 stop.set()
                 typer.join(timeout=2.0)
-            registry.record_outbox(conn, PLATFORM, uid, out.chat_id, out.chunks)
+            # The core chunks by code points; re-measure in UTF-16 units (Telegram's
+            # unit) so an emoji-dense chunk can't exceed the limit and be refused.
+            pieces = [p for c in out.chunks for p in chunk_for_telegram(c)]
+            registry.record_outbox(conn, PLATFORM, uid, out.chat_id, pieces)
         _send_pending(conn, client, uid)  # raises on failure → offset NOT advanced
         if ev is not None:
             core.settle(ev)  # POST-SEND: deferred bookkeeping now (overlaps the player reading)
@@ -188,8 +250,7 @@ def _send_pending(conn, client: TelegramClient, update_id: int) -> None:
     for row in registry.pending_outbox(conn, PLATFORM):
         if row["update_id"] != update_id:
             continue
-        client.send_message(row["chat_id"], row["text"])
-        registry.mark_sent(conn, PLATFORM, update_id, row["seq"])
+        _deliver(conn, client, row)
 
 
 def _drain_backlog(conn, client: TelegramClient) -> None:
@@ -216,7 +277,8 @@ def serve(registry_path, token: str, *, session_factory=None, client: TelegramCl
         # Interim progress sends DURING a build (the Atrium pings) — outside the
         # exactly-once outbox, best-effort: a dropped ping must not sink the build.
         try:
-            client.send_message(chat_id, text)
+            for piece in chunk_for_telegram(text):
+                client.send_message(chat_id, piece)
         except Exception:
             logger.exception("telegram notify failed")
 

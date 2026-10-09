@@ -18,7 +18,8 @@ import pytest
 from construct import loopback, registry, setup, telegram_bot
 from construct.provider import StubProvider
 from construct.transport_core import (
-    BUILD_HEADS_UP, GREETING, STATIC_REJECT, InboundEvent, TransportCore,
+    BUILD_HEADS_UP, GREETING, PENDING_CONTINUE, PENDING_EXIT, STATIC_REJECT, InboundEvent,
+    TransportCore,
     _humanize_stage, _interpret_mode, chunk)
 
 
@@ -679,7 +680,7 @@ class TestRouting:
         out2 = core.handle(_ev("telegram", "pr", "/ooc no really, do it"), now=NOW)
         assert prov.seen_pressed[-1] is True             # escalated
         assert "new scenario" in out2.chunks[0].lower()
-        assert "telegram:pr" in core._pending_exit                # a "yes" will exit
+        assert core._peek("telegram:pr", PENDING_EXIT)                # a "yes" will exit
         out3 = core.handle(_ev("telegram", "pr", "yes"), now=NOW)
         assert GREETING in out3.chunks[0]
         assert not registry.is_started(conn, "telegram", "pr")
@@ -1055,6 +1056,81 @@ class TestChunk:
         assert parts == ["hello", "world"]
 
 
+class TestTelegramChunking:
+    """Telegram's 4096 limit counts UTF-16 code units; chunking and sending honour it."""
+
+    @staticmethod
+    def _u16(s):
+        return len(s.encode("utf-16-le")) // 2
+
+    def test_emoji_heavy_text_fits_in_utf16_units(self):
+        text = ("\U0001F600" * 40 + "\n") * 100        # 4100 chars, 8100 UTF-16 units
+        parts = telegram_bot.chunk_for_telegram(text)
+        assert len(parts) > 1
+        assert all(self._u16(p) <= telegram_bot.MSG_LIMIT for p in parts)
+        # nothing lost: only the boundary newlines are dropped
+        assert "".join(parts).replace("\n", "") == text.replace("\n", "")
+
+    def test_no_broken_surrogate_even_on_hard_cut(self):
+        text = "\U0001F600" * 5000                        # no newline: forced hard cuts
+        parts = telegram_bot.chunk_for_telegram(text)
+        assert all(self._u16(p) <= telegram_bot.MSG_LIMIT for p in parts)
+        for p in parts:
+            p.encode("utf-16-le")                         # raises on a lone surrogate
+            assert set(p) == {"\U0001F600"}
+        assert "".join(parts) == text
+        # an odd-aligned astral run: a 1-unit prefix shifts every pair boundary
+        parts = telegram_bot.chunk_for_telegram("a" + "\U0001F600" * 4096)
+        for p in parts:
+            p.encode("utf-16-le")
+            assert self._u16(p) <= telegram_bot.MSG_LIMIT
+
+    def test_ascii_boundaries_unchanged(self):
+        text = "".join(f"line {i:04d} " + "x" * (i % 37) + "\n" for i in range(900))
+        assert telegram_bot.chunk_for_telegram(text) == chunk(text, telegram_bot.MSG_LIMIT)
+        flat = "y" * 10000
+        assert telegram_bot.chunk_for_telegram(flat) == chunk(flat, telegram_bot.MSG_LIMIT)
+
+    def test_process_updates_records_utf16_safe_chunks(self, conn):
+        code = registry.mint_invite(conn, "telegram", "anchor", now=NOW)
+        registry.claim_invite(conn, code, "telegram", "9", now=NOW)
+
+        class _Core:
+            def handle(self, ev, now=None):
+                # one code-point-legal (<=4096) chunk that is 8000 UTF-16 units
+                return type("O", (), {"chat_id": ev.chat_id,
+                                      "chunks": ["\U0001F600" * 4000]})()
+
+            def settle(self, ev):
+                pass
+
+        client = _FakeTG()
+        telegram_bot.process_updates(conn, _Core(), client, [_msg(3, 9, "x")],
+                                     now_fn=lambda: NOW)
+        assert len(client.sent) >= 2
+        assert all(self._u16(t) <= telegram_bot.MSG_LIMIT for _, t in client.sent)
+
+    def test_send_message_posts_json_body(self):
+        from types import SimpleNamespace as NS
+        calls = []
+
+        class _H:
+            def post(self, url, json=None, **kw):
+                calls.append((url, json, kw))
+                return NS(status_code=200, json=lambda: {"ok": True})
+
+            def get(self, *a, **kw):
+                raise AssertionError("sendMessage must not use GET")
+
+        client = telegram_bot.TelegramClient("123:TOK", http=_H())
+        client.send_message("42", "hello \U0001F600 & more?x=1")
+        assert len(calls) == 1
+        url, body, kw = calls[0]
+        assert url == "https://api.telegram.org/bot123:TOK/sendMessage"
+        assert body == {"chat_id": "42", "text": "hello \U0001F600 & more?x=1"}
+        assert "params" not in kw
+
+
 # ---- telegram adapter: exactly-once + ignore non-message -----------------
 
 def _msg(uid, frm, text, chat_type="private"):
@@ -1153,7 +1229,7 @@ class TestTelegramAdapter:
         from types import SimpleNamespace as NS
         resp = NS(status_code=200, json=lambda: {"ok": False, "description": "bad"})
         client = telegram_bot.TelegramClient("123:SECRET",
-                                             http=NS(get=lambda u, params=None: resp))
+                                             http=NS(post=lambda u, json=None: resp))
         with pytest.raises(RuntimeError) as exc:
             client.send_message("1", "hi")
         assert "SECRET" not in str(exc.value)
@@ -1455,7 +1531,7 @@ class TestDeathTerminalTransport:
         text = "\n".join(out.chunks)
         assert "The End" in text
         assert "The story goes on" not in text
-        assert "telegram:dt1" not in core._pending_continue
+        assert not core._peek("telegram:dt1", PENDING_CONTINUE)
 
     def test_chapter_ending_still_arms_continue(self, conn):
         # regression guard: an ordinary chapter close keeps the auto-continue arm
@@ -1464,7 +1540,7 @@ class TestDeathTerminalTransport:
         out = core.handle(_ev("telegram", "dt2", "I name the culprit"), now=NOW)
         text = "\n".join(out.chunks)
         assert "End of Chapter" in text and "The story goes on" in text
-        assert "telegram:dt2" in core._pending_continue
+        assert core._peek("telegram:dt2", PENDING_CONTINUE)
 
 
 # ---- /remove: retire a world from the shelf (founder 2026-07-05) ----------

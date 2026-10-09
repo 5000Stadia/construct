@@ -13,6 +13,7 @@ or credential. Downstream code knows "main" and "cheap", nothing else.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -60,6 +61,12 @@ class ProviderTimeout(ProviderError):
 
 class ProviderTransportError(ProviderError):
     """HTTP / wire / payload failure; raw tail preserved in the message."""
+
+
+class ProviderTransientError(ProviderTransportError):
+    """A connection-level failure (reset, refused, dropped chunked read) that
+    `_call_transient_retry` may retry, bounded. API-level errors stay plain
+    `ProviderTransportError` and fail fast."""
 
 
 class SchemaViolation(ProviderError):
@@ -143,19 +150,27 @@ def complete_sync(provider: Provider, prompt: str, schema: dict, *, tier: Tier =
     return asyncio.run(provider.complete(prompt, schema, tier=tier, deliberate=deliberate))
 
 
-def engine_callable(provider: Provider, tier: Tier = "main") -> ModelCallable:
-    """Bind a tier; return the sync `(prompt, schema) -> json` callable
-    the engine's `World(model=...)` expects (letter 004, Q5 ruling)."""
+def engine_callable(provider: Provider, tier: Tier | None = "main") -> ModelCallable:
+    """Return the sync `(prompt, schema) -> json` callable the engine's
+    `World(model=...)` expects (letter 004, Q5 ruling).
+
+    A `tier` binds every call to that tier. `tier=None` instead dispatches per
+    call by prompt shape (see `_CHEAP_ENGINE_PREFIXES`): extraction and
+    classification go cheap, everything else (resolver invention, refer tier-2)
+    goes main. Pure dispatch, no vendor knowledge."""
 
     def call(prompt: str, schema: dict) -> dict:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(provider.complete(prompt, schema, tier=tier))
-        raise RuntimeError(
-            "engine_callable invoked inside a running event loop; "
-            "hand the engine an executor-dispatched wrapper instead"
-        )
+            pass
+        else:
+            raise RuntimeError(
+                "engine_callable invoked inside a running event loop; "
+                "hand the engine an executor-dispatched wrapper instead")
+        chosen: Tier = tier if tier is not None else (
+            "cheap" if prompt.startswith(_CHEAP_ENGINE_PREFIXES) else "main")
+        return asyncio.run(provider.complete(prompt, schema, tier=chosen))
 
     return call
 
@@ -189,7 +204,12 @@ FORBID_TASK_MARKERS = (
 
 
 def task_tag(code: str) -> str:
-    """The stable section header to prepend to a host cohort prompt (3-letter code)."""
+    """The stable section header to prepend to a host cohort prompt (3-letter code).
+
+    Raises ValueError for a code `task_of` could not read back: a malformed tag
+    would silently disable profiling / stub dispatch / effort routing for its cohort."""
+    if not re.fullmatch(r"[a-z]{3}", code or ""):
+        raise ValueError(f"task code must be exactly 3 lowercase letters, got {code!r}")
     return f"{_TASK_OPEN}{code}{_TASK_CLOSE}\n"
 
 
@@ -206,24 +226,40 @@ _HIGH_EFFORT_TASKS = frozenset({"nar", "opn"})
 
 
 def engine_tier_dispatch(provider: Provider) -> ModelCallable:
-    """The engine gets ONE callable; tier is chosen per call by prompt
-    shape: extraction/classification → cheap, everything else (resolver
-    invention, refer tier-2) → main. Pure dispatch, no vendor knowledge."""
+    """The engine gets ONE callable; tier is chosen per call by prompt shape
+    (the live path). Shorthand for `engine_callable(provider, tier=None)`."""
+    return engine_callable(provider, tier=None)
 
-    def call(prompt: str, schema: dict) -> dict:
-        tier: Tier = "cheap" if prompt.startswith(_CHEAP_ENGINE_PREFIXES) else "main"
-        return asyncio.run(provider.complete(prompt, schema, tier=tier))
 
-    return call
+#: Silent defaults the StubProvider answers WITHOUT consuming its queue, keyed by task
+#: tag: `{task: (queue-head key that means "this test stubbed it explicitly", default)}`.
+#: Each is a NEW cohort call that landed inside paths older tests had already stubbed
+#: ("the same precedent"): unless a test EXPLICITLY stubs the call (queue head carries
+#: the signature key), the default is answered and the legacy stub sequence flows on.
+#:   csg  #88A  the clarification gate (a new cheap call inside the commitment path)
+#:   rmb  #97   the Remembrancer's gated cheap calls (tag is `rmb`, NOT `mem` - the
+#:              narrative-memory compactor owns `mem`; Cx 439 #2)
+#:   mcl        the claims/people extractor
+#:   law  #105  the WORLD-LAWS author -> "no laws", a law-less build flows as before
+#:   lwc  #105  the WORLD-LAWS critic
+_SILENT_DEFAULTS: dict[str, tuple[str, dict]] = {
+    "csg": ("specified", {"specified": True, "missing": [], "clarification": ""}),
+    "rmb": ("stirs", {"stirs": False, "memory": "", "feeling": ""}),
+    "mcl": ("claims", {"claims": [], "people": []}),
+    "law": ("laws", {"reality_register": "secondary", "laws": []}),
+    "lwc": ("verdicts", {"verdicts": []}),
+}
 
 
 class StubProvider(Provider):
-    """Canned, deterministic responses for tests — the engine accepts it
+    """Canned, deterministic responses for tests - the engine accepts it
     the same way, which is how arc-layer and session-zero logic get
     tested before and without any live model."""
 
-    def __init__(self, responses: list[dict] | None = None) -> None:
+    def __init__(self, responses: list[dict] | None = None, *,
+                 silent_defaults: dict[str, tuple[str, dict]] | None = None) -> None:
         self._queue: list[dict] = list(responses or [])
+        self._silent_defaults = _SILENT_DEFAULTS if silent_defaults is None else silent_defaults
         self.calls: list[tuple[str, dict, str]] = []
 
     def enqueue(self, response: dict) -> None:
@@ -232,40 +268,12 @@ class StubProvider(Provider):
     async def complete(self, prompt: str, schema: dict, *, tier: Tier = "main",
                        deliberate: bool = False) -> dict:
         self.calls.append((prompt, schema, tier))
-        # #88A stage-gate default: the clarification gate is a NEW cheap call inside the
-        # commitment path; pre-existing tests stub that path without knowing about it. Unless
-        # a test EXPLICITLY stubs the gate (queue head carries "specified"), answer
-        # "specified" here WITHOUT consuming the queue — the legacy stub sequence flows on.
-        if task_of(prompt) == "csg" and not (
-                self._queue and isinstance(self._queue[0], dict)
-                and "specified" in self._queue[0]):
-            return {"specified": True, "missing": [], "clarification": ""}
-        # #97 (same precedent): the Remembrancer's gated cheap calls are NEW inside
-        # long-stubbed paths (asks_self / protagonist-knowledge turns). Unless a test
-        # EXPLICITLY stubs them (queue head carries the signature key), answer the
-        # silent default without consuming the queue. Tag is `rmb`, NOT `mem` — the
-        # narrative-memory compactor owns `mem` (Cx 439 #2: sharing it silently fed
-        # compaction the wrong schema).
-        if task_of(prompt) == "rmb" and not (
-                self._queue and isinstance(self._queue[0], dict)
-                and "stirs" in self._queue[0]):
-            return {"stirs": False, "memory": "", "feeling": ""}
-        if task_of(prompt) == "mcl" and not (
-                self._queue and isinstance(self._queue[0], dict)
-                and "claims" in self._queue[0]):
-            return {"claims": [], "people": []}
-        # #105 (same precedent): the WORLD-LAWS author/critic are NEW calls inside
-        # long-stubbed build paths. Unless a test EXPLICITLY stubs them (queue head
-        # carries the signature key), answer "no laws" without consuming the queue —
-        # a law-less build flows exactly as before.
-        if task_of(prompt) == "law" and not (
-                self._queue and isinstance(self._queue[0], dict)
-                and "laws" in self._queue[0]):
-            return {"reality_register": "secondary", "laws": []}
-        if task_of(prompt) == "lwc" and not (
-                self._queue and isinstance(self._queue[0], dict)
-                and "verdicts" in self._queue[0]):
-            return {"verdicts": []}
+        silent = self._silent_defaults.get(task_of(prompt))
+        if silent is not None:
+            key, default = silent
+            if not (self._queue and isinstance(self._queue[0], dict)
+                    and key in self._queue[0]):
+                return copy.deepcopy(default)
         if not self._queue:
             raise ProviderTransportError("StubProvider queue exhausted")
         response = self._queue.pop(0)
@@ -343,34 +351,46 @@ def force_strict_object_schema(schema: Any) -> Any:
     return out
 
 
-class CodexProvider(Provider):
-    """The EXPLICIT OPT-IN path (`CONSTRUCT_PROVIDER=codex`):
-    ChatGPT-subscription OAuth via the Codex-shape HTTP shim
-    (Kernos-proven pattern, letter 020).
+class _ResponsesWireProvider(Provider):
+    """The Responses-API wire shared by the two sibling providers: the request
+    body, the SSE collect path (error / incomplete / refusal aware), the bounded
+    transient retry, the keepalive sockets, the timeout bound, the payload cap and
+    the reasoning-effort ladder. It knows NO credential: each sibling supplies
+    `_read_auth`, `_headers`, `describe`, and its own wire constants (class
+    attributes) and environment variable names.
 
-    Opt-in only — personal-use context under OpenAI's Terms of Use
-    (https://openai.com/policies/terms-of-use/); the shipped default is
-    the metered `OpenAIProvider` below (see `default_provider`).
+    `CodexProvider` and `OpenAIProvider` are siblings, neither a subclass of the
+    other, so a setting of one wire cannot leak into the other through
+    inheritance. Two deliberate carry-overs keep behaviour identical to the old
+    parent/child shape: both wires read the same `HOLODECK_CODEX_*` EFFORT
+    variables (the thinking-level dial predates the metered wire), and both
+    enforce the same transport cap."""
 
-    Wire invariants carried from Kernos production: OAuth bearer (never
-    an API key) + chatgpt-account-id + originator/UA headers; SSE-only
-    endpoint; `store: false`; `include: reasoning.encrypted_content`;
-    strict-coerced output schema; ~40KB payload cap enforced loudly.
-    Auth is fresh-read from `~/.codex/auth.json` per call; 401 fails
-    fast with the fix named — never retried."""
-
-    _endpoint_path = "/codex/responses"
-    _label = "Codex"
-    _auth_fix = "run `codex login`"
+    # -- per-wire constants: each sibling overrides what differs ----------
+    _endpoint_path: str
+    _label: str
+    _auth_fix: str
     #: Whether text.format carries `strict: true` (server-side Structured
-    #: Outputs adherence). The Codex consumer wire ships WITHOUT it — the
+    #: Outputs adherence). The Codex consumer wire ships WITHOUT it - the
     #: Kernos-proven request shape is preserved verbatim; the official
-    #: metered endpoint (OpenAIProvider) opts in.
+    #: metered endpoint opts in.
     _schema_strict = False
+    #: The transport threshold, enforced loudly per call (a per-wire setting).
+    _payload_cap_bytes = CODEX_PAYLOAD_CAP_BYTES
+    #: Environment variable names and defaults for models and base URL.
+    _model_env: str
+    _model_default = "gpt-5.5"
+    _cheap_model_env: str
+    _cheap_model_default = "gpt-5.4-mini"
+    _base_url_env: str
+    _base_url_default: str
+    #: Effort dial variables - shared by both wires on purpose (see docstring).
+    _main_effort_env = "HOLODECK_CODEX_MAIN_EFFORT"
+    _cheap_effort_env = "HOLODECK_CODEX_CHEAP_EFFORT"
+    _reasoning_override_env = "HOLODECK_CODEX_REASONING_EFFORT"
 
     def __init__(
         self,
-        auth_path: Path | None = None,
         main_model: str | None = None,
         cheap_model: str | None = None,
         base_url: str | None = None,
@@ -378,52 +398,35 @@ class CodexProvider(Provider):
         main_effort: str | None = None,
         cheap_effort: str | None = None,
     ) -> None:
-        self._auth_path = auth_path or Path.home() / ".codex" / "auth.json"
-        self._main_model = main_model or os.getenv("HOLODECK_CODEX_MODEL", "gpt-5.5")
-        self._cheap_model = cheap_model or os.getenv("HOLODECK_CODEX_CHEAP_MODEL", "gpt-5.4-mini")
-        # The MAIN tier's THINKING LEVEL (reasoning effort) — settable, because
+        # An empty variable counts as unset (it falls to the wire's own default, never
+        # to the other wire's variable).
+        self._main_model = main_model or os.getenv(self._model_env) or self._model_default
+        self._cheap_model = (cheap_model or os.getenv(self._cheap_model_env)
+                             or self._cheap_model_default)
+        # The MAIN tier's THINKING LEVEL (reasoning effort) - settable, because
         # main carries the quality-bearing work (narration, authoring, NPC voice,
         # generation). Effort is the latency cliff (letter 022 C: ~22s low vs 180s+
-        # medium per call), so the default stays `low` (good model, low effort —
+        # medium per call), so the default stays `low` (good model, low effort -
         # no behaviour change) and you dial it UP when you want more deliberation.
         # `deliberate` calls (arc authoring) still floor at medium. Levels:
         # minimal | low | medium | high. Cheap stays low (plumbing speed).
-        self._main_effort = main_effort or os.getenv("HOLODECK_CODEX_MAIN_EFFORT", "low")
-        self._cheap_effort = cheap_effort or os.getenv("HOLODECK_CODEX_CHEAP_EFFORT", "low")
-        self._base_url = (base_url or os.getenv(
-            "HOLODECK_CODEX_BASE_URL", "https://chatgpt.com/backend-api")).rstrip("/")
+        self._main_effort = main_effort or os.getenv(self._main_effort_env, "low")
+        self._cheap_effort = cheap_effort or os.getenv(self._cheap_effort_env, "low")
+        self._base_url = (base_url or os.getenv(self._base_url_env)
+                          or self._base_url_default).rstrip("/")
         self._timeouts = dict(DEFAULT_TIMEOUTS, **(timeouts or {}))
         import uuid
         self._session_id = f"construct-{uuid.uuid4()}"
 
     # -- plumbing ---------------------------------------------------------
 
+    @abstractmethod
     def _read_auth(self) -> dict:
-        """Fresh per call — never cached across runs (letter 020)."""
-        if not self._auth_path.exists():
-            raise ProviderAuthError(
-                f"no Codex credential at {self._auth_path} — run `codex login`")
-        try:
-            tokens = json.loads(self._auth_path.read_text())["tokens"]
-            return {"access": tokens["access_token"], "account_id": tokens["account_id"]}
-        except (KeyError, json.JSONDecodeError) as exc:
-            raise ProviderAuthError(
-                f"unreadable Codex credential ({exc}) — run `codex login`") from exc
+        """The credential, fresh per call - never cached across runs."""
 
+    @abstractmethod
     def _headers(self, auth: dict) -> dict[str, str]:
-        system = platform.system().lower() or "unknown"
-        details = "; ".join(p for p in (platform.release(), platform.machine()) if p)
-        return {
-            "session_id": self._session_id,
-            "x-client-request-id": self._session_id,
-            "Authorization": f"Bearer {auth['access']}",
-            "chatgpt-account-id": auth["account_id"],
-            "originator": "pi",
-            "User-Agent": f"pi ({system} {details})".strip(),
-            "Content-Type": "application/json",
-            "OpenAI-Beta": "responses=experimental",
-            "accept": "text/event-stream",
-        }
+        """Request headers for this wire, built from `_read_auth()`."""
 
     def _model_for(self, tier: Tier) -> str:
         return self._main_model if tier == "main" else self._cheap_model
@@ -462,7 +465,7 @@ class CodexProvider(Provider):
                 effort = self._main_effort
                 if deliberate and _EFFORT_RANK.get(effort, 1) < _EFFORT_RANK["medium"]:
                     effort = "medium"
-            effort = os.getenv("HOLODECK_CODEX_REASONING_EFFORT", effort)
+            effort = os.getenv(self._reasoning_override_env, effort)
             # The narrator holding a LIVE SCENE is the crown jewel (player-facing
             # prose) — it floors at HIGH effort regardless of the tier default or a
             # lower global override (founder: narration quality over latency).
@@ -476,11 +479,34 @@ class CodexProvider(Provider):
         return body
 
     @staticmethod
+    def _stream_failure(event: dict) -> str:
+        """`code: message` of an error-bearing stream event or response object. The
+        error may sit on the event itself or under `error` / `response.error`."""
+        resp = event.get("response") if isinstance(event.get("response"), dict) else {}
+        err = event.get("error") or resp.get("error")
+        src = err if isinstance(err, dict) else event
+        code = src.get("code") or src.get("type") or ""
+        msg = src.get("message") or (err if isinstance(err, str) else "")
+        return ": ".join(str(x) for x in (code, msg) if x) or json.dumps(event)[:300]
+
+    @staticmethod
+    def _incomplete_reason(response: dict) -> str:
+        details = response.get("incomplete_details")
+        reason = details.get("reason") if isinstance(details, dict) else None
+        return str(reason or "unknown reason")
+
+    @staticmethod
     async def _collect_sse_text(resp: Any) -> str:
         """Collect the final output text from the SSE stream. Partial
-        output is preserved in errors — it is the only clue (DP-4)."""
+        output is preserved in errors — it is the only clue (DP-4).
+
+        A stream that reports an error / failure, stops incomplete, or answers with
+        a refusal raises `ProviderTransportError` carrying the server's code and
+        message — it is never returned as if it were a complete answer. These are
+        not marked transient: re-sending the same request cannot improve them."""
         final: dict = {}
         text_chunks: list[str] = []
+        refusal_chunks: list[str] = []
         buffer = ""
         async for chunk in resp.aiter_text():
             buffer += chunk
@@ -495,18 +521,48 @@ class CodexProvider(Provider):
                     event = json.loads(data_str)
                 except json.JSONDecodeError:
                     continue
+                if not isinstance(event, dict):
+                    continue
                 etype = event.get("type", "")
                 if etype in ("response.completed", "response.done"):
                     final = event.get("response", event)
                 elif etype == "response.output_text.delta":
                     text_chunks.append(event.get("delta", ""))
+                elif etype == "response.refusal.delta":
+                    refusal_chunks.append(event.get("delta", ""))
+                elif etype == "response.refusal.done":
+                    raise ProviderTransportError(
+                        f"model refused the request: "
+                        f"{event.get('refusal') or ''.join(refusal_chunks)}")
+                elif etype in ("error", "response.failed"):
+                    raise ProviderTransportError(
+                        f"response stream reported {etype}: "
+                        f"{_ResponsesWireProvider._stream_failure(event)}")
+                elif etype == "response.incomplete":
+                    raise ProviderTransportError(
+                        f"response incomplete (not a full answer): "
+                        f"{_ResponsesWireProvider._incomplete_reason(event.get('response') or {})}")
+        # A "completed" envelope can still carry a failed / incomplete status.
+        if final.get("error") or final.get("status") == "failed":
+            raise ProviderTransportError(
+                f"response failed: {_ResponsesWireProvider._stream_failure({'response': final})}")
+        if final.get("status") == "incomplete":
+            raise ProviderTransportError(
+                f"response incomplete (not a full answer): "
+                f"{_ResponsesWireProvider._incomplete_reason(final)}")
+        refusals: list[str] = []
         for item in final.get("output", []):
             if item.get("type") == "message":
                 for content in item.get("content", []):
                     if content.get("type") == "output_text" and content.get("text"):
                         return content["text"]
+                    if content.get("type") == "refusal":
+                        refusals.append(str(content.get("refusal") or ""))
         if text_chunks:
             return "".join(text_chunks)
+        if refusals or refusal_chunks:
+            raise ProviderTransportError(
+                f"model refused the request: {' '.join(refusals) or ''.join(refusal_chunks)}")
         raise ProviderTransportError(
             f"response stream ended without output text; final event tail: "
             f"{json.dumps(final)[:300]}")
@@ -545,15 +601,15 @@ class CodexProvider(Provider):
         sunk by one 'peer closed connection / incomplete chunked read'): a
         dropped stream mid-response is a network blip, not a verdict — retry
         it up to twice with a short backoff before surfacing. Only failures
-        `_call_once` marks `transient` (connection-level httpx.TransportError)
-        qualify; API errors, auth failures, and timeouts keep their existing
+        `_call_once` raises as `ProviderTransientError` (connection-level
+        httpx.TransportError) qualify; API errors, auth failures, and timeouts keep their existing
         fail-fast semantics (a timeout already consumed its full bound —
         retrying it would double a player's worst-case wait)."""
         for i in range(3):
             try:
                 return await self._call_once(prompt, schema, tier, deliberate)
             except ProviderTransportError as exc:
-                if i == 2 or not getattr(exc, "transient", False):
+                if i == 2 or not isinstance(exc, ProviderTransientError):
                     raise
                 logger.warning("%s transient transport failure "
                                "(retry %d/2, tier=%s): %s", self._label, i + 1,
@@ -589,9 +645,9 @@ class CodexProvider(Provider):
                          deliberate: bool = False) -> str:
         body = self._body(prompt, schema, tier, deliberate)
         payload_bytes = len(json.dumps(body))
-        if payload_bytes > CODEX_PAYLOAD_CAP_BYTES:
+        if payload_bytes > self._payload_cap_bytes:
             raise ProviderTransportError(
-                f"payload {payload_bytes // 1024}KB exceeds the {CODEX_PAYLOAD_CAP_BYTES // 1024}KB "
+                f"payload {payload_bytes // 1024}KB exceeds the {self._payload_cap_bytes // 1024}KB "
                 f"{self._label} transport cap — the briefing composer owns budget-shaping; "
                 f"shrink the prompt, do not raise the cap")
         auth = self._read_auth()
@@ -603,8 +659,7 @@ class CodexProvider(Provider):
         # classify, npc_turn) keep their snappy tier default. Fixes the fresh-genre generation
         # ProviderTimeout (story_authoring exceeded 300s).
         _tier_bound = self._timeouts.get(tier, DEFAULT_TIMEOUTS[tier])
-        bound = min(max(_tier_bound, HARD_BOUND_SECONDS) if deliberate else _tier_bound,
-                    HARD_BOUND_SECONDS)
+        bound = HARD_BOUND_SECONDS if deliberate else min(_tier_bound, HARD_BOUND_SECONDS)
         url = f"{self._base_url}{self._endpoint_path}"
         import httpx
         try:
@@ -643,22 +698,86 @@ class CodexProvider(Provider):
                 f"{self._label} network timeout (tier={tier}): {exc}") from exc
         except httpx.TransportError as exc:
             # Connection-level failure (reset, refused, incomplete chunked
-            # read): marked transient so `_call_transient_retry` re-tries it
+            # read): raised as ProviderTransientError so `_call_transient_retry` re-tries it
             # bounded — a dropped stream must not sink a whole build. (Caught
             # BEFORE HTTPError; TimeoutException above stays a timeout.)
-            err = ProviderTransportError(
-                f"{self._label} transport error (tier={tier}): {exc}")
-            err.transient = True
-            raise err from exc
+            raise ProviderTransientError(
+                f"{self._label} transport error (tier={tier}): {exc}") from exc
         except httpx.HTTPError as exc:
             raise ProviderTransportError(
                 f"{self._label} transport error (tier={tier}): {exc}") from exc
+
+
+class CodexProvider(_ResponsesWireProvider):
+    """The EXPLICIT OPT-IN path (`CONSTRUCT_PROVIDER=codex`):
+    ChatGPT-subscription OAuth via the Codex-shape HTTP shim
+    (Kernos-proven pattern, letter 020).
+
+    Opt-in only — personal-use context under OpenAI's Terms of Use
+    (https://openai.com/policies/terms-of-use/); the shipped default is
+    the metered `OpenAIProvider` below (see `default_provider`).
+
+    Wire invariants carried from Kernos production: OAuth bearer (never
+    an API key) + chatgpt-account-id + originator/UA headers; SSE-only
+    endpoint; `store: false`; `include: reasoning.encrypted_content`;
+    strict-coerced output schema; ~40KB payload cap enforced loudly.
+    Auth is fresh-read from `~/.codex/auth.json` per call; 401 fails
+    fast with the fix named — never retried."""
+
+    _endpoint_path = "/codex/responses"
+    _label = "Codex"
+    _auth_fix = "run `codex login`"
+    _model_env = "HOLODECK_CODEX_MODEL"
+    _cheap_model_env = "HOLODECK_CODEX_CHEAP_MODEL"
+    _base_url_env = "HOLODECK_CODEX_BASE_URL"
+    _base_url_default = "https://chatgpt.com/backend-api"
+
+    def __init__(
+        self,
+        auth_path: Path | None = None,
+        main_model: str | None = None,
+        cheap_model: str | None = None,
+        base_url: str | None = None,
+        timeouts: dict[str, float] | None = None,
+        main_effort: str | None = None,
+        cheap_effort: str | None = None,
+    ) -> None:
+        self._auth_path = auth_path or Path.home() / ".codex" / "auth.json"
+        super().__init__(main_model, cheap_model, base_url, timeouts,
+                         main_effort, cheap_effort)
+
+    def _read_auth(self) -> dict:
+        """Fresh per call — never cached across runs (letter 020)."""
+        if not self._auth_path.exists():
+            raise ProviderAuthError(
+                f"no Codex credential at {self._auth_path} — run `codex login`")
+        try:
+            tokens = json.loads(self._auth_path.read_text())["tokens"]
+            return {"access": tokens["access_token"], "account_id": tokens["account_id"]}
+        except (KeyError, json.JSONDecodeError) as exc:
+            raise ProviderAuthError(
+                f"unreadable Codex credential ({exc}) — run `codex login`") from exc
+
+    def _headers(self, auth: dict) -> dict[str, str]:
+        system = platform.system().lower() or "unknown"
+        details = "; ".join(p for p in (platform.release(), platform.machine()) if p)
+        return {
+            "session_id": self._session_id,
+            "x-client-request-id": self._session_id,
+            "Authorization": f"Bearer {auth['access']}",
+            "chatgpt-account-id": auth["account_id"],
+            "originator": "pi",
+            "User-Agent": f"pi ({system} {details})".strip(),
+            "Content-Type": "application/json",
+            "OpenAI-Beta": "responses=experimental",
+            "accept": "text/event-stream",
+        }
 
     def describe(self) -> str:
         return f"codex/{self._main_model}+{self._cheap_model}"
 
 
-class OpenAIProvider(CodexProvider):
+class OpenAIProvider(_ResponsesWireProvider):
     """THE SHIPPED DEFAULT: a metered OpenAI API key against the official
     Responses endpoint (`https://api.openai.com/v1/responses`).
 
@@ -674,6 +793,10 @@ class OpenAIProvider(CodexProvider):
     _auth_fix = ("set OPENAI_API_KEY (or opt in to subscription auth with "
                  "CONSTRUCT_PROVIDER=codex)")
     _schema_strict = True   # server-side Structured Outputs adherence
+    _model_env = "CONSTRUCT_OPENAI_MODEL"
+    _cheap_model_env = "CONSTRUCT_OPENAI_CHEAP_MODEL"
+    _base_url_env = "CONSTRUCT_OPENAI_BASE_URL"
+    _base_url_default = "https://api.openai.com"
 
     def __init__(
         self,
@@ -685,16 +808,8 @@ class OpenAIProvider(CodexProvider):
         main_effort: str | None = None,
         cheap_effort: str | None = None,
     ) -> None:
-        super().__init__(
-            main_model=main_model or os.getenv("CONSTRUCT_OPENAI_MODEL", "gpt-5.5"),
-            cheap_model=cheap_model or os.getenv(
-                "CONSTRUCT_OPENAI_CHEAP_MODEL", "gpt-5.4-mini"),
-            base_url=(base_url or os.getenv(
-                "CONSTRUCT_OPENAI_BASE_URL", "https://api.openai.com")),
-            timeouts=timeouts,
-            main_effort=main_effort,
-            cheap_effort=cheap_effort,
-        )
+        super().__init__(main_model, cheap_model, base_url, timeouts,
+                         main_effort, cheap_effort)
         self._api_key = api_key
 
     def _read_auth(self) -> dict:

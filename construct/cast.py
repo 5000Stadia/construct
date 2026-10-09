@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from construct.arc.conditions import AnyOf, InFrame
 from construct.arc.grammar import Pillar
+from construct.text import alnum_words, humanize_id
 
 #: Coverage effect a clue has on its pillar when surfaced into the player frame.
 COVERAGE_EFFECTS = ("genuine", "false", "context")
@@ -367,7 +368,7 @@ def cast_location_plan(cast: tuple[CastNode, ...], scene_place: str
         if place != scene_place:
             places.add(place)
     for place in sorted(places):
-        name = place.split(":", 1)[-1].replace("_", " ").strip()
+        name = humanize_id(place).strip()
         items.append({"entity": place, "attribute": "kind", "value": "place"})
         if name:
             items.append({"entity": place, "attribute": "name", "value": name})
@@ -405,9 +406,7 @@ _IDENTITY_STOP = {"the", "a", "an", "of", "who", "and", "to", "in", "for", "with
 
 
 def _identity_tokens(text: str) -> set[str]:
-    import re as _re
-    return {t for t in _re.split(r"[^a-z0-9]+", str(text).lower())
-            if len(t) > 3 and t not in _IDENTITY_STOP}
+    return set(alnum_words(str(text), min_len=4, stop=_IDENTITY_STOP))
 
 
 def disambiguate_cast_identities(proposal: dict, identity_of, existing_ids) -> tuple[dict, dict]:

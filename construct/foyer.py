@@ -18,8 +18,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from construct import cohorts, hostcontrol
+from construct import cohorts
+from construct.adapter import state_value  # noqa: F401 — re-exported (tests/scripts import it from here)
 from construct.provider import Provider
+from construct.text import humanize_id
 
 logger = logging.getLogger(__name__)
 
@@ -86,21 +88,6 @@ def _ask_required(field: str) -> str:
     return f"Before we step in — could you settle your {field}?"
 
 
-def state_value(porcelain: Any, entity: str, attribute: str,
-                *, as_of: float | None = None) -> str | None:
-    """The bare canon value for (entity, attribute), or None. `porcelain.state`
-    returns a structured `{status, fact:{value}}` dict — unwrap it the way
-    `adapter.PorcelainWorldReads.state` does (known/conflicted → the value).
-
-    `as_of` (B' S3): materialize as-of the play horizon, so scene/imagery reads see the
-    opening state, not the source aftermath. None (the default) = the timeline head."""
-    try:
-        st = porcelain.state(entity, attribute, as_of=as_of)
-    except Exception:
-        return None
-    return hostcontrol.collapse_state(st, entity, attribute)
-
-
 def world_anchors(world: Any, scope: list[str] | None, protagonist: str,
                   *, as_of: float | None = None) -> list[str]:
     """The world's threads tied to the protagonist — the arc-scope entities the
@@ -114,8 +101,7 @@ def world_anchors(world: Any, scope: list[str] | None, protagonist: str,
         if entity == protagonist or not p:
             continue
         kind = state_value(p, entity, "kind", as_of=as_of) or entity.split(":", 1)[0]
-        name = (state_value(p, entity, "name", as_of=as_of)
-                or entity.split(":", 1)[-1].replace("_", " "))
+        name = state_value(p, entity, "name", as_of=as_of) or humanize_id(entity)
         feel = (state_value(p, entity, "role", as_of=as_of)
                 or state_value(p, entity, "feel", as_of=as_of)
                 or state_value(p, entity, "disposition", as_of=as_of) or "")
@@ -177,7 +163,7 @@ def ground_character(world: Any, provider: Provider, protagonist: str,
         place_name = _sv(place, "name")
         place_desc = _sv(place, "description")
         place_kind = _sv(place, "kind")
-        place_label = place_name or (place.split(":", 1)[-1].replace("_", " ") if place else "")
+        place_label = place_name or (humanize_id(place) if place else "")
         sheet_summary = "; ".join(
             f"{a}: {_sv(protagonist, a)}"
             for a in ("name", "background", "role", "gender", "pronouns") if _sv(protagonist, a))

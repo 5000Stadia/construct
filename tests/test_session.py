@@ -421,7 +421,7 @@ class TestSession:
         s1.close()
         # A second open resumes the SAME slot at its head (turn count grew).
         from construct.game import next_turn_number, open_playthrough
-        w, _arc, _meta = open_playthrough(scenario, _provider(), player_id="u1")
+        w = open_playthrough(scenario, _provider(), player_id="u1").world
         assert next_turn_number(w) >= 2  # turn_0 + the played turn
         w.close()
 
@@ -722,6 +722,8 @@ class TestColdOpenConcealment:
                  "value": "the culprit is named at last"},   # brushes 'culprit' (protected)
                 {"entity": "event:e2", "attribute": "alias",
                  "value": "the water ration tightens"},       # benign
+                {"entity": "event:e3", "attribute": "alias",
+                 "value": "who the culprit, at last, was"},   # punctuation must not hide it
             ]}
 
         monkeypatch.setattr(s._world.porcelain, "snapshot", fake_snapshot)
@@ -739,7 +741,7 @@ class TestEndlessMode:
         import shutil
         from construct.game import scenario_path
         shutil.copyfile(scenario_path(scenario), slot_path(scenario, player_id))
-        w, _arc, _meta = open_playthrough(scenario, _provider(), player_id=player_id)
+        w = open_playthrough(scenario, _provider(), player_id=player_id).world
         w.porcelain.ingest_structured(
             [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
             frame=PLAYER_FRAME)
@@ -972,4 +974,159 @@ def test_opening_names_the_containment_chain(tmp_path, monkeypatch):
     assert any("YOUR HISTORY WITH THIS GROUND" in p
                and "grief closed every other door" in p for p in _open_prompts), \
         "the authored place relationship must ride the grounding"
+    s.close()
+
+
+def test_notebook_ignores_legacy_placeholder_settled_record(scenario):
+    # B3: slots continued BEFORE the fix hold a settled record built from `_build_arc`'s
+    # placeholder premise ("<protagonist> · kind · person — ANSWERED"); the notebook must not
+    # print "YOU — ... settled" for them.
+    import json as _json
+    s = Session.open(scenario, player_id="u1", fresh=True, provider=StubProvider([]))
+    s._world.porcelain.ingest_structured([
+        {"entity": PLAYER, "attribute": "role", "value": "the investigator",
+         "valid_from": turn_time(2)},
+    ], frame=PLAYER_FRAME)
+    s._world.porcelain.ingest_structured([
+        {"entity": "settled:episode_9", "attribute": "record",
+         "value": _json.dumps({"title": "The First Case", "outcome": "won",
+                               "settled": [f"{PLAYER} · kind · person — ANSWERED"]}),
+         "value_type": "literal", "valid_from": turn_time(9)}], frame="session:main")
+    out = s.journal()
+    s.close()
+    you = next(ln for ln in out.splitlines() if ln.startswith("YOU —"))
+    assert "settled" not in you
+
+
+def test_open_playthrough_returns_side_arcs_not_stuffed_into_meta(scenario):
+    """Audit 2026-10 F1: the side arcs are a real return value; the meta stays the
+    persisted shape (no runtime `_side_arcs` key holding `Arc` objects)."""
+    from construct.game import open_playthrough, start_playthrough
+    from construct.scenario_meta import ScenarioMeta
+    start_playthrough(scenario, fresh=True, player_id="u1")
+    pt = open_playthrough(scenario, _provider(), player_id="u1")
+    try:
+        assert isinstance(pt.meta, ScenarioMeta)
+        assert "_side_arcs" not in pt.meta.to_json()
+        assert pt.meta.main_arc == pt.arc.arc_id
+        assert all(a.arc_id != pt.arc.arc_id for a in pt.side_arcs)
+    finally:
+        pt.world.close()
+
+
+# ---------------------------------------------------------------------------
+# frame-knowledge recipe (pattern-buffer ADOPTION): the `knows:` digest / notebook /
+# collision reads FOLD through the engine (`snapshot(entities(F), frame=F)`), not a
+# hand-fold over the raw `facts(F)` rows. Each assertion below is a CORRECTION the
+# hand-fold got wrong.
+# ---------------------------------------------------------------------------
+
+def _knows_recipe_session(scenario):
+    s = Session.open(scenario, player_id="u1", fresh=True, provider=StubProvider([]))
+    p = s._world.porcelain
+    p.ingest_structured([
+        {"entity": "person:dan", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": "person:daniel", "attribute": "kind", "value": "person", "timeless": True},
+    ])
+    p.ingest_structured([
+        # one man, two ids (merged below): the hand-fold kept TWO entities, the old
+        # clerk row alongside the new one
+        {"entity": "person:dan", "attribute": "role", "value": "the clerk",
+         "valid_from": turn_time(2)},
+        {"entity": "person:daniel", "attribute": "role", "value": "the head clerk",
+         "valid_from": turn_time(3)},
+        # a set-valued key: both members stand (the hand-fold kept the last one only)
+        {"entity": PLAYER, "attribute": "allied_with", "value": "Reed",
+         "valid_from": turn_time(2)},
+        {"entity": PLAYER, "attribute": "allied_with", "value": "Bell",
+         "valid_from": turn_time(2)},
+        # superseded functional value: only the standing one is the frame's knowledge
+        {"entity": PLAYER, "attribute": "standing", "value": "wary",
+         "valid_from": turn_time(2)},
+        {"entity": PLAYER, "attribute": "standing", "value": "trusting",
+         "valid_from": turn_time(3)},
+    ], frame=PLAYER_FRAME)
+    assert p.merge("person:daniel", "person:dan", "the same clerk")["outcome"] == "merged"
+    return s
+
+
+def test_build_sheet_folds_identity_and_keeps_set_members(scenario):
+    from construct.remembrancer import build_sheet
+    s = _knows_recipe_session(scenario)
+    sheet = build_sheet(s._world, PLAYER, s._arc).splitlines()
+    s.close()
+    roles = [ln for ln in sheet if " · role · " in ln]
+    # CORRECTION (same_as identity): the merged clerk is ONE entity with ONE standing role
+    assert len(roles) == 1 and roles[0].endswith(" · role · the head clerk"), roles
+    # CORRECTION (set members): both allies stand, not just the last-written one
+    assert {ln for ln in sheet if " · allied_with · " in ln} == {
+        f"{PLAYER} · allied_with · Reed", f"{PLAYER} · allied_with · Bell"}
+    # the superseded value is not the frame's knowledge
+    assert [ln for ln in sheet if " · standing · " in ln] == [f"{PLAYER} · standing · trusting"]
+
+
+def test_notebook_has_one_entry_for_a_merged_clerk(scenario):
+    s = _knows_recipe_session(scenario)
+    out = s.journal()
+    s.close()
+    assert out.count("the head clerk") == 1
+    assert "the clerk\n" not in out + "\n"          # the pre-merge row is not a second entry
+    people = out.split("PEOPLE", 1)[1]
+    assert sum(1 for ln in people.splitlines() if ln.lstrip().startswith("•")) == 1
+
+
+def test_declared_memory_reads_the_folded_standing_values(scenario):
+    from construct.remembrancer import _existing_value, _standing_values
+    s = _knows_recipe_session(scenario)
+    w = s._world
+    assert _existing_value(w, PLAYER, "standing", PLAYER_FRAME) == "trusting"
+    # a merged alias id reads through identity
+    assert _existing_value(w, "person:dan", "role", PLAYER_FRAME) == "the head clerk"
+    assert set(_standing_values(w, PLAYER, "allied_with", PLAYER_FRAME)) == {"Reed", "Bell"}
+    assert _standing_values(w, PLAYER, "nope", PLAYER_FRAME) == []
+    assert _existing_value(w, "person:ghost", "role", PLAYER_FRAME) is None  # unknown entity
+    s.close()
+
+
+def test_declaring_a_standing_set_member_is_not_a_collision(scenario, monkeypatch):
+    from construct import cohorts, remembrancer
+    s = _knows_recipe_session(scenario)
+    monkeypatch.setattr(cohorts, "extract_memory_claims", lambda *a, **k: {"claims": [
+        {"about": "self", "subject": "", "attribute": "allied_with", "value": "Reed"}]})
+    tensions, receipts = remembrancer.commit_declared_memory(
+        s._world, None, "I was always allied with Reed.", PLAYER, s._arc, 5)
+    s.close()
+    # Reed already STANDS as a member of the set: declaring it is not a collision. (The
+    # single-value hand-fold only saw the last-written member, "Bell", and quarantined it.)
+    assert tensions == []
+    assert (PLAYER, "allied_with", "memory_declared") in receipts
+
+
+def test_same_time_tie_keeps_the_latest_asserted_side(scenario):
+    """An open same-time tie on a functional key: the engine holds the FIRST-asserted side;
+    the digest reads as freshest-knowledge, so the LATEST-asserted side stands (as the
+    hand-fold always chose) and every side counts as standing for the collision check."""
+    from construct.remembrancer import _existing_value, _standing_values, build_sheet
+    s = Session.open(scenario, player_id="u1", fresh=True, provider=StubProvider([]))
+    s._world.porcelain.ingest_structured([
+        {"entity": PLAYER, "attribute": "mood", "value": "wary", "valid_from": turn_time(2)},
+        {"entity": PLAYER, "attribute": "mood", "value": "resolute", "valid_from": turn_time(2)},
+    ], frame=PLAYER_FRAME)
+    sheet = build_sheet(s._world, PLAYER, s._arc).splitlines()
+    assert [ln for ln in sheet if " · mood · " in ln] == [f"{PLAYER} · mood · resolute"]
+    assert _existing_value(s._world, PLAYER, "mood", PLAYER_FRAME) == "resolute"
+    assert _standing_values(s._world, PLAYER, "mood", PLAYER_FRAME) == ["wary", "resolute"]
+    s.close()
+
+
+def test_declared_memory_sees_a_pre_play_row(scenario):
+    """CORRECTION (hand-fold sentinel bug): the old `best_vf = -1.0` start made a row with a
+    negative valid_from (a pre-play fact) invisible, so a contradicting declaration sailed
+    through; the engine's fold has no such sentinel."""
+    from construct.remembrancer import _existing_value
+    s = Session.open(scenario, player_id="u1", fresh=True, provider=StubProvider([]))
+    s._world.porcelain.ingest_structured([
+        {"entity": "person:rival", "attribute": "signed", "value": "the old treaty",
+         "valid_from": -11.0}])
+    assert _existing_value(s._world, "person:rival", "signed", "canon") == "the old treaty"
     s.close()

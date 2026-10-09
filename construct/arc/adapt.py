@@ -22,6 +22,7 @@ this op validates + applies it.
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import Any
 
 from construct.arc.executor import PLOT, SESSION, turn_time
@@ -32,8 +33,27 @@ logger = logging.getLogger(__name__)
 #: (the generator's pacing lesson). Beyond this, pursued threads decline to atmosphere.
 ADAPT_BUDGET = 4
 
+
+class AdaptLane(StrEnum):
+    """The lane an adaptation decision names, and the outcome lane `apply_adaptation`
+    reports. The first four are the DECISION lanes the doorway acts on; the rest are
+    result-only lanes the doorway synthesizes when it declines."""
+    GENUINE = "genuine"
+    RED_HERRING = "red_herring"
+    PLOT_SUPERSEDE = "plot_supersede"
+    DECLINE = "decline"
+    # result-only (never a valid decision lane)
+    REJECTED_UNKNOWN_LANE = "rejected_unknown_lane"
+    DEFERRED_PLOT_SUPERSEDE = "deferred_plot_supersede"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+    REJECTED_BAD_FACT = "rejected_bad_fact"
+    REJECTED_NO_DEBUNKER = "rejected_no_debunker"
+    WRITE_FAILED = "write_failed"
+
+
 #: The only lanes the doorway will act on (Cx 089 #2 — keep it narrow as callers grow).
-_KNOWN_LANES = frozenset({"genuine", "red_herring", "plot_supersede", "decline"})
+_KNOWN_LANES = frozenset({AdaptLane.GENUINE, AdaptLane.RED_HERRING,
+                          AdaptLane.PLOT_SUPERSEDE, AdaptLane.DECLINE})
 
 
 def adaptations_used(reads: Any) -> int:
@@ -62,12 +82,12 @@ def _record(world: Any, *, turn: int, lane: str, pillar_id: str, reason: str,
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": (reason or "")[:200],
          "valid_from": turn_time(turn)},
-    ], frame=PLOT)
+    ], frame=PLOT, classify="rules")
     # budget count (session) — the literal running total of applied adaptations
     world.porcelain.ingest_structured([
         {"entity": "adapt:ledger", "attribute": "used", "value": int(new_used),
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def apply_adaptation(world: Any, decision: dict, *, protagonist: str, turn: int,
@@ -79,7 +99,7 @@ def apply_adaptation(world: Any, decision: dict, *, protagonist: str, turn: int,
     decision: {"lane": genuine|red_herring|plot_supersede|decline,
                "pillar_id": str, "fact": [e,a,v], "debunker_fact": [e,a,v]|None, "reason": str}
     """
-    lane = (decision or {}).get("lane") or "decline"
+    lane = (decision or {}).get("lane") or AdaptLane.DECLINE
     pillar_id = (decision or {}).get("pillar_id") or ""
     reason = (decision or {}).get("reason") or ""
     fact = (decision or {}).get("fact")
@@ -89,30 +109,30 @@ def apply_adaptation(world: Any, decision: dict, *, protagonist: str, turn: int,
     # (a new/buggy caller) declines to atmosphere rather than falling through to a write.
     if lane not in _KNOWN_LANES:
         logger.info("adapt: unknown lane %r — declining to atmosphere", lane)
-        return {**result, "lane": "rejected_unknown_lane", "applied": False}
-    if lane == "decline":
-        return {**result, "lane": "decline"}
-    if lane == "plot_supersede":
+        return {**result, "lane": AdaptLane.REJECTED_UNKNOWN_LANE, "applied": False}
+    if lane == AdaptLane.DECLINE:
+        return {**result, "lane": AdaptLane.DECLINE}
+    if lane == AdaptLane.PLOT_SUPERSEDE:
         # arc-repair-class (new required pillar / changed answer) — DEFERRED to v2 so it can never
         # silently mutate the solve. Decline (atmosphere) rather than mint structure unsafely.
         logger.info("adapt: plot_supersede declined (v2, arc-repair not yet built)")
-        return {**result, "lane": "deferred_plot_supersede", "applied": False}
+        return {**result, "lane": AdaptLane.DEFERRED_PLOT_SUPERSEDE, "applied": False}
     used = adaptations_used(reads)
     if used >= ADAPT_BUDGET:
         logger.info("adapt: budget exhausted (%d) — declining to atmosphere", ADAPT_BUDGET)
-        return {**result, "lane": "budget_exhausted", "applied": False}
+        return {**result, "lane": AdaptLane.BUDGET_EXHAUSTED, "applied": False}
 
     # genuine / red_herring both need a 3-part fact to write into the player frame.
     if not (isinstance(fact, (list, tuple)) and len(fact) == 3 and all(fact)):
         logger.info("adapt: malformed fact %r — declining", fact)
-        return {**result, "lane": "rejected_bad_fact", "applied": False}
+        return {**result, "lane": AdaptLane.REJECTED_BAD_FACT, "applied": False}
 
-    if lane == "red_herring":
+    if lane == AdaptLane.RED_HERRING:
         deb = (decision or {}).get("debunker_fact")
         if not (isinstance(deb, (list, tuple)) and len(deb) == 3 and all(deb)):
             # A false path WITHOUT a reachable debunker is the dead-end problem relabeled (Cx 087).
             logger.info("adapt: red_herring without a debunker fact — declining")
-            return {**result, "lane": "rejected_no_debunker", "applied": False}
+            return {**result, "lane": AdaptLane.REJECTED_NO_DEBUNKER, "applied": False}
 
     try:
         e, a, v = fact[0], fact[1], str(fact[2])
@@ -124,4 +144,4 @@ def apply_adaptation(world: Any, decision: dict, *, protagonist: str, turn: int,
         return {"applied": True, "lane": lane, "learned": [[e, a, v]], "reason": reason}
     except Exception as exc:  # fail-open: a write hiccup declines, never sinks the turn
         logger.warning("adapt: write failed (%s) — declining to atmosphere", exc)
-        return {**result, "lane": "write_failed", "applied": False}
+        return {**result, "lane": AdaptLane.WRITE_FAILED, "applied": False}

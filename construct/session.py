@@ -26,7 +26,13 @@ from construct.game import (
     start_playthrough,
 )
 from construct.provider import Provider
-from construct.adapter import PorcelainWorldReads
+from construct.scenario_meta import (
+    InputAuthority, PlaythroughState, ScenarioMeta, ScenarioMode,
+)
+from construct.adapter import PorcelainWorldReads, state_value
+from construct.text import (
+    human_name, humanize_id, humanize_id_last, humanize_typed_id, id_local,
+)
 from construct.turnloop import TurnTrace, run_turn, terminal_outcome
 
 logger = logging.getLogger(__name__)
@@ -80,13 +86,21 @@ class Session:
     """An open holonovel for one player. Construct does all the model
     work inside `turn`; transports carry text in and out, nothing more."""
 
-    def __init__(self, scenario: str, world: Any, arc: Any, meta: dict,
+    def __init__(self, scenario: str, world: Any, arc: Any,
+                 meta: "PlaythroughState | ScenarioMeta | dict",
                  provider: Provider, player_id: str | None,
                  entry_as_of: float | None = None,
-                 mode_override: str | None = None) -> None:
+                 mode_override: str | None = None,
+                 side_arcs: list | None = None) -> None:
         self.scenario = scenario
         self.player_id = player_id
         self.entry_as_of = entry_as_of
+        # `meta` is normally the PlaythroughState (scenario meta + this slot's
+        # session:episode.* overrides, precedence written once in scenario_meta). A bare
+        # scenario meta (ScenarioMeta / dict — tests, tools) is layered over the slot here.
+        state = (meta if isinstance(meta, PlaythroughState)
+                 else PlaythroughState.from_world(meta, world))
+        meta = state.meta
         # AS-OF PLAY HORIZON (B' S3): a HORIZON world (ingested fiction with a spaced source
         # axis) binds every canon read to `opening_as_of + turns-so-far`, so beats/conditions
         # and scene/presence reads see the opening state and never the source aftermath.
@@ -100,22 +114,13 @@ class Session:
         self._arc = arc
         # The rest of the arc portfolio (LIVING-WORLD-GENERATOR P1): side arcs
         # tick and conclude alongside the main arc but never end the scenario.
-        self._side_arcs = meta.get("_side_arcs") or []
+        self._side_arcs = side_arcs or []
         self._provider = provider
-        self._scope = meta.get("arc_scope") or None
-        # Prefer the PER-PLAYER episode scope persisted in THIS slot's session frame (written by
-        # game.continue_episode on a CONCLUDE→CONTINUE) over the shared, build-time scenario meta
-        # (Cx 191): the live reopen reloads the stale scenario .meta.json, so without this EP2 would
-        # cold-open with EP1's scope (the old cast + any polluted aliases). Mirrors the entry_epoch fix.
-        _slot_scope_loaded = False
-        try:
-            _slot_scope = PorcelainWorldReads(self._world).state(
-                "session:episode", "arc_scope", frame="session:main")
-            if _slot_scope:
-                self._scope = json.loads(_slot_scope) if isinstance(_slot_scope, str) else _slot_scope
-                _slot_scope_loaded = True
-        except Exception:
-            logger.exception("episode scope read failed; falling back to scenario meta")
+        # The PER-PLAYER episode scope (persisted in THIS slot's session frame by
+        # game.continue_episode, Cx 191) already beats the shared scenario meta's scope in
+        # `state` — EP2 must not cold-open with EP1's cast (see PlaythroughState).
+        self._scope = state.scope
+        _slot_scope_loaded = state.slot_scope_loaded
         # DRIFT D3 (cr re-review rounds 2-4): scope provenance needs THREE
         # sets at open — the SEALED beat baseline (what build-time scope's
         # beat-derived portion was, so subtraction classifies the persisted
@@ -136,7 +141,7 @@ class Session:
         except Exception:
             logger.exception("beat-scope baseline failed; removal disabled until refresh")
         self._sealed_beat_scope = _sealed_beat_scope
-        self._mode = meta.get("mode", "pure")
+        self._mode = meta.get("mode", InputAuthority.PURE.value)
         # The PLAYER's chosen experience (session-zero interview) overrides the
         # scenario's authored default. Three states:
         #   win_loss — a story that builds to an ending (has an aim; can terminate);
@@ -146,8 +151,12 @@ class Session:
         # In the live transport the player ALWAYS supplies mode_override (the
         # session-zero interview), so this default only governs CLI/tests/legacy.
         # `_endless` honors both the mode and the legacy `meta["endless"]` flag.
+        # KNOWN WART (audit B9, deliberately not fixed here): the two flags can DISAGREE —
+        # a freeplay-built world (meta endless=True) opened with mode_override="win_loss"
+        # gives _scenario_mode == "win_loss" AND _endless == True.
         self._scenario_mode = mode_override or meta.get("scenario_mode", "bounded")
-        self._endless = self._scenario_mode == "endless" or bool(meta.get("endless"))
+        self._endless = (self._scenario_mode == ScenarioMode.ENDLESS
+                         or bool(meta.get("endless")))
         # The game-type directive (GAME-TYPES.md): the maintained narrative
         # instruction for THIS kind of game (hand-wave vs dramatize, tension).
         # None for an unset/unknown type → free improvised narrative.
@@ -219,15 +228,7 @@ class Session:
             (set(self._scope or []) - getattr(self, "_sealed_beat_scope", set()))
             | (set() if _slot_scope_loaded else set(self._cast or {}))
             | {self._arc.protagonist})
-        try:
-            _extra_raw = PorcelainWorldReads(self._world).state(
-                "session:scope", "independent_extra", frame="session:main")
-            if _extra_raw:
-                self._independent_scope |= set(
-                    json.loads(_extra_raw) if isinstance(_extra_raw, str)
-                    else _extra_raw)
-        except Exception:
-            logger.exception("persisted independent-scope read failed; continuing without")
+        self._independent_scope |= state.independent_extra
         # The rebuild runs on BOTH paths (cr D3 round 5 — a mid-episode
         # repair must survive a reopen): the slot path differs only in its
         # provenance inputs (episode-local baseline; no stale meta cast).
@@ -243,19 +244,13 @@ class Session:
         # pre-play valid_from. Re-established on the executor contextvar at every turn so
         # turn_time (staging supersession + pacing fold) sits on the entry axis. Absent →
         # TURN_EPOCH (one-timeframe / legacy worlds — unchanged behavior).
-        from construct.arc.executor import TURN_EPOCH, set_entry_epoch
-        # Prefer the PER-PLAYER episode epoch persisted in THIS slot's session frame (written by
-        # game.continue_episode on a CONCLUDE→CONTINUE) over the shared, build-time scenario meta
-        # (Cx 138 #2): a continued episode raised the epoch for its boundary, and turns must stamp
-        # ABOVE it or terminal_outcome (scoped since the episode_start) won't see the new ending.
-        _slot_epoch = None
-        try:
-            _slot_epoch = PorcelainWorldReads(self._world).state(
-                "session:episode", "entry_epoch", frame="session:main")
-        except Exception:
-            logger.exception("episode epoch read failed; falling back to scenario meta")
-        self._entry_epoch = float(_slot_epoch if _slot_epoch is not None
-                                  else (meta.get("entry_epoch", TURN_EPOCH) or TURN_EPOCH))
+        from construct.arc.executor import set_entry_epoch
+        # `state.entry_epoch` is the PER-PLAYER episode epoch (slot row) over the shared
+        # scenario meta's (Cx 138 #2): a continued episode raised the epoch for its boundary,
+        # and turns must stamp ABOVE it or terminal_outcome (scoped since the episode_start)
+        # won't see the new ending. `state.meta` already carries the slot's PER-CHAPTER
+        # title / death policy (B2) laid over the scenario's.
+        self._entry_epoch = state.entry_epoch
         set_entry_epoch(self._entry_epoch)
         self._meta = meta
         self._closed = False
@@ -291,10 +286,11 @@ class Session:
             from construct.provider import default_provider
             provider = default_provider()
         start_playthrough(scenario, fresh=fresh, player_id=player_id)
-        world, arc, meta = open_playthrough(scenario, provider, player_id=player_id)
-        entry = _entry_as_of(world, requested=as_of, fresh=fresh)
-        return cls(scenario, world, arc, meta, provider, player_id, entry_as_of=entry,
-                   mode_override=mode_override)
+        pt = open_playthrough(scenario, provider, player_id=player_id)
+        entry = _entry_as_of(pt.world, requested=as_of, fresh=fresh)
+        return cls(scenario, pt.world, pt.arc, PlaythroughState.from_world(pt.meta, pt.world),
+                   provider, player_id, entry_as_of=entry, mode_override=mode_override,
+                   side_arcs=pt.side_arcs)
 
     @property
     def title(self) -> str:
@@ -339,13 +335,12 @@ class Session:
         transport to prepend to a reply. The narrator never sees this — it's a
         host-injected header, outside the agent's context."""
         from construct.clock import read_clock
-        from construct.foyer import state_value
         loc = self.location()
         when = read_clock(self._world, loc).render()
         where = ""
         if loc:
             where = (state_value(self._world.porcelain, loc, "name", as_of=self._horizon())
-                     or loc.split(":", 1)[-1].replace("_", " "))
+                     or humanize_id(loc))
         return f"{when} | {where}" if where else when
 
     def journal(self) -> str:
@@ -356,7 +351,6 @@ class Session:
         from construct.arc.executor import (
             arc_protected_keys, concealed_tokens, turn_time, value_leaks,
         )
-        from construct.foyer import state_value
         from construct.journal import render_journal
         proto = self._arc.protagonist
         h = self._horizon()
@@ -375,15 +369,16 @@ class Session:
 
         def _shows(r: Any) -> bool:
             vf = getattr(r, "valid_from", None)
-            if h is not None and vf is not None and float(vf) > h:
-                return False  # beyond the play horizon
             if vf is not None and float(vf) > _stamp:
                 return True   # learned in play — earned through the gated writes
             return ((str(r.entity), str(r.attribute)) not in _protected
                     and not value_leaks(str(getattr(r, "value", "")), _ctoks))
 
-        from construct.adapter import frame_facts
-        rows = [r for r in frame_facts(self._world, f"knows:{proto}") if _shows(r)]
+        # The frame's FOLDED knowledge at the play horizon (the engine's frame-knowledge
+        # recipe) — not a hand-fold over its raw rows; the horizon gate is the engine's.
+        from construct.remembrancer import frame_knowledge
+        rows = [r for r in frame_knowledge(self._world, f"knows:{proto}", as_of=h)
+                if _shows(r)]
 
         def _name_of(ent: str) -> str | None:
             try:
@@ -406,6 +401,10 @@ class Session:
                         and str(r.attribute) == "record"):
                     rec = json.loads(str(r.value))
                     for line in rec.get("settled", []):
+                        # records written before the fix carry the placeholder premise
+                        # `<protagonist> · kind · person` — not an answered question.
+                        if str(line).startswith(f"{proto} · kind · person"):
+                            continue
                         tok = str(line).split(" · ", 1)[0].strip()
                         if ":" in tok:
                             _settled_ids.add(tok)
@@ -420,11 +419,11 @@ class Session:
         change), and the world anchors tied to them. Returns None if unavailable
         (then the transport skips the Foyer and goes straight to the cold open)."""
         try:
-            from construct.foyer import world_anchors, state_value, _DETAIL_ATTRS
+            from construct.foyer import world_anchors, _DETAIL_ATTRS
             proto = self._arc.protagonist
             p = self._world.porcelain
             _h = self._horizon()  # the opening horizon (Cx 255): role/name/defaults at the start
-            name = state_value(p, proto, "name", as_of=_h) or proto.split(":")[-1].replace("_", " ")
+            name = state_value(p, proto, "name", as_of=_h) or humanize_id_last(proto)
             role = (state_value(p, proto, "role", as_of=_h)
                     or state_value(p, proto, "kind", as_of=_h) or "")
             defaults = {a: v for a in _DETAIL_ATTRS
@@ -512,7 +511,6 @@ class Session:
         the narrator may weave in IF it fits the trajectory (turn loop surfaces it).
         Append-only with a small cap; deduped by text."""
         import json
-        from construct.foyer import state_value
         text = (text or "").strip()
         if not text:
             return
@@ -526,7 +524,7 @@ class Session:
             wishes = (wishes + [text])[-6:]
             p.ingest_structured([{"entity": "session:wishes", "attribute": "list",
                                   "value": json.dumps(wishes), "value_type": "literal"}],
-                                frame="session:main")
+                                frame="session:main", classify="rules")
 
     def goal_statement(self) -> str | None:
         """The non-spoiling player-facing aim, shown only in win_loss mode.
@@ -597,15 +595,14 @@ class Session:
             return min(namelike, key=len)            # the tightest name-like handle
         s = str(entity)
         if ":" in s:
-            local = s.split(":", 1)[-1].replace("_", " ")   # humanized id beats a descriptive clause
-            return local.title() if s.startswith("person:") else local  # person slug = a proper name
+            # a humanized id beats a descriptive clause; a person slug is a proper name
+            return human_name(s)
         return (vals["alias"] + vals["title"] + [s])[0]
 
     def _opening_narration(self, intro: str) -> str:
         """Render the cold open from the establishing anchors (by name, in voice).
         Fail-open: returns '' so opening() degrades to a clean banner."""
         from construct import cohorts
-        from construct.foyer import state_value
         anchors, names = self._establishing_anchors()
         # COLD-OPEN LOCKSTEP (INVESTIGATION-SHAPE.md §3b / Cx 059): the opening must foreground
         # EXACTLY the people the engine considers present, computed with the SAME _colocated the
@@ -937,9 +934,7 @@ class Session:
             s = str(x)
             if s in names:
                 return names[s]
-            if ":" in s and s.split(":", 1)[0] in ("person", "place", "obj", "fact", "event"):
-                return s.split(":", 1)[-1].replace("_", " ")
-            return s
+            return humanize_typed_id(s)
 
         # CONCEAL the arc's load-bearing facts from the cold open — the same
         # (entity, attribute) keys the turn loop protects (the beats' conditions,
@@ -998,10 +993,10 @@ class Session:
         concealed = self._concealed_tokens()
 
         def _leaks(text: str, ev: str) -> bool:
-            blob = (f"{text} {ev.split(':', 1)[-1]}"
-                    .replace("_", " ").replace("-", " ").replace(":", " ").lower())
-            words = set(blob.split())
-            return bool(concealed & words)
+            # The ONE punctuation-proof screen (concealment.value_leaks): a whitespace split
+            # let 'the culprit,' through (audit 2026-10, the tier-1 bug in a second place).
+            from construct.arc.concealment import value_leaks
+            return value_leaks(f"{text} {id_local(ev)}", concealed)
 
         return [t for e, t in threads.items() if not _leaks(t, e)][:limit]
 
@@ -1160,7 +1155,6 @@ class Session:
         it furnishes one ONCE so the image has a paint source. Fail-open; idempotent per scene."""
         try:
             from construct import imagery
-            from construct.foyer import state_value
             if not imagery.enabled():
                 return None
             loc = self.location()
@@ -1233,7 +1227,6 @@ class Session:
         corpse — so the image depicts the real, furnished room (founder: not a bare
         hall). LIVING people are deliberately excluded (theatre of the mind); a dead
         body IS included. Read from the arc scope (the cast + key objects); best-effort."""
-        from construct.foyer import state_value
         p = self._world.porcelain
         proto = self._arc.protagonist
         _h = self._horizon()
@@ -1253,7 +1246,7 @@ class Session:
                         continue
             except Exception:
                 continue
-            name = state_value(p, e, "name", as_of=_h) or e.split(":", 1)[-1].replace("_", " ")
+            name = state_value(p, e, "name", as_of=_h) or humanize_id(e)
             kind = (state_value(p, e, "kind", as_of=_h) or "").strip()
             if e.startswith("person:"):
                 cond = " ".join(filter(None, (
@@ -1393,7 +1386,7 @@ class Session:
                              | set(self._read_independent_extra()))),
                          "value_type": "literal",
                          "valid_from": _tt(next_turn_number(self._world))},
-                    ], frame="session:main")
+                    ], frame="session:main", classify="rules")
                 except Exception:
                     logger.exception("independent-scope persist failed (in-memory set stands)")
             scope = self._independent_scope | self._beat_scope
@@ -1441,7 +1434,7 @@ def _entry_as_of(world: Any, requested: float | None, fresh: bool) -> float | No
             p.ingest_structured(
                 [{"entity": _ENTRY, "attribute": "kind", "value": "entry",
                   "valid_from": float(requested)}],
-                frame=_SESSION_FRAME)
+                frame=_SESSION_FRAME, classify="rules")
         return requested
     for ev in p.events(kind="entry", frame=_SESSION_FRAME):
         t = ev.get("t")

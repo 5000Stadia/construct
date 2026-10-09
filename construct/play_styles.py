@@ -15,6 +15,7 @@ of "what kind of game this is" never lapses.
 from __future__ import annotations
 
 from construct.play_styles_data import STYLE_CARDS
+from construct.text import alnum_words
 
 
 def _norm(key: str) -> str:
@@ -63,8 +64,7 @@ def names(game_types) -> list[str]:
 
 
 def _tokens(text: str) -> set[str]:
-    import re
-    return {t for t in re.split(r"[^a-z0-9]+", (text or "").lower()) if len(t) >= 3}
+    return set(alnum_words(text or "", min_len=3))
 
 
 def match(label: str) -> str | None:
