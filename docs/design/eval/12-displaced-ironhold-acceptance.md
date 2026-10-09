@@ -28,10 +28,33 @@ What happened, and what was done:
 2. **A build whose every chunk fails now stops at once with the cause** (merged as `a34ae81`).
 3. **Foreshadow pins were never indexed.** A second timeless `pin_index` row conflicted with the arc's own, and the fold served `[]`. **Fixed** (merged as `3eaf0bb`).
 4. **Continuity breaks the critic filed** (a hymn slip changing hands, `held_by` cycles). These trace to pattern-buffer's `holds`/`wearing` inversion at its gate, whose fix (GATE-INVERSE-ALIAS-V1) is with pbr. That is engine-side by our law; nothing is changed in construct.
-5. **Canon/prose location divergence.** Canon ends with the player inside `obj:laundry_barge` while the prose has him at the chapel threshold. This is likely the same `held_by` inversion; it is to be confirmed once pattern-buffer's fix ships.
+5. ~~**Canon/prose location divergence.**~~ **Withdrawn after run 2: a probe error, not a world error.** The probe read the player's place without the play horizon, so it printed the source book's later canon (`obj:laundry_barge`). Read at the horizon, as the session reads it, run 1 ended at `place:chapel_threshold`, which matches the prose. The probe is fixed.
 6. **Live bots.** The Codex opt-in's default cheap model is refused by this account. The live Telegram bots aren't running (last active in July), so no player has been hit. The fix at the next start is one line, sent to the monitor for Kabe.
 
-Run 2 (all three fixes, a fresh build) is below.
+## Run 2 — FAIL (criterion 1), causes found and fixed
+
+Fresh build with all of run 1's fixes. Chapter 1 played 11 turns. The player worked the dead man and the red-thread chit, broke out onto the river road when a warrant seal cracked, reached the chain-piers, took a false name, and stepped into a downstream hauler. The arc reached its won state on turn 9, at the piers (`beat:river_window_won`, lifecycle `won`, the narrator told the decisive moment is within reach). **The chapter did not conclude**, so chapter 2 never ran.
+
+1. **The conclusory move was read as plain action.** On turn 11 the player made the escape's decisive act ("knot it around my wrist like a vow before stepping down into the hauler … I'm done earning the old"). The classifier only had accusation-shaped examples and nothing about the story's readiness, so `commits` stayed false. **Fixed:** while a commitment-owned win_loss arc is ready, classify is told the decisive moment is within reach and what this shape's conclusory act is (`commitment_kind`). The earned gate, stage gate and pillar bounce still stand behind it.
+2. **A turn was lost to an HTTP 503** ("no healthy upstream") on narration. The stream-error fix covered errors inside a stream, not a failed status before it. **Fixed:** 429 and 5xx statuses are transient and retried; other 4xx errors still fail fast.
+3. **The probe printed the wrong end place.** See run 1's item 5. Played to the horizon, run 2 ended at `place:river_road`, which **was minted in play** (absent from the pristine world). So criterion 2 holds for where canon has the player.
+4. **Finding, for Kabe: the player cannot board a vessel.** "Step down into the hauler" resolved to `obj:hauler`, and the movement rule (Cx 327) never puts a person *in* an object, so the move was dropped. The prose ends with the player aboard and drifting downstream while canon keeps him on the river road (`obj:chain_piers` and `place:low_quay` sit inside it). The source book itself puts people in boats (`person:ewan in obj:mercy_finch`). Conveyances (enter a vessel, the vessel travels, the next chapter opens aboard) are a design question. Not changed tonight.
+5. **Critic notes:** one, on Pike's role (staff in the opening, the condemned man's paperwork later). Not a WHERE note.
+
+### R23 timings, run 2 (10 instrumented turns)
+
+| | Run 2 |
+|---|---|
+| Player-felt (cp_generator + narrate) | 41–209 s; typically 70–110 s |
+| Salience window | 8–69 s; typically 30–57 s |
+| Narrate | 19–51 s; 124 s on a turn with a transport retry |
+| Player-input ingest | 5–29 s |
+| Settle tail (post_extract + promote) | 27–55 s; it did not grow steadily this run |
+| Classify | 5–8 s |
+
+The ranking holds: the serial salience window is the largest block before the reply, then narration, then the settle tail after it.
+
+Run 3 (these fixes, a fresh build) follows.
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
