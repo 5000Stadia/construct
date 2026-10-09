@@ -8,13 +8,20 @@ module is pure structure.
 
 from __future__ import annotations
 
-import enum
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from construct.arc.conditions import Expr
 
+# --- the arc string vocabularies (audit 2026-10 arc F7) -------------------
+# Every enum below is a `StrEnum` whose member VALUES are the exact strings the
+# plot rows, JSON caches and prompts already carry: a member == its string, hashes
+# like it, and serializes as it, so persistence is byte-identical and bare-string
+# comparisons elsewhere keep working. Write the member at definition sites and
+# comparisons; write `.value` (the plain str) where a row/item is composed.
 
-class Phase(enum.Enum):
+
+class Phase(StrEnum):
     SETUP = "setup"
     RISING = "rising"
     CRISIS = "crisis"
@@ -22,18 +29,112 @@ class Phase(enum.Enum):
     FALLING = "falling"
 
 
-class Weight(enum.Enum):
+class Weight(StrEnum):
     REQUIRED = "required"
     OPTIONAL = "optional"
     FLAVOR = "flavor"
 
 
-class Rung(enum.Enum):
+class Rung(StrEnum):
     SURFACE = "surface"
     DRAW = "draw"
     CONVERGE = "converge"
     CONFRONT = "confront"
     REFUSAL = "refusal"
+
+
+class BeatStatus(StrEnum):
+    """A beat's stored `status` row (absent reads as PENDING)."""
+    PENDING = "pending"
+    ACHIEVED = "achieved"
+    CLOSED = "closed"
+
+
+class ClockStatus(StrEnum):
+    """A clock's stored `status` row."""
+    ARMED = "armed"
+    FIRED = "fired"
+
+
+class Rearm(StrEnum):
+    """A clock's `rearm` policy."""
+    ONCE = "once"
+    REPEAT = "repeat"
+
+
+class Lifecycle(StrEnum):
+    """An arc's lifecycle (LIVING-WORLD-GENERATOR §3): ACTIVE is live, the other
+    four are terminal."""
+    ACTIVE = "active"
+    WON = "won"
+    LOST = "lost"
+    CANCELLED = "cancelled"
+    INCOMPLETABLE = "incompletable"
+
+
+#: The terminal lifecycles (everything but ACTIVE), in the stored order.
+LIFECYCLE_TERMINALS: tuple[Lifecycle, ...] = (
+    Lifecycle.WON, Lifecycle.LOST, Lifecycle.CANCELLED, Lifecycle.INCOMPLETABLE)
+
+
+class Outcome(StrEnum):
+    """`arc_outcome`'s binary classification (the narrative-shaped ending is
+    `OutcomeShape`)."""
+    WON = "won"
+    LOST = "lost"
+
+
+class Coverage(StrEnum):
+    """Tri-state coverage of one causal pillar."""
+    GENUINE = "genuine"
+    FALSE = "false"
+    UNFILLED = "unfilled"
+
+
+class OutcomeShape(StrEnum):
+    """The narrative-shaped ending vocabulary (CONCLUSIVE-OUTCOME-SPEC C1)."""
+    TRIUMPH = "triumph"
+    COSTLY_VICTORY = "costly_victory"
+    BITTERSWEET = "bittersweet"
+    PARTIAL = "partial"
+    FAILURE = "failure"
+    QUIET_FAILURE = "quiet_failure"
+
+
+class WorldEvent(StrEnum):
+    """An external result read alongside coverage (Contest's scoreboard)."""
+    WIN = "win"
+    LOSS = "loss"
+
+
+class DeltaType(StrEnum):
+    """The character-delta a ConclusionShape declares (ARC-LAYER §6)."""
+    DRIVE_INVERTED = "drive_inverted"
+    DESIRE_AT_COST = "desire_at_cost"
+    DESIRE_RENOUNCED = "desire_renounced"
+    IDENTITY_ACCEPTED = "identity_accepted"
+    HOMECOMING_CHANGED = "homecoming_changed"
+
+
+class CostDisposition(StrEnum):
+    """How a shape's pillar coverage is READ at the conclusion (CATALOG §0)."""
+    PERIL_REDEMPTION = "peril_redemption"
+    REPAIR = "repair"
+    SACRIFICE = "sacrifice"
+    FAIL_FORWARD = "fail_forward"
+
+
+class TerminalOwner(StrEnum):
+    """What closes the story for a shape (Cx 141)."""
+    COMMITMENT = "commitment"
+    WORLD_EVENT = "world_event"
+
+
+class PinScope(StrEnum):
+    """A pin's scope kind (PINNED-AWARENESS)."""
+    REGION = "region"
+    TEMPORAL = "temporal"
+    SOCIAL = "social"
 
 
 @dataclass(frozen=True)
@@ -87,7 +188,7 @@ class Clock:
     effects: tuple[dict, ...]
     bound_to: str | None = None  # beat_id or arc_id
     rung: Rung | None = None
-    rearm: str = "once"  # "once" | "repeat"
+    rearm: str = Rearm.ONCE  # a `Rearm` ("once" | "repeat")
 
 
 @dataclass(frozen=True)
@@ -97,8 +198,7 @@ class ConclusionShape:
     early success / repair-or-refusal)."""
 
     shape_id: str
-    delta_type: str  # drive_inverted | desire_at_cost | desire_renounced
-    #               | identity_accepted | homecoming_changed
+    delta_type: str  # a `DeltaType` value (kept `str`: a stored row may carry any text)
     tension: tuple[str, str, str]  # (entity, stronger_drive, weaker_drive)
     world_condition: Expr
     premise: Expr
@@ -125,7 +225,7 @@ class Pin:
     salience, never briefed raw (no leak, Cx 062 #3)."""
 
     pin_id: str
-    scope_kind: str  # "region" | "temporal" | "social"
+    scope_kind: str  # a `PinScope` value ("region" | "temporal" | "social")
     subject_entity: str
     directive: str
     subject_attribute: str | None = None

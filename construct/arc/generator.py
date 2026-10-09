@@ -48,7 +48,7 @@ from construct.arc.executor import (
     stored_lifecycle,
     turn_time,
 )
-from construct.arc.grammar import Arc, Phase
+from construct.arc.grammar import LIFECYCLE_TERMINALS, Arc, Phase  # noqa: F401
 from construct.arc.lint import lint_arc
 from construct.provider import Provider
 
@@ -61,8 +61,6 @@ GEN_DEPTH_CAP = 2
 #: Min turns since the last generation ATTEMPT before another may fire (paced
 #: off the lineage receipt, NOT the live thread count — Cx #2).
 GEN_COOLDOWN = 2
-
-LIFECYCLE_TERMINALS = ("won", "lost", "cancelled", "incompletable")
 
 #: Routine bookkeeping event kinds excluded from the "first-time kind" salience
 #: signal — internal host/engine events are not player-caused developments (§A).
@@ -112,7 +110,7 @@ def _last_try_turn(reads: Any) -> int:
 def _active_generated(reads: Any, side_arcs: list[Arc]) -> int:
     n = 0
     for a in side_arcs:
-        if reads.state(a.arc_id, "generated", frame=PLOT) == "yes" and \
+        if arc_io.is_yes(reads.state(a.arc_id, "generated", frame=PLOT)) and \
                 stored_lifecycle(reads, a) not in LIFECYCLE_TERMINALS:
             n += 1
     return n
