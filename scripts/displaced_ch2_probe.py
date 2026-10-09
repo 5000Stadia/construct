@@ -154,9 +154,10 @@ def main() -> None:
     from construct.adapter import PorcelainWorldReads
     from construct.arc.executor import arc_concluded
     from construct.turnloop import terminal_outcome
-    reads = PorcelainWorldReads(s._world)
-    prot = s._arc.protagonist
-    end_loc = (s._world.porcelain.locate(prot) or ["?"])[0]
+    # read at the PLAY horizon, as the session does: a head read sees the source's later canon
+    # (R20 runs 1 and 2 printed the book's end location, not where play left the player)
+    reads = PorcelainWorldReads(s._world, horizon=s._horizon())
+    end_loc = s.location() or "?"
     ended = terminal_outcome(reads) is not None or arc_concluded(reads, s._arc)
     w(f"\n**CH1 END STATE:** protagonist at `{end_loc}`; concluded={ended}")
     s.close()
@@ -175,7 +176,7 @@ def main() -> None:
         s2._meta["continuation_intro"] = meta2["continuation_intro"]
     ch2_open = s2.opening()
     w("## CH2 OPENING\n\n" + ch2_open + "\n")
-    open_loc = (s2._world.porcelain.locate(s2._arc.protagonist) or ["?"])[0]
+    open_loc = s2.location() or "?"
     w(f"**CH2 OPEN STATE:** protagonist at `{open_loc}` "
       f"(ch1 ended at `{end_loc}`)\n")
     story2 = story[-2500:] + "\n\n===== CHAPTER 2 BEGINS =====\n\n" + ch2_open
