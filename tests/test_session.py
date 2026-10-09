@@ -329,6 +329,30 @@ class TestOpeningGrounding:
         assert m.call_args.kwargs.get("grounding") is False       # present cast → not a held solo open
         s.close()
 
+    def test_session_hands_run_turn_the_active_shapes_commitment_kind(self, scenario):
+        # AUDIT-2026-10: Session resolves the world's game type to its story shape and passes
+        # the SHAPE'S OWN commitment_kind (contest -> 'achieved_state') to run_turn.
+        from unittest.mock import patch
+        import construct.session as session_mod
+        meta_path = WORLDS_DIR / f"{scenario}.meta.json"
+        meta = json.loads(meta_path.read_text())
+        meta["game_type"] = "tactical_combat"
+        meta_path.write_text(json.dumps(meta))
+        real = session_mod.run_turn
+        seen = {}
+
+        def _spy(*a, **kw):
+            seen.update(kw)
+            return real(*a, **kw)
+
+        s = Session.open(scenario, player_id="u1", provider=_provider())
+        s.opening()
+        with patch.object(session_mod, "run_turn", _spy):
+            s.turn("I look around the study.")
+        assert seen.get("commitment_kind") == "achieved_state"
+        assert seen.get("judgment_type") == "proof-vs-standard"
+        s.close()
+
     def test_solo_fresh_open_holds_the_call(self, scenario):
         # the other half of the seam (Cx 335 #5): a fresh open with NO present cast (the demo
         # scenario — person:rival has no location) IS a held solo open → grounding=True.

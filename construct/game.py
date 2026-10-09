@@ -936,7 +936,7 @@ def _stage_commit_arc(world: Any, arc: Arc) -> None:
     from construct.arc.executor import turn_time
 
     world.porcelain.ingest_structured(
-        arc_io.arc_to_items(arc) + arc_io.index_items(arc))
+        arc_io.arc_to_items(arc) + arc_io.index_items(arc), classify="rules")
     # #107 SEAL-LINT (protagonist coherence — the founder's Minutes Before Bullets
     # split): the arc binds play through THREE surfaces that must name one figure —
     # the committed `arc:main.protagonist` entity row (what arc-reload reads), the
@@ -962,7 +962,7 @@ def _stage_commit_arc(world: Any, arc: Arc) -> None:
                  "value": _committed, "valid_from": turn_time(0)},
                 {"entity": "event:seal_incoherence", "attribute": "authored",
                  "value": arc.protagonist, "valid_from": turn_time(0)},
-            ], frame="session:main")
+            ], frame="session:main", classify="rules")
     except Exception as exc:  # the lint must never sink a build
         logger.warning("#107 seal-lint skipped: %s", exc)
     # The portfolio manifest (LIVING-WORLD-GENERATOR P1): session zero authors
@@ -970,11 +970,11 @@ def _stage_commit_arc(world: Any, arc: Arc) -> None:
     # explicitly (rather than relying on the fail-open default) so the multi-arc
     # load path is exercised uniformly; side arcs are added by the P2 generator.
     world.porcelain.ingest_structured(
-        arc_io.portfolio_items([arc.arc_id], main_arc_id=arc.arc_id))
+        arc_io.portfolio_items([arc.arc_id], main_arc_id=arc.arc_id), classify="rules")
     world.porcelain.ingest_structured([
         {"entity": "event:turn_0", "attribute": "kind", "value": "turn",
          "valid_from": turn_time(0)},
-    ], frame="session:main")
+    ], frame="session:main", classify="rules")
 
 
 def _seed_cast_clues(world: Any, arc: Arc, cast_nodes: tuple) -> None:
@@ -1763,11 +1763,11 @@ def _author_foreshadow_pins(world: Any, clues: list[tuple[str, str]]) -> None:
                       directive=feel, anchor=entity, severity=0.6, escalates=True)
             items += pin_to_items(pin, "arc:main")
             new_ids.append(pin_id)
-        p.ingest_structured(items, frame="plot:main")
+        p.ingest_structured(items, frame="plot:main", classify="rules")
         p.ingest_structured([{"entity": "arc:main", "attribute": "pin_index",
                               "value": json.dumps(existing + new_ids),
                               "value_type": "literal", "timeless": True}],
-                            frame="plot:main")
+                            frame="plot:main", classify="rules")
         logger.info("flavor: %d foreshadow pins authored", len(new_ids))
     except Exception as exc:
         logger.warning("foreshadow-pin authoring skipped: %s", exc)
@@ -3023,10 +3023,14 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # Session.open reloads the SHARED, stale scenario meta — so the returned meta isn't enough.
         # Session prefers these slot rows over meta (mirrors the entry_epoch fix). Scope is a JSON-blob
         # literal so the classifier never mistypes it.
-        _epi_rows = [{"entity": "session:episode", "attribute": "entry_epoch", "value": epoch}]
+        # Every chapter row is stamped on THIS chapter's turn axis (as chapter_title is): unstamped
+        # rows all landed at 0.0, tied, and after a third chapter the engine served chapter two.
+        _epi_rows = [{"entity": "session:episode", "attribute": "entry_epoch", "value": epoch,
+                      "valid_from": turn_time(turn)}]
         if _ep2_scope:
             _epi_rows.append({"entity": "session:episode", "attribute": "arc_scope",
-                              "value": json.dumps(_ep2_scope), "value_type": "literal"})
+                              "value": json.dumps(_ep2_scope), "value_type": "literal",
+                              "valid_from": turn_time(turn)})
         # EPISODE-LOCAL independent provenance (cr D3 round 5): the hook ids
         # are THIS episode's positive non-beat scope origins; writing the row
         # here RESETS it per episode (latest-wins), so a mid-episode reopen
@@ -3035,7 +3039,7 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # without ever re-admitting stale scenario-meta cast.
         _epi_rows.append({"entity": "session:scope", "attribute": "independent_extra",
                           "value": json.dumps(sorted(set(_hook_ids))),
-                          "value_type": "literal"})
+                          "value_type": "literal", "valid_from": turn_time(turn)})
         # B2: the reopened Session reloads the SHARED scenario meta, so the new chapter's
         # title / death policy (computed above) are persisted in THIS slot's session frame
         # beside the epoch and scope rows; Session prefers them. A /restart to chapter one
