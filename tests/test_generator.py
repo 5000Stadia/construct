@@ -1392,6 +1392,13 @@ def test_salient_spine_touch_value_fires():
     assert lines
 
 
+def test_engine_identity_merge_is_never_salient():
+    # pattern-buffer's events() one-reader (R22) surfaces identity_merge events; a merge is
+    # engine bookkeeping, not a moment, even the first one and even with a cause
+    ev = _ev("identity_merge", "event:merge_1", caused_by=("event:reconcile",))
+    assert salient_moments([], [ev], set(), set()) == []
+
+
 def test_salient_first_time_kind():
     # Signal 2: a new event kind not in prior_kinds → salient.
     ev = _ev("confrontation", "event:confrontation_1")

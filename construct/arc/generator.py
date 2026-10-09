@@ -88,6 +88,10 @@ ROUTINE_EVENT_KINDS: frozenset[str] = frozenset({
     # AFTER clock_pass, so without these the first escalation firing read as "a new
     # kind of event" and woke the player-caused opportunistic generator.
     "clock_fired", "pressure",
+    # The ENGINE's own identity bookkeeping: pattern-buffer's events() one-reader (R22) will
+    # return `identity_merge` events that classification never reached. A merge is never a
+    # dramatic moment, and one landing in a turn window must not wake the generator.
+    "identity_merge",
 })
 
 #: Diegetic-minute quiet threshold for the ambient trigger (§C, P2c).
