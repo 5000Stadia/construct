@@ -1381,6 +1381,13 @@ def _partition_frames(items: list) -> tuple[list[dict], list[str]]:
 #: too late to carry the turn coordinate. One spelling carries containment at the seam: `in`.
 _CONTAINMENT_SYNONYMS = frozenset({"in", "inside", "located_in", "within"})
 
+#: Every attribute that can carry an object off the player at the promote gate. The engine folds
+#: `held_by`/`worn_by`/`carried_by` into containment beside `in` (and aliases `holds`/`wearing` to
+#: the first two), so a narrator row `obj:hymn held_by person:x` moves a held object as surely as
+#: `obj:hymn in obj:desk` does. The held-object guard checks all of them, not `in` alone (pb's
+#: reviewer, GATE-INVERSE-ALIAS-V1 r1.2: the R20 hymn slip changed hands this way).
+_HELD_RELOCATING_ATTRS = _CONTAINMENT_SYNONYMS | {"held_by", "worn_by", "carried_by"}
+
 #: Attributes whose narrator-promoted value is TEMPORAL STATE (true from THIS turn),
 #: not a timeless trait. A promoted row with no `valid_from` defaults to 0.0 — fine for
 #: a trait (colour/occupation are true-always, learned-now via `asserted_at`), but WRONG
@@ -6977,11 +6984,12 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # policy, a different layer.
             # POSSESSION IS HOST-OWNED: the narrator may not relocate a PLAYER-HELD object. A held
             # object's `in` changes ONLY via the deterministic take/drop steps; a narrator row that
-            # moves it elsewhere (`obj:pencil in obj:desk`, `obj:token in obj:pocket`) is drift that
+            # moves it elsewhere (`obj:pencil in obj:desk`, `obj:token in obj:pocket`, `obj:hymn held_by
+            # person:x` — any `_HELD_RELOCATING_ATTRS`) is drift that
             # strands it off the player. Quarantine it unless the player licensed the move THIS turn
             # (a drop the deterministic step already committed → key in pre_keys). Keeps inventory on
             # the player across locations (founder live cohesion test, 2026-06-29).
-            if (attribute == "in" and str(entity) in _held_now
+            if (attribute in _HELD_RELOCATING_ATTRS and str(entity) in _held_now
                     and str(newv) != arc.protagonist and (entity, attribute) not in pre_keys
                     and entity != (trace.dropped or None)):
                 quarantined.append((entity, attribute))

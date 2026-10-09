@@ -755,6 +755,32 @@ class TestFullTurn:
         assert world.porcelain.state("obj:pencil", "in")["fact"]["value"] == PLAYER  # stays held
         assert world.porcelain.state("obj:token", "in")["fact"]["value"] == PLAYER
 
+    def test_narrator_may_not_hand_a_held_object_to_someone_else(self, world):
+        # R20 run 1 (2026-10-08): a hymn slip the player held changed hands because the narrator's
+        # extraction said `held_by person:x`, and the held-object guard checked `in` only. Every
+        # containment attribute that carries an object off the player is guarded now.
+        arc = make_arc()
+        seed_arc(world, arc)
+        world.ingest_structured([{"entity": "obj:slip", "attribute": "kind", "value": "slip"},
+                                 {"entity": "obj:slip", "attribute": "name", "value": "hymn slip"},
+                                 {"entity": "obj:slip", "attribute": "in", "value": PLAYER}])
+        world._extractions.append({"items": []})                       # player input
+        world._extractions.append({"items": [                          # narrator prose extraction
+            {"entity": "obj:slip", "attribute": "held_by", "value": "person:rival",
+             "value_type": "entity", "frame": "canon"},
+        ]})
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The rival's eyes go to the hymn slip in your hand."},
+        ])
+        result = run_turn(world, arc, provider, "I keep the slip close.", turn=2,
+                          scope=[PLAYER, "obj:slip", "person:rival", "place:study"])
+        assert ("obj:slip", "held_by") in result.trace.quarantined
+        # `held_by` reads through the engine's containment fold, so canon still says the player
+        assert world.porcelain.state("obj:slip", "held_by")["fact"]["value"] == PLAYER
+        assert world.porcelain.locate("obj:slip")[0] == PLAYER       # still the player's
+
     def test_gate_quarantines_unlicensed_arc_key_promotes_ordinary(self, world):
         # GATED-INGEST slice 2 (momentous default-deny, option A): a NEW, UNLICENSED
         # narrator assertion of an ARC KEY (handing away the answer) is quarantined;
