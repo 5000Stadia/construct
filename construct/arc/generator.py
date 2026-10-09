@@ -270,6 +270,11 @@ def window_events(events: list, floor: float) -> list:
     return [e for e in events if getattr(e, "at", None) is not None and e.at > floor]
 
 
+#: The extractor's fallback kind for an event it could not type. pattern-buffer's events()
+#: one-reader (R22) surfaces such rows (13 in live worlds), and a few with no kind at all.
+_GENERIC_EVENT_KIND = "event"
+
+
 def salient_moments(fact_rows: list[dict], events: list,
                     prior_kinds: set[str], spined: set[str]) -> list[str]:
     """Deterministic, zero-model-call salience read over the turn's committed delta.
@@ -310,7 +315,9 @@ def salient_moments(fact_rows: list[dict], events: list,
             # causal linkage (else a routine turn/arc event with caused_by would
             # make EVERY turn salient and the filter would stop filtering).
             continue
-        if kind not in prior_kinds:
+        if kind and kind != _GENERIC_EVENT_KIND and kind not in prior_kinds:
+            # an untyped event (no kind, or the extractor's fallback 'event') says nothing new
+            # about the story by its kind; it can still ripple below
             lines.append(
                 f"a new kind of event occurred this turn: {kind!r} "
                 f"(not seen before in this story)"
