@@ -340,7 +340,7 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         # the explicit cancel: the deed walked back to the old story
         try:
             p.ingest_structured(tangent_mod.cancel_rows(at=turn_time(turn)),
-                                frame=SESSION, classify="batch")
+                                frame=SESSION, classify="rules")
             trace.tangent = "cancelled"
             logger.info("tangent pending cancelled (the deed walked back)")
         except Exception as exc:  # noqa: BLE001 — expiry will lapse it
@@ -440,13 +440,13 @@ def _tangent_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     # neither is story structure; expiry would lapse a surviving pending)
     try:
         p.ingest_structured(tangent_mod.cancel_rows(at=turn_time(turn)),
-                            frame=SESSION, classify="batch")
+                            frame=SESSION, classify="rules")
         title = str(proposal.get("title") or "").strip()
         if title:
             p.ingest_structured([{
                 "entity": "session:episode", "attribute": "title",
                 "value": title, "valid_from": turn_time(turn)}],
-                frame=SESSION, classify="batch")
+                frame=SESSION, classify="rules")
     except Exception:  # noqa: BLE001
         trace.dropped_cohorts.append("tangent_post_adoption bookkeeping")
     logger.info("tangent ADOPTED: %s (%r)", new_id, pending.aim)
@@ -1809,7 +1809,7 @@ def _store_route_price(world: Any, a: str | None, b: str, minutes: int, turn: in
             "value": json.dumps({"o": a or "", "d": b, "est": int(minutes),
                                  "turn": turn}),
             "value_type": "literal", "valid_from": turn_time(turn),
-        }], frame=SESSION, classify="batch")
+        }], frame=SESSION, classify="rules")
         return any(r.get("entity") == "session:journey_price" and r.get("attribute") == key
                    for r in _receipt_rows(receipt))
     except Exception:  # noqa: BLE001 — anchoring is best-effort
@@ -3130,7 +3130,7 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     cb_rows = drift.callback_rows(beat_id, affected, callback_line,
                                   moment_id, turn)
     try:
-        cb_receipt = world.porcelain.ingest_structured(cb_rows, frame=SESSION)
+        cb_receipt = world.porcelain.ingest_structured(cb_rows, frame=SESSION, classify="rules")
         cb_confirmed, _ = confirmed_batch(cb_rows, _receipt_rows(cb_receipt),
                                           cap=len(cb_rows))
         cb_ok = len(cb_confirmed) == len(cb_rows)
@@ -3599,7 +3599,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
          "value": new_id, "valid_from": turn_time(turn), "frame": PLOT},
     ]
     try:
-        receipt = world.porcelain.ingest_structured(rows)
+        receipt = world.porcelain.ingest_structured(rows, classify="rules")
         confirmed, _ = confirmed_batch(rows, _receipt_rows(receipt), cap=len(rows))
         ok = len(confirmed) == len(rows)
     except Exception:  # noqa: BLE001
@@ -4419,7 +4419,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             "value": json.dumps({"est": _est_min, "turn": turn,
                                  "priceable": _priceable}),
             "value_type": "literal", "valid_from": turn_time(turn),
-        }], frame=SESSION, classify="batch")
+        }], frame=SESSION, classify="rules")
         trace.movement_status = "deliberating"
         trace.deliberating = (f"{label} — roughly {_est_min} minutes of travel against "
                               f"about {int(_delib_deadline[0])} minutes left")
@@ -4864,7 +4864,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 tangent_mod.pending_rows(_t_aim, turn=turn,
                                          action=player_input,
                                          at=turn_time(turn)),
-                frame=SESSION, classify="batch")
+                frame=SESSION, classify="rules")
             trace.tangent = f"pending:{_t_aim}"
             logger.info("tangent declared (beat 1): %r", _t_aim)
         except Exception as exc:  # noqa: BLE001 — the receipt is retryable
@@ -5154,7 +5154,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         p.ingest_structured([
             {"entity": f"event:arc_touch_{turn}", "attribute": "kind",
              "value": "arc_touch", "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # arc-touch marker — bookkeeping
+        ], frame=SESSION, classify="rules")  # arc-touch marker — bookkeeping
 
     # 4. World tick (strict order; beats LAST). Atoms read LIVE canon
     #    directly: per-key folds are ~0.2ms post-engine-037 (were seconds
@@ -5714,7 +5714,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         [{"entity": f"card:{card_id}", "attribute": "weave_state",
                           "value": "hook_proposed"},
                          {"entity": "weave:pacing", "attribute": "last_turn", "value": turn}],
-                        frame=SESSION, classify="batch")
+                        frame=SESSION, classify="rules")
         except Exception as exc:  # governance must never sink the turn
             trace.dropped_cohorts.append(f"weave_pick ({exc})")
 
@@ -5787,7 +5787,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     {"entity": "session:peril", "attribute": "cause",
                      "value": (uncertain_of or player_input)[:200],
                      "valid_from": turn_time(turn)},
-                ], frame=SESSION, classify="batch")
+                ], frame=SESSION, classify="rules")
                 _death_staged = True
                 trace.peril = "staged"
             elif _peril_scene and (not mortal_risk
@@ -5798,7 +5798,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([
                     {"entity": "session:peril", "attribute": "scene", "value": "",
                      "valid_from": turn_time(turn)},
-                ], frame=SESSION, classify="batch")
+                ], frame=SESSION, classify="rules")
                 trace.peril = "cleared"
             elif _peril_standing and mortal_risk:
                 trace.peril = "standing"
@@ -6095,7 +6095,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         p.ingest_structured([
             {"entity": f"event:conclusion_{turn}", "attribute": "kind",
              "value": "conclusion", "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # conclusion marker — bookkeeping
+        ], frame=SESSION, classify="rules")  # conclusion marker — bookkeeping
 
     # Win/loss termination (WIN-LOSS §10): STRICTLY in `win_loss` mode (founder
     # ruling) — endless/freeplay never terminate. On the first won/lost, write
@@ -6151,7 +6151,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     p.ingest_structured([{
                         "entity": "session:clarification", "attribute": "asked",
                         "value": f"turn_{turn}", "valid_from": turn_time(turn)}],
-                        frame=SESSION, classify="batch")
+                        frame=SESSION, classify="rules")
                     logger.info("commitment clarification beat (missing: %s)",
                                 _gate.get("missing"))
             except Exception as exc:  # noqa: BLE001 — never block the commitment path
@@ -6209,7 +6209,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              "value": "commitment", "valid_from": turn_time(turn)},
             {"entity": f"event:commitment_{turn}", "attribute": "grade",
              "value": commitment_grade, "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # commitment marker — bookkeeping
+        ], frame=SESSION, classify="rules")  # commitment marker — bookkeeping
     trace.commitment = commitment if commits else ""
     trace.commitment_grade = commitment_grade
     trace.commitment_bounced = commitment_bounced
@@ -6296,7 +6296,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                  "valid_from": turn_time(turn)},
                 {"entity": _rcpt, "attribute": "agent", "value": arc.protagonist,
                  "value_type": "entity", "valid_from": turn_time(turn)},
-            ], frame=SESSION, classify="batch")
+            ], frame=SESSION, classify="rules")
             set_lifecycle(world, arc, "lost", turn)
         else:
             _rcpt = f"event:arc_outcome_{turn}"
@@ -6327,7 +6327,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     {"entity": _rcpt, "attribute": "basis",
                      "value": conc.get("basis", ""), "valid_from": turn_time(turn)},
                 ]
-            p.ingest_structured(_shape_rows, frame=SESSION, classify="batch")
+            p.ingest_structured(_shape_rows, frame=SESSION, classify="rules")
             set_lifecycle(world, arc, main_life, turn)
         # COMMITMENT-AS-EFFECT slice 3 (Cx 105 #5): a HOLLOW/unjust main landing writes a CONCRETE
         # canon consequence — the fallout the next episode grows from — anchored via `caused_by` to
@@ -7025,7 +7025,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         p.ingest_structured([
             {"entity": f"event:turn_{turn}", "attribute": "concealment_audit",
              "value": trace.concealment_audit, "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # bookkeeping (audit) — no durability (K 077)
+        ], frame=SESSION, classify="rules")  # bookkeeping (audit) — no durability (K 077)
 
         # Append this beat to the rolling transcript (the narrator's short-term memory).
         # Beats past the verbatim window age out; once a BATCH has accumulated, fold
@@ -7045,7 +7045,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([
                     {"entity": _MEMORY, "attribute": "text", "value": updated["memory"][:6000],
                      "value_type": "literal", "valid_from": turn_time(turn)},
-                ], frame=SESSION, classify="batch")  # narrative memory literal — no durability
+                ], frame=SESSION, classify="rules")  # narrative memory literal — no durability
                 _recent = _recent[-_RECENT_TURNS:]  # aged beats now live in memory
                 trace.cohort_calls.append("compact_memory:main")
             except Exception as exc:  # noqa: BLE001 — never break the turn on memory
@@ -7056,7 +7056,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             {"entity": _TRANSCRIPT, "attribute": "recent",
              "value": json.dumps(_recent), "value_type": "literal",
              "valid_from": turn_time(turn)},
-        ], frame=SESSION, classify="batch")  # transcript literal — no durability
+        ], frame=SESSION, classify="rules")  # transcript literal — no durability
 
         # Advance diegetic time POST-RENDER for the normal case (richer estimate — it can use the
         # narration), UNLESS a time-deadline arc already advanced it early (Cx 173 #3) so the deadline
@@ -7080,7 +7080,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([
                     {"entity": _n, "attribute": "last_seen_min", "value": _mins_now,
                      "valid_from": turn_time(turn)} for _n in npcs
-                ], frame=SESSION, classify="batch")
+                ], frame=SESSION, classify="rules")
             except Exception:  # noqa: BLE001
                 logger.debug("last-seen markers skipped", exc_info=True)
         if not _grounding_runway:

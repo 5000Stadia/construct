@@ -170,7 +170,7 @@ def mark_nudge(world: Any, thread: str, minutes_now: float, turn: int) -> None:
          "value": thread, "valid_from": turn_time(turn)},
         {"entity": "session:drift", "attribute": "last_nudge_min",
          "value": minutes_now, "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def relocation_receipt(reads: Any, beat_id: str) -> dict | None:
@@ -206,7 +206,7 @@ def mark_relocation(world: Any, beat_id: str, old_staging: str | None,
          "value": new_staging, "valid_from": turn_time(turn)},
         {"entity": f"session:relocated_{slug}", "attribute": "old_staging",
          "value": old_staging or "", "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift relocation committed: %s -> %s (beat %s)",
                 old_staging, new_staging, beat_id)
 
@@ -430,7 +430,7 @@ def mark_moment(world: Any, beat_id: str, event_id: str, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": f"session:moment_{slug}", "attribute": "done",
          "value": event_id, "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def callback_rows(beat_id: str, affected: list[str], directive: str,
@@ -492,7 +492,7 @@ def mark_callback_surfaced(world: Any, callback_entity: str, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": callback_entity, "attribute": "status", "value": "surfaced",
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def record_absence_declined(world: Any, turn: int, beat_id: str, reason: str) -> None:
@@ -507,7 +507,7 @@ def record_absence_declined(world: Any, turn: int, beat_id: str, reason: str) ->
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("absence-consequence declined (turn %d, beat %s): %s",
                 turn, beat_id, reason)
 
@@ -527,7 +527,7 @@ def record_relocate_declined(world: Any, turn: int, beat_id: str, reason: str) -
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift relocation declined (turn %d, beat %s): %s", turn, beat_id, reason)
 
 
@@ -602,7 +602,7 @@ def mark_repair(world: Any, arc_id: str, beat_id: str, new_beat_id: str,
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "mode", "value": mode,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift repair committed (%s): %s -> %s (arc %s, turn %d)",
                 mode, beat_id, new_beat_id, arc_id, turn)
 
@@ -619,5 +619,5 @@ def record_repair_declined(world: Any, turn: int, beat_id: str, reason: str) -> 
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("drift repair declined (turn %d, beat %s): %s", turn, beat_id, reason)

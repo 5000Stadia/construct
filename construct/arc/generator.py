@@ -361,7 +361,7 @@ def _mark_development(world: Any, minutes_now: float, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": "session:ambient", "attribute": "last_development_min",
          "value": minutes_now, "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 # --- guard writes -------------------------------------------------------
@@ -373,7 +373,7 @@ def _record_decline(world: Any, turn: int, reason: str) -> None:
          "valid_from": turn_time(turn)},
         {"entity": eid, "attribute": "reason", "value": reason,
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     logger.info("generation declined (turn %d): %s", turn, reason)
 
 
@@ -381,7 +381,7 @@ def _mark_exhausted(world: Any, source: str, turn: int) -> None:
     world.porcelain.ingest_structured([
         {"entity": f"gen:exhausted_{_id_slug(source)}", "attribute": "kind",
          "value": "exhausted_for_generation", "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
 
 
 def _record_attempt(world: Any, arc: Arc, source: str, depth: int, fp: str,
@@ -394,13 +394,13 @@ def _record_attempt(world: Any, arc: Arc, source: str, depth: int, fp: str,
          "value": arc.arc_id, "valid_from": turn_time(turn)},
         {"entity": f"gen:fp:{fp}", "attribute": "kind", "value": "gen_fingerprint",
          "valid_from": turn_time(turn)},
-    ], frame=SESSION)
+    ], frame=SESSION, classify="rules")
     # The provenance on the arc itself (plot) — lineage + depth for the cap.
     world.porcelain.ingest_structured([
         {"entity": arc.arc_id, "attribute": "generated", "value": "yes", "timeless": True},
         {"entity": arc.arc_id, "attribute": "generated_from", "value": source, "timeless": True},
         {"entity": arc.arc_id, "attribute": "gen_depth", "value": depth, "timeless": True},
-    ], frame=PLOT)
+    ], frame=PLOT, classify="rules")
 
 
 # --- coherence preflight (guard #5) -------------------------------------
@@ -506,9 +506,10 @@ def _mint_side_arc(world: Any, reads: Any, provider: Provider,
     # never a rewrite of the sealed arc_ids list) + the provenance/receipts.
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc, frame=PLOT) + arc_io.index_items(arc, frame=PLOT),
-        frame=PLOT)
+        frame=PLOT, classify="rules")
     world.porcelain.ingest_structured(
-        arc_io.portfolio_add_items(reads, arc_id, valid_from=turn_time(turn)), frame=PLOT)
+        arc_io.portfolio_add_items(reads, arc_id, valid_from=turn_time(turn)),
+        frame=PLOT, classify="rules")
     _record_attempt(world, arc, source, depth, fp, turn)
     logger.info("generated arc %s from %s (depth %d)", arc_id, source, depth)
     return arc, _sanitize_hook(proposal.get("hook") or "")
