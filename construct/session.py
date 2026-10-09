@@ -31,8 +31,7 @@ from construct.scenario_meta import (
 )
 from construct.adapter import PorcelainWorldReads, state_value
 from construct.text import (
-    ID_SEPARATORS, human_name, humanize_id, humanize_id_last, humanize_typed_id, id_local,
-    split_words,
+    human_name, humanize_id, humanize_id_last, humanize_typed_id, id_local,
 )
 from construct.turnloop import TurnTrace, run_turn, terminal_outcome
 
@@ -994,9 +993,10 @@ class Session:
         concealed = self._concealed_tokens()
 
         def _leaks(text: str, ev: str) -> bool:
-            words = set(split_words(f"{text} {id_local(ev)}", seps=ID_SEPARATORS,
-                                    lower="last"))
-            return bool(concealed & words)
+            # The ONE punctuation-proof screen (concealment.value_leaks): a whitespace split
+            # let 'the culprit,' through (audit 2026-10, the tier-1 bug in a second place).
+            from construct.arc.concealment import value_leaks
+            return value_leaks(f"{text} {id_local(ev)}", concealed)
 
         return [t for e, t in threads.items() if not _leaks(t, e)][:limit]
 

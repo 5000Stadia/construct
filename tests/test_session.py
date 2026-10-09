@@ -722,6 +722,8 @@ class TestColdOpenConcealment:
                  "value": "the culprit is named at last"},   # brushes 'culprit' (protected)
                 {"entity": "event:e2", "attribute": "alias",
                  "value": "the water ration tightens"},       # benign
+                {"entity": "event:e3", "attribute": "alias",
+                 "value": "who the culprit, at last, was"},   # punctuation must not hide it
             ]}
 
         monkeypatch.setattr(s._world.porcelain, "snapshot", fake_snapshot)
