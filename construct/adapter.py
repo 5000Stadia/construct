@@ -139,7 +139,9 @@ class PorcelainWorldReads:
             kind=kind, participants=participant, since=since, until=until, frame=frame)
         return [
             EventRow(
-                event_id=r["id"], kind=r["kind"],
+                # a story event the extractor wrote with no kind row has kind None (pb R22
+                # surfaces two); every reader gets a string, "" meaning untyped
+                event_id=r["id"], kind=r.get("kind") or "",
                 agents=tuple(r.get("agents", ())),
                 patients=tuple(r.get("patients", ())),
                 at=r.get("t"),

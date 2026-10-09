@@ -61,3 +61,19 @@ def test_conflicted_serves_holding_value_and_warns_only_on_host_control(caplog):
 
 def test_foyer_reexport_is_the_same_helper():
     assert foyer.state_value is adapter.state_value
+
+
+def test_an_event_with_no_kind_reads_as_untyped():
+    # pattern-buffer's events() one-reader (R22) surfaces story events the extractor wrote with
+    # no kind row (event:runner_arrival); the adapter hands every reader a string
+    from types import SimpleNamespace
+    from construct.adapter import PorcelainWorldReads
+
+    class _Ev:
+        def events(self, **kw):
+            return [{"id": "event:runner_arrival", "kind": None},
+                    {"id": "event:summons", "kind": "summons", "t": 3.0}]
+
+    rows = PorcelainWorldReads(SimpleNamespace(porcelain=_Ev())).events()
+    assert [(r.event_id, r.kind) for r in rows] == [("event:runner_arrival", ""),
+                                                     ("event:summons", "summons")]
