@@ -15,6 +15,13 @@ def test_rule_is_conservative():
     assert attribute_default("role") is None
 
 
+def test_text_wearing_accumulates():
+    # pb's reviewer (GATE-INVERSE-ALIAS-V1 r1.2): a text-valued `wearing` stays literal at the
+    # engine gate, and a person wears several things at once, so it keeps them all, like `holds`.
+    assert attribute_default("wearing") == {"arity": "set_valued"}
+    assert attribute_default("holds") == {"arity": "set_valued"}
+
+
 def test_traversal_policy_attrs_are_structural_set_valued():
     # RFC-003 route() policy attributes: structural (no model classification)
     # + set-valued (route() needs all block-states). Structural is the bit that

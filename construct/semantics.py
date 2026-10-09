@@ -26,6 +26,9 @@ SET_VALUED_DOMAIN = frozenset({
     "encloses", "stores", "contained",
     # possession / acquisition
     "took_up_with", "gave", "carries", "owns", "possesses", "keeps",
+    # a text-valued `wearing` ("a grey coat") stays literal at the engine gate (an object value
+    # aliases to `worn_by`); a person wears several things at once, like `holds` above
+    "wearing",
     "took", "received", "acquired", "stole",
     # association (genuinely plural)
     "knows", "allied_with", "met", "employs", "trusts", "serves_under",
