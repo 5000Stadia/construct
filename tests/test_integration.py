@@ -499,10 +499,11 @@ class TestFullTurn:
                                             attribute="in")
                      if r.value == "place:hall"]
         assert hall_rows and hall_rows[-1].valid_from == turn_time(3)
-        # no stray un-canonicalized spelling committed alongside
+        # no stray un-canonicalized spelling committed alongside (checked on the stored rows'
+        # own attribute: since pb READ-SURFACE-V1 a read BY `inside`/`located_in` serves the `in` fold)
         if spelling != "in":
-            assert not list(frame_facts(world, "canon", entity=PLAYER,
-                                        attribute=spelling))
+            assert not [r for r in frame_facts(world, "canon", entity=PLAYER)
+                        if r.attribute == spelling]
 
     def test_dropping_a_held_object_commits_it_into_the_scene(self, world):
         # FOUNDER cohesion test: "set the letter-opener down" narrated but canon kept it held →
