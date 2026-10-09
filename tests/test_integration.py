@@ -4303,6 +4303,37 @@ def test_commitment_owned_climax_is_ready_not_terminal(world):
     assert r2.trace.terminal is True                       # the accusation closes it
 
 
+def test_classifier_is_told_when_the_decisive_moment_is_within_reach(world):
+    # R20 run 2 (2026-10-08): the escape was won and the player stepped into the hauler, done with
+    # the old name, twice; the classifier read it as plain action, so the chapter never closed. A
+    # commitment-owned arc that is ready now tells the classifier what its conclusory move is.
+    arc = make_arc()
+    seed_arc(world, arc)
+
+    def _classify_prompt(provider):
+        return next(c[0] for c in provider.calls if "Classify this player input" in c[0])
+
+    def _turn(n):
+        world._extractions.extend([{"items": []}, {"items": []}])
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": ""},
+            {"prose": "The boat waits at the quay."}])
+        run_turn(world, arc, provider, "I step down into the boat.", turn=n,
+                 scenario_mode="win_loss", terminal_owner="commitment",
+                 commitment_kind="achieved_state",
+                 scope=["fact:secret", "person:rival", PLAYER, "place:study"])
+        return _classify_prompt(provider)
+
+    assert "DECISIVE MOMENT" not in _turn(2)                # not ready yet: no hint
+    world.porcelain.ingest_structured(                       # world_condition met: ready
+        [{"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}],
+        frame=PLAYER_FRAME)
+    ready = _turn(3)
+    assert "DECISIVE MOMENT IS WITHIN REACH" in ready
+    assert "getting clear" in ready                          # the shape's own conclusory act
+
+
 def test_no_deadline_ready_arc_never_force_concludes(world):
     # Founder ruling 2026-06-25 / Cx 173: turns are FREE. A commitment-owned arc with NO authored
     # deadline that is READY (sound proof) but uncommitted NEVER force-concludes — not after 2 turns,

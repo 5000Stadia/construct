@@ -77,6 +77,10 @@ _TRANSIENT_STREAM_CODES = frozenset({
     "rate_limit_error", "timeout", "request_timeout",
 })
 
+#: HTTP statuses that mean the same passing trouble before a stream starts (an R20 probe turn
+#: lost its narration to one `503: no healthy upstream`).
+_TRANSIENT_HTTP_STATUSES = frozenset({429, 500, 502, 503, 504})
+
 
 class SchemaViolation(ProviderError):
     """Output failed schema validation after the bounded re-ask."""
@@ -631,7 +635,8 @@ class _ResponsesWireProvider(Provider):
         dropped stream mid-response is a network blip, not a verdict — retry
         it up to twice with a short backoff before surfacing. Only failures
         `_call_once` raises as `ProviderTransientError` (connection-level
-        httpx.TransportError) qualify; API errors, auth failures, and timeouts keep their existing
+        httpx.TransportError, a server-side stream error, or a 429/5xx status) qualify; other API
+        errors, auth failures, and timeouts keep their existing
         fail-fast semantics (a timeout already consumed its full bound —
         retrying it would double a player's worst-case wait)."""
         for i in range(3):
@@ -713,7 +718,10 @@ class _ResponsesWireProvider(Provider):
                                 f"Tail: {resp.text[:200]}")
                         if resp.status_code >= 400:
                             await resp.aread()
-                            raise ProviderTransportError(
+                            cls = (ProviderTransientError
+                                   if resp.status_code in _TRANSIENT_HTTP_STATUSES
+                                   else ProviderTransportError)
+                            raise cls(
                                 f"{self._label} API error ({resp.status_code}): {resp.text[:300]}")
                         return await self._collect_sse_text(resp)
         except TimeoutError as exc:

@@ -4148,12 +4148,23 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     _ask_by_oid[_oid] = _clue
     # The verdict's whole contract (defaults, kind gating, fail-open vs fail-closed) is
     # TurnIntent's (construct/intent.py); the turn reads it here.
+    # The decisive moment within reach (the same readiness the narrator's nudge reads, as of the
+    # turn's start): the classifier is told to look for the conclusory move, which in an escape
+    # or a choice often reads as an ordinary action.
+    _decisive = None
+    if terminal_owner == "commitment" and scenario_mode == "win_loss":
+        try:
+            _st0 = arc_status(live_reads, arc)
+            if (_st0.climax_ready or _st0.world_true) and terminal_outcome(live_reads) is None:
+                _decisive = commitment_kind
+        except Exception as exc:  # noqa: BLE001 — a read miss only drops the hint
+            logger.warning("decisive-moment read failed: %s", exc)
     try:
         with _phase(trace, "classify"):
             verdict = cohorts.classify(provider, player_input, actor=actor,
                                        ask_candidates=ask_candidates,
                                        npc_candidates=npc_candidates,
-                                       laws=_laws_full)
+                                       laws=_laws_full, decisive=_decisive)
         intent = TurnIntent.from_verdict(verdict, player_input)
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:

@@ -300,3 +300,22 @@ def test_one_server_error_is_retried_to_success(tmp_path, monkeypatch):
     monkeypatch.setattr(P.asyncio, "sleep", lambda *a, **k: real_sleep(0))
     assert asyncio.run(provider.complete("p", schema)) == {"prose": "ok"}
     assert calls["n"] == 2
+
+
+@pytest.mark.parametrize("status,transient", [(503, True), (502, True), (429, True),
+                                              (500, True), (400, False), (404, False)])
+def test_http_status_transience(tmp_path, monkeypatch, status, transient):
+    """R20 run 2: a narration call lost its turn to one `503: no healthy upstream` because only
+    stream errors were transient. A 429/5xx status is the same passing trouble; a 4xx request
+    error still fails fast."""
+    import httpx
+    from construct.provider import ProviderTransientError
+    provider = CodexProvider(auth_path=tmp_path / "absent.json")
+    monkeypatch.setattr(provider, "_read_auth", lambda: {})
+    monkeypatch.setattr(provider, "_headers", lambda auth: {})
+    monkeypatch.setattr(httpx, "AsyncHTTPTransport", lambda **kw: httpx.MockTransport(
+        lambda request: httpx.Response(status, text="no healthy upstream")))
+    schema = {"type": "object", "properties": {"prose": {"type": "string"}}, "required": ["prose"]}
+    with pytest.raises(ProviderTransportError) as ei:
+        asyncio.run(provider._call_once("p", schema, "main"))
+    assert isinstance(ei.value, ProviderTransientError) is transient
