@@ -371,3 +371,25 @@ def test_three_continuations_chapter_rows_read_the_latest_chapter(tmp_path, monk
         assert PlaythroughState.from_world({}, w).entry_epoch == metas[2]["entry_epoch"]
     finally:
         w.close()
+
+
+def test_ingest_stops_with_the_real_cause_when_every_chunk_fails(tmp_path, monkeypatch):
+    """Every chunk failing (e.g. a model the account refuses) used to be skipped chunk by chunk
+    and surface later as a misleading 'bare world' arc failure. It now stops at once, naming it."""
+    import pytest
+    from patternbuffer import porcelain as pb_porcelain
+    from construct import game
+    from construct.provider import ProviderTransportError, StubProvider
+
+    monkeypatch.setattr(game, "WORLDS_DIR", tmp_path)
+    monkeypatch.setattr(game, "scenario_path", lambda name: tmp_path / f"{name}.world")
+
+    def refuse(self, *a, **k):
+        raise ProviderTransportError("Codex API error (400): model not supported")
+    for cls in vars(pb_porcelain).values():
+        if isinstance(cls, type) and hasattr(cls, "extract"):
+            monkeypatch.setattr(cls, "extract", refuse)
+    prose = tmp_path / "book.md"
+    prose.write_text("# A Book\n\n## One\n\nThe first chapter.\n\n## Two\n\nThe second chapter.\n")
+    with pytest.raises(RuntimeError, match="every one of .* chunk.*model not supported"):
+        game.create_scenario_from_ingest("failfast", prose, StubProvider([]))

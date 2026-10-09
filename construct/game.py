@@ -1400,6 +1400,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         # to the finalize rules pass (Win 1). Fail-open per chunk preserved on both extract + ingest.
         _parallel_extract = os.getenv("CONSTRUCT_PARALLEL_EXTRACT", "1") != "0"
         skipped = 0
+        first_failure: BaseException | None = None  # the cause, if EVERY chunk fails
         items_by_chunk: dict[int, list] = {}
         if _parallel_extract and len(chunks) > 1:
             from concurrent.futures import ThreadPoolExecutor
@@ -1413,6 +1414,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                         _emit(on_stage, f"   …chunk {i}/{len(chunks)} extracted")
                     except Exception as exc:  # noqa: BLE001 — one bad chunk must not sink
                         skipped += 1
+                        first_failure = first_failure or exc
                         logger.warning("chunk %d/%d extract failed (%s: %s) — skipping",
                                        i, len(chunks), type(exc).__name__, str(exc)[:200])
                         _emit(on_stage, f"   …chunk {i}/{len(chunks)} SKIPPED ({type(exc).__name__})")
@@ -1439,12 +1441,20 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                 # drop that chunk's facts, keep building — the viability gate still catches a
                 # world too thin to play.
                 skipped += 1
+                first_failure = first_failure or exc
                 logger.warning("chunk %d/%d ingest failed (%s: %s) — skipping; the "
                                "build continues", i, len(chunks),
                                type(exc).__name__, str(exc)[:200])
                 _emit(on_stage, f"   …chunk {i}/{len(chunks)} SKIPPED "
                                 f"({type(exc).__name__})")
                 continue
+        if chunks and skipped == len(chunks):
+            # One bad chunk must not sink a build, but EVERY chunk failing is not a bad chunk:
+            # it is a cause (an unsupported model, a dead credential) that would otherwise
+            # surface only later, disguised as a bare world. Stop here with the real reason.
+            raise RuntimeError(
+                f"ingest failed: every one of {len(chunks)} chunk(s) failed; first cause: "
+                f"{type(first_failure).__name__}: {str(first_failure)[:300]}") from first_failure
         if skipped:
             logger.warning("ingest completed with %d/%d chunk(s) skipped", skipped, len(chunks))
         return _finalize_scenario(world, name, title, provider, spath, endless,
