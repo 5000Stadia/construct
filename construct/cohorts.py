@@ -2522,9 +2522,22 @@ def player_constraint(protagonist: str) -> str:
     )
 
 
+#: What the conclusory move IS, per story shape's `commitment_kind` (story_shapes.SHAPES), in
+#: words the classifier can recognize when the decisive moment is within reach.
+_DECISIVE_ACTS = {
+    "claim": "naming who or what is responsible: their answer",
+    "relational_state": "the choice that settles the bond: a declaration, a reconciliation, a break",
+    "achieved_state": "the act that wins or gives up the goal: getting clear, holding, finishing",
+    "executed_action": "springing the play, so it lands or collapses",
+    "understanding": "claiming what they now understand, or choosing what to do with it",
+    "comic_resolution": "the move that brings the chaos to its head",
+    "choice_identity": "choosing who they will be: owning or renouncing it",
+}
+
+
 def classify(provider: Provider, player_input: str, actor: str = "",
              ask_candidates: list = (), npc_candidates: list = (),
-             laws: str = "") -> dict:
+             laws: str = "", decisive: str | None = None) -> dict:
     """Returns {kind, moves_to, requires, needs_test, uncertain_of, ...} — movement intent
     AND the assured-vs-uncertain resolution judgment ride the same cheap call (no extra
     latency; letter 026 + ACTION-RESOLUTION.md). `actor` is the protagonist's
@@ -2533,7 +2546,21 @@ def classify(provider: Provider, player_input: str, actor: str = "",
     pursuable disclosures as `(opaque_id, non_spoiling_descriptor)` pairs; when given, the
     classifier matches the player's QUESTION to the candidate(s) it pursues (`asks_targets`),
     the ASK twin of `examines_target`. Opaque ids only (clue ids can embed the answer); the
-    HOST still gates eligibility (reveal-condition/presence) — this only PICKS the topic."""
+    HOST still gates eligibility (reveal-condition/presence) — this only PICKS the topic.
+    `decisive` (the story's `commitment_kind`, "" when unknown) is passed only while the story's
+    decisive moment is within reach: the conclusory move then often reads as an ordinary action
+    (stepping aboard and away, crossing the line), and the classifier must know to look for it
+    (R20 run 2: an escape made twice was classified as plain action and the chapter never
+    closed)."""
+    decisive_note = ""
+    if decisive is not None:
+        _act = _DECISIVE_ACTS.get(decisive, "the decisive act the story has built toward")
+        decisive_note = (
+            f"\nTHE DECISIVE MOMENT IS WITHIN REACH: what this story built toward is now open to "
+            f"the player, and what remains is their conclusory move ({_act}). If this input TAKES "
+            f"that move, carrying it out, completing it, or declaring it, set `commits` TRUE even "
+            f"when it reads as an ordinary action. A move that only prepares, asks, or lingers is "
+            f"not a commitment.\n")
     actor_note = (f"\nTHE CHARACTER (judge proficiency against this — what they should "
                   f"plainly be able to do needs NO test): {actor}\n" if actor else "")
     laws_note = (f"\n{laws}\nJUDGE AGAINST THE LAWS (WORLD-LAWS): what a law makes "
@@ -2568,6 +2595,7 @@ def classify(provider: Provider, player_input: str, actor: str = "",
         ask_note +
         npc_note +
         actor_note +
+        decisive_note +
         laws_note +
         f"Classify this player input from an interactive-fiction session "
         f"by INTENT, not punctuation. The player is INSIDE the story unless they "
