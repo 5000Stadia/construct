@@ -34,6 +34,10 @@ from construct.arc.grammar import Arc, Beat, Clock, ConclusionShape, Phase, Rung
 from construct.arc.lint import lint_arc
 from construct.provider import Provider, ProviderError, complete_sync, engine_tier_dispatch
 from construct.scenario_meta import ScenarioMeta
+from construct.text import (
+    alnum_words, file_safe, humanize_id, humanize_id_last, humanize_id_title, id_local,
+    slugify_keep_underscores, split_words,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +158,7 @@ def slot_path(name: str, player_id: str | None = None) -> Path:
 
 def _safe_player_id(player_id: str) -> str:
     """Filesystem-safe slot segment; never empty."""
-    safe = re.sub(r"[^A-Za-z0-9_-]+", "_", player_id).strip("_")
-    return safe or "player"
+    return file_safe(player_id) or "player"
 
 
 def list_scenarios() -> list[dict]:
@@ -195,7 +198,7 @@ def _chunk_chapters(text: str, max_chars: int = 4000) -> list[str]:
 def _slug(s: str) -> str:
     """Conform an id segment to the frozen porcelain id grammar
     (^[a-z][a-z0-9_]*:[a-z0-9_:]+$) — model proposals love hyphens."""
-    return re.sub(r"[^a-z0-9_]+", "_", s.lower()).strip("_")
+    return slugify_keep_underscores(s)
 
 
 def _beat_expr(beat: dict, player_frame: str):
@@ -742,7 +745,7 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
         if (arc.protagonist not in located_people
                 and play_as.strip() and arc.protagonist in known_ids):
             def _toks(s: str) -> set[str]:
-                return set(s.lower().replace(":", " ").replace("_", " ").split())
+                return set(split_words(s, seps=":_"))
             _want = {w for w in _toks(play_as) if len(w) > 3}
             _pick = _toks(arc.protagonist)
             if _want & _pick:
@@ -940,8 +943,7 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
                             _admit.append({"entity": _fresh, "attribute": "kind",
                                            "value": "person", "timeless": True})
                             _admit.append({"entity": _fresh, "attribute": "name",
-                                           "value": _orig.split(":", 1)[-1]
-                                           .replace("_", " ").title()})
+                                           "value": humanize_id_title(_orig)})
                             if _m.get("surface_role"):
                                 _admit.append({"entity": _fresh, "attribute": "role",
                                                "value": str(_m["surface_role"])[:120]})
@@ -1736,9 +1738,7 @@ def _hidden_terms(world: Any, proposal: dict) -> set[str]:
         raw = str(raw)
         if ":" not in raw:
             return
-        for tok in re.split(r"[^a-z0-9]+", raw.split(":", 1)[-1].lower()):
-            if len(tok) >= 3:
-                terms.add(tok)
+        terms.update(alnum_words(id_local(raw), min_len=3))
 
     for b in proposal.get("beats", []):
         if b.get("kind") == "player_learns":
@@ -1754,7 +1754,7 @@ def _goal_statement_safe(goal: str, forbidden: set[str]) -> bool:
     forbidden set — a structural token check, not a lint we hope holds."""
     if not goal or not goal.strip():
         return False
-    words = {w for w in re.split(r"[^a-z0-9]+", goal.lower()) if w}
+    words = set(alnum_words(goal))
     return words.isdisjoint(forbidden)
 
 
@@ -1774,8 +1774,7 @@ def _player_goal(proposal: dict, world: Any, win_direction: str = "") -> str:
     if chosen and _goal_statement_safe(chosen, forbidden):
         return chosen  # the player's own aim — honour it
     if goal or chosen:
-        leaked = {w for w in re.split(r"[^a-z0-9]+", f"{goal} {chosen}".lower())
-                  if w in forbidden}
+        leaked = {w for w in alnum_words(f"{goal} {chosen}") if w in forbidden}
         logger.warning("goal/win framing names a hidden identity %s; using the "
                        "default", sorted(leaked))
     return _DEFAULT_GOAL
@@ -1897,7 +1896,7 @@ def seed_player_relationships(world: Any, provider: Provider, protagonist: str,
             _pid = str(_pid)
             if not _pid.startswith("place:"):
                 continue
-            _pnm = reads.state(_pid, "name") or _pid.split(":", 1)[-1].replace("_", " ")
+            _pnm = reads.state(_pid, "name") or humanize_id(_pid)
             roster.append({"id": _pid,
                            "surface_role": f"the opening location ({_pnm}) — the player's "
                                            f"own starting ground"})
@@ -2171,11 +2170,11 @@ def _fallback_protagonist(world: Any, located: list[str], play_as: str) -> str |
     license to fabricate a location for a bad role id. None if nothing is located."""
     if not located:
         return None
-    want = {w for w in play_as.lower().replace(":", " ").split() if len(w) > 3}
+    want = set(split_words(play_as, seps=":", min_len=4))
     if want:
         def _score(pid: str) -> int:
             name = str(world.porcelain.state(pid, "name") or "")
-            toks = set((pid + " " + name).lower().replace(":", " ").split())
+            toks = set(split_words(pid + " " + name, seps=":"))
             return len(want & toks)
         best = max(located, key=_score)
         if _score(best) > 0:
@@ -2478,8 +2477,7 @@ def _tension_axis(arc) -> str:
     """A short 'X against Y' read of an arc's drive axis, or '' if unavailable."""
     try:
         _e, strong, weak = arc.shape.tension
-        return (f"{strong.split(':')[-1].replace('_', ' ')} against "
-                f"{weak.split(':')[-1].replace('_', ' ')}")
+        return f"{humanize_id_last(strong)} against {humanize_id_last(weak)}"
     except Exception:
         return ""
 
@@ -2530,7 +2528,7 @@ def _continuation_intro(prior_title: str, prior_outcome: str, prior_arc, proposa
         "never come up. Do NOT default to a formula — no obligatory 'time has passed' or 'you made "
         "a name on that one'. Let these two stories decide the bridge, then let the new case surface."
         + (f"\nTHE DOORWAY (engine truth — the map already places them): the new chapter opens at "
-           f"{door_place.split(':', 1)[-1].replace('_', ' ')}, after time has passed. Open THERE — "
+           f"{humanize_id(door_place)}, after time has passed. Open THERE — "
            f"do not restage the last scene, and give the character nothing they do not already carry. "
            f"PRESENCE TRUTH holds at the opening too: stage ONLY people the world places there — an "
            f"undeclared clerk or passer-by narrated as present will be honestly DENIED a turn later "

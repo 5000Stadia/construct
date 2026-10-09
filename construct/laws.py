@@ -21,8 +21,9 @@ adjudication call that may grant world change (ruling 3).
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
+
+from construct.text import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +123,7 @@ def allowed_registers(families: list[str] | None, reality: str) -> set[str]:
 
 
 def _slug(s: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "_", (s or "").lower()).strip("_")
-    return s or "law"
+    return slugify(s or "") or "law"
 
 
 def lint_laws(laws: list[dict], allowed: set[str]) -> list[str]:

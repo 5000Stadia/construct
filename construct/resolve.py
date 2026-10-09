@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from construct.text import id_stem_parts, separator_words
+
 #: deixis → the protagonist (these DO have a referent; never mint a phantom). Cx 304 / Kernos 084 4c.
 #: Cx 603 completes the first/second-person family with the plural pronouns (we/us/ourselves/
 #: yourselves) and their person:-prefixed extractor forms.  "our"/"ours" project CONSERVATIVELY
@@ -89,7 +91,7 @@ def _is_place_like(kind_hint: str, eid: str) -> bool:
     token would wrongly flag `obj:office_key`/`obj:street_lamp` (objects with a place word as a
     modifier). The extractor's `kind` is the reliable type signal — `obj:street kind street` is the
     mistyped place; `obj:office_key kind key` is a real object."""
-    toks = set(re.split(r"[ _\-/:]+", (kind_hint or "").lower()))
+    toks = set(separator_words(kind_hint or ""))
     return bool(toks & _PLACE_LIKE_KINDS)
 
 
@@ -138,7 +140,7 @@ def reconstruct_names(rows: list[dict], prose: str) -> list[dict]:
                 or not eid.startswith(("place:", "person:"))):
             continue
         seen.add(eid)
-        toks = [t for t in _local(eid).split("_") if t]
+        toks = id_stem_parts(eid)
         if not toks:
             continue
         pat = r"\b" + r"[\s\-'’]+".join(re.escape(t) for t in toks) + r"\b"
@@ -169,7 +171,7 @@ def is_voice(eid: Any) -> bool:
     whole-token so a legit `person:speakman` is untouched (was the host `_is_narrator_phantom` guard)."""
     if not isinstance(eid, str):
         return False
-    toks = set(t for t in re.split(r"[ _\-/:]+", eid.lower()) if t)
+    toks = set(separator_words(eid))
     return bool(toks & _VOICE_TOKENS)
 
 

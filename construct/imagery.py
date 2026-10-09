@@ -44,7 +44,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import shlex
 import subprocess
 import threading
@@ -53,6 +52,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from construct.game import WORLDS_DIR
+from construct.text import slugify
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +115,7 @@ def enabled() -> bool:
 
 
 def _slug(text: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
-    return s or "scene"
+    return slugify(text or "", sep="-") or "scene"
 
 
 def _hash(description: str) -> str:

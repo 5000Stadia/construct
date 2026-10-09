@@ -60,7 +60,13 @@ from construct.arc.executor import (
     stored_lifecycle,
     turn_time,
 )
-from construct.arc.executor import _human as _human_entity
+from construct.text import (
+    CLAUSE_PUNCT, EDGE_PUNCT, ID_SEPARATORS, WORD_PUNCT, alnum_words, human_name_typed_id,
+    humanize_id, humanize_id_last, humanize_id_title, id_stem_parts, name_or_humanized_id,
+    name_text_or_humanized_id, read_str, respace, slugify, slugify_per_char, split_words,
+    table_or_read_name,
+)
+from construct.text import human_name as _human_entity
 from construct.arc.generator import (
     AMBIENT_QUIET_MIN,
     _last_development_min,
@@ -157,10 +163,8 @@ def _secret_tokens(arc: Arc, reads: Any, public: set[str]) -> set[str]:
         except Exception:
             v = None
         for src in (a, v if isinstance(v, str) else ""):
-            for t in (str(src).replace(":", " ").replace("_", " ")
-                      .replace("-", " ").lower().split()):
-                if len(t) > 3 and t not in _SECRET_STOP:
-                    toks.add(t)
+            toks.update(split_words(str(src), seps=ID_SEPARATORS, lower="last",
+                                    min_len=4, stop=_SECRET_STOP))
     return toks - public
 
 
@@ -168,8 +172,7 @@ def _secret_word_set(text: str) -> set[str]:
     """TOTAL word tokenizer (Cx 274): split on ANY non-alphanumeric run, so punctuation
     ('the map!', 'map;', 'key?') can never leave a protected token un-matched. Used on BOTH
     sides of the secret-take guard so the two tokenizations are identical."""
-    return {t for t in re.findall(r"[a-z0-9]+", (text or "").lower())
-            if len(t) > 1 and t not in _SECRET_STOP}
+    return set(alnum_words(text or "", min_len=2, stop=_SECRET_STOP))
 
 
 def _take_touches_secret(takes: str, arc: Arc, reads: Any) -> bool:
@@ -527,12 +530,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
         return False
 
     def _disp(eid: str) -> str:
-        try:
-            v = live_reads.state(eid, "name")
-        except Exception:
-            v = None
-        return v if isinstance(v, str) and v else \
-            eid.split(":", 1)[-1].replace("_", " ")
+        return name_or_humanized_id(live_reads, eid)
 
     try:
         from construct.clock import read_clock as _rc
@@ -813,7 +811,7 @@ def _is_pressing(text_low: str, *, needs_test: bool) -> bool:
         return True
     if "?" in text_low:
         return True
-    toks = set(text_low.replace("?", " ").replace(",", " ").replace(".", " ").split())
+    toks = set(split_words(text_low, seps=CLAUSE_PUNCT, lower="never"))
     return bool(toks & _PRESSURE_VERBS) or bool(toks & _PROBE_SIGNALS)
 
 
@@ -837,7 +835,7 @@ def _is_scrutiny(text_low: str) -> bool:
     `_is_pressing`)? True when an examine/inspect/search-class verb is present, OR a close-
     inspection adverb ('look closely/carefully at …'). A bare 'look around'/'notice' is a glance,
     not scrutiny. Gates `scrutiny` object-clues; a glance earns only `examined`-level clues."""
-    toks = set(text_low.replace(",", " ").replace(".", " ").replace("?", " ").split())
+    toks = set(split_words(text_low, seps=CLAUSE_PUNCT, lower="never"))
     if toks & _EXAMINE_VERBS:
         return True
     return any(adv in text_low for adv in _SCRUTINY_ADVERBS)
@@ -878,9 +876,7 @@ _ROLE_NOUNS = frozenset({
 
 def _words(s: str) -> list[str]:
     """Lowercased word tokens, punctuation stripped (so 'Dr. Ames,' → ['dr','ames'])."""
-    for ch in ",.;:!?\"'()[]—-":
-        s = s.replace(ch, " ")
-    return s.lower().split()
+    return split_words(s, seps=WORD_PUNCT, lower="last")
 
 
 def _names_entity(entity: str, text_low: str, name: str = "", role: str = "") -> bool:
@@ -899,7 +895,7 @@ def _names_entity(entity: str, text_low: str, name: str = "", role: str = "") ->
     text_toks = set(_words(text_low))
     cands: set[str] = set()
     # Name + id-stem tokens are fully addressable identity (they ARE the person's name).
-    stem = entity.split(":", 1)[-1].replace("_", " ")
+    stem = humanize_id(entity)
     for src_toks in (_words(stem), _words(name)):
         for tok in src_toks:
             if len(tok) > 2 and tok not in _NAME_NOISE:
@@ -1931,12 +1927,11 @@ def _mint_held_object(world: Any, protagonist: str, description: str,
     allow. We always mint a fresh id, never reusing/mutating an existing entity. Returns the
     new id, or None if the write didn't land. Shared by the equipment grant (produce gear)
     and the take grant (pick an ordinary object out of the scene)."""
-    words = (description or "").lower().split()
+    words = split_words(description or "")
     while words and words[0] in {"my", "the", "a", "an", "your", "his", "her",
                                  "their", "its", "some"}:
         words.pop(0)
-    slug = "".join(c if (c.isalnum() or c == "_") else "_"
-                   for c in "_".join(words)).strip("_") or "thing"
+    slug = slugify_per_char("_".join(words)) or "thing"
     reads = PorcelainWorldReads(world)
     hint = (hint or "").strip()
     item_id = hint if (hint.startswith("obj:") and not reads.has_entity(hint)) else f"obj:{slug}"
@@ -2049,8 +2044,7 @@ def _dest_head(moves_to: str) -> str:
     """The HEAD noun of a move destination phrase, for the fixture/place split (Cx 325). Strips lead
     words, then takes the last word of the core noun phrase BEFORE any locative tail ('rain barrel by
     the shed' → 'barrel'; 'back lane by the warehouse sheds' → 'lane'; 'the table' → 'table')."""
-    words = [w.strip(".,;:!?'\"") for w in (moves_to or "").lower().split()]
-    words = [w for w in words if w]
+    words = split_words(moves_to or "", strip=EDGE_PUNCT)
     while words and words[0] in _MOVE_LEAD_STOP:
         words.pop(0)
     core = []
@@ -2135,24 +2129,21 @@ def _embedded_container(moves_to: str, roster: list) -> tuple[str, str] | None:
     place inside the established one (chain-containment presence then colocates honestly).
     Deterministic; None on no/ambiguous match or when the phrase IS the container."""
     phrase = (moves_to or "").lower()
-    ptoks = {t for t in re.split(r"[^a-z0-9]+", phrase) if len(t) > 3 and t not in _EMBED_STOP}
+    ptoks = set(alnum_words(phrase, min_len=4, stop=_EMBED_STOP))
     if not ptoks:
         return None
     best: tuple[int, str, set] | None = None
     tied = False
     for pid, _label in roster or []:
-        stoks = {t for t in str(pid).split(":", 1)[-1].split("_")
-                 if len(t) > 3 and t not in _EMBED_STOP}
+        stoks = set(id_stem_parts(str(pid), min_len=4, stop=_EMBED_STOP))
         # Cx 449: name/kind evidence widens the HIT surface (place:north named "North
         # Village" is findable by "village"). Match strength must still be EARNED:
         # either the original slug ratio holds, or the hit covers at least half the
         # place's NAME tokens — a lone kind-word brush ("...a rain-wet yard") never
         # qualifies a container on its own.
         _lcore = str(_label).split(" (the room", 1)[0]
-        ltoks = {t for t in re.split(r"[^a-z0-9]+", _lcore.lower())
-                 if len(t) > 3 and t not in _EMBED_STOP}
-        ntoks = {t for t in re.split(r"[^a-z0-9]+", _lcore.split(" — ", 1)[0].lower())
-                 if len(t) > 3 and t not in _EMBED_STOP}
+        ltoks = set(alnum_words(_lcore, min_len=4, stop=_EMBED_STOP))
+        ntoks = set(alnum_words(_lcore.split(" — ", 1)[0], min_len=4, stop=_EMBED_STOP))
         hit = (stoks | ltoks) & ptoks
         score = len(hit)
         _strong = ((stoks and score * 2 >= len(stoks))
@@ -2171,9 +2162,8 @@ def _embedded_container(moves_to: str, roster: list) -> tuple[str, str] | None:
     # a tail must carry a DISTINCTIVE token of its own — "back to the study" leaves only
     # the stop-word "back", which is the reuse path's business ("go back"), not a nest.
     tails = [s for s in segments
-             if not (hit & {t for t in re.split(r"[^a-z0-9]+", s) if t})
-             and any(len(t) > 3 and t not in _EMBED_STOP
-                     for t in re.split(r"[^a-z0-9]+", s))]
+             if not (hit & set(alnum_words(s)))
+             and alnum_words(s, min_len=4, stop=_EMBED_STOP)]
     if not tails:
         return None  # the whole phrase names the container — nothing to nest
     return container, tails[-1]
@@ -2245,16 +2235,15 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
                         (moves_to or "").strip(), re.IGNORECASE)
         if _loc and _loc.group(1).strip():
             _child, _tail = _loc.group(1).strip(), _loc.group(2).strip().rstrip(".,;")
-            _ttoks = {t for t in re.split(r"[^a-z0-9]+", _tail.lower()) if len(t) > 3}
+            _ttoks = set(alnum_words(_tail, min_len=4))
 
             def _place_evidence(pid: str, lb: str) -> set:
                 # Cx 449 blocker: the container must match on WORLD FACTS (name/kind
                 # in the roster label), never only on how the id happens to be worded
                 # — place:north with name "North Village" IS a village.
                 _core = str(lb).split(" (the room", 1)[0]  # drop the current-room marker
-                return ({t for t in str(pid).split(":", 1)[-1].split("_") if len(t) > 3}
-                        | {t for t in re.split(r"[^a-z0-9]+", _core.lower())
-                           if len(t) > 3})
+                return (set(id_stem_parts(str(pid), min_len=4))
+                        | set(alnum_words(_core, min_len=4)))
 
             _thits = [pid for pid, _lb in (roster or [])
                       if _ttoks & _place_evidence(pid, _lb)]
@@ -2265,15 +2254,14 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
             if len(_thits) == 1:
                 container, moves_to = _thits[0], _child
             else:
-                _tkind = _tail.lower().split()[-1]
+                _tkind = split_words(_tail)[-1]
                 _mint_container = (_tail, _tkind if _tkind in _PLACE_LIKE_KINDS
                                    else "place")
                 moves_to = _child
-    words = (moves_to or "").lower().split()
-    while words and words[0].strip(".,;:!?'\"") in _MOVE_LEAD_STOP:
+    words = split_words(moves_to or "")
+    while words and words[0].strip(EDGE_PUNCT) in _MOVE_LEAD_STOP:
         words.pop(0)
-    slug = "".join(c if (c.isalnum() or c == "_") else "_"
-                   for c in "_".join(words)).strip("_")
+    slug = slugify_per_char("_".join(words))
     if slug in _DEICTIC_DEST:
         # deictic/directional ("go back", "go inside") — not a named place; let the narrator
         # handle it against the real geography rather than mint `place:back` / `place:inside`.
@@ -2309,7 +2297,7 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
         # so the child nests honestly — place:consulting_room IN place:village, never
         # place:consulting_room_in_the_village.
         _tail_phrase, _tail_kind = _mint_container
-        _tslug = re.sub(r"[^a-z0-9]+", "_", _tail_phrase.lower()).strip("_")
+        _tslug = slugify(_tail_phrase)
         if _tslug and _tslug not in _DEICTIC_DEST:
             container = f"place:{_tslug}"
             if not reads.has_entity(container):
@@ -2626,8 +2614,7 @@ def _world_tick(world: Any, p: Any, arc: Any, trace: Any, provider: Any, turn: i
                     pass
                 if not _nm and not _kd:
                     continue  # not canon-readable at the horizon — not a destination
-                _places.append((_pid, str(_nm) if _nm
-                                else _pid.split(":", 1)[-1].replace("_", " ")))
+                _places.append((_pid, str(_nm) if _nm else humanize_id(_pid)))
         except Exception:  # noqa: BLE001
             pass
         verdict = cohorts.world_tick(
@@ -3041,18 +3028,10 @@ def _absence_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     if not subjects:
         drift.record_absence_declined(world, turn, beat_id, "nothing_grounded")
         return False
-    try:
-        _sname = str(live_reads.state(staged_scene, "name") or "")
-    except Exception:  # noqa: BLE001
-        _sname = ""
-    _swhere = _sname or staged_scene.split(":", 1)[-1].replace("_", " ")
+    _swhere = name_text_or_humanized_id(live_reads, staged_scene)
 
     def _display(pid: str) -> str:
-        try:
-            nm = str(live_reads.state(pid, "name") or "")
-        except Exception:  # noqa: BLE001
-            nm = ""
-        return nm or pid.split(":", 1)[-1].replace("_", " ")
+        return name_text_or_humanized_id(live_reads, pid)
 
     # per-subject closed lapse predicates PLUS (licensed only) the verbatim
     # authored occurrence — ALL subject rows kept, the note appended (cr r4
@@ -3210,7 +3189,7 @@ def _relocate_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
         _hname = ""
     _hdesc = str(_hname or getattr(carrier_node, "surface_role", "")
                  or getattr(carrier_node, "shape_role", "")
-                 or carrier_node.node_id.split(":", 1)[-1].replace("_", " "))
+                 or humanize_id(carrier_node.node_id))
     holder_line = (f"{carrier_node.node_id} ({_hdesc}) — currently at "
                    f"{old_staging or 'an unknown place'}"
                    + ("" if carrier_node.node_id in present_ids
@@ -3510,10 +3489,9 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                 _ent = getattr(_a, "entity", None)
                 if _ent:
                     try:
-                        _en = str(live_reads.state(_ent, "name")
-                                  or _ent.split(":", 1)[-1].replace("_", " "))
+                        _en = str(live_reads.state(_ent, "name") or humanize_id(_ent))
                     except Exception:  # noqa: BLE001
-                        _en = _ent.split(":", 1)[-1].replace("_", " ")
+                        _en = humanize_id(_ent)
                     _attr = getattr(_a, 'attribute', 'its state')
                     threads.append(
                         f"the road turns on the standing state of {_en} "
@@ -3544,8 +3522,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
             threads = list(dict.fromkeys(threads))  # dedupe repeated shapes
             for _h in live_holders:
                 try:
-                    _hn = str(live_reads.state(_h, "name")
-                              or _h.split(":", 1)[-1].replace("_", " "))
+                    _hn = str(live_reads.state(_h, "name") or humanize_id(_h))
                     _hr = str(live_reads.state(_h, "role") or "")
                     _hl = (p.locate(_h, as_of=horizon) or [None])[0]
                     _hln = (str(live_reads.state(_hl, "name") or _hl)
@@ -3553,7 +3530,7 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
                     threads.append(", ".join(x for x in (
                         _hn, _hr, f"presently at {_hln}" if _hln else "") if x))
                 except Exception:  # noqa: BLE001 — one thread line, best-effort
-                    threads.append(_h.split(":", 1)[-1].replace("_", " "))
+                    threads.append(humanize_id(_h))
             dest_desc = (f"{getattr(beat.achievable_via, 'entity', beat_id)} · "
                          f"{getattr(beat.achievable_via, 'attribute', 'delivery')}")
             pick = cohorts.repair_arc(provider, beat_id, dest_desc, threads,
@@ -3661,15 +3638,17 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
 def _protagonist_tokens(protagonist: str) -> list[str]:
     """Name fragments that mark third-person rendering of the player
     ('person:marn' -> 'marn'). Deterministic guard input (letter 025)."""
-    slug = protagonist.split(":", 1)[-1]
-    return [t for t in slug.replace("-", "_").split("_") if len(t) > 2]
+    return id_stem_parts(protagonist, hyphens=True, min_len=3)
+
+
+#: Apostrophes, comma, period and semicolon read as spaces when looking for the player's
+#: name in the narration.
+_PROTAGONIST_NAME_SEPS = "’',.;"
 
 
 def names_protagonist(text: str, protagonist: str) -> bool:
-    lowered = f" {text.lower()} "
-    return any(f" {tok}" in lowered.replace("’", " ").replace("'", " ")
-               .replace(",", " ").replace(".", " ").replace(";", " ")
-               for tok in _protagonist_tokens(protagonist))
+    lowered = f" {respace(text, seps=_PROTAGONIST_NAME_SEPS)} "
+    return any(f" {tok}" in lowered for tok in _protagonist_tokens(protagonist))
 
 
 def _conclusion_recorded(reads: Any) -> bool:
@@ -3993,9 +3972,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         proto = arc.protagonist
         bits = [live_reads.state(proto, a) for a in ("role", "kind", "background")]
         actor = "; ".join(b for b in bits if isinstance(b, str) and b) \
-            or proto.split(":")[-1].replace("_", " ")
+            or humanize_id_last(proto)
     except Exception:
-        actor = arc.protagonist.split(":")[-1].replace("_", " ")
+        actor = humanize_id_last(arc.protagonist)
     # BEAT-DELIVERY half 2 (topic-aware ASK delivery, Cx 125): assemble the ENTRY-scene
     # present clue-bearing cast's pursuable disclosures as OPAQUE candidates so `classify`
     # can match the player's QUESTION to the right one (the ASK twin of examines_target).
@@ -4036,7 +4015,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 _nm = live_reads.state(_pid, "name")
             except Exception:
                 pass
-            _desc = str(_nm) if _nm else _pid.split(":", 1)[-1].replace("_", " ").title()
+            _desc = str(_nm) if _nm else humanize_id_title(_pid)
             _node = (cast or {}).get(_pid) if hasattr(cast or {}, "get") else None
             if _node is not None and getattr(_node, "surface_role", ""):
                 _desc += f" ({_node.surface_role})"
@@ -4239,11 +4218,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # `obj:pencil in person:you`). The resolver binds mentions to present entities, binds
                 # deixis to the protagonist, mints one typed entity for genuine novelty, drops the rest.
                 def _pin_name(e: str) -> str:
-                    try:
-                        v = live_reads.state(e, "name")
-                    except Exception:
-                        v = None
-                    return v if isinstance(v, str) else ""
+                    return read_str(live_reads, e)
                 _pin_cands = (set(scope or []) | set(_pre_held) | set(pre_chain or [])
                               | ({pre_scene} if pre_scene else set()) | {arc.protagonist})
                 # pov= (PB SHAPE-FIX 4c, #108): the player's "I" IS the protagonist —
@@ -4360,7 +4335,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         advance never re-prices the same movement."""
         if _delib_deadline is None:
             return False
-        _dest_key = dest_id or re.sub(r"[^a-z0-9]+", "_", str(label).lower()).strip("_")
+        _dest_key = dest_id or slugify(str(label))
         if dest_id:
             if dest_id == pre_scene:
                 return False
@@ -4497,11 +4472,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         def _name_of(e: str) -> str:
             # Display name at the play horizon (the canon snapshot isn't built until step 3, after
             # movement) — live_reads is horizon-bound and returns the unwrapped value or None.
-            try:
-                v = live_reads.state(e, "name")
-            except Exception:
-                return ""
-            return v if isinstance(v, str) else ""
+            return read_str(live_reads, e)
 
         def _undiscovered_offscene(n) -> bool:
             return (getattr(n, "presence", "") == "offscene" and bool(getattr(n, "location", ""))
@@ -4601,8 +4572,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             else:
                 # a DEICTIC destination ("back", "outside") is geography, never a reference
                 # to a named roster place — skip the bind, let the mint path refuse as before.
-                _slug_probe = re.sub(r"[^a-z0-9]+", "_",
-                                     str(moves_to).lower()).strip("_")
+                _slug_probe = slugify(str(moves_to))
                 _deictic = _slug_probe in _DEICTIC_DEST
                 # THE KNOWN-WORLD PLACE ROSTER, built FIRST (Cx 356 / Cx 390): scope alone
                 # misses authored geography (production bodycase scope holds ONE place, not
@@ -4644,8 +4614,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                     _bits.append(str(_v))
                             if not _bits and _pid not in set(scope or []):
                                 continue  # not horizon-present/readable — not a bind target
-                            _label = " — ".join(_bits) or _pid.split(":", 1)[-1] \
-                                .replace("_", " ")
+                            _label = " — ".join(_bits) or humanize_id(_pid)
                             # THE CURRENT SCENE IS A BIND TARGET (founder live, the
                             # drawing-room twin): a synonym for the room the player is
                             # STANDING IN ("the drawing room" in an established parlor)
@@ -5043,11 +5012,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # spawning a twin `obj:pencil_1` (the live bug: `refer` missed it by name; the bounded
             # token matcher catches it; one identity authority shared with the prose resolver).
             def _live_name(e: str) -> str:
-                try:
-                    v = live_reads.state(e, "name")
-                except Exception:
-                    v = None
-                return v if isinstance(v, str) else ""
+                return read_str(live_reads, e)
             _take_cands = (set(scope or []) | set(_pre_held)
                            | set(pre_chain or []) | ({pre_scene} if pre_scene else set()))
             _bound, _why = bind_or_mint(takes, kind="obj", candidates=_take_cands,
@@ -5345,13 +5310,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 _ncands.add(npc)
 
                 def _npc_name(e: str, _ct=canon_table) -> str:
-                    v = _ct.get((e, "name"))
-                    if not isinstance(v, str):
-                        try:
-                            v = live_reads.state(e, "name")
-                        except Exception:
-                            v = None
-                    return v if isinstance(v, str) else ""
+                    return table_or_read_name(_ct, live_reads, e)
                 _nraw = p.extract(decision["action"], scene=scene, extract="lean",
                                   pov=npc)  # read-only; the NPC's own "I" (PB 4c)
                 _nres, _nrec = resolve_rows(_nraw, scene=_ncands, protagonist=arc.protagonist,
@@ -5384,8 +5343,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         if _vtok:
             _vh, _vcount = _title_holder(canon_table, _vtok, arc.protagonist)
             if _vh:
-                _voc_name = str(canon_table.get((_vh, "name")) or
-                                _vh.split(":", 1)[-1].replace("_", " ").title())
+                _voc_name = str(canon_table.get((_vh, "name")) or humanize_id_title(_vh))
                 if _vh in npcs:
                     _voc_holder = _vh
                     trace.vocative = f"{_vtok}->{_vh} (present)"
@@ -6005,10 +5963,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         s = str(x)
         if s in names:
             return names[s]
-        if ":" in s and s.split(":", 1)[0] in ("person", "place", "obj", "fact", "event"):
-            local = s.split(":", 1)[-1].replace("_", " ")
-            return local.title() if s.startswith("person:") else local  # person slug = a proper name
-        return s
+        return human_name_typed_id(s)  # person slug = a proper name
 
     # LOCATION FILTER (founder live: "the tape followed us everywhere"): scene facts are the
     # player-frame snapshot over the WHOLE arc scope, so a learned-but-ELSEWHERE entity (a clue
@@ -6136,10 +6091,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _asked = "miss"  # can't read the receipt → don't gate (fail-open)
         if not _asked:
             try:
-                _here = str(canon_table.get((scene, "name")) or
-                            (scene or "").split(":")[-1].replace("_", " "))
+                _here = str(canon_table.get((scene, "name")) or humanize_id_last(scene or ""))
                 _who = ", ".join(
-                    str(canon_table.get((n, "name")) or n.split(":")[-1].replace("_", " "))
+                    str(canon_table.get((n, "name")) or humanize_id_last(n))
                     for n in npcs) if npcs else ""
                 _gate = cohorts.commitment_stage_gate(
                     provider, player_input, commitment, _here, _who, judgment_type or "")
@@ -6755,11 +6709,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         pre_keys = {(row["entity"], row["attribute"]) for row in receipt_rows}
         pre_entities = {row["entity"] for row in receipt_rows}
         briefing_keys = set(player_table)
-        license_tokens = set(
-            f"{briefing}\n{player_input}".lower()
-            .replace("’", "").replace("'", "")
-            .replace(",", " ").replace(".", " ").replace(";", " ").replace(":", " ")
-            .split())
+        license_tokens = set(split_words(f"{briefing}\n{player_input}",
+                                         seps=",.;:", drop="’'"))
 
         def _licensed(entity: str, attribute: str) -> bool:
             # Licensed = the narrator was GIVEN it: a briefing/player key, an entity
@@ -6769,8 +6720,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 return True
             if entity in pre_entities or entity == scene:
                 return True
-            name_tokens = entity.split(":", 1)[-1].replace("-", "_").split("_")
-            return all(tok in license_tokens for tok in name_tokens if tok)
+            return all(tok in license_tokens
+                       for tok in id_stem_parts(entity, hyphens=True))
 
         canon_before = dict(canon_table)  # established values BEFORE this render
         # `defer`: don't durability-classify the QUARANTINE staging — these rows are
@@ -6808,13 +6759,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             pass
 
         def _resolve_name_of(e: str) -> str:
-            v = canon_table.get((e, "name"))
-            if not isinstance(v, str):
-                try:
-                    v = live_reads.state(e, "name")
-                except Exception:
-                    v = None
-            return v if isinstance(v, str) else ""
+            return table_or_read_name(canon_table, live_reads, e)
         try:
             with _phase(trace, "post_extract"):
                 _raw = p.extract(prose, scene=scene, extract="lean",

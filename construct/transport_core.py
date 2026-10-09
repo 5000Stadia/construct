@@ -19,7 +19,6 @@ IO (`getUpdates`/`sendMessage`, file queues) and exactly-once persistence
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -27,6 +26,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from construct import registry
+from construct.text import alnum_words, file_safe
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def _pick(answer: str, choices: dict[str, tuple[str, ...]]) -> str | None:
     word inside another word never counts). Returns None when no choice matches or
     when two different choices both do — the caller re-asks and keeps the prompt
     armed, so a destructive path never runs on an ambiguous answer."""
-    words = set(re.findall(r"[a-z0-9]+", (answer or "").lower()))
+    words = set(alnum_words(answer or ""))
     hit = {name for name, keys in choices.items() if words & set(keys)}
     return next(iter(hit)) if len(hit) == 1 else None
 
@@ -1550,8 +1550,7 @@ class TransportCore:
 
     # -- transcript + /dump ------------------------------------------------
     def _transcript_path(self, ev: InboundEvent) -> Path:
-        import re
-        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", ev.external_id).strip("_") or "player"
+        safe = file_safe(ev.external_id) or "player"
         return self._log_dir / f"{ev.platform}_{safe}.log"
 
     def _log(self, ev: InboundEvent, role: str, text: str) -> None:
@@ -1617,8 +1616,7 @@ class TransportCore:
         d = self._feedback_dir
         d.mkdir(parents=True, exist_ok=True)
         ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        import re
-        safe = re.sub(r"[^A-Za-z0-9_-]+", "_", ev.external_id).strip("_") or "player"
+        safe = file_safe(ev.external_id) or "player"
         # Disambiguate same-second notes from the same player.
         n = sum(1 for _ in d.glob(f"feedback-{ts}-{safe}*.md"))
         suffix = f"-{n}" if n else ""
@@ -1781,8 +1779,7 @@ def _genre_emoji(genre: str, title: str = "") -> str:
 
 def _safe(s: str) -> str:
     """Filesystem-safe scenario-name segment; never empty."""
-    import re
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", s or "").strip("_") or "x"
+    return file_safe(s or "") or "x"
 
 
 #: Raw build stage line (substring) → the warm, player-facing progress line we

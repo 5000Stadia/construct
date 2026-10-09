@@ -21,6 +21,7 @@ from typing import Any
 from construct import cohorts
 from construct.adapter import state_value  # noqa: F401 — re-exported (tests/scripts import it from here)
 from construct.provider import Provider
+from construct.text import humanize_id
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +101,7 @@ def world_anchors(world: Any, scope: list[str] | None, protagonist: str,
         if entity == protagonist or not p:
             continue
         kind = state_value(p, entity, "kind", as_of=as_of) or entity.split(":", 1)[0]
-        name = (state_value(p, entity, "name", as_of=as_of)
-                or entity.split(":", 1)[-1].replace("_", " "))
+        name = state_value(p, entity, "name", as_of=as_of) or humanize_id(entity)
         feel = (state_value(p, entity, "role", as_of=as_of)
                 or state_value(p, entity, "feel", as_of=as_of)
                 or state_value(p, entity, "disposition", as_of=as_of) or "")
@@ -163,7 +163,7 @@ def ground_character(world: Any, provider: Provider, protagonist: str,
         place_name = _sv(place, "name")
         place_desc = _sv(place, "description")
         place_kind = _sv(place, "kind")
-        place_label = place_name or (place.split(":", 1)[-1].replace("_", " ") if place else "")
+        place_label = place_name or (humanize_id(place) if place else "")
         sheet_summary = "; ".join(
             f"{a}: {_sv(protagonist, a)}"
             for a in ("name", "background", "role", "gender", "pronouns") if _sv(protagonist, a))

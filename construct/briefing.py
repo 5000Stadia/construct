@@ -29,10 +29,11 @@ from typing import TYPE_CHECKING, Any
 
 from construct import laws as _laws_mod
 from construct import resolution
-from construct.arc.executor import _human as _human_entity
 from construct.arc.executor import arc_entities, climax_ready, current_phase
 from construct.arc.grammar import Arc
 from construct.gauge import gauge_lines
+from construct.text import CLAUSE_PUNCT, read_str, split_words, table_or_read_name_or_human
+from construct.text import human_name as _human_entity
 
 if TYPE_CHECKING:
     from construct.turnloop import TurnTrace
@@ -642,11 +643,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
     # authoritative winner. Carry pronouns + background + role from canon too (the Foyer writes them
     # there; the player-frame YOU block misses them).
     def _id_attr(a: str) -> str:
-        try:
-            v = live_reads.state(arc.protagonist, a)
-        except Exception:
-            v = None
-        return str(v) if isinstance(v, str) else ""
+        return read_str(live_reads, arc.protagonist, a)
     _pname = _id_attr("name") or protagonist_display
     _ppron = _id_attr("pronouns") or _id_attr("gender")
     _pbg = _id_attr("background")
@@ -712,13 +709,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
         _held = []
     if _held:
         def _held_name(h: str) -> str:
-            nm = canon_table.get((h, "name"))
-            if not nm:
-                try:
-                    nm = live_reads.state(h, "name")
-                except Exception:
-                    nm = None
-            return str(nm or _human_entity(h))
+            return table_or_read_name_or_human(canon_table, live_reads, h)
         briefing_parts.append(
             "\nWHAT YOU ARE CARRYING (in hand or on your person right now — honor this; never "
             "narrate one of these back where it was taken from). This list is EXCLUSIVE: it is "
@@ -729,13 +720,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
         # DROP ACKNOWLEDGMENT (Cx 299 non-blocking): a thing set down THIS turn left the player's
         # hands and stays where it was left — so the narrator doesn't re-pocket it from transcript
         # memory next turn (the founder's "object follows me" family). Names the object + the place.
-        _dropped_canon = canon_table.get((trace.dropped, "name"))
-        if not _dropped_canon:
-            try:
-                _dropped_canon = live_reads.state(trace.dropped, "name")
-            except Exception:
-                _dropped_canon = None
-        _dropped_nm = str(_dropped_canon or _human_entity(trace.dropped))
+        _dropped_nm = table_or_read_name_or_human(canon_table, live_reads, trace.dropped)
         _here_nm = str(canon_table.get((pre_scene, "name")) or _human_entity(pre_scene)) if pre_scene else "here"
         briefing_parts.append(
             f"\nJUST SET DOWN (no longer carried — it STAYS here, at {_here_nm}; do not narrate it "
@@ -885,11 +870,9 @@ def build_briefing_rulings(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
             "story arrives next beat.")
     deflect_secret = False
     if improv_query:
-        public_name_toks = {t for nm in names.values()
-                            for t in nm.lower().replace("-", " ").split()}
+        public_name_toks = {t for nm in names.values() for t in split_words(nm, seps="-")}
         secret_toks = _secret_tokens(arc, live_reads, public_name_toks)
-        qtoks = set(improv_query.lower().replace("?", " ").replace(",", " ")
-                    .replace(".", " ").split())
+        qtoks = set(split_words(improv_query, seps=CLAUSE_PUNCT))
         deflect_secret = bool(secret_toks & qtoks)
     if improv_query and deflect_secret:
         # The fallen-through question probes the mystery's HIDDEN answer directly

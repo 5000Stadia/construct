@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from construct.adapter import state_value
+from construct.text import CLAUSE_PUNCT, split_words
 
 DEFAULT_HOURS_PER_DAY = 24
 
@@ -266,7 +267,7 @@ def deterministic_elapsed(action: str, *, moved: bool = False) -> dict | None:
     low = action.lower()
     if any(m in low for m in _TEMPORAL_MARKERS):
         return None  # explicit time language → defer to the model estimate (phase/day jump)
-    toks = set(low.replace(",", " ").replace(".", " ").replace("?", " ").split())
+    toks = set(split_words(low, seps=CLAUSE_PUNCT))
     if toks & _EXAMINE_VERBS:
         return {"advance_minutes": 12}      # close inspection / searching
     if moved or (toks & _MOVE_VERBS):

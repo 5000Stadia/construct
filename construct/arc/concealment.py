@@ -10,11 +10,11 @@ by `construct.arc.executor`.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from construct.arc.grammar import Arc
 from construct.arc.supersession import active_beats
+from construct.text import UNICODE_WORD, id_local, unicode_words
 
 
 def _is_placeholder_premise(atom: Any, protagonist: str) -> bool:
@@ -86,8 +86,8 @@ _CONCEAL_STOP = {"the", "a", "an", "of", "to", "is", "in", "on", "status", "kind
 #: tokens, screening the text) so they cannot disagree: any run of letters/digits, so
 #: punctuation and `_`/`-`/`:` separators never hide a token. Same run as
 #: `turnloop._secret_word_set` (`[a-z0-9]+`), made unicode-aware so an accented name
-#: ('josé') is one word on both sides.
-_CONCEAL_WORD = re.compile(r"[^\W_]+")
+#: ('josé') is one word on both sides. It is `construct.text.unicode_words`'s pattern.
+_CONCEAL_WORD = UNICODE_WORD
 
 
 def concealed_tokens(keys: set[tuple[str, str]]) -> set[str]:
@@ -97,10 +97,8 @@ def concealed_tokens(keys: set[tuple[str, str]]) -> set[str]:
     (Cx 022 #3 / 333 #3 / 337). `keys` = `arc_protected_keys(arc)`."""
     toks: set[str] = set()
     for (e, a) in keys:
-        for src in (str(e).split(":", 1)[-1], str(a)):
-            for t in _CONCEAL_WORD.findall(src.lower()):
-                if len(t) > 3 and t not in _CONCEAL_STOP:
-                    toks.add(t)
+        for src in (id_local(str(e)), str(a)):
+            toks.update(unicode_words(src, min_len=4, stop=_CONCEAL_STOP))
     return toks
 
 
@@ -115,7 +113,7 @@ def value_leaks(text: str, tokens: set[str]) -> bool:
     # be imported here — turnloop imports this module): punctuation ('the culprit,') must
     # never leave a concealed token un-matched. `_`/`-`/`:` are non-alphanumeric, so
     # id-style text ('person:edith_marlowe') still splits into its words.
-    words = set(_CONCEAL_WORD.findall(str(text).lower()))
+    words = set(unicode_words(str(text)))
     return bool(tokens & words)
 
 

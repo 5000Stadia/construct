@@ -23,6 +23,8 @@ import inspect
 import logging
 from dataclasses import dataclass, field
 
+from construct.text import slugify
+
 logger = logging.getLogger(__name__)
 
 
@@ -431,16 +433,12 @@ class AssembledChunk:
 _ID_GRAMMAR = _re.compile(r"(?:place|person|obj|region):[a-z0-9_]+")
 
 
-def _slugify(name: str) -> str:
-    return _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
-
-
 def _alloc(prefix: str, name: str, exists, taken: set) -> str:
     """Collision-free id under the global identity authority: the canon
     roster (`exists`) AND this chunk's own allocations (`taken`) — a grown
     person and their same-named companion must not collide intra-chunk.
     Ordinal probe, the D3 re-mint pattern."""
-    slug = _slugify(name)
+    slug = slugify(name)
     if not slug:
         return ""
     cand = f"{prefix}:{slug}"
