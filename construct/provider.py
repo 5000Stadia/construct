@@ -69,6 +69,15 @@ class ProviderTransientError(ProviderTransportError):
     `ProviderTransportError` and fail fast."""
 
 
+#: Stream error codes the server reports as its own, passing trouble: re-sending can succeed.
+#: (An R20 probe turn lost the player's move to one `server_error` that was not retried.)
+_TRANSIENT_STREAM_CODES = frozenset({
+    "server_error", "internal_error", "internal_server_error", "service_unavailable",
+    "overloaded", "server_overloaded", "overloaded_error", "rate_limit_exceeded",
+    "rate_limit_error", "timeout", "request_timeout",
+})
+
+
 class SchemaViolation(ProviderError):
     """Output failed schema validation after the bounded re-ask."""
 
@@ -479,6 +488,23 @@ class _ResponsesWireProvider(Provider):
         return body
 
     @staticmethod
+    def _stream_code(event: dict) -> str:
+        """The error code of an error-bearing stream event or response object ('' if none)."""
+        resp = event.get("response") if isinstance(event.get("response"), dict) else {}
+        err = event.get("error") or resp.get("error")
+        src = err if isinstance(err, dict) else event
+        return str(src.get("code") or src.get("type") or "")
+
+    @staticmethod
+    def _stream_error(event: dict, text: str) -> "ProviderTransportError":
+        """The exception for a failed stream: TRANSIENT when the server says the failure is
+        its own and passing (a server error, overload, rate limit, timeout) so the bounded
+        retry re-sends it; otherwise a plain transport error that fails fast."""
+        code = _ResponsesWireProvider._stream_code(event).lower()
+        cls = ProviderTransientError if code in _TRANSIENT_STREAM_CODES else ProviderTransportError
+        return cls(text)
+
+    @staticmethod
     def _stream_failure(event: dict) -> str:
         """`code: message` of an error-bearing stream event or response object. The
         error may sit on the event itself or under `error` / `response.error`."""
@@ -502,8 +528,10 @@ class _ResponsesWireProvider(Provider):
 
         A stream that reports an error / failure, stops incomplete, or answers with
         a refusal raises `ProviderTransportError` carrying the server's code and
-        message — it is never returned as if it were a complete answer. These are
-        not marked transient: re-sending the same request cannot improve them."""
+        message — it is never returned as if it were a complete answer. A failure the
+        server reports as its own and passing (`_TRANSIENT_STREAM_CODES`) is raised as
+        `ProviderTransientError` so the bounded retry re-sends it; the rest fail fast,
+        since re-sending the same request cannot improve them."""
         final: dict = {}
         text_chunks: list[str] = []
         refusal_chunks: list[str] = []
@@ -535,16 +563,17 @@ class _ResponsesWireProvider(Provider):
                         f"model refused the request: "
                         f"{event.get('refusal') or ''.join(refusal_chunks)}")
                 elif etype in ("error", "response.failed"):
-                    raise ProviderTransportError(
-                        f"response stream reported {etype}: "
-                        f"{_ResponsesWireProvider._stream_failure(event)}")
+                    raise _ResponsesWireProvider._stream_error(
+                        event, f"response stream reported {etype}: "
+                               f"{_ResponsesWireProvider._stream_failure(event)}")
                 elif etype == "response.incomplete":
                     raise ProviderTransportError(
                         f"response incomplete (not a full answer): "
                         f"{_ResponsesWireProvider._incomplete_reason(event.get('response') or {})}")
         # A "completed" envelope can still carry a failed / incomplete status.
         if final.get("error") or final.get("status") == "failed":
-            raise ProviderTransportError(
+            raise _ResponsesWireProvider._stream_error(
+                {"response": final},
                 f"response failed: {_ResponsesWireProvider._stream_failure({'response': final})}")
         if final.get("status") == "incomplete":
             raise ProviderTransportError(
