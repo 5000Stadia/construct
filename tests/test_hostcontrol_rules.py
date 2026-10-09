@@ -41,12 +41,14 @@ _PLOT_STAMPERS = {"arc_to_items", "index_items", "portfolio_items", "portfolio_a
                   "beat_to_items"}
 _MODEL_FREE = {"rules", "defer"}
 
-#: Build-time writes. `_finalize_scenario_impl` runs inside the porcelain's begin_build
+#: Build-time writes. `_finalize_scenario_impl` (whose arc-commit stage now lives in
+#: `_stage_commit_arc`, called from it) runs inside the porcelain's begin_build
 #: session, whose `seal_build` pass classifies what the session deferred (RULES-only by
 #: default; CONSTRUCT_FAST_CLASSIFY=0 sends the ambiguous remainder to the batch model).
 #: They are deliberately not switched per call here.
 _BUILD_SESSION = {
     ("game.py", "_finalize_scenario_impl"),
+    ("game.py", "_stage_commit_arc"),
     ("game.py", "_author_foreshadow_pins"),
 }
 
