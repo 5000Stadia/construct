@@ -675,10 +675,20 @@ class _ResponsesWireProvider(Provider):
                 opts.append((socket.IPPROTO_TCP, getattr(socket, name), value))
         return opts
 
+    def payload_bytes(self, prompt: str, schema: dict, tier: Tier = "main",
+                      deliberate: bool = False) -> int:
+        """The request size the transport cap is checked against, so a composer can shape
+        its prompt to fit BEFORE the call (`payload_cap_bytes` is the limit)."""
+        return len(json.dumps(self._body(prompt, schema, tier, deliberate)))
+
+    @property
+    def payload_cap_bytes(self) -> int:
+        return self._payload_cap_bytes
+
     async def _call_once(self, prompt: str, schema: dict, tier: Tier,
                          deliberate: bool = False) -> str:
+        payload_bytes = self.payload_bytes(prompt, schema, tier, deliberate)
         body = self._body(prompt, schema, tier, deliberate)
-        payload_bytes = len(json.dumps(body))
         if payload_bytes > self._payload_cap_bytes:
             raise ProviderTransportError(
                 f"payload {payload_bytes // 1024}KB exceeds the {self._payload_cap_bytes // 1024}KB "

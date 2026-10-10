@@ -87,7 +87,8 @@ from construct.cast import beat_delivery_targets
 from construct.pins import resolve_active_pins
 from construct.intent import FAIL_OPEN as FAIL_INTENT, TurnIntent
 from construct.provider import Provider, ProviderError
-from construct.briefing import BriefingInputs, build_briefing, build_briefing_rulings
+from construct.briefing import (BriefingInputs, build_briefing, build_briefing_rulings,
+                                drop_oldest_story_turn)
 
 logger = logging.getLogger(__name__)
 
@@ -6805,7 +6806,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     with _phase(trace, "narrate"):
         prose = cohorts.narrate(provider, briefing, arc.protagonist,
                                 peopled=_peopled, competence=_competence,
-                                serve_thread=_serve_thread)
+                                serve_thread=_serve_thread,
+                                shrink=drop_oldest_story_turn)
     trace.cohort_calls.append("narrate:main")
     # Deterministic player-boundary guard on the render: prose naming
     # the protagonist in third person gets ONE re-ask with the violation
@@ -6818,7 +6820,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             f"{arc.protagonist} as a third-person character. They are 'you'. "
             f"Re-render without naming them.",
             arc.protagonist, peopled=_peopled, competence=_competence,
-            serve_thread=_serve_thread)  # same flags (Cx 247)
+            serve_thread=_serve_thread,
+            shrink=drop_oldest_story_turn)  # same flags (Cx 247)
         trace.cohort_calls.append("narrate:main(re-ask)")
     if names_protagonist(prose, arc.protagonist):
         trace.player_boundary = "FLAGGED: protagonist named in third person"

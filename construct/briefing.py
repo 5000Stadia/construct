@@ -43,6 +43,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger("construct.turnloop")
 
 
+#: The recent-beats block's header; `drop_oldest_story_turn` finds the block by it.
+STORY_SO_FAR_HEADER = ("THE STORY SO FAR (recent beats, in detail — your short-term memory of "
+                       "what just happened; continue naturally, do not repeat or re-establish "
+                       "what's here):\n")
+#: Each turn in the recent-beats block starts with the player's line under this mark.
+_YOU_MARK = "› You: "
+
+
+def drop_oldest_story_turn(briefing: str) -> str | None:
+    """The briefing with the OLDEST turn of THE STORY SO FAR removed, or None when the block
+    is absent or down to its last turn. The narrator's `shrink` step at the transport cap:
+    the recent window is the briefing's one part that grows with the chapter, and its oldest
+    beat is already carried, at lower resolution, by NARRATIVE MEMORY."""
+    head = briefing.find(STORY_SO_FAR_HEADER)
+    if head < 0:
+        return None
+    start = head + len(STORY_SO_FAR_HEADER)
+    first = briefing.find(_YOU_MARK, start)
+    if first < 0:
+        return None
+    # A leading beat with no player line (the opening's prose) is the oldest turn itself.
+    cut = first if first > start else briefing.find(_YOU_MARK, first + len(_YOU_MARK))
+    if cut < 0:
+        return None
+    return briefing[:start] + briefing[cut:]
+
+
 @dataclass(frozen=True)
 class BriefingInputs:
     """Everything the briefing reads from the turn, passed explicitly (no closure over
@@ -195,7 +222,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
         beats = []
         for e in _recent[-_RECENT_TURNS:]:
             if e.get("player"):
-                beats.append(f"› You: {e['player']}")
+                beats.append(f"{_YOU_MARK}{e['player']}")
             if e.get("prose"):
                 beats.append(e["prose"])
         story_so_far = "\n\n".join(beats)
@@ -250,10 +277,7 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
             f"themes, unresolved threads; lower-resolution than the recent beats "
             f"below, but the through-line to honour):\n{narrative_memory}\n")
     if story_so_far:
-        briefing_parts.append(
-            f"THE STORY SO FAR (recent beats, in detail — your short-term memory of "
-            f"what just happened; continue naturally, do not repeat or re-establish "
-            f"what's here):\n{story_so_far}\n")
+        briefing_parts.append(f"{STORY_SO_FAR_HEADER}{story_so_far}\n")
     if trace.time_now:
         # The diegetic hour, on THIS place's calendar — let it shape the light, who's
         # about, what's open; never state it as a clock readout.
