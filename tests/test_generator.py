@@ -13,6 +13,8 @@ player-boundary decline, and depth-0 roots with depth-1 regeneration.
 import json
 import logging
 
+import pytest
+
 from patternbuffer import World
 from patternbuffer.testing import StubModel, rule_classifier_fallback
 
@@ -882,10 +884,11 @@ def test_finalize_stages_play_as_pick_instead_of_swapping(tmp_path):
     w.close()
 
 
-def test_seal_lint_catches_protagonist_split(tmp_path):
+def test_seal_lint_stops_the_build_on_protagonist_split(tmp_path):
     # #107 seal-lint: if the committed arc:main.protagonist row diverges from the
     # authored (in-memory) protagonist the beat gates + meta are built from, the
-    # build receipts a `protagonist_split` incoherence (loud, never a raise). We
+    # build STOPS (monitor n3e4ce5: the R20 probe's run 5 lost two earned beats to
+    # a split the lint only logged). We
     # force the split by monkeypatching arc_to_items to emit a DIFFERENT canonical
     # protagonist row than the arc object carries.
     from construct import game
@@ -937,19 +940,36 @@ def test_seal_lint_catches_protagonist_split(tmp_path):
                 r["value"] = "person:other"   # <- the split
         return rows
     game.arc_io.arc_to_items = _splitting
+    spath = tmp_path / "split_scenario.world"
     try:
-        spath = tmp_path / "split_scenario.world"
-        game._finalize_scenario(w, "split", "Split World", _P(), spath,
-                                endless=False, play_as="person hero")
+        with pytest.raises(game.ProtagonistSplitError) as err:
+            game._finalize_scenario(w, "split", "Split World", _P(), spath,
+                                    endless=False, play_as="person hero")
     finally:
         game.arc_io.arc_to_items = _orig
 
-    from construct.adapter import frame_facts
-    kinds = {str(r.value) for r in frame_facts(w, "session:main",
-                                               entity="event:seal_incoherence")}
-    assert "protagonist_split" in kinds          # the lint fired + receipted
-    assert spath.with_suffix(".meta.json").exists()   # but never sank the build
+    assert (err.value.committed, err.value.authored) == ("person:other", "person:hero")
+    assert not spath.with_suffix(".meta.json").exists()   # never sealed
     w.close()
+
+
+def test_a_protagonist_split_fails_the_generated_build_as_not_viable(tmp_path, monkeypatch):
+    # The generated path (the transports and the probe) turns the seal stop into
+    # the ViabilityError its callers already handle; the ingest path has already
+    # removed the half-built world.
+    from construct import game
+
+    def _split(name, prose_path, provider, **kw):
+        raise game.ProtagonistSplitError("person:elias_venn", "person:elias")
+
+    monkeypatch.setattr(game, "create_scenario_from_ingest", _split)
+    monkeypatch.setattr(game, "_author_world_laws", lambda *a, **k: ([], ""))
+    from construct import cohorts
+    monkeypatch.setattr(cohorts, "author_story", lambda *a, **k: "# T\n\nprose")
+    monkeypatch.setattr(game, "_save_generated_prose", lambda name, work: tmp_path / "t.md")
+    with pytest.raises(game.ViabilityError) as err:
+        game.create_scenario_from_generated("splitgen", object(), seed="s")
+    assert "protagonist split at seal" in err.value.problems[0]
 
 
 def test_fidelity_vouched_pairs_allowlist_and_load_bearing_gates():
