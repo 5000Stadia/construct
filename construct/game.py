@@ -930,6 +930,18 @@ def _stage_vouch_merges(world: Any, arc: Arc, _required_holders: set) -> None:
         logger.warning("fidelity vouched-merge skipped: %s", exc)
 
 
+class ProtagonistSplitError(RuntimeError):
+    """#107 SEAL-LINT: the committed arc row names a different protagonist than the
+    authored arc its beat gates watch, so the arc is undeliverable as sealed. Raised
+    at seal to stop the build; the creation paths remove the half-built world."""
+
+    def __init__(self, committed: str, authored: str) -> None:
+        self.committed = committed
+        self.authored = authored
+        super().__init__(f"protagonist split at seal: the arc row names {committed!r} but "
+                         f"the beats watch knows:{authored} (arc undeliverable as sealed)")
+
+
 def _stage_commit_arc(world: Any, arc: Arc) -> None:
     """Commit the arc rows + #107 seal-lint + portfolio + turn_0. Pure move out of
     `_finalize_scenario_impl`."""
@@ -946,25 +958,23 @@ def _stage_commit_arc(world: Any, arc: Arc) -> None:
     # character can never write the frame the beats watch → an undeliverable arc that
     # LOOKS built. The staged-not-swapped guard + PB's durable_contradiction veto
     # close the known cause; this is the belt-and-suspenders invariant that catches
-    # ANY future cause at build. Loud + receipted, never a raise (fail-open: a false
-    # positive must not deny a player a world — the viability gate is the harder net).
+    # ANY future cause at build. A split STOPS the build (monitor n3e4ce5, 2026-10-10):
+    # it was loud-but-fail-open, and in the R20 probe it was a true positive three
+    # times (runs 2, 4, 5); in run 5 the player earned two knowledge beats into the
+    # played frame and neither counted. No automatic repair here: that belongs with
+    # pattern-buffer's identity work (gate g3bf5da). An unreadable row still fails
+    # open — the lint's own read must not sink a build.
     try:
         _committed = _protagonist_coherence(world, arc)
-        if _committed is not None and _committed != arc.protagonist:
-            logger.error("#107 SEAL-LINT: protagonist SPLIT — committed arc row %r "
-                         "!= authored %r (beat gates watch knows:%s); the arc is "
-                         "undeliverable as sealed", _committed, arc.protagonist,
-                         arc.protagonist)
-            world.porcelain.ingest_structured([
-                {"entity": "event:seal_incoherence", "attribute": "kind",
-                 "value": "protagonist_split", "valid_from": turn_time(0)},
-                {"entity": "event:seal_incoherence", "attribute": "committed",
-                 "value": _committed, "valid_from": turn_time(0)},
-                {"entity": "event:seal_incoherence", "attribute": "authored",
-                 "value": arc.protagonist, "valid_from": turn_time(0)},
-            ], frame="session:main", classify="rules")
-    except Exception as exc:  # the lint must never sink a build
+    except Exception as exc:  # the lint's read must never sink a build
         logger.warning("#107 seal-lint skipped: %s", exc)
+        _committed = None
+    if _committed is not None and _committed != arc.protagonist:
+        logger.error("#107 SEAL-LINT: protagonist SPLIT — committed arc row %r "
+                     "!= authored %r (beat gates watch knows:%s); the arc is "
+                     "undeliverable as sealed — stopping the build", _committed,
+                     arc.protagonist, arc.protagonist)
+        raise ProtagonistSplitError(_committed, arc.protagonist)
     # The portfolio manifest (LIVING-WORLD-GENERATOR P1): session zero authors
     # one (main) arc, so the registry is a single-entry portfolio. It is written
     # explicitly (rather than relying on the fail-open default) so the multi-arc
@@ -1678,11 +1688,14 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
     _emit(on_stage, f"   …hidden bible saved (authoring side of the firewall) "
                     f"→ {prose_path}")
 
-    meta = create_scenario_from_ingest(name, prose_path, provider,
-                                       endless=endless, on_stage=on_stage,
-                                       win_direction=win_direction, play_as=play_as,
-                                       game_types=game_types,
-                                       laws=laws, reality_register=reality)
+    try:
+        meta = create_scenario_from_ingest(name, prose_path, provider,
+                                           endless=endless, on_stage=on_stage,
+                                           win_direction=win_direction, play_as=play_as,
+                                           game_types=game_types,
+                                           laws=laws, reality_register=reality)
+    except ProtagonistSplitError as exc:  # the ingest path already removed the world
+        raise ViabilityError(name, prose_path, [str(exc)]) from exc
 
     _emit(on_stage, "Stage 7 · Viability gate · entry material + cold-open smoke "
                     "over shipped reads")
