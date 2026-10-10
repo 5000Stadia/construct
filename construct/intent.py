@@ -36,6 +36,7 @@ class TurnIntent:
     commits: bool = False                # action or declaration
     commitment: str = ""                 # the committed words; the input itself when blank
     takes: str = ""
+    takes_more: tuple[str, ...] = ()     # further objects taken in the same move (run 5 t22)
     drops: str = ""
     examines_target: str = ""
     asks_targets: tuple[str, ...] = ()
@@ -73,6 +74,8 @@ class TurnIntent:
             commits=bool(verdict.get("commits")) and acts,
             commitment=(verdict.get("commitment") or "").strip() or player_input,
             takes=(verdict.get("takes") or "").strip(),
+            takes_more=tuple(t.strip() for t in (verdict.get("takes_more") or [])
+                             if isinstance(t, str) and t.strip()),
             drops=(verdict.get("drops") or "").strip(),
             examines_target=(verdict.get("examines_target") or "").strip(),
             asks_targets=tuple(t for t in (verdict.get("asks_targets") or []) if t),

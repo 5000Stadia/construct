@@ -4175,6 +4175,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     mortal_risk, reshape_attempt = intent.mortal_risk, intent.reshape_attempt
     commits, commitment = intent.commits, intent.commitment
     takes, drops, examines_target = intent.takes, intent.drops, intent.examines_target
+    takes_more = intent.takes_more
     asks_targets = list(intent.asks_targets)
     addresses_present, asserts_or_reveals = intent.addresses_present, intent.asserts_or_reveals
     moves_open, seeks_encounter = intent.moves_open, intent.seeks_encounter
@@ -5108,62 +5109,69 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     #     the ledger under their arm but canon never tracked possession, so a later "set
     #     it back" was wrongly denied. Host-side + coreference-proof: "I take X" → X is
     #     with you, never the pronoun-phantom the extraction sometimes invents.)
-    if takes:
-        # SCOPED (founder synonym mandate): scene + held — "the blade" binds the
-        # scene's knife at tier 2 instead of minting a sibling obj:blade.
-        ores = world.refer(takes, scope=[e for e in (pre_scene, arc.protagonist) if e],
-                           frame="canon", as_of=_h)  # take only a horizon-present object (Cx 257)
-        otarget = getattr(ores, "entity_id", None)
-        # Horizon-presence guard (Cx 257): don't grant possession of a future-only object that
-        # `refer` matched purely by its registered name; it doesn't exist yet at the opening.
-        if otarget and not live_reads.has_entity(otarget):
-            logger.info("take target %s absent at the play horizon; not granting", otarget)
-            otarget = None
-        if (getattr(ores, "status", None) == "resolved" and otarget
-                and otarget != arc.protagonist and otarget not in _NARRATOR_PHANTOM
-                and otarget not in _PRONOUN_PHANTOM):
-            p.ingest_structured([{
-                "entity": otarget, "attribute": "in", "value": arc.protagonist,
-                "value_type": "entity", "valid_from": turn_time(turn),
-            }], classify="batch")
-            trace.took = otarget
-            logger.info("player took: %s -> held by %s", otarget, arc.protagonist)
-        elif takes and not _take_touches_secret(takes, arc, live_reads):
-            # ENTITY AUTHORITY (Cx 304): before MINTING, BIND by token to an object already present
-            # in the scene/held set — so "take the pencil" grabs the scene's `obj:pencil` instead of
-            # spawning a twin `obj:pencil_1` (the live bug: `refer` missed it by name; the bounded
-            # token matcher catches it; one identity authority shared with the prose resolver).
-            def _live_name(e: str) -> str:
-                return read_str(live_reads, e)
-            _take_cands = (set(scope or []) | set(_pre_held)
-                           | set(pre_chain or []) | ({pre_scene} if pre_scene else set()))
-            _bound, _why = bind_or_mint(takes, kind="obj", candidates=_take_cands,
-                                        protagonist=arc.protagonist, name_of=_live_name)
-            if _bound and str(_bound).startswith("obj:") and _bound != arc.protagonist:
+    # MULTI-OBJECT TAKE (R20 probe run 5, turn 22: "I hook the ash-rake and poker under my
+    # arm, shove the complaint slate inside my coat" left the poker and the rake uncommitted —
+    # `takes` names one thing, and the A-lite skip then judged the turn assertion-free).
+    # Every object the player took gets the same deterministic commit, in the order named.
+    _took: list[str] = []
+    for takes in [t for t in (takes, *takes_more) if t]:
+            # SCOPED (founder synonym mandate): scene + held — "the blade" binds the
+            # scene's knife at tier 2 instead of minting a sibling obj:blade.
+            ores = world.refer(takes, scope=[e for e in (pre_scene, arc.protagonist) if e],
+                               frame="canon", as_of=_h)  # take only a horizon-present object (Cx 257)
+            otarget = getattr(ores, "entity_id", None)
+            # Horizon-presence guard (Cx 257): don't grant possession of a future-only object that
+            # `refer` matched purely by its registered name; it doesn't exist yet at the opening.
+            if otarget and not live_reads.has_entity(otarget):
+                logger.info("take target %s absent at the play horizon; not granting", otarget)
+                otarget = None
+            if (getattr(ores, "status", None) == "resolved" and otarget
+                    and otarget != arc.protagonist and otarget not in _NARRATOR_PHANTOM
+                    and otarget not in _PRONOUN_PHANTOM):
                 p.ingest_structured([{
-                    "entity": _bound, "attribute": "in", "value": arc.protagonist,
+                    "entity": otarget, "attribute": "in", "value": arc.protagonist,
                     "value_type": "entity", "valid_from": turn_time(turn),
                 }], classify="batch")
-                trace.took = _bound
-                logger.info("player took (bound present object): %s -> held by %s",
-                            _bound, arc.protagonist)
-            elif _why == "mint":
-                # IMPROV-OBJECT PERMANENCE (founder: "a mug from the bar doesn't not exist"): the take
-                # named an object NOT present in canon (ZERO candidates). If it's an ordinary thing
-                # plainly present in the scene, grant world permanence — mint ONE fresh obj held by the
-                # player. A specific/named/load-bearing object is not minted (the gate denies). Only a
-                # genuine `mint` signal reaches here — an AMBIGUOUS take must NOT spawn a sibling (Cx
-                # 306): it falls through to no canon write + a receipt, below.
-                granted = _grant_taken_object(world, arc.protagonist, takes, pre_scene,
-                                              provider, at=turn_time(turn),
-                                              laws=_laws_full)
-                if granted:
-                    trace.took = granted
-            else:
-                # ambiguous / dropped — multiple present matches or a voice/malformed mention. No canon
-                # write (never a third sibling); surface a receipt and let the narrator handle it.
-                trace.resolver = (trace.resolver or []) + [(takes, "takes", _why)]
-                logger.info("take %r unresolved (%s); no mint", takes, _why)
+                _took.append(otarget)
+                logger.info("player took: %s -> held by %s", otarget, arc.protagonist)
+            elif takes and not _take_touches_secret(takes, arc, live_reads):
+                # ENTITY AUTHORITY (Cx 304): before MINTING, BIND by token to an object already present
+                # in the scene/held set — so "take the pencil" grabs the scene's `obj:pencil` instead of
+                # spawning a twin `obj:pencil_1` (the live bug: `refer` missed it by name; the bounded
+                # token matcher catches it; one identity authority shared with the prose resolver).
+                def _live_name(e: str) -> str:
+                    return read_str(live_reads, e)
+                _take_cands = (set(scope or []) | set(_pre_held)
+                               | set(pre_chain or []) | ({pre_scene} if pre_scene else set()))
+                _bound, _why = bind_or_mint(takes, kind="obj", candidates=_take_cands,
+                                            protagonist=arc.protagonist, name_of=_live_name)
+                if _bound and str(_bound).startswith("obj:") and _bound != arc.protagonist:
+                    p.ingest_structured([{
+                        "entity": _bound, "attribute": "in", "value": arc.protagonist,
+                        "value_type": "entity", "valid_from": turn_time(turn),
+                    }], classify="batch")
+                    _took.append(_bound)
+                    logger.info("player took (bound present object): %s -> held by %s",
+                                _bound, arc.protagonist)
+                elif _why == "mint":
+                    # IMPROV-OBJECT PERMANENCE (founder: "a mug from the bar doesn't not exist"): the take
+                    # named an object NOT present in canon (ZERO candidates). If it's an ordinary thing
+                    # plainly present in the scene, grant world permanence — mint ONE fresh obj held by the
+                    # player. A specific/named/load-bearing object is not minted (the gate denies). Only a
+                    # genuine `mint` signal reaches here — an AMBIGUOUS take must NOT spawn a sibling (Cx
+                    # 306): it falls through to no canon write + a receipt, below.
+                    granted = _grant_taken_object(world, arc.protagonist, takes, pre_scene,
+                                                  provider, at=turn_time(turn),
+                                                  laws=_laws_full)
+                    if granted:
+                        _took.append(granted)
+                else:
+                    # ambiguous / dropped — multiple present matches or a voice/malformed mention. No canon
+                    # write (never a third sibling); surface a receipt and let the narrator handle it.
+                    trace.resolver = (trace.resolver or []) + [(takes, "takes", _why)]
+                    logger.info("take %r unresolved (%s); no mint", takes, _why)
+    if _took:
+        trace.took = ", ".join(_took)
 
     # 2c-ii. DROP (the inverse of take, founder cohesion test): when the player SETS DOWN a HELD
     #     object, commit it into the current place — so a dropped thing actually STAYS where it was

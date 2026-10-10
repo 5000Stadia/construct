@@ -127,3 +127,14 @@ def test_dismissal_wins_and_only_actions_move_people():
 def test_strict_flags_never_fail_open_through_truthiness():
     i = TurnIntent.from_verdict({"kind": "action", "moves_open": "true", "seeks_encounter": 1}, "x")
     assert not i.moves_open and not i.seeks_encounter
+
+
+def test_takes_more_keeps_every_further_named_object():
+    """R20 run 5 t22: the further objects of a multi-object take survive normalization;
+    blanks and non-strings drop, an absent field is empty (old verdicts unchanged)."""
+    v = {"kind": "action", "takes": " the ash-rake ",
+         "takes_more": [" the poker", "", None, "the slate "]}
+    intent = TurnIntent.from_verdict(v, "x")
+    assert intent.takes == "the ash-rake"
+    assert intent.takes_more == ("the poker", "the slate")
+    assert TurnIntent.from_verdict({"kind": "action"}, "x").takes_more == ()
