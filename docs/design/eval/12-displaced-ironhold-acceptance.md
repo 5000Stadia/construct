@@ -88,6 +88,29 @@ Kabe's gate g855759 went to its default: movement stays as it is (no conveyances
 
 Criteria 2–5 stand. Criterion 1 becomes: **chapter 1 lands a conclusion within 30 turns** (`concluded=True`). The turn the arc became ready is recorded too. Since movement is unchanged, a fail that comes from boarding a vessel or an object-named destination is recorded as that, and not worked around.
 
+## Run 4 — FAIL (criterion 1): the action deck was stuck on one card
+
+Fresh build on main `2330910`, against a frozen copy of pattern-buffer at `0aaa30c` (it includes R22). The copy was needed because pb's R22 merge rewrote the engine mid-import and crashed the first attempt (archived in `ironhold-run4-aborted/`). The world: a condemned man in Ironhold, the Night Ice Reader's room, the death of the river clerk Arlen Pike. Chapter 1 played all 30 turns: seven of investigation, then the escape stance from turn 8. The player talked their way to a guarded trip to the necessary-house, slipped out the back, crawled the cart-rut to the river, fought a boatman over a skiff and a corded bundle, and ended in the wash-yard behind the hanging linen. **The arc was never ready** (2 of 6 beats; 0 of the 3 climax beats), so `concluded=False`, and chapter 2 never ran. Artifacts are in `ironhold-run4/`.
+
+Against the mark: **1 fails.** 2 and 3 can't be judged without a conclusion. Canon's end place, `place:behind_hanging_linen`, came from the book, not from play. **4 passes in play** (no ENGINE ERROR, no empty prose); the build logged one ERROR, item 3 below. **5 fails:** the critic filed a WHERE note at turn 17 (prose had the player outside while canon kept them in the necessary-house).
+
+What happened, in order of weight:
+
+1. **Every uncertain action drew the same card.** From turn 6, 18 checks drew `failure_opportunity` 18 times, never a success. Each failure opened a new opening and took nothing, so no escape beat could land. The cause: the deck's seed and cursor were timeless session rows rewritten on every draw. Rows that tie on valid time read as *conflicted*, and the engine serves the first one, so the cursor read 1 forever and every draw after the first was card 1. This is not new: run 2's four `success_cost` draws in a row were the same stuck card on a luckier seed. The unit test's fake world kept the last write, so it never showed. **Fixed** (`fix/deck-cursor`): the rows are now `deck_seed` / `deck_cursor`, declared `fold_policy: last_write` on first use (pb READ-SURFACE-V1 §2). They need new names because the engine refuses to declare an attribute that already holds data. A saved world with old rows simply starts a fresh deck. Two real-engine tests were added; a copy of this run's world now draws success, failure, complete success.
+2. **The engine's extractor dropped 266 facts** (`place:/chapel`, `event:mara-steps-from-fog`), ids its own grammar rejects. Run 2 had 371 of these. The cause is in the engine's extraction prompt (`ingest.py`, two places): "entity ids namespaced: person:/place:/obj:/event:" reads as `person:/`. pb's `c52736b` fixed the same slash in its eval harness only, not the engine. **Sent to pb** (m8be3a3 and follow-up); it is engine law, not ours to work around.
+3. **The protagonist split** (build ERROR, #107 SEAL-LINT): the arc row says `person:tomas` while the authored arc says `person:tomas_reed`. Most of `tomas_reed`'s rows were among item 2's dropped facts. Play used `person:tomas`, and `person:tomas_reed` took an NPC turn on 28 of 30 turns, one extra serial cheap call each turn. He never surfaced in prose. It did not block readiness, because every beat here is an event beat with no knows: gate. Likely to go with item 2's fix; watch it in run 5.
+4. **Moves to unnamed places stayed underdetermined** (`the necessary-house`, `the black mud beyond its light`, `the dark rut`, `the wash-yard`): no target and no candidates, so canon held the player while the prose moved on. That gap is behind turn 17's WHERE note. Movement stays as it is by g855759; recorded, not worked around.
+5. **A prose-offered thing was refused as not owned.** Turn 29's prose put a river-office shirt "within reach"; turn 30's "drag the office shirt over my shoulders" was denied as "not a thing you are known to have". The narration never committed the shirt, and the refusal treated "within reach" as "not yours". This is first-mention permanence again; noted for daytime.
+6. **The Night Ice Reader changed sex mid-turn** (critic, turn 4). Narration drift; no fix tonight.
+
+### R23 timings, run 4 (30 instrumented turns)
+
+Whole turn 24–268 s, median 170 s, 83 minutes for the chapter. Player-felt (generator + narrate): median 107 s, p90 143 s. Salience window: median 32 s, p90 83 s, max 103 s. It was largest in the six-person room (turns 3–12, 49–103 s) and fell to 10–34 s once the player was alone with the boatman. The settle tail is now the largest single block: median 63 s, p90 114 s (post_extract median 41 s, max 97 s; promote 8–48 s, no steady climb this time). Player-input ingest 4–50 s, median 19 s. Narrate 9–53 s. Classify 4–12 s. The ranking moves: the salience window still leads on crowded turns, and the settle tail now rivals it on every turn. A fast next message waits on the tail.
+
+### Where R20 stands after run 4
+
+Four runs, four fails on criterion 1. The two newest causes are a stuck action deck (fixed) and the engine's id drops (with pb). Run 3's cause, an arc that needed more turns, is what run 4's 30-turn ceiling answered; run 4 had the turns and was stopped by the deck. Run 5 needs no new decision from Kabe: same probe and same pass mark, a fresh build on main with the deck fix. The extractor's slash ids may recur until pb fixes the prompt; they cost facts, not the deck.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
