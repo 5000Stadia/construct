@@ -20,6 +20,14 @@ from typing import Any
 
 SESSION = "session:main"
 _DECK_ENTITY = "session:resolution"
+#: The deck's two rows, declared `fold_policy: last_write` on first use. They are
+#: rewritten on every draw, timeless, so they tie on valid time; undeclared, the
+#: engine reads the rewritten cursor as conflicted and serves its FIRST row, and
+#: every draw after the first repeats card 1 (Ironhold probe run 4: 18 checks,
+#: 18 failures). The engine refuses a declaration once an attribute holds data,
+#: so these are new names; a world that drew under the old undeclared `seed` /
+#: `cursor` simply starts a fresh deck on its next draw.
+_SEED, _CURSOR = "deck_seed", "deck_cursor"
 _BAG_SIZE = 100
 
 #: tier key -> the narrator directive gloss. Fail-forward: every outcome has a twist.
@@ -68,7 +76,7 @@ def _state(reads: Any) -> tuple[int, int]:
             return int(v) if v is not None else None
         except (TypeError, ValueError):
             return None
-    return _int("seed") or 0, _int("cursor") or 0
+    return _int(_SEED) or 0, _int(_CURSOR) or 0
 
 
 def draw_tier(reads: Any, p: Any, *, seed_source: int | None = None) -> str:
@@ -82,9 +90,10 @@ def draw_tier(reads: Any, p: Any, *, seed_source: int | None = None) -> str:
         seed = seed_source if seed_source is not None else random.Random().randint(1, 2**31)
     tier = _batch(seed, cursor // _BAG_SIZE)[cursor % _BAG_SIZE]
     p.ingest_structured([
-        {"entity": _DECK_ENTITY, "attribute": "seed", "value": str(seed), "timeless": True},
-        {"entity": _DECK_ENTITY, "attribute": "cursor", "value": str(cursor + 1),
-         "timeless": True},
+        {"entity": _DECK_ENTITY, "attribute": _SEED, "value": str(seed), "timeless": True,
+         "fold_policy": "last_write"},
+        {"entity": _DECK_ENTITY, "attribute": _CURSOR, "value": str(cursor + 1),
+         "timeless": True, "fold_policy": "last_write"},
     ], frame=SESSION, classify="rules")
     return tier
 

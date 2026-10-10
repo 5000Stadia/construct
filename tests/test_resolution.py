@@ -3,6 +3,7 @@ the 10/20/55/15 distribution, draws sequentially, refills, and persists seed+cur
 from collections import Counter
 
 from construct import resolution
+from tests.test_integration import world  # noqa: F401
 
 
 class FakeWorld:
@@ -39,10 +40,10 @@ def test_draw_advances_cursor_and_persists():
     w = FakeWorld()
     t1 = resolution.draw_tier(w, w, seed_source=999)
     assert t1 in resolution.TIERS
-    assert w.rows[(resolution._DECK_ENTITY, "cursor")] == "1"
-    assert w.rows[(resolution._DECK_ENTITY, "seed")] == "999"
+    assert w.rows[(resolution._DECK_ENTITY, resolution._CURSOR)] == "1"
+    assert w.rows[(resolution._DECK_ENTITY, resolution._SEED)] == "999"
     t2 = resolution.draw_tier(w, w)                         # seed now persisted
-    assert w.rows[(resolution._DECK_ENTITY, "cursor")] == "2"
+    assert w.rows[(resolution._DECK_ENTITY, resolution._CURSOR)] == "2"
     # the two draws match the seeded batch order
     assert [t1, t2] == resolution._batch(999, 0)[:2]
 
@@ -51,10 +52,10 @@ def test_100_draws_yield_the_exact_distribution_then_refill():
     w = FakeWorld()
     drawn = [resolution.draw_tier(w, w, seed_source=7) for _ in range(100)]
     assert Counter(drawn) == Counter(resolution._BAG)      # exact over a full bag
-    assert w.rows[(resolution._DECK_ENTITY, "cursor")] == "100"
+    assert w.rows[(resolution._DECK_ENTITY, resolution._CURSOR)] == "100"
     # draw 101 refills (next batch) without error
     assert resolution.draw_tier(w, w) in resolution.TIERS
-    assert w.rows[(resolution._DECK_ENTITY, "cursor")] == "101"
+    assert w.rows[(resolution._DECK_ENTITY, resolution._CURSOR)] == "101"
 
 
 def test_directive_renders_the_tier_without_exposing_dice():
@@ -62,3 +63,28 @@ def test_directive_renders_the_tier_without_exposing_dice():
     assert "SUCCESS WITH A COST" in d
     assert "the pit may be too wide" in d
     assert "do not state odds, dice" in d.lower() or "no" in d.lower()
+
+
+def test_draws_advance_through_a_real_engine_world(world):  # noqa: F811
+    """The deck's seed and cursor live as rewritten session rows; on the real engine
+    each draw must read the LATEST cursor, never a stale holding value (Ironhold
+    probe run 4: the cursor read stuck at 1, so every check drew the same card)."""
+    from construct.adapter import PorcelainWorldReads
+    drawn = [resolution.draw_tier(PorcelainWorldReads(world), world.porcelain,
+                                  seed_source=999) for _ in range(6)]
+    assert drawn == resolution._batch(999, 0)[:6]
+    assert resolution._state(PorcelainWorldReads(world)) == (999, 6)
+
+
+def test_a_world_with_old_undeclared_deck_rows_still_draws(world):  # noqa: F811
+    """A world that drew before the deck rows were declared holds undeclared
+    `seed`/`cursor` rows, and the engine refuses to declare an attribute that
+    already holds data; the declared new names keep such a world drawing."""
+    from construct.adapter import PorcelainWorldReads
+    world.porcelain.ingest_structured([
+        {"entity": resolution._DECK_ENTITY, "attribute": a, "value": v, "timeless": True}
+        for a, v in (("seed", "5"), ("cursor", "1"), ("cursor", "2"))
+    ], frame=resolution.SESSION, classify="rules")
+    drawn = [resolution.draw_tier(PorcelainWorldReads(world), world.porcelain,
+                                  seed_source=999) for _ in range(3)]
+    assert drawn == resolution._batch(999, 0)[:3]
