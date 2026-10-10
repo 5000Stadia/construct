@@ -82,6 +82,12 @@ Three runs, three fails on criterion 1, for three different reasons: a lost retr
 
 No run 4 tonight.
 
+## Run 4: the pass mark as changed, set before the run
+
+Kabe's gate g855759 went to its default: movement stays as it is (no conveyances; the object-destination branch stays unmerged), and the probe plays **to readiness**, with a 30-turn ceiling, before run 4. Chapter 1 now plays the original seven opening stances. If the arc is still not ready, it plays an escape stance until it is. Once ready, it plays the three displacement stances, then resolve, repeated until the chapter concludes or reaches 30 turns.
+
+Criteria 2–5 stand. Criterion 1 becomes: **chapter 1 lands a conclusion within 30 turns** (`concluded=True`). The turn the arc became ready is recorded too. Since movement is unchanged, a fail that comes from boarding a vessel or an object-named destination is recorded as that, and not worked around.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |

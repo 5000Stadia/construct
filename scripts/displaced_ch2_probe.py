@@ -65,6 +65,14 @@ CH1_SCHEDULE = [
           "and chose a new life. Commit to it plainly."),
 ]
 
+#: Chapter 1 plays until the arc is READY (Kabe, gate g855759: run to readiness, not a fixed 11
+#: turns), then displaces and resolves; CH1_CEILING bounds the whole chapter.
+CH1_CEILING = 30
+CH1_OPENING = CH1_SCHEDULE[:7]
+CH1_ESCAPE = ("D", "WORK THE ESCAPE — you are still inside. Find the window (a route, a "
+                   "person, a routine, a tool) and take it. Getting OUT is the whole story now.")
+CH1_AFTER_READY = CH1_SCHEDULE[7:]   # displace x3, then resolve (repeated until it concludes)
+
 #: CH2 addendum: the founder's three bars, judged on top of the standard seam.
 DISPLACED_CH2_ADDENDUM = """
 THE DISPLACED TRANSITION (this continuation followed a chapter that ENDED far
@@ -127,7 +135,32 @@ def main() -> None:
     opening = s.opening()
     w("## CH1 OPENING\n\n" + opening + "\n")
     story = opening
-    for i, (st, custom) in enumerate(CH1_SCHEDULE, 1):
+    from construct.adapter import PorcelainWorldReads
+    from construct.arc.conclusion import arc_status
+    from construct.arc.executor import arc_concluded
+    from construct.turnloop import terminal_outcome
+
+    def _reads():
+        return PorcelainWorldReads(s._world, horizon=s._horizon())
+
+    def _ready() -> bool:
+        st_ = arc_status(_reads(), s._arc)
+        return bool(st_.climax_ready or st_.world_true)
+
+    def _concluded() -> bool:
+        rd = _reads()
+        return terminal_outcome(rd) is not None or arc_concluded(rd, s._arc)
+
+    ready_at = None
+    for i in range(1, CH1_CEILING + 1):
+        if ready_at is None and _ready():
+            ready_at = i
+            w(f"\n*(arc READY before turn {i})*")
+        if ready_at is None:
+            st, custom = CH1_OPENING[i - 1] if i <= len(CH1_OPENING) else CH1_ESCAPE
+        else:
+            k = i - ready_at
+            st, custom = CH1_AFTER_READY[min(k, len(CH1_AFTER_READY) - 1)]
         try:
             mv = _move(story[-5000:], st if custom is None else ("C" if st == "C" else "D"),
                        custom)
@@ -149,6 +182,12 @@ def main() -> None:
         if getattr(r, "ended", False):
             w("\n*(story reached its terminal)*")
             break
+        if _concluded():
+            w(f"\n*(chapter 1 concluded at turn {i})*")
+            break
+    else:
+        w(f"\n*(chapter 1 hit the {CH1_CEILING}-turn ceiling; ready at "
+          f"{ready_at if ready_at else 'never'})*")
 
     # where did chapter 1 actually END? (evidence for the WHERE bar)
     from construct.adapter import PorcelainWorldReads
