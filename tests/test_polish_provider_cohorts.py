@@ -319,3 +319,63 @@ def test_http_status_transience(tmp_path, monkeypatch, status, transient):
     with pytest.raises(ProviderTransportError) as ei:
         asyncio.run(provider._call_once("p", schema, "main"))
     assert isinstance(ei.value, ProviderTransientError) is transient
+
+
+# ---- the narrator fits the transport cap (R20 probe run 5, turn 10) ----------------------
+
+def _story_briefing(turns: int, prose: str = "The rope creaks. " * 40) -> str:
+    from construct.briefing import STORY_SO_FAR_HEADER
+    beats = "\n\n".join(f"› You: move {i}\n\n{prose}turn {i} prose" for i in range(1, turns + 1))
+    return f"WORLD LAWS: river law.\n\n{STORY_SO_FAR_HEADER}{beats}\n\nTHE TIME: night\n"
+
+
+def test_drop_oldest_story_turn_removes_one_turn_and_keeps_the_last():
+    from construct.briefing import drop_oldest_story_turn
+    b = _story_briefing(3)
+    once = drop_oldest_story_turn(b)
+    assert "move 1" not in once and "turn 1 prose" not in once
+    assert "move 2" in once and "move 3" in once
+    assert once.startswith("WORLD LAWS") and once.endswith("THE TIME: night\n")
+    last = drop_oldest_story_turn(drop_oldest_story_turn(b))
+    assert "move 3" in last and drop_oldest_story_turn(last) is None   # the last turn stays
+    assert drop_oldest_story_turn("no story here") is None
+
+
+class _CappedStub(StubProvider):
+    """A stub with the wire providers' cap surface: size = prompt length."""
+    def __init__(self, cap: int):
+        super().__init__([{"prose": "You hold the rope."}])
+        self.payload_cap_bytes = cap
+
+    def payload_bytes(self, prompt, schema, tier="main", deliberate=False):
+        return len(prompt)
+
+
+def test_narrate_drops_old_beats_until_the_request_fits_the_cap():
+    from construct.briefing import drop_oldest_story_turn
+    b = _story_briefing(8)
+    p = _CappedStub(cap=0)
+    p.payload_cap_bytes = 10**9
+    cohorts.narrate(p, b, "person:hero", shrink=drop_oldest_story_turn)
+    uncapped = len(p.calls[0][0])
+    cap = uncapped - 1500                       # about two turns too big
+    p = _CappedStub(cap=cap)
+    out = cohorts.narrate(p, b, "person:hero", shrink=drop_oldest_story_turn)
+    sent = p.calls[0][0]
+    assert out == "You hold the rope." and len(sent) <= cap
+    assert "move 8" in sent and "move 1" not in sent        # newest kept, oldest dropped
+    assert "WORLD LAWS" in sent and "THE TIME: night" in sent
+
+
+def test_narrate_without_a_shrink_step_sends_the_briefing_untouched():
+    p = _CappedStub(cap=10)
+    cohorts.narrate(p, _story_briefing(4), "person:hero")
+    assert "move 1" in p.calls[0][0]                         # no shrink: no shaping
+
+
+def test_codex_payload_bytes_is_the_measure_its_cap_guard_uses():
+    p = CodexProvider()
+    schema = cohorts.NARRATE_SCHEMA
+    prompt = "“quoted” — " * 50
+    assert p.payload_bytes(prompt, schema) == len(json.dumps(p._body(prompt, schema, "main")))
+    assert p.payload_cap_bytes == 40 * 1024

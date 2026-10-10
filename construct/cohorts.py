@@ -11,6 +11,7 @@ the action+intent decision is light, and the turn loop uses `npc_turn`.)
 from __future__ import annotations
 
 import logging
+from typing import Callable
 
 from construct.provider import FORBID_TASK_MARKERS, Provider, complete_sync
 
@@ -3617,7 +3618,15 @@ def open_scene(provider: Provider, briefing: str, protagonist: str,
 
 def narrate(provider: Provider, briefing: str, protagonist: str, *,
             peopled: bool = True, competence: bool = True, reorder: bool = False,
-            serve_thread: bool = False) -> str:
+            serve_thread: bool = False,
+            shrink: Callable[[str], str | None] | None = None) -> str:
+    """Render the turn. `shrink`, when given, is the briefing composer's way to fit the
+    transport cap: called with the briefing while the request would exceed the provider's
+    `payload_cap_bytes`, it returns a smaller briefing, or None when it has nothing left to
+    give (the call then goes as is, and the provider's loud cap error stands). Inclusion is
+    by merit (no prompt budget); this only keeps a long chapter from crossing the transport's
+    hard edge (R20 probe run 5, turn 10: "payload 40KB exceeds the 40KB Codex transport
+    cap", and the turn returned no fiction)."""
     # SCENE-CONTEXT-SHAPE Stage 2 (conditional injection): the peopled / competence / rule-of-
     # cool directives ride the window ONLY when the turn triggers them (NPCs present / a
     # capability-dependent protagonist-knowledge move / a live rich thread to serve) — not as
@@ -3635,17 +3644,33 @@ def narrate(provider: Provider, briefing: str, protagonist: str, *,
         f"any part of it would script the player, render only the world's "
         f"side of it and leave the player's response to the player.\n\n"
         f"{FORBID_TASK_MARKERS}")
-    if reorder:
-        # SCENE-CONTEXT-SHAPE Stage 3 (window reorder, K 078): voice contract at the TOP
-        # (durable identity), the SITUATION foregrounded in the high-attention tail, the
-        # render ask LAST (freshest = most-followed). Behind a flag pending A/B + sign-off.
-        prompt = (f"You are the narrator of a text construct. Your voice contract:\n\n"
-                  f"{rules}\n\n"
-                  f"SITUATION (everything you know — there is nothing else):\n{briefing}\n\n"
-                  f"Render this turn: 1-3 paragraphs.")
-    else:
-        prompt = (f"You are the narrator of a text construct.\n\nBRIEFING (everything "
-                  f"you know — there is nothing else):\n{briefing}\n\n{rules}\n\n"
-                  f"Render this turn: 1-3 paragraphs.")
+    def _prompt(briefing: str) -> str:
+        if reorder:
+            # SCENE-CONTEXT-SHAPE Stage 3 (window reorder, K 078): voice contract at the TOP
+            # (durable identity), the SITUATION foregrounded in the high-attention tail, the
+            # render ask LAST (freshest = most-followed). Behind a flag pending A/B + sign-off.
+            return (f"You are the narrator of a text construct. Your voice contract:\n\n"
+                    f"{rules}\n\n"
+                    f"SITUATION (everything you know — there is nothing else):\n{briefing}\n\n"
+                    f"Render this turn: 1-3 paragraphs.")
+        return (f"You are the narrator of a text construct.\n\nBRIEFING (everything "
+                f"you know — there is nothing else):\n{briefing}\n\n{rules}\n\n"
+                f"Render this turn: 1-3 paragraphs.")
+
+    prompt = _prompt(briefing)
+    _size = getattr(provider, "payload_bytes", None)
+    _cap = getattr(provider, "payload_cap_bytes", None)
+    if shrink is not None and callable(_size) and isinstance(_cap, int):
+        while _size(prompt, NARRATE_SCHEMA, "main") > _cap:
+            smaller = shrink(briefing)
+            if smaller is None or len(smaller) >= len(briefing):
+                logger.warning("narrate briefing still over the transport cap with "
+                               "nothing left to shrink")
+                break
+            briefing = smaller
+            prompt = _prompt(briefing)
+            logger.info("narrate briefing shrunk to fit the transport cap (%d chars)",
+                        len(briefing))
     result = complete_sync(provider, prompt, NARRATE_SCHEMA, tier="main", task="nar")
     return _clean_prose(result["prose"])
+
