@@ -111,6 +111,35 @@ Whole turn 24–268 s, median 170 s, 83 minutes for the chapter. Player-felt (ge
 
 Four runs, four fails on criterion 1. The two newest causes are a stuck action deck (fixed) and the engine's id drops (with pb). Run 3's cause, an arc that needed more turns, is what run 4's 30-turn ceiling answered; run 4 had the turns and was stopped by the deck. Run 5 needs no new decision from Kabe: same probe and same pass mark, a fresh build on main with the deck fix. The extractor's slash ids may recur until pb fixes the prompt; they cost facts, not the deck.
 
+## Run 5 — FAIL (criteria 1 and 4): the protagonist split swallowed earned beats; the last run in this loop
+
+Fresh build on main `605f121` (with the deck fix), against a frozen pb copy at `4f1a6a8` (engine code the same as run 4). The monitor made this the last run in the loop (nc47ee4). The world: Elias Venn, condemned, with Warder Hobb and the Scrivener over a skipped laundry weighing and a missing warrant. The player built the case for seven turns, talked and forced a way through the scale-room service door, followed a wicker drag-line through the laundry to the upper ash-stove, and ended at the rope side by the river. Chapter 1 hit the 30-turn ceiling, **never ready**, `concluded=False`; no chapter 2. Artifacts are in `ironhold-run5/`.
+
+Against the mark: **1 fails.** 2 and 3 can't be judged. **4 fails:** turn 10 returned no fiction, only "(the turn could not complete: payload 40KB exceeds the 40KB Codex transport cap …)". **5:** no WHERE breaker. The critic filed 13 continuity notes (people and carried things disappearing), all on other bars.
+
+**The deck fix held.** Nine checks drew 5 `success_cost`, 2 `complete_success`, 2 `failure_opportunity`.
+
+What happened, in order of weight:
+
+1. **The protagonist split decided it.** At build, #107 SEAL-LINT logged it again: the arc row says `person:elias_venn` while the authored arc says `person:elias`. Play wrote what the hero learned to `knows:person:elias_venn`, but the arc's four knowledge beats watch `knows:person:elias`. The player did learn two of them (the chaplain's seventh bell; the missing warrant's significance): both rows are in `knows:person:elias_venn`, and neither counted. The escape event did fire (`take_the_thaw_barge` is true), and readiness needs two of three climax beats. The likely second one, `weigh_the_condemned_laundry`, is a knowledge beat behind the same split. Its fact reached only Mara's frame, so even without the split the arc was one delivery short. `person:elias` also took an NPC turn on 22 turns. The seal lint fails open by design ("a false positive must not deny a player a world"). Twice in two runs it has been a true positive. **For Kabe:** whether a protagonist split should stop the build, or be repaired at seal, rather than only logged.
+2. **A take of several things committed none of them.** Turn 22, "I hook the ash-rake and poker under my arm, shove the complaint slate inside my coat": the player-input ingest was skipped as `no asserts/reveals` (the A-lite skip). The narrator rendered all three takes. Only the slate reached canon, through promote. Worse, the after-turn extraction restated the poker's old place and promote re-committed `obj:short_poker in place:upper_ash_stove` at turn 22. The ash-rake never became an entity. From then on, the carrying list left them out, and turns 26–29 refused the poker and the rake. Recorded, not fixed (the loop is closed).
+3. **Things the prose offered were refused** (seven refusals in all): the measures slate, a chain link, the bent witness-strip. Run 4's shirt is the same family. Most were never committed. The witness-strip is different: canon has it on the player (`in person:elias_venn`), alongside an older `held_by person:scrivener`, so that refusal is a reference or fold miss, not a missing row. Recorded with the movement findings, not worked around.
+4. **Turn 10 crossed the Codex 40KB cap**, and the turn returned an error line instead of fiction. The narrate briefing outgrew the transport cap mid-chapter, with nothing to shape it below the cap. The founder's rule is no prompt budget, inclusion by merit; the transport cap is a hard edge that rule doesn't cover. For R23 and the briefing composer, not tonight.
+5. **The engine extractor dropped 342 facts** (311 slash ids, 25 hyphenated event ids), on the pre-fix engine. pb has since fixed the wording (`4a1105a`, the extraction rules and the movement rule's `event:` example). The after-fix count is below.
+6. **One in-turn ingest was dropped whole (turn 2):** "cannot declare semantics for attribute 'knows' after folded data already exists (a:1662)". The build held no `knows` rows (probably among item 5's drops). In play, `attr:knows` was declared at a:1661 and the first row landed at a:1662, and then a second declaration attempt was refused. That points to an engine handle that had not seen a:1661. The fail-open shield (task #89) kept the turn. Sent to pb with the row ids.
+7. **Two transient stalls:** a cheap-tier classify batch hit the 180 s bound (the engine defaulted the batch), and one 503 was retried.
+
+### R23 timings, run 5 (29 instrumented turns)
+
+Whole turn 13–359 s, median 117 s, 64 minutes for the chapter. Player-felt median 79 s, p90 106 s (max 298 s, on the turn whose player ingest took 193 s). Salience window: median 34 s, max 66 s; the room never held more than three NPCs. Settle tail: median 62 s, p90 130 s (post_extract median 29 s, max 120 s; promote median 29 s). Narrate median 23 s. Classify 3–14 s. As in run 4, the settle tail is the largest steady block.
+
+### Where R20 stands after run 5
+
+Five runs, five fails on criterion 1, each for a different first cause. Of those causes, the lost retry, the missed conclusory move and the stuck deck are fixed. The engine's id drops are fixed upstream. The cause that remains is the protagonist split, which fails open at seal. It showed in runs 2, 4 and 5 and decided run 5. The loop stops here, as agreed. No run 6 without Kabe. What waits on him:
+- whether a protagonist split stops or repairs the build;
+- conveyances and object-named destinations;
+- whether to fix the multi-object take, and the briefing's 40KB edge, as R20 work or later.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
