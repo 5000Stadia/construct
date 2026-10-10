@@ -144,17 +144,23 @@ CLASSIFY_SCHEMA = {
                   "description": "the object the player PICKS UP / takes into their "
                   "possession this turn (lifts, grabs, pockets, tucks under their arm), "
                   "as they named it ('the ledger'); empty if they take nothing."},
+        "takes_more": {"type": "array", "items": {"type": "string"},
+                       "description": "EVERY FURTHER object the player takes in the same move, "
+                       "beyond `takes`, each as they named it ('I hook the ash-rake and poker "
+                       "under my arm and pocket the slate' → takes 'the ash-rake', takes_more "
+                       "['the poker', 'the slate']); empty when they take one thing or none."},
         "drops": {"type": "string",
                   "description": "the object the player SETS DOWN / drops / leaves / puts "
                   "down / places here this turn (the inverse of takes), as they named it "
                   "('the letter-opener'); empty if they set nothing down."},
         "asserts_or_reveals": {"type": "boolean",
                   "description": "true if this input could ESTABLISH or CHANGE a world fact "
-                  "that isn't already captured by moves_to/takes — i.e. the player asserts "
+                  "that isn't already captured by moves_to/takes/takes_more — i.e. the player asserts "
                   "something new about the world, makes a claim, declares a fact, or performs "
                   "an action that plausibly alters or reveals state worth recording. FALSE for "
                   "pure looking/observing, asking, or plain talk with no claim, and for simple "
-                  "movement/taking already captured by moves_to/takes. When UNSURE, say true."},
+                  "movement/taking already captured by moves_to/takes/takes_more. When UNSURE, "
+                  "say true."},
         "examines_target": {"type": "string",
                   "description": "if the player CLOSELY INVESTIGATES one SPECIFIC thing — "
                   "scrutinizes/inspects/follows up on a particular object, mark, trace, or "

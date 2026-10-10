@@ -1616,6 +1616,38 @@ class TestFullTurn:
         assert not reads.has_entity("obj:pencil_1")                     # no twin minted
         assert not reads.has_entity("obj:plain_pencil")
 
+    def test_a_take_of_several_things_holds_every_one(self, world):
+        # R20 probe run 5, turn 22: "I hook the ash-rake and poker under my arm, shove the
+        # slate inside my coat" — classify's `takes` names ONE object, and the rest went
+        # uncommitted (the A-lite skip then judged the turn assertion-free). `takes_more`
+        # carries the others; every one gets the same deterministic held commit.
+        arc = make_arc()
+        seed_arc(world, arc)
+        rows = []
+        for oid, name in (("obj:ash_rake", "ash-rake"), ("obj:poker", "poker"),
+                          ("obj:slate", "slate")):
+            rows += [{"entity": oid, "attribute": "kind", "value": "object"},
+                     {"entity": oid, "attribute": "name", "value": name},
+                     {"entity": oid, "attribute": "in", "value": "place:study"}]
+        world.ingest_structured(rows)
+        world._extractions.append({"items": []})       # post-render
+        provider = StubProvider([
+            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+             "uncertain_of": "", "commits": False, "commitment": "",
+             "takes": "the ash-rake", "takes_more": ["the poker", "the slate"],
+             "asserts_or_reveals": False},
+            {"prose": "You hook the ash-rake and the poker under your arm; the slate "
+                      "goes inside your coat."},
+        ])
+        result = run_turn(world, arc, provider,
+                          "I hook the ash-rake and poker under my arm and shove the slate "
+                          "inside my coat.", turn=2,
+                          scope=[PLAYER, "obj:ash_rake", "obj:poker", "obj:slate",
+                                 "place:study"])
+        for oid in ("obj:ash_rake", "obj:poker", "obj:slate"):
+            assert world.porcelain.state(oid, "in")["fact"]["value"] == PLAYER, oid
+        assert result.trace.took == "obj:ash_rake, obj:poker, obj:slate"
+
     def test_ambiguous_take_does_not_mint_a_sibling(self, world):
         # Cx 306 blocker 1: two same-named present objects + "take the pencil" must NOT mint a third.
         # The take's bind_or_mint returns ambiguous; the caller must only mint on `_why == "mint"`.
