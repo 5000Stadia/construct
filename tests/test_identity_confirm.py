@@ -307,3 +307,132 @@ def test_cli_new_prints_the_viability_message_and_exits_1(chdir_tmp, monkeypatch
     assert cli._cmd_new(args) == 1
     err = capsys.readouterr().err
     assert STOP.plain in err and str(kept) in err and "Traceback" not in err
+
+
+# ---- cr RED on 80db23e: the vouch and the cast-collision reject never fail open ----------
+
+HOLDER, ECHO = "person:brigg", "person:ansel_brigg"
+
+
+def _holder_world(tmp_path, monkeypatch):
+    """A required-clue holder and a fragment the vouch allowlist selects (forced here)."""
+    w = game._world(tmp_path / "h.world", "h", model=None)
+    w.porcelain.ingest_structured(_person(ECHO, "Ansel Brigg") + _person(HOLDER, "Brigg"),
+                                  classify="rules")
+    monkeypatch.setattr(game, "_fidelity_vouched_pairs", lambda groups, lb: [(HOLDER, ECHO)])
+    return w
+
+
+@pytest.mark.parametrize("receipt", [
+    {"outcome": "vetoed", "canonical_id": None},
+    {"outcome": "merged", "canonical_id": ECHO},                # the wrong survivor
+])
+def test_a_bad_vouch_receipt_for_a_required_holder_stops_the_build(tmp_path, monkeypatch,
+                                                                   receipt):
+    w = _holder_world(tmp_path, monkeypatch)
+    try:
+        monkeypatch.setattr(w.porcelain, "merge", lambda *a, **k: receipt)
+        with pytest.raises(game.IdentityUnresolvedError) as err:
+            game._stage_vouch_merges(w, _arc(), {HOLDER})
+        assert [(a, b) for a, b, _ in err.value.pairs] == [(HOLDER, ECHO)]
+    finally:
+        w.close()
+
+
+def test_a_vouch_merge_that_raises_stops_the_build(tmp_path, monkeypatch):
+    w = _holder_world(tmp_path, monkeypatch)
+    try:
+        def _boom(*a, **k):
+            raise ValueError("representative not in either closure")
+        monkeypatch.setattr(w.porcelain, "merge", _boom)
+        with pytest.raises(game.IdentityUnresolvedError, match="ValueError"):
+            game._stage_vouch_merges(w, _arc(), {HOLDER})
+    finally:
+        w.close()
+
+
+def test_a_good_vouch_for_a_required_holder_keeps_the_holder(tmp_path, monkeypatch):
+    # The control: the real engine merge, served as the holder, passes.
+    w = _holder_world(tmp_path, monkeypatch)
+    try:
+        game._stage_vouch_merges(w, _arc(), {HOLDER})
+        assert game._closure_reader(w)(HOLDER) == {HOLDER, ECHO}
+    finally:
+        w.close()
+
+
+def test_a_wrong_survivor_for_a_required_holder_stops_a_real_build(chdir_tmp, monkeypatch):
+    """End to end through the interview path's real finalize: the holder's vouched merge
+    comes back served as the fragment, so the build stops, the half-built world is removed,
+    and the caller gets one ViabilityError."""
+    from patternbuffer.porcelain import Porcelain
+
+    from tests.test_interview import _InterviewStub
+    monkeypatch.setattr(game, "_stage_author_cast",
+                        lambda world, provider, arc, *a, **k: (arc, (), None, {"person:rook"}))
+    monkeypatch.setattr(game, "_fidelity_vouched_pairs",
+                        lambda groups, lb: [("person:rook", "person:rook_echo")])
+    monkeypatch.setattr(Porcelain, "merge", lambda self, a, b, evidence, representative=None:
+                        {"outcome": "merged", "canonical_id": "person:rook_echo"})
+    with pytest.raises(game.ViabilityError) as err:
+        game.create_scenario_from_interview("harbor", "a drowned harbor town", _InterviewStub())
+    assert err.value.problems[0] == game.IdentityUnresolvedError.plain
+    assert "person:rook ~ person:rook_echo" in err.value.problems[1]
+    assert not game.scenario_path("harbor").exists()
+    assert not game.scenario_path("harbor").with_suffix(".meta.json").exists()
+    assert (chdir_tmp / "generated" / "harbor.brief.md").is_file()
+
+
+@pytest.mark.parametrize("stub", ["receipt", "raises"])
+def test_a_failed_cast_collision_reject_stops_the_build(tmp_path, monkeypatch, stub):
+    w = game._world(tmp_path / "v.world", "v", model=None)
+    try:
+        w.porcelain.ingest_structured(_person("person:voss", "Voss"), classify="rules")
+
+        def _reject(a, b):
+            if stub == "raises":
+                raise RuntimeError("engine refused")
+            return {"outcome": "conflict_already_correlated", "canonical_id": None}
+        monkeypatch.setattr(w.porcelain, "reject", _reject)
+        with pytest.raises(game.IdentityUnresolvedError) as err:
+            game._admit_disambiguated_cast(
+                w, {"person:voss": "person:voss_2"},
+                {"cast": [{"id": "person:voss_2", "surface_role": "smuggler"}]})
+        assert [(a, b) for a, b, _ in err.value.pairs] == [("person:voss", "person:voss_2")]
+    finally:
+        w.close()
+
+
+def test_cast_authoring_lets_an_identity_stop_through(tmp_path, monkeypatch):
+    """Cast authoring is fail-open for authoring misses, but an identity stop from the
+    cast-collision admission must reach the creation path, not become 'pillar-less'."""
+    import dataclasses
+
+    from construct import cast, cohorts, story_shapes
+
+    @dataclasses.dataclass(frozen=True)
+    class _Arc:
+        protagonist: str = HERO
+        beats: tuple = ()
+        pillars: tuple = ()
+
+    monkeypatch.setattr(story_shapes, "shapes_for",
+                        lambda gt: {"shape": "deduction", "secondary": []})
+    monkeypatch.setattr(story_shapes, "author_signature_directive", lambda gt: "")
+    monkeypatch.setattr(cohorts, "author_cast", lambda *a, **k: {"cast": []})
+    monkeypatch.setattr(cast, "disambiguate_cast_identities",
+                        lambda prop, ident, known: (prop, {"person:voss": "person:voss_2"}))
+    monkeypatch.setattr(cast, "cast_from_proposal",
+                        lambda prop: ([SimpleNamespace(node_id="person:voss_2")], []))
+    for fn in ("check_solvability", "validate_signature_support", "validate_beat_delivery",
+               "beat_delivery_targets"):
+        monkeypatch.setattr(cast, fn, lambda *a, **k: [])
+    monkeypatch.setattr(cast, "build_pillars", lambda *a, **k: ())
+    monkeypatch.setattr(cast, "required_holder_ids", lambda *a, **k: set())
+    monkeypatch.setattr(game, "_admit_disambiguated_cast", _raise_stop)
+    w = game._world(tmp_path / "a.world", "a", model=None)
+    try:
+        with pytest.raises(game.IdentityUnresolvedError):
+            game._stage_author_cast(w, object(), _Arc(), {}, "", [], [], ["deduction"], "")
+    finally:
+        w.close()

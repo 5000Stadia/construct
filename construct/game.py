@@ -232,24 +232,27 @@ def _fidelity_vouched_pairs(name_collisions: list, load_bearing: set,
     return out
 
 
-def _vouch_merge(world: Any, keep: str, frag: str) -> str | None:
+def _vouch_merge(world: Any, keep: str, frag: str) -> str:
     """Fold a fragment into a load-bearing id (#56), keeping `keep` as the closure's
     representative. The engine otherwise serves a closure under its FIRST-SEEN member, so
     a fragment seen before the protagonist would become the id the committed arc row reads
     back as, while the beats watch `knows:<keep>`: the protagonist split of R20 runs 2, 4
-    and 5 (eval/14). pattern-buffer IDENTITY-REPRESENTATIVE-V1. Returns the canonical id
-    the engine reports, or None when the merge is vetoed (left unresolved, fail-open)."""
-    mr = world.porcelain.merge(
-        keep, frag, evidence="fidelity-repair: alias_not_specific "
-        "coref folded into the arc-load-bearing id (#56)", representative=keep)
-    if mr.get("outcome") not in ("merged", "noop_already_merged"):
-        logger.warning("fidelity merge vetoed: %s <- %s (%s)", keep, frag, mr.get("outcome"))
-        return None
+    and 5 (eval/14). pattern-buffer IDENTITY-REPRESENTATIVE-V1. Receipts decide
+    (IDENTITY-CONFIRM step 1): anything but a merge served as `keep` stops the build
+    (IdentityUnresolvedError), because `keep` is load-bearing by construction and a wrong
+    survivor would hide the split inside one closure. Returns the canonical id."""
+    try:
+        mr = world.porcelain.merge(
+            keep, frag, evidence="fidelity-repair: alias_not_specific "
+            "coref folded into the arc-load-bearing id (#56)", representative=keep)
+    except Exception as exc:  # noqa: BLE001 — an engine refusal leaves the pair split
+        raise IdentityUnresolvedError(
+            [(keep, frag, f"vouched merge raised {type(exc).__name__}: {exc}")]) from exc
     canonical = mr.get("canonical_id")
-    if canonical != keep:   # the seal-lint then stops the build if this is the protagonist
-        logger.error("fidelity merge: %s <- %s served as %r, not %r", keep, frag, canonical, keep)
-    else:
-        logger.info("fidelity merge: %s <- %s", keep, frag)
+    if mr.get("outcome") not in ("merged", "noop_already_merged") or canonical != keep:
+        raise IdentityUnresolvedError([(keep, frag, f"vouched merge receipt "
+                                        f"{mr.get('outcome')!r} served as {canonical!r}")])
+    logger.info("fidelity merge: %s <- %s", keep, frag)
     return canonical
 
 
@@ -790,21 +793,28 @@ def _admit_disambiguated_cast(world: Any, _remaps: dict, _cprop: dict) -> None:
     # The fresh id is a DIFFERENT person who shares the canon name (IDENTITY-CONFIRM step
     # 4): hold the pair apart, so reconcile never proposes it and the identity stop never
     # reads it as a split.
+    # Receipts decide: the reject is the only thing keeping the pair apart, so a failure
+    # stops the build (the creation path then removes the half-built world).
+    _open: list[tuple[str, str, str]] = []
     for _orig, _fresh in _remaps.items():
         try:
             _r = world.porcelain.reject(_orig, _fresh)
-            if _r.get("outcome") not in ("rejected", "noop_already_distinct"):
-                logger.warning("cast collision %s / %s not held apart: %s",
-                               _orig, _fresh, _r.get("outcome"))
-        except Exception as exc:  # noqa: BLE001 — the identity stop then names the pair
-            logger.warning("cast collision %s / %s not held apart: %s", _orig, _fresh, exc)
+        except Exception as exc:  # noqa: BLE001 — named in the stop below
+            _open.append((_orig, _fresh, f"cast-collision reject raised "
+                                         f"{type(exc).__name__}: {exc}"))
+            continue
+        if _r.get("outcome") not in ("rejected", "noop_already_distinct"):
+            _open.append((_orig, _fresh, f"cast-collision reject receipt "
+                                         f"{_r.get('outcome')!r}"))
+    if _open:
+        raise IdentityUnresolvedError(_open)
 
 
 def _stage_author_cast(world: Any, provider: Provider, arc: Arc, proposal: dict, digest: str,
                        people: list, known_ids: list, resolved_game_types: list,
                        _laws_block: str):
-    """The populated cast + pillars (fail-open). Pure move out of `_finalize_scenario_impl`;
-    returns (arc, cast_nodes, cast_proposal, _required_holders)."""
+    """The populated cast + pillars (fail-open, except an identity stop). Pure move out of
+    `_finalize_scenario_impl`; returns (arc, cast_nodes, cast_proposal, _required_holders)."""
     # The POPULATED CAST (STORY-SHAPES §8): author the causal PILLARS + the people who hold
     # the clues that fill them, over the just-authored arc. GATED on solvability and fully
     # fail-open — a world that can't be authored fairly stays on the legacy (pillar-less)
@@ -919,6 +929,8 @@ def _stage_author_cast(world: Any, provider: Provider, arc: Arc, proposal: dict,
                 logger.warning("cast unsolvable after retries — shipping pillar-less (legacy)")
                 logger.info("authored %d pillar(s) + %d cast member(s) for %s",
                             len(arc.pillars), len(_cast), _shape)
+    except BuildIdentityError:  # an identity stop is not an authoring miss
+        raise
     except Exception as exc:  # cast authoring NEVER sinks a build
         logger.warning("cast authoring skipped: %s", exc)
         cast_nodes, cast_proposal = (), None
@@ -935,7 +947,7 @@ def _stage_vouch_merges(world: Any, arc: Arc, _required_holders: set) -> None:
     # non-load-bearing fragments INTO that id. Runs
     # HERE — after cast authoring, BEFORE the arc_to_items write below — so the plot
     # rows are written with the merged canonical id, and never after Stage-5's
-    # literal knows:<id> frame seeding (Cx 480 insertion-point ruling). Fail-open.
+    # literal knows:<id> frame seeding (Cx 480 insertion-point ruling).
     # Load-bearing = protagonist ∪ REQUIRED-clue holder ids only (Cx 486 — the
     # entity surface of required pillars, NOT the pillar ids and NOT all cast
     # nodes; optional/red-herring cast is a different safety claim).
@@ -946,13 +958,12 @@ def _stage_vouch_merges(world: Any, arc: Arc, _required_holders: set) -> None:
     # (also live) or any other/missing reason FAILS OPEN (never force-merged);
     # merge() is host-authoritative past the soft heuristic, so the allowlist is
     # the safety, not guarded_merge.
-    try:
-        for _keep, _frag in _fidelity_vouched_pairs(
-                world.porcelain.fidelity_audit().get("name_collisions", []),
-                _load_bearing):
-            _vouch_merge(world, _keep, _frag)
-    except Exception as exc:  # noqa: BLE001 — repair NEVER sinks a build
-        logger.warning("fidelity vouched-merge skipped: %s", exc)
+    # Not fail-open (IDENTITY-CONFIRM, cr): every pair here touches a load-bearing id, so a
+    # refused or wrongly-served merge stops the build rather than shipping a split.
+    for _keep, _frag in _fidelity_vouched_pairs(
+            world.porcelain.fidelity_audit().get("name_collisions", []),
+            _load_bearing):
+        _vouch_merge(world, _keep, _frag)
 
 
 class BuildIdentityError(RuntimeError):
@@ -1103,7 +1114,7 @@ def _stage_confirm_identity(world: Any, arc: Arc, _required_holders: set) -> Non
     reject). Never joins two load-bearing closures. Re-reads proposals and closures after
     every decision until a pass decides nothing; then stops the build (raises
     IdentityUnresolvedError) if any pair touching the protagonist or a required-clue
-    holder is still open. Unlike the vouch, this stage is not fail-open."""
+    holder is still open. Like the vouch, this stage never fails open."""
     load_bearing = {arc.protagonist} | set(_required_holders)
     left_open: dict[frozenset, str] = {}
     for _pass in range(64):     # each pass decides one pair; the bound is a backstop
