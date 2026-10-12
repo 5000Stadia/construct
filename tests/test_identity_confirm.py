@@ -306,7 +306,7 @@ def test_cli_new_prints_the_viability_message_and_exits_1(chdir_tmp, monkeypatch
     assert STOP.plain in err and str(kept) in err and "Traceback" not in err
 
 
-# ---- cr RED on 80db23e: the vouch and the cast-collision reject never fail open ----------
+# ---- cr RED on 8ec8e27: the vouch and the cast-collision reject never fail open ----------
 
 HOLDER, ECHO = "person:brigg", "person:ansel_brigg"
 
@@ -435,7 +435,7 @@ def test_cast_authoring_lets_an_identity_stop_through(tmp_path, monkeypatch):
         w.close()
 
 
-# ---- cr P1 on 80db23e: the scan holds no engine attribute list ---------------------------
+# ---- cr P1 on 8ec8e27: the scan holds no engine attribute list ---------------------------
 
 def _append_bookkeeping(w, frame: str, entity: str, attribute: str, value: str) -> None:
     """Write an engine bookkeeping row into a frame the way the engine's own ingestor does
