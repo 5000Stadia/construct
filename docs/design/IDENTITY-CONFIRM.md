@@ -1,6 +1,7 @@
 # Identity confirm at build (R34 P2 + P3): spec r2
 
-**Status:** r2, 2026-10-12. r1 was RED at cr (two blockers, both taken below; the policy itself was judged sound). pattern-buffer shipped IDENTITY-REPRESENTATIVE-V1 at `f275e40`. Review: cr.
+**Status:** r2, 2026-10-12, GREEN at cr as a specification. r1 was RED at cr (two blockers, both taken below; the policy itself was judged sound). pattern-buffer shipped IDENTITY-REPRESENTATIVE-V1 at `f275e40`. Review: cr.
+**Built** on `feat/identity-confirm`: `_stage_confirm_identity` in `construct/game.py` (steps 2 and 3, run right after the vouch), the cast-collision reject in `_admit_disambiguated_cast` (step 4), and the build-stop contract on every creation path, the CLI and the atrium. Checks 2-7 are `tests/test_identity_confirm.py` plus the atrium case in `tests/test_telegram.py`. Closures are walked over canon `same_as` rows through the public `facts()` read, because the porcelain has no closure verb.
 **Decision:** gate gc53c58, consult c12f82c. The monitor accepted P1–P3 on Kabe's behalf (note n126701). P1 is shipped as a test (`tests/test_identity_play_guard.py`).
 **Evidence:** `eval/14-frame-owner-measurement.md` (2 of 2 fresh builds split or twinned the hero); `eval/12` runs 2, 4, 5 and 6.
 **Engine:** R35 (no auto-merge of a frame owner), R36 (P1: frames read only their own names), IDENTITY-REPRESENTATIVE-V1 (a host merge or confirm names the survivor; `Receipt.canonical_id` is the elected representative).

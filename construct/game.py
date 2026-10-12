@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from patternbuffer import World
+from patternbuffer import META_ATTRIBUTES, World
 
 from construct import hostcontrol
 from construct.adapter import PorcelainWorldReads
@@ -787,6 +787,17 @@ def _admit_disambiguated_cast(world: Any, _remaps: dict, _cprop: dict) -> None:
     world.porcelain.ingest_structured(_admit)
     logger.info("admitted %d disambiguated cast identit(ies) as canon",
                 len(_remaps))
+    # The fresh id is a DIFFERENT person who shares the canon name (IDENTITY-CONFIRM step
+    # 4): hold the pair apart, so reconcile never proposes it and the identity stop never
+    # reads it as a split.
+    for _orig, _fresh in _remaps.items():
+        try:
+            _r = world.porcelain.reject(_orig, _fresh)
+            if _r.get("outcome") not in ("rejected", "noop_already_distinct"):
+                logger.warning("cast collision %s / %s not held apart: %s",
+                               _orig, _fresh, _r.get("outcome"))
+        except Exception as exc:  # noqa: BLE001 — the identity stop then names the pair
+            logger.warning("cast collision %s / %s not held apart: %s", _orig, _fresh, exc)
 
 
 def _stage_author_cast(world: Any, provider: Provider, arc: Arc, proposal: dict, digest: str,
@@ -944,16 +955,179 @@ def _stage_vouch_merges(world: Any, arc: Arc, _required_holders: set) -> None:
         logger.warning("fidelity vouched-merge skipped: %s", exc)
 
 
-class ProtagonistSplitError(RuntimeError):
+class BuildIdentityError(RuntimeError):
+    """A build stop over identity: the protagonist or a required-clue holder came out split
+    (IDENTITY-CONFIRM.md). Every public creation function turns it into a ViabilityError
+    after removing the half-built world. `plain` says the reason in a guest's words."""
+
+    plain = "a key character came out as two different people"
+
+
+class ProtagonistSplitError(BuildIdentityError):
     """#107 SEAL-LINT: the committed arc row names a different protagonist than the
     authored arc its beat gates watch, so the arc is undeliverable as sealed. Raised
     at seal to stop the build; the creation paths remove the half-built world."""
+
+    plain = "the main character came out as two different people"
 
     def __init__(self, committed: str, authored: str) -> None:
         self.committed = committed
         self.authored = authored
         super().__init__(f"protagonist split at seal: the arc row names {committed!r} but "
                          f"the beats watch knows:{authored} (arc undeliverable as sealed)")
+
+
+class IdentityUnresolvedError(BuildIdentityError):
+    """IDENTITY-CONFIRM step 3 (R34 P2): after the confirm pass, a pair touching a
+    load-bearing closure is still open. `pairs` is [(a, b, why), ...]."""
+
+    def __init__(self, pairs: list[tuple[str, str, str]]) -> None:
+        self.pairs = pairs
+        super().__init__("identity unresolved at build: " + "; ".join(
+            f"{a} ~ {b} ({why})" for a, b, why in pairs))
+
+
+# Rows the engine writes about identity, provenance, receipts or retraction: never
+# evidence that two people are different (IDENTITY-CONFIRM step 2's scan).
+_MECHANISM_ATTRS = META_ATTRIBUTES | {"evidence", "caused_by", "representative"}
+
+
+def _closure_reader(world: Any):
+    """A closure lookup over the canon `same_as` rows as they stand now (identity is
+    canon's). Read fresh after every identity decision; returns `closure(id) -> set`."""
+    edges: dict[str, set[str]] = {}
+    for f in world.porcelain.facts("canon", attribute="same_as"):
+        if f.get("value_type") == "entity":
+            edges.setdefault(f["entity"], set()).add(f["value"])
+            edges.setdefault(f["value"], set()).add(f["entity"])
+
+    def closure(entity: str) -> set[str]:
+        out, frontier = {entity}, [entity]
+        while frontier:
+            for nxt in edges.get(frontier.pop(), ()):
+                if nxt not in out:
+                    out.add(nxt)
+                    frontier.append(nxt)
+        return out
+    return closure
+
+
+def _frames_tell_apart(world: Any, a_closure: set, b_closure: set) -> bool:
+    """IDENTITY-CONFIRM step 2's exact scan: the raw stored rows of `knows:<m>` for
+    every member of both closures (no identity-resolved read, which would fold the very
+    pair in question). Evidence of two people is an entity-valued, non-mechanism row
+    relating the closures: subject in one, value in the other. A row merely ABOUT the
+    other closure is not evidence (a fragment's facts often sit in the hero's frame)."""
+    for m in sorted(a_closure | b_closure):
+        for f in world.porcelain.facts(f"knows:{m}"):
+            if f.get("value_type") != "entity" or f["attribute"] in _MECHANISM_ATTRS:
+                continue
+            s, v = f["entity"], f["value"]
+            if (s in a_closure and v in b_closure) or (s in b_closure and v in a_closure):
+                return True
+    return False
+
+
+def _held_apart(world: Any, a_closure: set, b_closure: set) -> bool:
+    """A canon `distinct_from` row between these two closures (not merely naming one)."""
+    for f in world.porcelain.facts("canon", attribute="distinct_from"):
+        s, v = f["entity"], f["value"]
+        if (s in a_closure and v in b_closure) or (s in b_closure and v in a_closure):
+            return True
+    return False
+
+
+def _frame_owner_proposals(world: Any) -> list[tuple[str, str]]:
+    return [(p["a"], p["b"]) for p in world.porcelain.proposals()
+            if (p.get("auto_decline") or {}).get("code") == "frame_owner"]
+
+
+def _decide_frame_owner_pair(world: Any, a: str, b: str, closure,
+                             load_bearing: set) -> str | None:
+    """One IDENTITY-CONFIRM step 2 decision over closures. Returns None when the pair is
+    settled by its receipt, else why it stays open. Receipts decide, not intentions."""
+    a_closure, b_closure = closure(a), closure(b)
+    lb = (a_closure | b_closure) & load_bearing
+    if len(lb) != 1:
+        return f"would join load-bearing ids {sorted(lb)}"
+    keep = next(iter(lb))
+    try:
+        if _frames_tell_apart(world, a_closure, b_closure):
+            r = world.porcelain.reject(a, b)
+            if r.get("outcome") in ("rejected", "noop_already_distinct"):
+                logger.info("identity confirm: %s / %s rejected (their frames tell them "
+                            "apart)", a, b)
+                return None
+            return f"reject receipt {r.get('outcome')!r}"
+        r = world.porcelain.confirm(a, b, representative=keep)
+    except Exception as exc:  # noqa: BLE001 — an engine refusal leaves the pair open
+        return f"{type(exc).__name__}: {exc}"
+    if r.get("outcome") in ("merged", "noop_already_merged") and r.get("canonical_id") == keep:
+        logger.info("identity confirm: %s ~ %s confirmed as %s", a, b, keep)
+        return None
+    return f"confirm receipt {r.get('outcome')!r} served as {r.get('canonical_id')!r}"
+
+
+def _identity_stops(world: Any, load_bearing: set) -> list[tuple[str, str, str]]:
+    """IDENTITY-CONFIRM step 3 (P2), per pair and per closure: an open `frame_owner`
+    proposal, or a live same-name pair (`unlinked`/`auto_declined`/`typing_slip`), that
+    touches a load-bearing closure and is neither one closure nor held apart."""
+    closure = _closure_reader(world)
+    stops: list[tuple[str, str, str]] = []
+    for a, b in _frame_owner_proposals(world):
+        if (closure(a) | closure(b)) & load_bearing:
+            stops.append((a, b, "open frame_owner proposal"))
+    for g in world.porcelain.fidelity_audit().get("name_collisions", []):
+        if not g.get("live"):
+            continue
+        for pr in g.get("pairs") or []:
+            if pr.get("status") not in ("unlinked", "auto_declined", "typing_slip"):
+                continue
+            a_closure, b_closure = closure(pr["a"]), closure(pr["b"])
+            if not (a_closure | b_closure) & load_bearing:
+                continue
+            if a_closure == b_closure or _held_apart(world, a_closure, b_closure):
+                continue
+            why = f"same name {g.get('anchor')!r}, {pr['status']}"
+            if pr.get("reason"):
+                why += f" ({pr['reason']})"
+            stops.append((pr["a"], pr["b"], why))
+    return stops
+
+
+def _stage_confirm_identity(world: Any, arc: Arc, _required_holders: set) -> None:
+    """IDENTITY-CONFIRM steps 2 and 3 (R34 P3 + P2), at the vouch slot: after cast
+    authoring, before the arc rows and the literal `knows:<id>` frames are written.
+    Confirms each open `frame_owner` proposal with exactly one load-bearing side, the
+    load-bearing id as survivor, unless the closures' own frames tell them apart (then
+    reject). Never joins two load-bearing closures. Re-reads proposals and closures after
+    every decision until a pass decides nothing; then stops the build (raises
+    IdentityUnresolvedError) if any pair touching the protagonist or a required-clue
+    holder is still open. Unlike the vouch, this stage is not fail-open."""
+    load_bearing = {arc.protagonist} | set(_required_holders)
+    left_open: dict[frozenset, str] = {}
+    for _pass in range(64):     # each pass decides one pair; the bound is a backstop
+        closure = _closure_reader(world)
+        decided = False
+        for a, b in _frame_owner_proposals(world):
+            key = frozenset((a, b))
+            if key in left_open or not (closure(a) | closure(b)) & load_bearing:
+                continue
+            why = _decide_frame_owner_pair(world, a, b, closure, load_bearing)
+            if why is None:
+                decided = True
+                break           # closures changed: re-read before the next decision
+            left_open[key] = why
+            logger.warning("identity confirm: %s ~ %s left open: %s", a, b, why)
+        if not decided:
+            break
+    stops = [(a, b, f"{why}: {left_open[frozenset((a, b))]}"
+              if frozenset((a, b)) in left_open else why)
+             for a, b, why in _identity_stops(world, load_bearing)]
+    for a, b, why in stops:
+        logger.error("identity unresolved at build: %s ~ %s (%s)", a, b, why)
+    if stops:
+        raise IdentityUnresolvedError(stops)
 
 
 def _stage_commit_arc(world: Any, arc: Arc) -> None:
@@ -1361,6 +1535,7 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
         world, provider, arc, proposal, digest, people, known_ids, resolved_game_types,
         _laws_block)
     _stage_vouch_merges(world, arc, _required_holders)
+    _stage_confirm_identity(world, arc, _required_holders)
     _stage_commit_arc(world, arc)
     seeded = _stage_seed_knowledge(world, provider, on_stage, arc, people, digest, cast_nodes,
                                    cast_proposal, laws, opening_as_of)
@@ -1486,10 +1661,12 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                                   play_as=play_as, game_types=game_types,
                                   source_step=SOURCE_STEP,
                                   laws=laws, reality_register=reality_register)
-    except BaseException:
+    except BaseException as exc:
         world.close()
         spath.unlink(missing_ok=True)
         spath.with_suffix(".meta.json").unlink(missing_ok=True)
+        if isinstance(exc, BuildIdentityError):   # the one build-stop contract
+            raise _identity_viability(name, prose_path, exc) from exc
         raise
     finally:
         world.close()
@@ -1544,29 +1721,51 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
                                   on_stage, win_direction=win_direction,
                                   play_as=play_as, game_types=game_types,
                                   laws=laws, reality_register=reality)
-    except BaseException:
+    except BaseException as exc:
         world.close()
         spath.unlink(missing_ok=True)
         spath.with_suffix(".meta.json").unlink(missing_ok=True)
+        if isinstance(exc, BuildIdentityError):   # the one build-stop contract
+            raise _identity_viability(name, _save_brief(name, brief), exc) from exc
         raise
     finally:
         world.close()
 
 
 class ViabilityError(RuntimeError):
-    """A generated scenario was ingested but failed the post-ingest
-    viability gate (STARTUP-ENTRY / Cx 063 #6). The published `.world`/
-    `.meta.json` are removed; the generated source is preserved for audit
-    at `source_path`. Raised so the caller surfaces an actionable failure
-    instead of a playable-but-broken scenario."""
+    """A built scenario failed the post-ingest viability gate (STARTUP-ENTRY /
+    Cx 063 #6), or any creation path stopped on identity (BuildIdentityError,
+    IDENTITY-CONFIRM). The published `.world`/`.meta.json` are removed; the
+    source (generated story, prose file, or an interview's saved brief) is
+    preserved for audit at `source_path`. Raised so the caller surfaces an
+    actionable failure instead of a playable-but-broken scenario. `problems[0]`
+    is plain enough to show a guest."""
 
     def __init__(self, name: str, source_path: Path, problems: list[str]) -> None:
         self.name = name
         self.source_path = source_path
         self.problems = problems
         super().__init__(
-            f"generated scenario {name!r} failed the viability gate "
+            f"scenario {name!r} failed the viability gate "
             f"({'; '.join(problems)}); source preserved at {source_path}")
+
+
+def _identity_viability(name: str, source_path: Path,
+                        exc: BuildIdentityError) -> ViabilityError:
+    """An identity stop as the ViabilityError every caller handles (IDENTITY-CONFIRM, the
+    build-stop contract): the plain reason first (what a guest is shown), the detail next."""
+    return ViabilityError(name, source_path, [exc.plain, str(exc)])
+
+
+def _save_brief(name: str, brief: str) -> Path:
+    """Keep an interview's brief for audit when its build stops, beside generated sources
+    (an interview has no source file of its own). Never clobbers an existing one."""
+    GENERATED_DIR.mkdir(exist_ok=True)
+    path, n = GENERATED_DIR / f"{name}.brief.md", 2
+    while path.exists():
+        path, n = GENERATED_DIR / f"{name}_{n}.brief.md", n + 1
+    path.write_text(brief)
+    return path
 
 
 def _save_generated_prose(name: str, work: dict) -> Path:
@@ -1708,8 +1907,8 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
                                            win_direction=win_direction, play_as=play_as,
                                            game_types=game_types,
                                            laws=laws, reality_register=reality)
-    except ProtagonistSplitError as exc:  # the ingest path already removed the world
-        raise ViabilityError(name, prose_path, [str(exc)]) from exc
+    except BuildIdentityError as exc:  # the ingest path already removed the world
+        raise _identity_viability(name, prose_path, exc) from exc
 
     _emit(on_stage, "Stage 7 · Viability gate · entry material + cold-open smoke "
                     "over shipped reads")

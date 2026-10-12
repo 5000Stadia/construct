@@ -203,8 +203,13 @@ class AtriumMixin:
                                      "and trying again…)")
                     time.sleep(BUILD_RETRY_DELAY_S)
         if last_exc is not None:
+            from construct.game import ViabilityError
+            # A not-viable build carries a plain first reason (IDENTITY-CONFIRM's build-stop
+            # contract); the guest never sees that exception's own text.
+            why = ((last_exc.problems or ["it didn't hold together"])[0]
+                   if isinstance(last_exc, ViabilityError) else last_exc)
             return self._reply(
-                ev, f"(I couldn't quite stabilize that world — {last_exc}. Tell "
+                ev, f"(I couldn't quite stabilize that world — {why}. Tell "
                     f"me what to change, or we can try again.)")
         registry.set_scenario(self._conn, ev.platform, ev.external_id, name)
         self._notify(ev, "Your world is ready. Let's settle who you are in it…")

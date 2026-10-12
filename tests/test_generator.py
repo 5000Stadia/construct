@@ -969,7 +969,8 @@ def test_a_protagonist_split_fails_the_generated_build_as_not_viable(tmp_path, m
     monkeypatch.setattr(game, "_save_generated_prose", lambda name, work: tmp_path / "t.md")
     with pytest.raises(game.ViabilityError) as err:
         game.create_scenario_from_generated("splitgen", object(), seed="s")
-    assert "protagonist split at seal" in err.value.problems[0]
+    assert err.value.problems[0] == game.ProtagonistSplitError.plain
+    assert "protagonist split at seal" in err.value.problems[1]
 
 
 def test_fidelity_vouched_pairs_allowlist_and_load_bearing_gates():
