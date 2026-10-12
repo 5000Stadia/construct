@@ -345,6 +345,11 @@ def _author_world_laws(provider: Provider, brief: str, reality: str,
     return survivors, settled
 
 
+def _id_namespace(entity: Any) -> str:
+    """The id's namespace (`person`, `place`, `obj`, …): the part before the colon."""
+    return str(entity).partition(":")[0]
+
+
 def _stage_reconcile_identity(world: Any, on_stage) -> None:
     """Build stage 2 (identity reconcile). Pure move out of `_finalize_scenario_impl`."""
     # Global coreference finalize pass (PB IDENTITY-RECALL-V1/V2, letters
@@ -382,9 +387,13 @@ def _stage_reconcile_identity(world: Any, on_stage) -> None:
             logger.info("typing slip %s -> %s: %s", _tc["spurious"],
                         _tc["target"], _r.get("outcome"))
         # FIDELITY-REPAIR step 2 (#56, Cx 480): person↔place HOMONYMS — a
-        # collision group carrying >1 folded kind is two genuinely-distinct
+        # collision pair in two id namespaces is two genuinely-distinct
         # entities sharing a name (a character AND a village, e.g.
-        # person:harth/place:harth), not a fragment. reject() writes
+        # person:harth/place:harth), not a fragment. The NAMESPACE decides, never
+        # the folded `kind` strings: extraction writes role words into `kind`
+        # ("condemned man" beside "person"), and reading those as two kinds held
+        # the hero apart from their own fragment (R20 run 7, a:1166; pb mbaab95).
+        # A same-namespace pair is the vouch's and the identity confirm's to judge. reject() writes
         # distinct_from → drops them from the live count AND gives refer() the
         # kind+scene signal to disambiguate at render (the presence-flicker fix).
         # RUN AFTER retype (Cx 480 #2): a slip is cross-kind too, so exclude any
@@ -394,13 +403,11 @@ def _stage_reconcile_identity(world: Any, on_stage) -> None:
         for _g in world.porcelain.fidelity_audit().get("name_collisions", []):
             if not _g.get("live"):
                 continue
-            _ents, _kinds = _g.get("entities") or [], _g.get("kinds") or []
+            _ents = _g.get("entities") or []
             for _i in range(len(_ents)):
                 for _j in range(_i + 1, len(_ents)):
-                    _ka, _kb = (_kinds[_i] if _i < len(_kinds) else None,
-                                _kinds[_j] if _j < len(_kinds) else None)
-                    if not (_ka and _kb and _ka != _kb):
-                        continue  # same-kind → not a homonym (step 4 handles)
+                    if _id_namespace(_ents[_i]) == _id_namespace(_ents[_j]):
+                        continue  # same namespace → not a homonym (the vouch judges it)
                     if tuple(sorted((_ents[_i], _ents[_j]))) in _slip_pairs:
                         continue  # a typing slip retype owns — never reject it
                     try:

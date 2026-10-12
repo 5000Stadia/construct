@@ -1326,6 +1326,15 @@ class _FailOpenIngest:
         return getattr(self._p, name)
 
     def ingest_structured(self, *args: Any, **kwargs: Any) -> Any:
+        # The host never declares attribute semantics in a turn: the engine declares an
+        # attribute on first use (semantics.attribute_default). An `attr:*` item that slips
+        # into a batch after the attribute holds data makes the engine refuse the WHOLE batch
+        # (R20 run 7: `attr:keeps` dropped a turn's rows; pb mbaab95), so it is dropped here,
+        # and logged with its contents so the path that produced it can be found.
+        if args and isinstance(args[0], (list, tuple)):
+            args = (_without_declarations(args[0]),) + args[1:]
+        elif isinstance(kwargs.get("items"), (list, tuple)):
+            kwargs["items"] = _without_declarations(kwargs["items"])
         try:
             return self._p.ingest_structured(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 — fail-open by design
@@ -1335,6 +1344,17 @@ class _FailOpenIngest:
             except Exception:
                 pass
             return {"rows": []}
+
+
+def _without_declarations(items: Any) -> list:
+    """`items` minus any `attr:*` semantics declaration, each dropped one logged."""
+    kept = []
+    for item in items:
+        if isinstance(item, dict) and str(item.get("entity", "")).startswith("attr:"):
+            logger.warning("in-turn ingest: dropped an attr:* declaration item %r", item)
+            continue
+        kept.append(item)
+    return kept
 
 
 def _receipt_rows(receipt: Any) -> list[dict]:
