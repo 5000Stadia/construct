@@ -1003,24 +1003,9 @@ class IdentityUnresolvedError(BuildIdentityError):
 _MECHANISM_ATTRS = META_ATTRIBUTES | {"evidence", "caused_by", "representative"}
 
 
-def _closure_reader(world: Any):
-    """A closure lookup over the canon `same_as` rows as they stand now (identity is
-    canon's). Read fresh after every identity decision; returns `closure(id) -> set`."""
-    edges: dict[str, set[str]] = {}
-    for f in world.porcelain.facts("canon", attribute="same_as"):
-        if f.get("value_type") == "entity":
-            edges.setdefault(f["entity"], set()).add(f["value"])
-            edges.setdefault(f["value"], set()).add(f["entity"])
-
-    def closure(entity: str) -> set[str]:
-        out, frontier = {entity}, [entity]
-        while frontier:
-            for nxt in edges.get(frontier.pop(), ()):
-                if nxt not in out:
-                    out.add(nxt)
-                    frontier.append(nxt)
-        return out
-    return closure
+def _closure(world: Any, entity: str) -> set[str]:
+    """The id's canon identity closure, itself included (pattern-buffer CLOSURE-READ-V1)."""
+    return set(world.porcelain.closure(entity))
 
 
 def _frames_tell_apart(world: Any, a_closure: set, b_closure: set) -> bool:
@@ -1039,13 +1024,10 @@ def _frames_tell_apart(world: Any, a_closure: set, b_closure: set) -> bool:
     return False
 
 
-def _held_apart(world: Any, a_closure: set, b_closure: set) -> bool:
-    """A canon `distinct_from` row between these two closures (not merely naming one)."""
-    for f in world.porcelain.facts("canon", attribute="distinct_from"):
-        s, v = f["entity"], f["value"]
-        if (s in a_closure and v in b_closure) or (s in b_closure and v in a_closure):
-            return True
-    return False
+def _held_apart(world: Any, a: str, b: str) -> bool:
+    """A canon `distinct_from` row between the two ids' closures, not merely naming one
+    (pattern-buffer CLOSURE-READ-V1 `distinct_between`)."""
+    return bool(world.porcelain.distinct_between(a, b))
 
 
 def _frame_owner_proposals(world: Any) -> list[tuple[str, str]]:
@@ -1053,11 +1035,10 @@ def _frame_owner_proposals(world: Any) -> list[tuple[str, str]]:
             if (p.get("auto_decline") or {}).get("code") == "frame_owner"]
 
 
-def _decide_frame_owner_pair(world: Any, a: str, b: str, closure,
-                             load_bearing: set) -> str | None:
+def _decide_frame_owner_pair(world: Any, a: str, b: str, load_bearing: set) -> str | None:
     """One IDENTITY-CONFIRM step 2 decision over closures. Returns None when the pair is
     settled by its receipt, else why it stays open. Receipts decide, not intentions."""
-    a_closure, b_closure = closure(a), closure(b)
+    a_closure, b_closure = _closure(world, a), _closure(world, b)
     lb = (a_closure | b_closure) & load_bearing
     if len(lb) != 1:
         return f"would join load-bearing ids {sorted(lb)}"
@@ -1083,10 +1064,9 @@ def _identity_stops(world: Any, load_bearing: set) -> list[tuple[str, str, str]]
     """IDENTITY-CONFIRM step 3 (P2), per pair and per closure: an open `frame_owner`
     proposal, or a live same-name pair (`unlinked`/`auto_declined`/`typing_slip`), that
     touches a load-bearing closure and is neither one closure nor held apart."""
-    closure = _closure_reader(world)
     stops: list[tuple[str, str, str]] = []
     for a, b in _frame_owner_proposals(world):
-        if (closure(a) | closure(b)) & load_bearing:
+        if (_closure(world, a) | _closure(world, b)) & load_bearing:
             stops.append((a, b, "open frame_owner proposal"))
     for g in world.porcelain.fidelity_audit().get("name_collisions", []):
         if not g.get("live"):
@@ -1094,10 +1074,10 @@ def _identity_stops(world: Any, load_bearing: set) -> list[tuple[str, str, str]]
         for pr in g.get("pairs") or []:
             if pr.get("status") not in ("unlinked", "auto_declined", "typing_slip"):
                 continue
-            a_closure, b_closure = closure(pr["a"]), closure(pr["b"])
+            a_closure, b_closure = _closure(world, pr["a"]), _closure(world, pr["b"])
             if not (a_closure | b_closure) & load_bearing:
                 continue
-            if a_closure == b_closure or _held_apart(world, a_closure, b_closure):
+            if a_closure == b_closure or _held_apart(world, pr["a"], pr["b"]):
                 continue
             why = f"same name {g.get('anchor')!r}, {pr['status']}"
             if pr.get("reason"):
@@ -1118,13 +1098,12 @@ def _stage_confirm_identity(world: Any, arc: Arc, _required_holders: set) -> Non
     load_bearing = {arc.protagonist} | set(_required_holders)
     left_open: dict[frozenset, str] = {}
     for _pass in range(64):     # each pass decides one pair; the bound is a backstop
-        closure = _closure_reader(world)
         decided = False
         for a, b in _frame_owner_proposals(world):
             key = frozenset((a, b))
-            if key in left_open or not (closure(a) | closure(b)) & load_bearing:
+            if key in left_open or not (_closure(world, a) | _closure(world, b)) & load_bearing:
                 continue
-            why = _decide_frame_owner_pair(world, a, b, closure, load_bearing)
+            why = _decide_frame_owner_pair(world, a, b, load_bearing)
             if why is None:
                 decided = True
                 break           # closures changed: re-read before the next decision

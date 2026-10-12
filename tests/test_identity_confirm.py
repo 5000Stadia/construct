@@ -60,7 +60,7 @@ def test_the_heros_frame_owner_twin_is_confirmed_with_the_hero_as_survivor(tmp_p
     w = _twin_world(tmp_path)
     try:
         game._stage_confirm_identity(w, _arc(), set())          # viable: no raise
-        assert game._closure_reader(w)(HERO) == {HERO, FRAG}
+        assert game._closure(w, HERO) == {HERO, FRAG}
         assert game._frame_owner_proposals(w) == []
         _commit_arc_row(w)
         assert game._protagonist_coherence(w, _arc()) == HERO   # the seal passes
@@ -94,9 +94,8 @@ def test_a_closure_members_frame_relating_the_two_closures_rejects_the_pair(tmp_
     w = _member_frame_world(tmp_path, [("person:tom", "distrusts", HERO)])
     try:
         game._stage_confirm_identity(w, _arc(), set())          # settled: no stop
-        closure = game._closure_reader(w)
-        assert HERO not in closure(FRAG)
-        assert game._held_apart(w, closure(FRAG), closure(HERO))
+        assert HERO not in game._closure(w, FRAG)
+        assert game._held_apart(w, FRAG, HERO)
     finally:
         w.close()
 
@@ -105,7 +104,7 @@ def test_a_row_only_about_the_other_closure_is_not_evidence(tmp_path):
     w = _member_frame_world(tmp_path, [(HERO, "in", "place:yard")])
     try:
         game._stage_confirm_identity(w, _arc(), set())
-        assert game._closure_reader(w)(HERO) == {HERO, FRAG, "person:tom"}
+        assert game._closure(w, HERO) == {HERO, FRAG, "person:tom"}
     finally:
         w.close()
 
@@ -188,8 +187,7 @@ def test_a_cascade_never_joins_two_load_bearing_closures(tmp_path):
 
         with pytest.raises(game.IdentityUnresolvedError) as err:
             game._stage_confirm_identity(w, _arc(hero), {holder})
-        closure = game._closure_reader(w)
-        assert holder not in closure(hero)                           # never joined
+        assert holder not in game._closure(w, hero)                  # never joined
         assert any("load-bearing" in why for _, _, why in err.value.pairs)
         assert frozenset(("person:pell", "person:pell_orr")) in {
             frozenset(p) for p in game._frame_owner_proposals(w)}   # bystanders untouched
@@ -209,8 +207,7 @@ def test_a_cast_collision_pair_is_held_apart_and_never_stops_the_build(tmp_path)
             w, {"person:voss": "person:voss_2"},
             {"cast": [{"id": "person:voss_2", "surface_role": "smuggler"}]})
         w.porcelain.reconcile()
-        closure = game._closure_reader(w)
-        assert game._held_apart(w, closure("person:voss"), closure("person:voss_2"))
+        assert game._held_apart(w, "person:voss", "person:voss_2")
         assert not [p for p in w.porcelain.proposals()
                     if {p["a"], p["b"]} == {"person:voss", "person:voss_2"}]
         assert game._identity_stops(w, {"person:voss"}) == []
@@ -226,7 +223,7 @@ def test_without_the_reject_the_cast_collision_pair_fuses(tmp_path):
         w.porcelain.ingest_structured(_person("person:voss", "Voss")
                                       + _person("person:voss_2", "Voss"), classify="rules")
         w.porcelain.reconcile()
-        assert "person:voss_2" in game._closure_reader(w)("person:voss")
+        assert "person:voss_2" in game._closure(w, "person:voss")
     finally:
         w.close()
 
@@ -356,7 +353,7 @@ def test_a_good_vouch_for_a_required_holder_keeps_the_holder(tmp_path, monkeypat
     w = _holder_world(tmp_path, monkeypatch)
     try:
         game._stage_vouch_merges(w, _arc(), {HOLDER})
-        assert game._closure_reader(w)(HOLDER) == {HOLDER, ECHO}
+        assert game._closure(w, HOLDER) == {HOLDER, ECHO}
     finally:
         w.close()
 
