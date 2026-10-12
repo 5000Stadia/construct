@@ -1,4 +1,4 @@
-"""Founder-approved clean rebuild of the founder's encampment world (#107): the same
+"""Founder-approved clean rebuild of the encampment test story (#107): the same
 brief, on the fixed code — the play_as figure is staged, never swapped, and
 her identity carries the gender the original capture dropped."""
 import logging

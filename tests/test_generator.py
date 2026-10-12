@@ -821,7 +821,7 @@ def test_finalize_commits_laws_as_canon_and_meta(tmp_path):
 
 
 def test_finalize_stages_play_as_pick_instead_of_swapping(tmp_path):
-    # #107 (Minutes Before Bullets): the author picked EXACTLY the figure the
+    # #107 (the Minutes Before Bullets test story): the author picked EXACTLY the figure the
     # player asked to be, but that person was an unplaced stub — the old guard
     # swapped the player's identity for whichever stranger held a location.
     # Identity outranks staging: the asked-for figure is STAGED (at the located

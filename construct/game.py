@@ -693,8 +693,8 @@ def _stage_author_arc(world: Any, provider: Provider, on_stage, play_as: str,
         # the located allowlist; keep the linted proposal for the fallback. Empty allowlist →
         # the loop exhausts, the fallback returns None, and we raise (never publish).
         #
-        # THE PLAYER'S FIGURE IS STAGED, NEVER SWAPPED (#107, founder's Minutes Before
-        # Bullets): when the author picked exactly the figure the player asked to BE and
+        # THE PLAYER'S FIGURE IS STAGED, NEVER SWAPPED (#107, the Minutes Before
+        # Bullets test story): when the author picked exactly the figure the player asked to BE and
         # that person is merely an UNPLACED stub, rejecting the pick trades the player's
         # chosen identity for whichever stranger happened to hold a location (he asked for
         # the defense apprentice; play cast him as a retrieval lead). Identity outranks
@@ -1124,8 +1124,8 @@ def _stage_commit_arc(world: Any, arc: Arc) -> None:
 
     world.porcelain.ingest_structured(
         arc_io.arc_to_items(arc) + arc_io.index_items(arc), classify="rules")
-    # #107 SEAL-LINT (protagonist coherence — the founder's Minutes Before Bullets
-    # split): the arc binds play through THREE surfaces that must name one figure —
+    # #107 SEAL-LINT (protagonist coherence — the Minutes Before Bullets
+    # test story's split): the arc binds play through THREE surfaces that must name one figure —
     # the committed `arc:main.protagonist` entity row (what arc-reload reads), the
     # literal-pinned beat-gate `knows:<id>` frames (what beats watch), and
     # `meta["protagonist"]`. A merge that rewrites the entity row but not the literal
