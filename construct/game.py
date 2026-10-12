@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from patternbuffer import META_ATTRIBUTES, World
+from patternbuffer import World
 
 from construct import hostcontrol
 from construct.adapter import PorcelainWorldReads
@@ -998,11 +998,6 @@ class IdentityUnresolvedError(BuildIdentityError):
             f"{a} ~ {b} ({why})" for a, b, why in pairs))
 
 
-# Rows the engine writes about identity, provenance, receipts or retraction: never
-# evidence that two people are different (IDENTITY-CONFIRM step 2's scan).
-_MECHANISM_ATTRS = META_ATTRIBUTES | {"evidence", "caused_by", "representative"}
-
-
 def _closure(world: Any, entity: str) -> set[str]:
     """The id's canon identity closure, itself included (pattern-buffer CLOSURE-READ-V1)."""
     return set(world.porcelain.closure(entity))
@@ -1011,12 +1006,14 @@ def _closure(world: Any, entity: str) -> set[str]:
 def _frames_tell_apart(world: Any, a_closure: set, b_closure: set) -> bool:
     """IDENTITY-CONFIRM step 2's exact scan: the raw stored rows of `knows:<m>` for
     every member of both closures (no identity-resolved read, which would fold the very
-    pair in question). Evidence of two people is an entity-valued, non-mechanism row
-    relating the closures: subject in one, value in the other. A row merely ABOUT the
+    pair in question). Evidence of two people is an entity-valued world fact relating
+    the closures: subject in one, value in the other. The engine leaves out its own
+    bookkeeping rows (identity edges, provenance, receipts, retractions:
+    FACTS-BOOKKEEPING-V1), so the host holds no list of them. A row merely ABOUT the
     other closure is not evidence (a fragment's facts often sit in the hero's frame)."""
     for m in sorted(a_closure | b_closure):
-        for f in world.porcelain.facts(f"knows:{m}"):
-            if f.get("value_type") != "entity" or f["attribute"] in _MECHANISM_ATTRS:
+        for f in world.porcelain.facts(f"knows:{m}", bookkeeping=False):
+            if f.get("value_type") != "entity":
                 continue
             s, v = f["entity"], f["value"]
             if (s in a_closure and v in b_closure) or (s in b_closure and v in a_closure):

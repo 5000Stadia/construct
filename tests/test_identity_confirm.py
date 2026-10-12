@@ -433,3 +433,54 @@ def test_cast_authoring_lets_an_identity_stop_through(tmp_path, monkeypatch):
             game._stage_author_cast(w, object(), _Arc(), {}, "", [], [], ["deduction"], "")
     finally:
         w.close()
+
+
+# ---- cr P1 on 80db23e: the scan holds no engine attribute list ---------------------------
+
+def _append_bookkeeping(w, frame: str, entity: str, attribute: str, value: str) -> None:
+    """Write an engine bookkeeping row into a frame the way the engine's own ingestor does
+    (the fixture technique of pattern-buffer's tests/test_facts_bookkeeping.py). Fixture
+    only: the code under test reads through the porcelain."""
+    from patternbuffer.roles import _make_engine_roles
+    w.buffer.append(entity=entity, attribute=attribute, value=value, value_type="entity",
+                    status="stated", role=_make_engine_roles()["ingestor"], frame=frame)
+
+
+@pytest.mark.parametrize("attribute", ["aka", "same_as", "source"])
+def test_an_engine_bookkeeping_row_relating_the_closures_is_not_evidence(tmp_path, attribute):
+    """Identity and provenance rows in a fragment's frame that name the other closure are
+    the engine's bookkeeping, not the fragment's knowledge. facts(bookkeeping=False)
+    leaves them out; the host names none of them."""
+    w = _twin_world(tmp_path)
+    try:
+        _append_bookkeeping(w, f"knows:{FRAG}", FRAG, attribute, HERO)
+        assert any(f["attribute"] == attribute for f in w.porcelain.facts(f"knows:{FRAG}"))
+        assert not game._frames_tell_apart(w, {FRAG}, {HERO})
+        game._stage_confirm_identity(w, _arc(), set())          # confirmed, not rejected
+        assert game._closure(w, HERO) == {HERO, FRAG}
+    finally:
+        w.close()
+
+
+def test_without_the_engine_filter_a_bookkeeping_row_would_read_as_evidence(tmp_path,
+                                                                            monkeypatch):
+    # Negative control: a scan that kept bookkeeping rows would reject a true twin.
+    w = _twin_world(tmp_path)
+    try:
+        _append_bookkeeping(w, f"knows:{FRAG}", FRAG, "aka", HERO)
+        real = w.porcelain.facts
+        monkeypatch.setattr(w.porcelain, "facts",
+                            lambda frame, **k: real(frame, **{**k, "bookkeeping": True}))
+        assert game._frames_tell_apart(w, {FRAG}, {HERO})
+    finally:
+        w.close()
+
+
+def test_the_build_module_imports_no_engine_constant():
+    """The host reaches the engine through `World` and its porcelain only (CLAUDE.md)."""
+    import ast
+    from pathlib import Path as _P
+    tree = ast.parse(_P(game.__file__).read_text())
+    names = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+             and (n.module or "").startswith("patternbuffer") for a in n.names}
+    assert names == {"World"}, names
