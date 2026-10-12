@@ -112,7 +112,9 @@ A lesson for the identity work (`IDENTITY-CONFIRM.md`): the rule "a possessive i
 5. **Engine pinned** at pattern-buffer `c44ad49`, which the full suite passed on (1557 passed, 1 skipped).
    - The commit is in `engine.pin`. `scripts/pin_engine.sh` installs that exact commit into `.venv`, replacing the editable link to pattern-buffer's working tree, and the installed copy was checked byte-identical to it.
    - To bump: run the suite against the new commit, change the one line in `engine.pin` (commit it with the result), and run the script.
-   - First bump: to `f275e40` (IDENTITY-REPRESENTATIVE-V1), after the full suite passed on it (commit `cda7dbe`).
+   - First bump: to `f275e40` (IDENTITY-REPRESENTATIVE-V1), after the full suite passed on it (commit `b87038e`).
+   - Second bump: to `0eb4e3f` (CLOSURE-READ-V1, FACTS-BOOKKEEPING-V1, VIEW-EXPORT-V1), commit `2ea7713`.
+   - pattern-buffer rebuilt its unpushed history before its 2026-10-12 push, so its ids in this report and in other docs from before that date are the old ones. Its `docs/COMMIT-ID-MAP-2026-10-12.md` maps each to the new id. The pin was then moved from `0eb4e3f` to `5a9e826`, the same commit under its new id (`src/` byte-identical).
 
 Row counts (old log kept as an exact prefix in every file):
 
