@@ -4,6 +4,7 @@ copy of the founder's slot, and prints raw rows vs resolved rows vs receipts."""
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 
 logging.basicConfig(level=logging.ERROR)
@@ -12,7 +13,8 @@ from construct.provider import CodexProvider, engine_callable
 from construct.resolve import resolve_rows
 from patternbuffer import World
 
-shutil.copyfile("worlds/bodycase.telegram_8786956263.play.world", "/tmp/b1probe.world")
+# The live play slot is named by the player's id, so it never sits in source.
+shutil.copyfile(os.environ["CONSTRUCT_SLOT"], "/tmp/b1probe.world")
 prov = CodexProvider()
 w = World("/tmp/b1probe.world", world_id="w:bodycase", stance="fiction",
           model=engine_callable(prov, tier="cheap"))

@@ -2,7 +2,7 @@
 Uses the ENGINE read p.fidelity_audit() (PB 101, ca9c87a) for the canonical
 live-fragmentation count, and adds the host-only severity weighting by joining
 the flagged entity ids against the arc protagonist + required cast. Read-only."""
-import json, sys
+import json, os, sys
 from pathlib import Path
 from patternbuffer import World
 from patternbuffer.testing import StubModel
@@ -28,8 +28,10 @@ def audit(name):
             "unstamped":s.get("unstamped_timed",0), "orphans":s.get("orphan_entities",0),
             "conflicts":s.get("open_conflicts",0), "score":score}
 
-worlds = sys.argv[1:] or ["bodycase","emberroad","thedeep",
-    "live_telegram_8786956263_3","live_telegram_8897888758_1"]
+# Live worlds are named by player ids, so they come from the command line or
+# CONSTRUCT_LIVE_WORLDS (space-separated), never from source.
+worlds = sys.argv[1:] or (["bodycase","emberroad","thedeep"]
+    + os.environ.get("CONSTRUCT_LIVE_WORLDS", "").split())
 print(f"{'world':<32}{'live':>5}{'sev':>4}{'unstmp':>7}{'orph':>5}{'conf':>5}{'SCORE':>6}")
 print("-"*68)
 for wn in worlds:

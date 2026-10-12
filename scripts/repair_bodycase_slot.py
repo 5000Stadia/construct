@@ -7,11 +7,13 @@ DRY-RUN by default (prints the plan). Run with --apply to execute.
 RUN ONLY WHILE THE BOT IS STOPPED (single-writer SQLite); reload the bot after."""
 from __future__ import annotations
 
+import os
 import sys
 
 from patternbuffer import World
 
-SLOT = "worlds/bodycase.telegram_8786956263.play.world"
+# The live play slot is named by the player's id, so it never sits in source.
+SLOT = os.environ["CONSTRUCT_SLOT"]
 APPLY = "--apply" in sys.argv
 PHANTOM = "place:scene_of_the_crime"
 YARD = "place:bluegate_yard"

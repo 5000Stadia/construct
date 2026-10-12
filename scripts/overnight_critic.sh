@@ -14,10 +14,12 @@ run() {
   sleep 20   # let the Codex budget breathe between runs
 }
 echo "###### OVERNIGHT CRITIC CAMPAIGN $(date) ######" >> logs/overnight-critic.log
-# priority: the two live worlds (newest features + highest fidelity scores),
-# then the flagship regression, then the other shipped worlds
-run live_telegram_8897888758_1 standard   # Quiet Shelf (score 142 — fragmentation stress)
-run live_telegram_8786956263_3 standard   # Warning Line (laws layer live + protagonist)
+# priority: the live worlds (newest features + highest fidelity scores), then the
+# flagship regression, then the other shipped worlds. Live worlds are named by player
+# ids, so they come from CONSTRUCT_LIVE_WORLDS (space-separated), never from source.
+for w in ${CONSTRUCT_LIVE_WORLDS:-}; do
+  run "$w" standard
+done
 run bodycase offpath                      # flagship regression + adversarial off-path
 run thedeep standard                      # survival (severity 11)
 run emberroad standard                    # the fragmentation exemplar

@@ -1,7 +1,8 @@
-"""Founder-approved clean rebuild of Minutes Before Bullets (#107): the same
+"""Founder-approved clean rebuild of the founder's encampment world (#107): the same
 brief, on the fixed code — the play_as figure is staged, never swapped, and
 her identity carries the gender the original capture dropped."""
 import logging
+import os
 logging.basicConfig(level=logging.INFO,
                     format="%(levelname)s %(name)s: %(message)s")
 
@@ -21,7 +22,7 @@ The main character is the defense apprentice — a young woman, daughter of the 
 The encampment has multiple categories of needs sectioned into groups, each group with a lead and an apprentice; decisions are made by democratic voting in a nighttime group setting around dinner time."""
 
 meta = create_scenario_from_generated(
-    "live_telegram_8786956263_3",
+    os.environ["CONSTRUCT_REBUILD_NAME"],   # a live world name carries the player's id
     CodexProvider(),
     seed=SEED,
     endless=False,
