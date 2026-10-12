@@ -140,6 +140,35 @@ Five runs, five fails on criterion 1, each for a different first cause. Of those
 - conveyances and object-named destinations;
 - whether to fix the multi-object take, and the briefing's 40KB edge, as R20 work or later.
 
+## Run 6 — FAIL (criteria 2 and 5): chapter 1 concluded for the first time, but the player never left the room
+
+Kabe opened run 6 (monitor n715a22, 2026-10-12), after main was pushed (`ce6186c`). Same probe and pass mark, on pushed main, with pattern-buffer frozen at `1041704` (engine source as `8dfeff0`, the SecondWriter guard). A crash at about 00:32 killed the pre-push suite; it was rerun green before the push.
+
+| Criterion | Result |
+|---|---|
+| 1. Chapter 1 concludes | **Pass.** Turn 5: `beat:writ_chain_broken` (event `gallows_writ_bell_chain_disrupted`) took the arc to act III, `won`, and the settle closed the chapter. The first conclusion in six runs. |
+| 2. Ends in a place grown in play | **Fail.** The player ended at `place:ironhold`, the prison itself. They never moved: all five turns were talk and a forensic act in one room. |
+| 3. Chapter 2 opens where chapter 1 ended | Pass (`place:ironhold` to `place:ironhold`). |
+| 4. No broken turns | Pass. Chapter 2 played 6 turns with no `ENGINE ERROR` and no empty prose. Two Codex 503s were retried and recovered. |
+| 5. No WHERE breaker | **Fail.** Notes t2–t4 report the narration putting the scene "in a cell" ("the cell's iron holds the cold around all of you", Hal angling "toward the cell door") while the scene was set below the key gallery; t4 calls it "snapping us into a cell that we didn't enter". Canon never moved; this is prose drift, but it is the teleport report the bar names. |
+
+What run 6 showed:
+
+1. **The conclusion came early and without the escape.** A prison-break build (win_loss: escape) won on its fifth turn, on the player's linen-and-ink move against the writ chain. That meets the founder's rule (the chapter ends inside a resolution), but the story the critic-player was steered toward, "get out", never happened, so the world-growth criterion had nothing to test. The probe's ch1 schedule only pushes movement after the arc is ready; here readiness and the win came on the same turn. Recorded, not changed: whether criterion 2 should require the move, or the probe should push it earlier, is a pass-mark question.
+2. **The protagonist's twin, again.** The seal passed: the arc row and the authored arc both say `person:tomas_reed`. But `person:tomas_reed_cell` ("Tomas Reed Cell") was a separate person in the room and took an NPC turn on all 10 played turns, one serial cheap call each. This is the case the frame-owner consult (gate gc53c58, point 2) names: the naming stays consistent, so today's seal check misses it, and a live twin of the hero sits in the scene. Built on the pre-R35 engine, so it is not R35's doing.
+3. **No protagonist split, no id drops, no second writer.** No `malformed_id` skips, no `ProtagonistSplitError`, no `SecondWriter`, no knows-declaration error. The turn-3 error from run 5 did not recur, so the guard had nothing to name.
+4. **Fiction-quality notes** (recorded, not failures): at the chapter seam the roles of Venn and Morrow swapped (clerk and bellman); in chapter 2 the lock-twine vanished ("there is no lock-twine there") and came back the next turn.
+
+R23 timings, 10 instrumented turns: whole turn 95–306 s in chapter 1. Player-felt (cp_generator + narrate) min 52, median 138, max 184 s. The salience window (snapshot to salience) median 78 s, max 97 s, about twice run 5's median of 34 s, though npc_action itself stayed at 3–9 s; the machine was under heavy load from other projects all night (load average near 20), and the cheap tier returned two 503s, so this is not read as a regression without a quieter rerun. Settle tail median 62 s, max 131 s. Narrate median 29 s. Classify 5–14 s. Player-input ingest 16–34 s.
+
+### Where R20 stands after run 6
+
+Chapter 1 now concludes and chapter 2 plays without engine errors. Two things stand between this and a pass:
+- the twin of the hero (gate gc53c58, with Kabe);
+- whether criterion 2 is still the right test when the arc can win without the player moving (Kabe's call; the movement findings stay recorded, not worked around).
+
+No run 7 without Kabe.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
