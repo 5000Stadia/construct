@@ -232,6 +232,27 @@ def _fidelity_vouched_pairs(name_collisions: list, load_bearing: set,
     return out
 
 
+def _vouch_merge(world: Any, keep: str, frag: str) -> str | None:
+    """Fold a fragment into a load-bearing id (#56), keeping `keep` as the closure's
+    representative. The engine otherwise serves a closure under its FIRST-SEEN member, so
+    a fragment seen before the protagonist would become the id the committed arc row reads
+    back as, while the beats watch `knows:<keep>`: the protagonist split of R20 runs 2, 4
+    and 5 (eval/14). pattern-buffer IDENTITY-REPRESENTATIVE-V1. Returns the canonical id
+    the engine reports, or None when the merge is vetoed (left unresolved, fail-open)."""
+    mr = world.porcelain.merge(
+        keep, frag, evidence="fidelity-repair: alias_not_specific "
+        "coref folded into the arc-load-bearing id (#56)", representative=keep)
+    if mr.get("outcome") not in ("merged", "noop_already_merged"):
+        logger.warning("fidelity merge vetoed: %s <- %s (%s)", keep, frag, mr.get("outcome"))
+        return None
+    canonical = mr.get("canonical_id")
+    if canonical != keep:   # the seal-lint then stops the build if this is the protagonist
+        logger.error("fidelity merge: %s <- %s served as %r, not %r", keep, frag, canonical, keep)
+    else:
+        logger.info("fidelity merge: %s <- %s", keep, frag)
+    return canonical
+
+
 def _protagonist_coherence(world: Any, arc: Any) -> str | None:
     """#107 seal-lint read: the committed `arc:main.protagonist` value off the
     plot frame (the id an arc-reload binds play to). Public surface only
@@ -918,14 +939,7 @@ def _stage_vouch_merges(world: Any, arc: Arc, _required_holders: set) -> None:
         for _keep, _frag in _fidelity_vouched_pairs(
                 world.porcelain.fidelity_audit().get("name_collisions", []),
                 _load_bearing):
-            _mr = world.porcelain.merge(
-                _keep, _frag, evidence="fidelity-repair: alias_not_specific "
-                "coref folded into the arc-load-bearing id (#56)")
-            if _mr.get("outcome") in ("merged", "noop_already_merged"):
-                logger.info("fidelity merge: %s <- %s", _keep, _frag)
-            else:  # vetoed → leave unresolved, fail-open (Cx 480 receipt rule)
-                logger.warning("fidelity merge vetoed: %s <- %s (%s)",
-                               _keep, _frag, _mr.get("outcome"))
+            _vouch_merge(world, _keep, _frag)
     except Exception as exc:  # noqa: BLE001 — repair NEVER sinks a build
         logger.warning("fidelity vouched-merge skipped: %s", exc)
 
