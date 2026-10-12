@@ -215,9 +215,11 @@ def read_clock(world, location: str | None = None) -> Clock:
     return Clock(minutes=minutes, calendar=governing_calendar(world, location))
 
 
-def commit_elapsed(world, delta_minutes: int) -> None:
+def commit_elapsed(world, delta_minutes: int, *, at: float | None = None) -> None:
     """Append `+delta_minutes` to the accrue counter (seeding the baseline once).
-    Append-only/monotonic — story-time never rewinds (Kernos 074)."""
+    Append-only/monotonic — story-time never rewinds (Kernos 074). `at` is the valid
+    time of the turn that spent the minutes (`turn_time(turn)`), so an as-of read of the
+    clock at turn n sees exactly the minutes spent through turn n (unified world access)."""
     if not delta_minutes or delta_minutes <= 0:
         return
     p = world.porcelain
@@ -231,9 +233,9 @@ def commit_elapsed(world, delta_minutes: int) -> None:
                               "value": "clock", "timeless": True}])
     if state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) is None:
         p.ingest_structured([{"entity": ELAPSED_ENTITY, "attribute": ELAPSED_ATTR,
-                              "value": 0, "value_type": "literal"}])
+                              "value": 0, "value_type": "literal"}], at=at)
     p.ingest_structured([{"entity": ELAPSED_ENTITY, "attribute": ELAPSED_ATTR,
-                          "value": int(delta_minutes), "value_type": "delta"}])
+                          "value": int(delta_minutes), "value_type": "delta"}], at=at)
 
 
 #: Explicit temporal language that warrants the MODEL estimate — a real wait / jump / rest /

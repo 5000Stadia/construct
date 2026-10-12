@@ -170,3 +170,31 @@ def test_deterministic_elapsed_skips_model_for_ordinary_turns():
     assert deterministic_elapsed("I wait until sunset") is None
     assert deterministic_elapsed("I sleep through the night") is None
     assert deterministic_elapsed("Three days later, I return") is None
+
+
+def test_elapsed_minutes_land_at_the_turn_that_spent_them(tmp_path):
+    # Unified world access (pb 1041704, construct's side): a reader maps a turn to clock
+    # time with state(time:elapsed, as_of=turn_time(n)). The per-turn delta must carry its
+    # turn's valid time, not wherever an earlier write left the scene cursor.
+    from construct.adapter import state_value
+    from construct.arc.timeline import turn_time
+    from construct.clock import ELAPSED_ATTR, ELAPSED_ENTITY, commit_elapsed
+    from construct.game import _world
+
+    world = _world(tmp_path / "c.world", "c", model=None)
+    try:
+        p = world.porcelain
+        commit_elapsed(world, 5, at=turn_time(2))
+        p.ingest_structured([{"entity": "place:study", "attribute": "lit", "value": "yes"}],
+                            at=turn_time(3))        # the last write that posed the cursor
+        commit_elapsed(world, 10, at=turn_time(5))   # turn 5 spends ten minutes
+
+        def minutes(turn: int):
+            return state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR, as_of=turn_time(turn))
+
+        assert minutes(2) == 5
+        assert minutes(4) == 5          # turn 5's minutes are not visible before turn 5
+        assert minutes(5) == 15
+        assert state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) == 15
+    finally:
+        world.close()
