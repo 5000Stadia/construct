@@ -33,10 +33,12 @@ This is that report. The live worlds are players' own stories, so this public re
 - 1892 rows before, 1904 after (12 added, none changed).
 
 ### World B (one file: the scenario world; its player has not started a save)
-- **Wrong merge.** Before: four ids (the protagonist, a second id for the protagonist, and two ids of one NPC) were one entity, joined through two speaker-relative phrases. After: three groups held apart (the second id; the NPC's two ids, a right merge, kept; the protagonist alone, with no location row of their own).
+**Corrected the same night:** the first repair split the protagonist from an NPC who is, by the text, the protagonist, and it left the protagonist with no location. See "Correction to the first repair" below. The file was restored and repaired again.
+
+- **Wrong merge.** Before: four ids (the protagonist, a second id for the protagonist, and two ids of one NPC) were one entity, joined through two speaker-relative phrases. After the first repair: three groups held apart (the second id; the NPC's two ids, a right merge, kept; the protagonist alone, with no location row of their own).
 - **Holds row stored backwards.** Before: `person held_by obj`. After: `obj held_by person`.
 - **Junk alias.** Retracted one row: the protagonist's description as an alias on the NPC.
-- 2108 rows before, 2116 after.
+- 2108 rows before, 2116 after the first repair; see the correction for the final count.
 
 ### World C (four files: the scenario world, the player's save, its checkpoint, and a critic play)
 - **Wrong merge.** Before: six different people were one entity, on a single shared sentence. One of them read the clues of two others. After: six separate people, with all 15 pairs held apart. Their locations are unchanged (each reads their own rows).
@@ -54,3 +56,69 @@ Untouched. None of the three groups is present, and its only flagged holds row i
 3. **Leftover aliases from the fusions** in worlds A and C: the other people's names, kinship phrases and the sentence that caused the fusion, left on the person the fusion folded them into, plus two wrong-entity aliases in world A's canon.
 4. **'san pedro'** is only in the thedeep preset (tracked in this repo), not in any live world. The thedeep `chen`/`elias_chen` confirm from the earlier list is also still open.
 5. **The engine version a live bot loads isn't fixed.** It's whatever pattern-buffer's `main` is at the moment the bot starts.
+
+## Follow-up: the leftovers, gate g82aabc (2026-10-12, later the same night)
+
+**Authority.** Gate g82aabc, answered by the monitor on Kabe's behalf (note n05f168), with the same method as g698a80:
+- a fresh backup first (the earlier one predates the repair);
+- verify every change on copies under the pinned engine, and apply only with no bot running;
+- a before/after report.
+
+The rules per item:
+- (1) and (3): retract.
+- (2) and (4): check the book text first. Fix only where the text clearly shows it; leave and report the rest.
+- (5): pin the engine.
+
+**Method.**
+- **Backup:** all 16 live files, the thedeep preset and its play copies, and the player registry, with checksums verified.
+- **Verification:** each change was verified on a fresh copy with the same checks as above. Two checks were added:
+  - the protagonist must still have a location;
+  - a merge the merge pass makes on an untouched copy too is not counted against the repair.
+- **Apply:** the live file was written only after that, and its new rows matched the verified copy row for row. No bot was running, and no process had the files open.
+
+### Correction to the first repair: world B
+
+The first repair split the four ids into three groups, following pattern-buffer's rule that a speaker-relative anchor ("my X", "his X") is no evidence. The book text says more:
+- **The NPC is the protagonist.** The text names the protagonist by that role, and the people around them use the same phrase for them.
+- **Only one link was wrong.** The other speaker's phrase meant a different, dead character, so that one merge was a real mistake.
+
+After the first repair, the protagonist had **no location at all**. That would have broken the opening for the next player. Nobody had played it in between: its one player wiped their saves before starting.
+
+The file was restored from the pre-repair backup (checksum equal to the original) and repaired again:
+- only the one wrong link is retracted;
+- the protagonist's ids and the other character's ids are held apart.
+
+Now:
+- the protagonist is one person with a location;
+- the other character is at their own place;
+- the backwards holds row and the junk alias are fixed as before;
+- the text-valued holds row below is retracted.
+
+A lesson for the identity work (`IDENTITY-CONFIRM.md`): the rule "a possessive is no evidence" is right for an automatic merge, and wrong as a repair rule when the text resolves who is meant.
+
+### The five items
+
+1. **Text-valued holds rows: retracted** in worlds B and D (world D's critic play was otherwise untouched, and no merge pass was run on it).
+2. **The two father merges, checked against the text.**
+   - World B: **right, kept.** The text names the father outright.
+   - World C: **wrong, split** in all four files. Two different men say "my father" about two different fathers. The `same_as` row is retracted and the pair held apart.
+3. **Leftover fusion aliases: retracted.** Each value was checked against whose alias it is in canon.
+   - **World C** (all four files): 50 rows in the five knowledge frames: the other women's names, kinship phrases that are another person's in canon, and the fusion sentence. The person's own name stays.
+   - **World A:** 18 rows in the knowledge frames: the protagonist fragment's own lines and the merge sentence. In canon, two wrong-entity aliases (each real owner keeps its own). The NPC's own aliases stay.
+   - The fusion sentence's **canon** rows came from extraction, not the fusion. They are left as text; since R35 they carry no weight as identity evidence.
+4. **thedeep** (the preset and its four play copies).
+   - **'san pedro': retracted.** The text says Keiko "had grown up repairing tuna boats in San Pedro"; it's a place, not her name.
+   - **`chen = elias_chen`: held.** The text is clear: "Dr. Elias Chen, the station medic and biologist" is the only Chen. But the arc's beats name `person:chen`, and the engine would keep the first-seen id, `person:elias_chen`. That is the wrong-survivor split eval/14 found. The confirm waits for pattern-buffer's IDENTITY-REPRESENTATIVE-V1 (in review), and will then run with `chen` as the survivor.
+5. **Engine pinned** at pattern-buffer `c44ad49`, which the full suite passed on (1557 passed, 1 skipped).
+   - The commit is in `engine.pin`. `scripts/pin_engine.sh` installs that exact commit into `.venv`, replacing the editable link to pattern-buffer's working tree, and the installed copy was checked byte-identical to it.
+   - To bump: run the suite against the new commit, change the one line in `engine.pin` (commit it with the result), and run the script.
+
+Row counts (old log kept as an exact prefix in every file):
+
+| World | Rows before → after |
+|---|---|
+| World A | 1904 → 1924 |
+| World B | 2108 → 2114 (re-repaired from the original) |
+| World C (4 files) | +52 each |
+| World D, critic play | 2214 → 2215 |
+| thedeep (5 files) | +1 each |
