@@ -345,6 +345,11 @@ def _author_world_laws(provider: Provider, brief: str, reality: str,
     return survivors, settled
 
 
+def _id_namespace(entity: Any) -> str:
+    """The id's namespace (`person`, `place`, `obj`, …): the part before the colon."""
+    return str(entity).partition(":")[0]
+
+
 def _stage_reconcile_identity(world: Any, on_stage) -> None:
     """Build stage 2 (identity reconcile). Pure move out of `_finalize_scenario_impl`."""
     # Global coreference finalize pass (PB IDENTITY-RECALL-V1/V2, letters
@@ -382,9 +387,14 @@ def _stage_reconcile_identity(world: Any, on_stage) -> None:
             logger.info("typing slip %s -> %s: %s", _tc["spurious"],
                         _tc["target"], _r.get("outcome"))
         # FIDELITY-REPAIR step 2 (#56, Cx 480): person↔place HOMONYMS — a
-        # collision group carrying >1 folded kind is two genuinely-distinct
+        # collision pair in two id namespaces is two genuinely-distinct
         # entities sharing a name (a character AND a village, e.g.
-        # person:harth/place:harth), not a fragment. reject() writes
+        # person:harth/place:harth), not a fragment. The NAMESPACE decides, never
+        # the folded `kind` strings: extraction writes role words into `kind`
+        # ("condemned man" beside "person"), and reading those as two kinds held
+        # the hero apart from their own fragment (R20 run 7, a:1166; pb mbaab95).
+        # A same-namespace pair whose kinds differ is decided at the identity confirm,
+        # once the load-bearing ids are known (`_stage_confirm_identity`). reject() writes
         # distinct_from → drops them from the live count AND gives refer() the
         # kind+scene signal to disambiguate at render (the presence-flicker fix).
         # RUN AFTER retype (Cx 480 #2): a slip is cross-kind too, so exclude any
@@ -394,13 +404,11 @@ def _stage_reconcile_identity(world: Any, on_stage) -> None:
         for _g in world.porcelain.fidelity_audit().get("name_collisions", []):
             if not _g.get("live"):
                 continue
-            _ents, _kinds = _g.get("entities") or [], _g.get("kinds") or []
+            _ents = _g.get("entities") or []
             for _i in range(len(_ents)):
                 for _j in range(_i + 1, len(_ents)):
-                    _ka, _kb = (_kinds[_i] if _i < len(_kinds) else None,
-                                _kinds[_j] if _j < len(_kinds) else None)
-                    if not (_ka and _kb and _ka != _kb):
-                        continue  # same-kind → not a homonym (step 4 handles)
+                    if _id_namespace(_ents[_i]) == _id_namespace(_ents[_j]):
+                        continue  # same namespace → not a homonym (the vouch judges it)
                     if tuple(sorted((_ents[_i], _ents[_j]))) in _slip_pairs:
                         continue  # a typing slip retype owns — never reject it
                     try:
@@ -1057,6 +1065,28 @@ def _decide_frame_owner_pair(world: Any, a: str, b: str, load_bearing: set) -> s
     return f"confirm receipt {r.get('outcome')!r} served as {r.get('canonical_id')!r}"
 
 
+def _role_kind_pairs(world: Any) -> list[tuple[str, str]]:
+    """Live same-name pairs in ONE id namespace whose folded kinds differ. Nothing here
+    tells role words in `kind` ("condemned man" beside "person": one person, R20 run 7)
+    from two people who share a name (a laundress and a clerk both called Lysa); the
+    engine declines both the same way (`kind_conflict`, no relating rows). So neither is
+    ever confirmed: one touching a load-bearing closure stops the build, and any other is
+    held apart, as the reconcile's homonym pass used to do for all of them."""
+    pairs: list[tuple[str, str]] = []
+    for g in world.porcelain.fidelity_audit().get("name_collisions", []):
+        if not g.get("live"):
+            continue
+        ents, kinds = g.get("entities") or [], g.get("kinds") or []
+        for i in range(len(ents)):
+            for j in range(i + 1, len(ents)):
+                ka = kinds[i] if i < len(kinds) else None
+                kb = kinds[j] if j < len(kinds) else None
+                if (ka and kb and ka != kb
+                        and _id_namespace(ents[i]) == _id_namespace(ents[j])):
+                    pairs.append((ents[i], ents[j]))
+    return pairs
+
+
 def _identity_stops(world: Any, load_bearing: set) -> list[tuple[str, str, str]]:
     """IDENTITY-CONFIRM step 3 (P2), per pair and per closure: an open `frame_owner`
     proposal, or a live same-name pair (`unlinked`/`auto_declined`/`typing_slip`), that
@@ -1094,6 +1124,23 @@ def _stage_confirm_identity(world: Any, arc: Arc, _required_holders: set) -> Non
     holder is still open. Like the vouch, this stage never fails open."""
     load_bearing = {arc.protagonist} | set(_required_holders)
     left_open: dict[frozenset, str] = {}
+    role_stops: list[tuple[str, str, str]] = []
+    for a, b in _role_kind_pairs(world):
+        a_closure, b_closure = _closure(world, a), _closure(world, b)
+        if a_closure == b_closure or _held_apart(world, a, b):
+            continue
+        if (a_closure | b_closure) & load_bearing:
+            left_open[frozenset((a, b))] = "same name, kinds differ"
+            role_stops.append((a, b, "same name, kinds differ: neither confirmed nor held apart"))
+            continue
+        try:
+            outcome = world.porcelain.reject(a, b).get("outcome")
+        except Exception as exc:  # noqa: BLE001 — not load-bearing: never sinks the build
+            outcome = f"{type(exc).__name__}: {exc}"
+        if outcome in ("rejected", "noop_already_distinct"):
+            logger.info("identity confirm: %s / %s held apart (same name, kinds differ)", a, b)
+        else:
+            logger.warning("identity confirm: %s / %s not held apart: %s", a, b, outcome)
     for _pass in range(64):     # each pass decides one pair; the bound is a backstop
         decided = False
         for a, b in _frame_owner_proposals(world):
@@ -1111,6 +1158,8 @@ def _stage_confirm_identity(world: Any, arc: Arc, _required_holders: set) -> Non
     stops = [(a, b, f"{why}: {left_open[frozenset((a, b))]}"
               if frozenset((a, b)) in left_open else why)
              for a, b, why in _identity_stops(world, load_bearing)]
+    stops += [s for s in role_stops
+              if frozenset(s[:2]) not in {frozenset(x[:2]) for x in stops}]
     for a, b, why in stops:
         logger.error("identity unresolved at build: %s ~ %s (%s)", a, b, why)
     if stops:
