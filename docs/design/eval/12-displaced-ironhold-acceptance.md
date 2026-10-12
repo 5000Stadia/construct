@@ -169,6 +169,32 @@ Chapter 1 now concludes and chapter 2 plays without engine errors. Two things st
 
 No run 7 without Kabe.
 
+## Run 7 — FAIL (criterion 5 only): the player escaped, chapter 1 concluded in a place grown in play, and chapter 2 opened there
+
+Kabe opened run 7 (monitor nf6e067, 2026-10-12: "Construct tests seem warranted as we are designing elements to engage with construct"). Same probe and pass mark, on local main `131a02c` with the pinned engine (`0eb4e3f`), so the first run with IDENTITY-CONFIRM (R34) at build. Codex subscription only; about 70 minutes. A first launch stopped before any model call because run 6's world was still in `worlds/`; it was moved aside (checked byte-identical to the run 6 archive) and the probe relaunched.
+
+| Criterion | Result |
+|---|---|
+| 1. Chapter 1 concludes | **Pass.** Turn 16, with the player out of the fortress and in the river drain. |
+| 2. Ends in a place grown in play | **Pass.** `place:barred_drain_mouth` is not in the built world; play made it. The first pass in seven runs. |
+| 3. Chapter 2 opens where chapter 1 ended | **Pass** (`place:barred_drain_mouth` to `place:barred_drain_mouth`). |
+| 4. No broken turns | **Pass.** No `ENGINE ERROR`, no empty prose, across 16 + 6 turns. One logged ingest failure (finding 3) dropped rows but not the turn. |
+| 5. No WHERE breaker | **Fail.** Critic notes t2 and t3: canon kept the player in their cell (`place:elias_venn_cell`), but turn 1's prose has Dena set the sack down "beside the cold hearth" and the player examining the hearth, which the opening placed in the warrant room, seen "past Dena's shoulder, through the open angle". The critic: "unclear whether Venn is still in the cell or has been moved to the warrant-room hearth." Prose drift, not a canon move, the same class as run 6's. |
+
+What run 7 showed:
+
+1. **Movement works when the arc needs it.** From turn 10 the player walked: under the laundry arch to the lower yard and river gate, onto the winch roof, down the stair into the river, along under the pier, and out at a drain mouth the world grew for them. The escape win landed there. This is the run 6 question answered by play: with an escape goal that the arc does not grant early, the player moves.
+2. **The hero is split again, and now held apart.** At build, pattern-buffer's identity reconcile (stage 2) wrote `a:1166`, `person:elias distinct_from person:elias_venn`. `person:elias` carries 70 rows of the hero (aliases "elias", "venn", "the condemned cartwright"; the wrist brand; their own cell, `place:elias_cell`), while the arc and play use `person:elias_venn` (19 rows). The vouch cannot fold a pair the engine holds apart, and IDENTITY-CONFIRM treats an engine-decided pair as decided, so no check stopped it. It did not show in play because `person:elias` sat in another cell and never entered a scene. The same pass held three Quill ids apart (`person:quill`, `person:silas_quill`, `person:warrant_clerk_quill`). This is the run 5 split, now hidden behind a keep-apart row. Sent to pattern-buffer; whether the confirm should reopen an engine keep-apart on a load-bearing closure is a design question for IDENTITY-CONFIRM.
+3. **A turn's ingest refused a declaration its own turn had made.** Turn 4's player-input ingest declared `keeps` set-valued (`a:2597`) and wrote two rows. A later ingest in the same turn was refused whole: "cannot declare semantics for attribute 'keeps' after folded data already exists (a:2598)". A fresh handle on a copy of the world reads `keeps` as declared and accepts the same row, and the session runs one handle on one thread. Sent to pattern-buffer with the world copy.
+4. **A question became fact.** The same turn-4 line asked "Quill, who keeps the wash tally ink and knife?" and the player-input ingest wrote `Quill keeps obj:wash_tally_ink` and `Quill keeps obj:knife` to canon. The question-only skip did not apply because the line mixed a question with a statement.
+5. **Object permanence broke in chapter 2** (fiction quality, recorded): the packet's vellum, narrated in hand at ch2 t2, was "no vellum to unroll" at t3 and back at t4; the ash-blue thread, pinched free in turn 11's prose and "still with" the player at the chapter 1 close, was by canon still at the laundry sack; one lost boot became bare feet at the seam. Each is prose that canon never held, the first-mention-permanence class.
+
+R23 timings, 22 instrumented turns: whole turn in chapter 1 128–291 s, median 152 s. Player-felt (generator + narrate) min 63, median 99, p90 163, max 195 s. Salience window median 30 s, p90 100 s, max 112 s (npc_action 5–7 s; the load average was near 11). Settle tail median 56 s, max 128 s (post_extract median 30 s, promote median 24 s). Narrate median 28 s. Classify 5–19 s. Player-input ingest 15–51 s, median 20 s.
+
+### Where R20 stands after run 7
+
+Criteria 1–4 pass for the first time. What stands between this and a pass is prose that places the player somewhere canon does not (runs 6 and 7), and the same truth-keeping gap shows as objects that come and go in chapter 2. The hero split (finding 2) is a build-identity defect that this run happened not to expose.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
