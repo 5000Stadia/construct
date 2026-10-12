@@ -2,7 +2,11 @@
 
 1. The reconcile's homonym pass held the hero apart from their own fragment: it read
    extraction's role words in `kind` ("condemned man" beside "person") as two kinds.
-   A homonym is now two id NAMESPACES (person:harth / place:harth), never two kind strings.
+   The reconcile now holds apart only pairs in two id NAMESPACES (person:harth /
+   place:harth). A same-namespace pair whose kinds differ could be role noise or two
+   people sharing a name, and nothing tells them apart (cr RED on 381b3de), so the
+   identity confirm never merges one: touching a load-bearing id it stops the build,
+   otherwise it is held apart as before.
 2. An `attr:*` declaration item in a turn's batch, after the attribute holds data, made
    the engine refuse the whole batch. The turn's ingest wrapper drops such items."""
 
@@ -11,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from construct import game, turnloop
+from construct.game import IdentityUnresolvedError
 
 
 class _Porcelain:
@@ -54,7 +59,8 @@ def test_cross_namespace_pair_is_still_a_homonym():
                         "kinds": ["person", "village"]}]) == [("person:harth", "place:harth")]
 
 
-def test_mixed_group_rejects_only_the_cross_namespace_pairs():
+def test_reconcile_leaves_same_namespace_pairs_to_the_confirm():
+    # stage 2 only: the person/person pair is decided later (see the real-engine tests)
     rejected = _reconcile([{"anchor": "quill", "live": True,
                             "entities": ["person:quill", "person:warrant_clerk_quill", "obj:quill"],
                             "kinds": ["clerk/person", "warrant clerk", "pen"]}])
@@ -101,6 +107,7 @@ def test_wrapper_drops_the_declaration_and_keeps_the_batch(keeps_world, caplog):
                                   classify="rules")
     assert [r["attribute"] for r in turnloop._receipt_rows(receipt)] == ["keeps"]
     assert trace.dropped_cohorts == []
+    assert trace.dropped_declarations == ["attr:keeps · arity"]
     assert "attr:keeps" in caplog.text
     held = {f["value"] for f in keeps_world.porcelain.facts("canon")
             if f["entity"] == "person:quill" and f["attribute"] == "keeps"}
@@ -112,3 +119,60 @@ def test_wrapper_filters_items_passed_by_keyword(keeps_world):
     receipt = p.ingest_structured(items=[dict(_DECLARATION), _knife()], frame="canon",
                                   classify="rules")
     assert len(turnloop._receipt_rows(receipt)) == 1
+
+
+# ---- 1b. same name, one namespace, different kinds: through reconcile AND confirm, real engine
+
+def _named_world(tmp_path, people):
+    w = game._world(tmp_path / "n.world", "n", model=None)
+    rows = []
+    for entity, kind, aliases in people:
+        rows.append({"entity": entity, "attribute": "kind", "value": kind})
+        rows += [{"entity": entity, "attribute": "alias", "value": a} for a in aliases]
+    w.porcelain.ingest_structured(rows, frame="canon", classify="rules")
+    game._stage_reconcile_identity(w, None)
+    return w
+
+
+_LYSAS = [("person:lysa", "laundress", ["lysa", "the laundress"]),
+          ("person:lysa_fen", "clerk", ["lysa fen", "lysa"]),
+          ("person:hero", "person", ["hero"])]
+# R20 run 7, as the engine saw it: one person, role words in kind
+_ELIAS = [("person:elias", "condemned man", ["elias", "venn"]),
+          ("person:elias_venn", "person", ["elias venn", "venn"])]
+
+
+def _arc(protagonist):
+    return SimpleNamespace(arc_id="arc:main", protagonist=protagonist)
+
+
+def test_two_people_sharing_a_name_stay_distinct(tmp_path):
+    w = _named_world(tmp_path, _LYSAS)
+    assert not w.porcelain.distinct_between("person:lysa", "person:lysa_fen")  # live after stage 2
+    game._stage_confirm_identity(w, _arc("person:hero"), set())               # not load-bearing
+    assert w.porcelain.distinct_between("person:lysa", "person:lysa_fen")
+    assert set(w.porcelain.closure("person:lysa")) == {"person:lysa"}
+
+
+def test_a_load_bearing_same_name_pair_stops_the_build_and_is_never_merged(tmp_path):
+    w = _named_world(tmp_path, _LYSAS)
+    with pytest.raises(IdentityUnresolvedError, match="kinds differ"):
+        game._stage_confirm_identity(w, _arc("person:lysa_fen"), set())
+    assert set(w.porcelain.closure("person:lysa_fen")) == {"person:lysa_fen"}
+
+
+def test_run7_hero_fragment_stops_instead_of_splitting(tmp_path):
+    w = _named_world(tmp_path, _ELIAS)
+    with pytest.raises(IdentityUnresolvedError) as err:
+        game._stage_confirm_identity(w, _arc("person:elias_venn"), set())
+    assert {frozenset(p[:2]) for p in err.value.pairs} == {
+        frozenset(("person:elias", "person:elias_venn"))}
+    # neither held apart (the run 7 split) nor merged on no evidence
+    assert not w.porcelain.distinct_between("person:elias", "person:elias_venn")
+    assert set(w.porcelain.closure("person:elias_venn")) == {"person:elias_venn"}
+
+
+def test_a_required_holder_counts_as_load_bearing(tmp_path):
+    w = _named_world(tmp_path, _LYSAS)
+    with pytest.raises(IdentityUnresolvedError):
+        game._stage_confirm_identity(w, _arc("person:hero"), {"person:lysa"})

@@ -1212,6 +1212,9 @@ class TurnTrace:
     adjudication: str = "allowed"
     concluded: bool = False
     dropped_cohorts: list[str] = field(default_factory=list)
+    # attr:* declaration items the turn's ingest wrapper dropped ("entity · attribute");
+    # a marker, not a fix: the producer is still unknown (R20 run 7, cr on 381b3de)
+    dropped_declarations: list[str] = field(default_factory=list)
     furnished: list[str] = field(default_factory=list)
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
     movement_status: MovementStatus = MovementStatus.NONE  # how the move resolved (route() passability etc.)
@@ -1332,9 +1335,9 @@ class _FailOpenIngest:
         # (R20 run 7: `attr:keeps` dropped a turn's rows; pb mbaab95), so it is dropped here,
         # and logged with its contents so the path that produced it can be found.
         if args and isinstance(args[0], (list, tuple)):
-            args = (_without_declarations(args[0]),) + args[1:]
+            args = (_without_declarations(args[0], self._trace),) + args[1:]
         elif isinstance(kwargs.get("items"), (list, tuple)):
-            kwargs["items"] = _without_declarations(kwargs["items"])
+            kwargs["items"] = _without_declarations(kwargs["items"], self._trace)
         try:
             return self._p.ingest_structured(*args, **kwargs)
         except Exception as exc:  # noqa: BLE001 — fail-open by design
@@ -1346,12 +1349,18 @@ class _FailOpenIngest:
             return {"rows": []}
 
 
-def _without_declarations(items: Any) -> list:
-    """`items` minus any `attr:*` semantics declaration, each dropped one logged."""
+def _without_declarations(items: Any, trace: Any = None) -> list:
+    """`items` minus any `attr:*` semantics declaration, each dropped one logged and
+    marked on the trace (`dropped_declarations`) so a recurrence is countable."""
     kept = []
     for item in items:
         if isinstance(item, dict) and str(item.get("entity", "")).startswith("attr:"):
             logger.warning("in-turn ingest: dropped an attr:* declaration item %r", item)
+            try:
+                trace.dropped_declarations.append(
+                    f"{item.get('entity')} · {item.get('attribute')}")
+            except AttributeError:
+                pass
             continue
         kept.append(item)
     return kept
@@ -7259,6 +7268,7 @@ def _write_mechanics_log(arc: Arc, turn: int, player_input: str, prose: str,
             f"generated={_g('generated') or '-'}",
             f"- cohorts fired: {_g('cohort_calls') or '-'}",
             f"- dropped: {_g('dropped_cohorts') or '-'}",
+            f"- dropped attr declarations: {_g('dropped_declarations') or '-'}",
             f"- movement: status={_g('movement_status') or '-'}  same_place={_g('same_place')}  "
             f"debug={_g('move_debug') or '-'}  obstruction={_g('movement_obstruction') or '-'}",
             f"- time: {_g('time_now')} (+{_g('time_advanced')}m)  "
