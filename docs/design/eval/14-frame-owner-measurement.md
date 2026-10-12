@@ -26,3 +26,23 @@ The script and raw JSON are on the scratch disk (`frame-owner-measure*`).
 4. **P1 is already true.** No play path calls `merge` or `confirm`: the only merges are at build (`construct/game.py`). It needs a test that keeps it that way, not new behaviour.
 
 Two builds is a small sample, so these are findings, not rates.
+
+## Check 8: rerun with IDENTITY-CONFIRM built (2026-10-12, early morning)
+
+The same build-only method and seed, on `feat/identity-confirm` (`80db23e`) with pattern-buffer pinned at `f275e40` (IDENTITY-REPRESENTATIVE-V1). The builds ran on the Codex subscription (`CONSTRUCT_PROVIDER=codex`, cheap tier `gpt-5.5`). The script and raw JSON are on the scratch disk (`identity-confirm-measure*`).
+
+| | Build 1 | Build 2 |
+|---|---|---|
+| Outcome | **viable** | **viable** |
+| Protagonist | `tomas`, alone in its closure, at `place:nore` (on `obj:skiff`) | `elias`, closure `{elias, elias_venn}`, at `place:chapel_bank` |
+| Load-bearing ids | 1 | 9 |
+| Frame-owner proposals at the confirm stage | 0 | 0 |
+| Confirms, rejects, stops | none | none |
+| Cast-collision pair | none | `mara_vale` / `mara_vale_2`, held apart by `distinct_from` |
+| Proposals left open | 1 `kind_conflict`, 1 `alias_not_specific`, none touching a load-bearing id | 5 `alias_not_specific`, none touching a load-bearing id |
+
+What it shows:
+1. **Build 2 is the old split, now whole.** The vouch folded `elias_venn` into the protagonist, as in build 1 of the first measurement, and this time the closure is served as `elias`, so the seal passed. That is the representative fix (`a7161eb`) doing its job in a real build.
+2. **The cast-collision reject works in a real build.** The second Mara is held apart from the first, so the identity stop did not read them as a split.
+3. **Neither build produced a frame-owner proposal**, so the confirm and reject path was not exercised here. It is covered by the unit fixtures (checks 2 to 5). The first measurement saw 3 such proposals in 1 of 2 builds, so a future build will meet them; two builds is still a small sample.
+4. **No build stopped.** The identity stop did not fire on any same-name pair here: every pair left open touches nothing load-bearing.

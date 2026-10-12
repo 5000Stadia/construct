@@ -207,6 +207,14 @@ def _cmd_scenarios() -> int:
     return 0
 
 
+def _not_viable(exc) -> int:
+    """A build that stopped as not viable (any creation path): say why, where its
+    source is kept, and exit 1 — never a traceback."""
+    print(f"The world was not playable: {'; '.join(exc.problems)}.\n"
+          f"Its source is kept for inspection at {exc.source_path}.", file=sys.stderr)
+    return 1
+
+
 def _cmd_new(args: argparse.Namespace) -> int:
     from construct.game import (ViabilityError, create_scenario_from_generated,
                                 create_scenario_from_ingest,
@@ -224,10 +232,7 @@ def _cmd_new(args: argparse.Namespace) -> int:
                                                   win_direction=win_direction,
                                                   play_as=play_as)
         except ViabilityError as exc:
-            print(f"Generated world was not playable: {'; '.join(exc.problems)}.\n"
-                  f"The source story is kept for inspection at {exc.source_path}.",
-                  file=sys.stderr)
-            return 1
+            return _not_viable(exc)
     elif args.interview is not None:
         brief = args.interview.strip()
         if not brief:
@@ -241,16 +246,23 @@ def _cmd_new(args: argparse.Namespace) -> int:
             print("No brief given; nothing to build.", file=sys.stderr)
             return 2
         name = args.name or "world"
-        meta = create_scenario_from_interview(name, brief, _provider(),
-                                              endless=endless, on_stage=_stage,
-                                              win_direction=win_direction,
-                                              play_as=play_as)
+        try:
+            meta = create_scenario_from_interview(name, brief, _provider(),
+                                                  endless=endless, on_stage=_stage,
+                                                  win_direction=win_direction,
+                                                  play_as=play_as)
+        except ViabilityError as exc:
+            return _not_viable(exc)
     else:
         prose = Path(args.ingest)
         name = args.name or prose.stem.replace(" ", "_")
-        meta = create_scenario_from_ingest(name, prose, _provider(),
-                                           endless=endless, on_stage=_stage,
-                                           win_direction=win_direction, play_as=play_as)
+        try:
+            meta = create_scenario_from_ingest(name, prose, _provider(),
+                                               endless=endless, on_stage=_stage,
+                                               win_direction=win_direction,
+                                               play_as=play_as)
+        except ViabilityError as exc:
+            return _not_viable(exc)
     print(f"Scenario {name!r} created: {meta['title']}")
     print(f"  protagonist: {meta['protagonist']}")
     print(f"  theme: {meta['theme']}")

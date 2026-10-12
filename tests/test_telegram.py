@@ -1710,6 +1710,35 @@ class TestBuildRetry:
         assert registry.scenario_for(conn, "telegram", "rt2") == "anchor"
 
 
+    def test_a_not_viable_build_shows_its_plain_reason_after_one_retry(self, conn,
+                                                                      monkeypatch):
+        # IDENTITY-CONFIRM's build-stop contract: a ViabilityError is retried once like
+        # any build failure, then the guest sees its first, plain problem, never the
+        # exception's own text.
+        import construct.transport_core as tc
+        from construct.game import ViabilityError
+        monkeypatch.setattr(tc.time, "sleep", lambda s: None)
+        self._enter(conn, "rt3")
+        f = _Factory()
+        attempts = []
+
+        def not_viable(*, name, provider, seed, endless, win_direction,
+                       play_as, on_stage, game_types=None, reality_register=""):
+            attempts.append(name)
+            raise ViabilityError(name, "generated/x.md", [
+                "the main character came out as two different people",
+                "protagonist split at seal: the arc row names 'person:a' but ..."])
+
+        provider = StubProvider([
+            _aturn("Cooking.", _aact("add_element", "a doomed expedition"),
+                   _aact("begin_build"))])
+        core = _core(conn, f, provider=provider, builder=not_viable)
+        out = core.handle(_ev("telegram", "rt3", "a doomed expedition, go"), now=NOW)
+        assert len(attempts) == 2
+        assert "the main character came out as two different people" in out.chunks[0]
+        assert "seal" not in out.chunks[0] and "viability gate" not in out.chunks[0]
+
+
 # ---- the terminal transport: construct start = the phone entry -------------
 
 class TestTerminalRepl:
