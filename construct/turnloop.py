@@ -3990,7 +3990,7 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
                     _store_route_price(world, _o, _d,
                                        int(est.get("advance_minutes") or 0), trace.turn)
         trace.time_advanced = delta_from_estimate(clock, est)
-        commit_elapsed(world, trace.time_advanced)
+        commit_elapsed(world, trace.time_advanced, at=turn_time(trace.turn))
     except Exception as exc:  # noqa: BLE001 — time never sinks a turn
         logger.warning("diegetic-time estimate failed: %s", exc)
         trace.dropped_cohorts.append(f"estimate_elapsed ({exc})")
