@@ -108,10 +108,11 @@ A lesson for the identity work (`IDENTITY-CONFIRM.md`): the rule "a possessive i
    - The fusion sentence's **canon** rows came from extraction, not the fusion. They are left as text; since R35 they carry no weight as identity evidence.
 4. **thedeep** (the preset and its four play copies).
    - **'san pedro': retracted.** The text says Keiko "had grown up repairing tuna boats in San Pedro"; it's a place, not her name.
-   - **`chen = elias_chen`: held.** The text is clear: "Dr. Elias Chen, the station medic and biologist" is the only Chen. But the arc's beats name `person:chen`, and the engine would keep the first-seen id, `person:elias_chen`. That is the wrong-survivor split eval/14 found. The confirm waits for pattern-buffer's IDENTITY-REPRESENTATIVE-V1 (in review), and will then run with `chen` as the survivor.
+   - **`chen = elias_chen`: confirmed**, once pattern-buffer shipped IDENTITY-REPRESENTATIVE-V1 (`f275e40`; the engine pin moved to it after the full suite passed). It ran as `confirm(chen, elias_chen, representative=chen)` in all five thedeep files. Every receipt is `merged`, with `canonical_id` = `person:chen`, the id the arc's beats name. A follow-up merge pass on each copy kept the pair together, and Chen is at `place:persephone_lock`. Under P1, the two `knows:` frames stay separate, and nothing reads across them.
 5. **Engine pinned** at pattern-buffer `c44ad49`, which the full suite passed on (1557 passed, 1 skipped).
    - The commit is in `engine.pin`. `scripts/pin_engine.sh` installs that exact commit into `.venv`, replacing the editable link to pattern-buffer's working tree, and the installed copy was checked byte-identical to it.
    - To bump: run the suite against the new commit, change the one line in `engine.pin` (commit it with the result), and run the script.
+   - First bump: to `f275e40` (IDENTITY-REPRESENTATIVE-V1), after the full suite passed on it (commit `cda7dbe`).
 
 Row counts (old log kept as an exact prefix in every file):
 
