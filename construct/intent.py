@@ -52,6 +52,9 @@ class TurnIntent:
     recalls: bool = False                # #97
     declares_memory: bool = False        # #97, action or declaration
     tangent_aim: str = ""                # BEAT-1 declaration, fails CLOSED
+    #: MOVE-TO-UNPLACED-OBJECT: is the move's destination inside the current place? Tri-state:
+    #: only a literal JSON boolean counts; absent or malformed is None (today's fixture rule).
+    within_scene: bool | None = None
 
     @classmethod
     def from_verdict(cls, verdict: dict, player_input: str) -> "TurnIntent":
@@ -93,6 +96,8 @@ class TurnIntent:
             recalls=bool(verdict.get("recalls")),
             declares_memory=bool(verdict.get("declares_memory")) and acts,
             tangent_aim=declaration(verdict, kind=kind),
+            within_scene=(verdict.get("within_scene")
+                          if isinstance(verdict.get("within_scene"), bool) else None),
         )
 
 
