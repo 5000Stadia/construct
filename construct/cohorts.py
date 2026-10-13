@@ -70,6 +70,11 @@ CLASSIFY_SCHEMA = {
                                     "travel-until: 'I walk until I meet someone' — "
                                     "moves_to stays empty and seeks_encounter carries "
                                     "the commitment)"},
+        "within_scene": {"type": "boolean",
+                         "description": "when moves_to is set: true if the destination is "
+                                        "something INSIDE the place the player is in now (a "
+                                        "table, the window, a person here: repositioning); "
+                                        "false if it is somewhere else they go to"},
         "requires": {"type": "array", "items": {"type": "string"},
                      "description": "specific items the player claims to USE or produce "
                                     "FROM THEIR POSSESSION for THIS action NOW ('the "
@@ -2544,7 +2549,7 @@ _DECISIVE_ACTS = {
 
 def classify(provider: Provider, player_input: str, actor: str = "",
              ask_candidates: list = (), npc_candidates: list = (),
-             laws: str = "", decisive: str | None = None) -> dict:
+             laws: str = "", decisive: str | None = None, scene: str = "") -> dict:
     """Returns {kind, moves_to, requires, needs_test, uncertain_of, ...} — movement intent
     AND the assured-vs-uncertain resolution judgment ride the same cheap call (no extra
     latency; letter 026 + ACTION-RESOLUTION.md). `actor` is the protagonist's
@@ -2598,12 +2603,14 @@ def classify(provider: Provider, player_input: str, actor: str = "",
             "PRESSES someone present, set `asks_targets` to the id(s) whose SUBJECT the "
             "question is after (topic match, not holder); empty otherwise. These are hints for "
             "matching only — never quote them, never treat them as facts:\n" + _lines + "\n")
+    scene_note = f"\nTHE PLAYER IS NOW IN: {scene}.\n" if scene else ""
     return complete_sync(provider,
         ask_note +
         npc_note +
         actor_note +
         decisive_note +
         laws_note +
+        scene_note +
         f"Classify this player input from an interactive-fiction session "
         f"by INTENT, not punctuation. The player is INSIDE the story unless they "
         f"clearly step outside it.\n"
@@ -2638,7 +2645,10 @@ def classify(provider: Provider, player_input: str, actor: str = "",
         f"Additionally: if the action MOVES the player somewhere, set "
         f"moves_to to the destination exactly as the player named it "
         f"('the wellhead', 'my quarters'); otherwise empty string. Walking "
-        f"off within the same place is not a move.\n"
+        f"off within the same place is not a move. When moves_to is set, set "
+        f"`within_scene` true if that destination is something inside the place the "
+        f"player is in now (a table, the window, a person here), false if it is "
+        f"somewhere else they go to.\n"
         f"Additionally: list in `requires` any specific item the player "
         f"claims to use or produce from their possession (keys, tools, "
         f"documents) — the world will verify they actually hold it. Empty "

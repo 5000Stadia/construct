@@ -2366,7 +2366,8 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
                        p: Any = None, origin: str | None = None,
                        as_of: float | None = None,
                        roster: list | None = None,
-                       hold_check: Any = None) -> tuple[str | None, dict | None]:
+                       hold_check: Any = None,
+                       carry: tuple = ()) -> tuple[str | None, dict | None]:
     """MOVEMENT PERMANENCE (founder live: "I said I went to Harrow's office" but canon kept me at
     the post office). A move to a NAMED place that didn't resolve to an established canon place (an
     improvised/narrated location) MINTS a fresh `place:<slug>` and commits the protagonist INTO it,
@@ -2472,6 +2473,9 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
                          "value_type": "entity", "valid_from": at})
     rows.append({"entity": protagonist, "attribute": "in", "value": place_id,
                  "value_type": "entity", "valid_from": at})
+    # objects whose place is this destination ride the same batch (MOVE-TO-UNPLACED-OBJECT)
+    rows += [{"entity": e, "attribute": "in", "value": place_id, "value_type": "entity",
+              "valid_from": at} for e in carry]
     world.porcelain.ingest_structured(rows)
     chain = PorcelainWorldReads(world).location_chain(protagonist) or []
     if not chain or chain[0] != place_id:
@@ -4487,12 +4491,23 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 _decisive = commitment_kind
         except Exception as exc:  # noqa: BLE001 — a read miss only drops the hint
             logger.warning("decisive-moment read failed: %s", exc)
+    # MOVE-TO-UNPLACED-OBJECT (cr r1): the scene is read BEFORE classify (the same
+    # horizon-bound locate `pre_scene` uses below), so the classifier can tell a step within
+    # this place from a move somewhere else (`within_scene`).
+    _scene_label = ""
+    try:
+        _sc0 = (p.locate(arc.protagonist, as_of=_h) or [None])[0]
+        if _sc0:
+            _scene_label = str(live_reads.state(_sc0, "name") or humanize_id(_sc0))
+    except Exception as exc:  # noqa: BLE001 — a read miss only drops the hint
+        logger.warning("scene read for classify failed: %s", exc)
     try:
         with _phase(trace, "classify"):
             verdict = cohorts.classify(provider, player_input, actor=actor,
                                        ask_candidates=ask_candidates,
                                        npc_candidates=npc_candidates,
-                                       laws=_laws_full, decisive=_decisive)
+                                       laws=_laws_full, decisive=_decisive,
+                                       scene=_scene_label)
         intent = TurnIntent.from_verdict(verdict, player_input)
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:
@@ -4510,6 +4525,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     uses_knowledge, asks_self = intent.uses_knowledge, intent.asks_self
     recalls, declares_memory = intent.recalls, intent.declares_memory
     _t_aim = intent.tangent_aim
+    within_scene = intent.within_scene
+    _unplaced_obj: str | None = None   # MOVE-TO-UNPLACED-OBJECT: an unlocated move target
     # PLAYER-DRIVEN CAST MOVEMENT (Cx 363/365): opaque ids → present NPC ids (only run_turn
     # holds the map); TurnIntent already gated them to action turns, dismissal winning.
     dismissed_ids = [_npc_by_oid[t] for t in intent.npcs_dismissed if t in _npc_by_oid]
@@ -4854,7 +4871,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         logger.info("journey held for deliberation: %s", trace.deliberating)
         return True
 
-    def _gated_move_commit(dest_id: str, label: str) -> None:
+    def _gated_move_commit(dest_id: str, label: str, carry: tuple = ()) -> None:
         """The ONE route -> deliberate -> commit path for a destination that resolved to
         an existing place (resolved, semantically bound, or known-place reuse): a blocked
         way is not walked (no commit, obstruction on the trace); deliberation runs only
@@ -4869,10 +4886,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         elif _hold_for_deliberation(dest_id, label):
             pass  # #102: held for the player's own weighing
         else:
+            # `carry`: objects whose place IS this destination (MOVE-TO-UNPLACED-OBJECT): placed
+            # in the same batch as the move, so they move only when the player does.
             p.ingest_structured([{
                 "entity": arc.protagonist, "attribute": "in", "value": dest_id,
                 "value_type": "entity", "valid_from": turn_time(turn),
-            }], classify="batch")
+            }] + [{"entity": e, "attribute": "in", "value": dest_id, "value_type": "entity",
+                   "valid_from": turn_time(turn)} for e in carry], classify="batch")
             trace.movement_status = (_as_movement_status(_seg.get("status")) if _seg
                                      else MovementStatus.CLEAR)
             if _seg:
@@ -4962,16 +4982,54 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # person-in-object desync. Absorb it: in-scene repositioning (fixture head, or the target
             # sits in the current scene), no location row. A resolved non-place that ISN'T a scene
             # absorb case is simply not a destination — don't commit it; the narrator handles it.
+            # MOVE-TO-UNPLACED-OBJECT (R20 run 9; cr GREEN on spec r2): decide by WHERE THE THING
+            # IS, not by its head noun. Run 9's "gate table" was an unlocated object born in play;
+            # the fixture word list ("table") absorbed three escape moves as in-room steps.
             _tchain = p.locate(target, as_of=_h) or []
             _in_scene_obj = bool(pre_scene and pre_scene in _tchain) or bool(
                 pre_chain and _tchain and _tchain[0] == pre_chain[0])
-            if _dest_head(moves_to) in _FIXTURE_HEADS or _in_scene_obj:
+            _obj = target
+            target = None  # never relocate INTO a non-place
+            if _in_scene_obj:
+                # 1. located here: a step within the place
                 trace.movement_status = MovementStatus.IN_SCENE
-                logger.info("resolved non-place target %r (fixture/scene-object) — in-scene, not travel",
-                            target)
+                logger.info("resolved non-place target %r is in the scene — in-scene, not travel",
+                            _obj)
+            elif _tchain:
+                # 2. located elsewhere: only the PLAYER'S knowledge of where it is can send them
+                # there (refer resolves against canon) — the person rule's discovery gate.
+                _pchain = p.locate(_obj, frame=player_frame, as_of=_h) or []
+                _oplace = next((x for x in _pchain if str(x).startswith("place:")), None)
+                if _oplace and not (cast and any(_undiscovered_offscene(n) for n in _cbi.values()
+                                                 if n.location == _oplace)):
+                    target = _oplace
+                    logger.info("move to %r redirected to where the player knows it is: %s",
+                                _obj, _oplace)
+                else:
+                    trace.movement_status = MovementStatus.UNDISCOVERED
+                    logger.info("move to %r: its place is not known to the player; no travel",
+                                _obj)
+            elif within_scene is True:
+                # 3a. unlocated, and the classifier says it is here: place it in the scene
+                trace.movement_status = MovementStatus.IN_SCENE
+                if pre_scene:
+                    p.ingest_structured([{"entity": _obj, "attribute": "in", "value": pre_scene,
+                                          "value_type": "entity",
+                                          "valid_from": turn_time(turn)}], classify="batch")
+                logger.info("unlocated %r is within the scene — placed in %s", _obj, pre_scene)
+            elif within_scene is False:
+                # 3b. unlocated, and somewhere else: the destination path below (bind, then
+                # mint), fixture guard skipped; the object rides the move's commit
+                _unplaced_obj = _obj
+                logger.info("unlocated %r is elsewhere — routed to the destination path", _obj)
+            elif _dest_head(moves_to) in _FIXTURE_HEADS:
+                # 3c. no verdict (None): today's fixture rule, unchanged
+                trace.movement_status = MovementStatus.IN_SCENE
+                logger.info("resolved non-place target %r (fixture head) — in-scene, not travel",
+                            _obj)
             else:
-                logger.info("resolved non-place target %r is not a location; narration handles", target)
-            target = None  # never relocate into a non-place
+                logger.info("resolved non-place target %r is not a location; narration handles",
+                            _obj)
         if status == "resolved" and target and target == pre_scene:
             # EXACT current-room naming (Cx 447 blocker): "I go to the study" while
             # standing in the study is a no-op — no relocation row, no route check,
@@ -4995,7 +5053,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             trace.movement_status = MovementStatus.UNDISCOVERED
             logger.info("unresolved move %r names an undiscovered offscene target; not minting",
                         moves_to)
-        elif (_orig_status != "resolved" and not _orig_candidates
+        elif ((_orig_status != "resolved" and not _orig_candidates or _unplaced_obj)
               and trace.movement_status not in (MovementStatus.UNDISCOVERED, MovementStatus.BLOCKED)
               and not _move_touches_secret(moves_to, arc, live_reads)):
             # MOVEMENT PERMANENCE (founder: "I said I went to Harrow's office"): a GENUINE
@@ -5019,7 +5077,11 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # `protagonist.in` row — the player stays in-scene with the people. Head-noun based (the
             # fixture is prose, not a structured feature). Navigable place heads ("office", "yard",
             # "lane", "kitchen") fall through to the mint and still travel (founder "Harrow's office").
-            if _dest_head(moves_to) in _FIXTURE_HEADS:
+            # MOVE-TO-UNPLACED-OBJECT: the classifier's within_scene, when it gave one, decides;
+            # the head-noun list only when it didn't (None). An unplaced object routed here as
+            # "elsewhere" never takes the fixture absorb.
+            if not _unplaced_obj and (within_scene is True or (
+                    within_scene is None and _dest_head(moves_to) in _FIXTURE_HEADS)):
                 trace.movement_status = MovementStatus.IN_SCENE  # no mint, no relocation — stay with the people
                 logger.info("move %r is an in-scene fixture (head %r) — repositioning, not travel",
                             moves_to, _dest_head(moves_to))
@@ -5107,7 +5169,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                         world, arc.protagonist, moves_to, at=turn_time(turn),
                         p=p, origin=pre_chain[0] if pre_chain else None,
                         as_of=_h, roster=_roster,
-                        hold_check=lambda: _hold_for_deliberation(None, moves_to))
+                        hold_check=lambda: _hold_for_deliberation(None, moves_to),
+                        carry=(_unplaced_obj,) if _unplaced_obj else ())
                     if _gseg and _gseg.get("status") == "ambiguous":
                         # #101 (Cx 445): an ambiguous locative tail ("in the village",
                         # two known villages) → the ask path, never a guessed mint.
@@ -5157,7 +5220,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # office) so a return home doesn't mint a duplicate (founder cohesion test).
                     # SAME MOVEMENT GATES AS THE OTHER TRAVEL PATHS: route check, then
                     # deliberation, then commit (a blocked way is never walked).
-                    _gated_move_commit(_known, moves_to)
+                    _gated_move_commit(_known, moves_to,
+                                       carry=(_unplaced_obj,) if _unplaced_obj else ())
                 elif _known == pre_scene:
                     trace.movement_status = MovementStatus.CLEAR  # naming the current place → already here
                     trace.same_place = True          # Cx 445: no time charge for a no-op
@@ -5219,7 +5283,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                             # no commit + obstruction on the trace; obscured → commit but hedge.
                             # Deliberation runs AFTER passability (Cx 465 #2): only a move
                             # that WOULD commit may render as a deadline choice.
-                            _gated_move_commit(_bound, moves_to)
+                            _gated_move_commit(_bound, moves_to,
+                                               carry=(_unplaced_obj,) if _unplaced_obj else ())
                     elif _amb:
                         # ASK, NEVER HALLUCINATE (founder 2026-07-04): an ambiguous
                         # destination gets a CLARIFY beat — the world asks which the player
