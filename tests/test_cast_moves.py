@@ -1187,7 +1187,7 @@ class TestCastMovesEndToEnd:
         arc = make_arc()
         seed_arc(world, arc)
         _seed_person(world, "person:maud", "Maud", "place:study")
-        world._extractions.append({"items": []})
+        # the line is a question only: no player-input extraction (R20 run 7 finding 4)
         world._extractions.append({"items": [
             {"entity": "person:maud", "attribute": "in", "value": "place:flat",
              "value_type": "entity"},
@@ -1215,7 +1215,7 @@ class TestCastMovesEndToEnd:
         world.porcelain.ingest_structured([
             {"entity": "person:maud", "attribute": "title", "value": "chief"},
         ])
-        world._extractions.append({"items": []})
+        # the line is a question only: no player-input extraction (R20 run 7 finding 4)
         world._extractions.append({"items": [
             {"entity": "person:maud", "attribute": "in", "value": "place:flat",
              "value_type": "entity"},

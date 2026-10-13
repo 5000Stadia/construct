@@ -5821,6 +5821,58 @@ def _named_sack_turn(world, sack_rows_player_frame):
     return result, _narrate_prompt(provider)
 
 
+def _extract_prompts(world):
+    return [prompt for prompt, _schema in world._stub.calls
+            if not prompt.startswith("Classify the lifetime")]
+
+
+def test_a_question_in_the_players_line_is_never_extracted(world):
+    # R20 run 7 finding 4: "Quill, who keeps the ink?" became `Quill keeps obj:ink` in canon
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You set the cup down."},
+    ])
+    result = run_turn(world, arc, provider,
+                      "I set the cup down. “Rival, who keeps the ledger ink?”", turn=2)
+    assert "player_ingest (questions not extracted)" in result.trace.dropped_cohorts
+    prompts = _extract_prompts(world)
+    assert any("I set the cup down." in p for p in prompts)
+    assert not any("who keeps the ledger ink" in p for p in prompts)
+
+
+def test_an_emphatic_question_is_never_extracted(world):
+    # cr RED on 15cda1f: "?!" (inside a closing quote) is a question too
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You wait."},
+    ])
+    run_turn(world, arc, provider, "“Rival, who keeps the ledger ink?!” I wait.", turn=2)
+    prompts = _extract_prompts(world)
+    assert any("I wait." in p for p in prompts)
+    assert not any("who keeps the ledger ink" in p for p in prompts)
+
+
+def test_a_question_only_line_extracts_nothing_from_the_player(world):
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "Nobody answers."},
+    ])
+    run_turn(world, arc, provider, "Rival, who keeps the ledger ink?", turn=2)
+    assert not any("who keeps the ledger ink" in p for p in _extract_prompts(world))
+
+
 def test_named_thing_known_elsewhere_gets_a_not_here_line(world):
     # OPENING-SETTLE-AND-ELSEWHERE Part A (R20 run 7): the player frame places the sack
     # in the office; the narrator is told so instead of bringing it into the study
