@@ -44,7 +44,7 @@ def _arc():
     return SimpleNamespace(arc_id="arc:main", protagonist=HERO)
 
 
-def gate(*verdicts, calls=None, **overrides):
+def gate(*verdicts, calls=None, mutate=None, **overrides):
     """A merge_gate stub: one report per call, verdicts taken in call order (one per
     requested pair, or a single verdict for all). `overrides` patch the report."""
     answers = list(verdicts)
@@ -62,6 +62,8 @@ def gate(*verdicts, calls=None, **overrides):
                       {"members": [e["a"], e["b"]], "status": "would_merge"}
                       for e in entries if verdict == "same"]}
         report.update(overrides)
+        if mutate is not None:
+            mutate(report)
         return report
     return _gate
 
@@ -207,3 +209,29 @@ def test_a_pair_that_changes_between_asking_and_writing_is_left_open(w, monkeypa
 
 def test_the_build_no_longer_has_an_evidence_free_vouch():
     assert not hasattr(game, "_stage_vouch_merges")
+
+
+def _set_entry(**fields):
+    return lambda report: report["pairs"][0].update(fields)
+
+
+@pytest.mark.parametrize("label,kwargs", [
+    ("pairs [None]", {"pairs": [None]}),
+    ("components [None]", {"components": [None]}),
+    ("not_asked not a list", {"not_asked": "none"}),
+    ("requested_as a string", {"mutate": _set_entry(requested_as=["0"])}),
+    ("requested_as a bool", {"mutate": _set_entry(requested_as=[True])}),
+    ("requested_as out of range", {"mutate": _set_entry(requested_as=[5])}),
+    ("requested_as not a list", {"mutate": _set_entry(requested_as=0)}),
+    ("wrong pair ids", {"mutate": _set_entry(a="person:x", b="person:y")}),
+    ("unknown verdict", {"mutate": _set_entry(verdict="maybe")}),
+    ("reason not a string", {"mutate": _set_entry(reason=None)}),
+    ("component members not strings", {"components": [{"members": [1], "status": "x"}]}),
+])
+def test_a_malformed_report_fails_closed(w, monkeypatch, label, kwargs):
+    # cr on 4951dc4: never an escaping exception; nothing written; the normal identity stop
+    monkeypatch.setattr(w.porcelain, "merge_gate", gate("same", "same", **kwargs),
+                        raising=False)
+    _adjudicate(w)
+    assert game._closure(w, KEEP) == {KEEP} and not game._held_apart(w, KEEP, FRAG)
+    _stops(w)

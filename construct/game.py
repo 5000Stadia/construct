@@ -982,34 +982,63 @@ def _source_context(world: Any, ids: list[str], source_text: str) -> dict[str, l
     return out
 
 
-def _gate_report_ok(report: Any, requested: list[list[str]]) -> bool:
-    """One merge_gate report is usable only if it is a fresh, uncached answer to exactly
-    this request: `cached` false, a call_id, `requested` echoed exactly, and `requested_as`
-    covering every request index exactly once across asked and not-asked entries."""
+def _parse_gate_report(world: Any, report: Any,
+                       requested: list[list[str]]) -> dict[int, tuple[str, str]] | None:
+    """One merge_gate report, validated whole and structurally BEFORE anything is read from
+    it (cr on 4951dc4: a malformed report must fail closed, never escape as an exception).
+    Returns {request index: (verdict, reason)} for the asked pairs, or None when the report
+    is not a fresh, well-formed answer to exactly this request:
+    - a dict with `cached` exactly False, a non-empty string `call_id`, `requested` equal to
+      the request, and `pairs` / `not_asked` / `components` as lists (absent means empty);
+    - every entry a dict whose `requested_as` is a list of int indexes (bools refused) in
+      range; across all entries they cover every index exactly once;
+    - every asked entry's a/b fall in the two closures of each request it answers, with a
+      verdict of same / different / unsure and a string reason;
+    - every component a dict with a list of string members and a string status.
+    A `same` whose component is not `would_merge` is read as unsure."""
     if not isinstance(report, dict) or report.get("cached") is not False:
-        return False
-    if not report.get("call_id") or report.get("requested") != requested:
-        return False
+        return None
+    if not isinstance(report.get("call_id"), str) or not report["call_id"]:
+        return None
+    if report.get("requested") != requested:
+        return None
+    asked, not_asked, components = (report.get(k, []) for k in ("pairs", "not_asked",
+                                                                  "components"))
+    if not all(isinstance(x, list) for x in (asked, not_asked, components)):
+        return None
     seen: list[int] = []
-    for entry in list(report.get("pairs") or []) + list(report.get("not_asked") or []):
-        seen += list(entry.get("requested_as") or [])
-    return sorted(seen) == list(range(len(requested)))
-
-
-def _gate_verdict(report: dict, index: int) -> str:
-    """The verdict a report gives request `index`: same / different / unsure, or "" when
-    it was not asked. A `same` inside a conflicting component counts as unsure."""
-    entry = next((e for e in report.get("pairs") or [] if index in (e.get("requested_as") or [])),
-                 None)
-    if entry is None:
-        return ""
-    verdict = str(entry.get("verdict") or "")
-    if verdict == "same":
-        pair = {entry.get("a"), entry.get("b")}
-        for comp in report.get("components") or []:
-            if pair <= set(comp.get("members") or []) and comp.get("status") != "would_merge":
-                return "unsure"
-    return verdict if verdict in ("same", "different", "unsure") else "unsure"
+    for entry in asked + not_asked:
+        if not isinstance(entry, dict) or not isinstance(entry.get("requested_as"), list):
+            return None
+        for index in entry["requested_as"]:
+            if type(index) is not int or not 0 <= index < len(requested):
+                return None
+            seen.append(index)
+    if sorted(seen) != list(range(len(requested))):
+        return None
+    conflicted: list[set] = []
+    for comp in components:
+        if (not isinstance(comp, dict) or not isinstance(comp.get("status"), str)
+                or not isinstance(comp.get("members"), list)
+                or not all(isinstance(m, str) for m in comp["members"])):
+            return None
+        if comp["status"] != "would_merge":
+            conflicted.append(set(comp["members"]))
+    out: dict[int, tuple[str, str]] = {}
+    for entry in asked:
+        a, b, verdict = entry.get("a"), entry.get("b"), entry.get("verdict")
+        reason = entry.get("reason", "")
+        if not (isinstance(a, str) and isinstance(b, str) and isinstance(reason, str)
+                and verdict in ("same", "different", "unsure")):
+            return None
+        for index in entry["requested_as"]:
+            x, y = (_closure(world, e) for e in requested[index])
+            if not ((a in x and b in y) or (a in y and b in x)):
+                return None  # the answer is about some other pair
+            out[index] = ("unsure" if verdict == "same"
+                          and any({a, b} <= members for members in conflicted)
+                          else verdict, reason)
+    return out
 
 
 def _adjudicable(world: Any, keep: str, frag: str, load_bearing: set) -> bool:
@@ -1054,35 +1083,37 @@ def _stage_adjudicate_identity(world: Any, arc: Arc, _required_holders: set,
     frozen_context = {e: context[e] for pair in requested for e in pair}
     digest = hashlib.sha256(json.dumps(
         {"pairs": requested, "context": frozen_context}, sort_keys=True).encode()).hexdigest()[:12]
-    reports: list[dict] = []
+    answers: list[dict[int, tuple[str, str]]] = []
+    call_ids: list[str] = []
     for _ in range(2):
         try:
             report = gate([list(pair) for pair in requested], context=frozen_context)
+            parsed = _parse_gate_report(world, report, requested)
         except Exception as exc:  # noqa: BLE001 — no answer: the stop stands
-            logger.warning("identity adjudication: merge_gate raised %s: %s",
+            logger.warning("identity adjudication: merge_gate failed %s: %s",
                            type(exc).__name__, exc)
             return
-        if not _gate_report_ok(report, requested):
+        if parsed is None:
             logger.warning("identity adjudication: a merge_gate report did not answer the "
                            "request %s; nothing written", digest)
             return
-        reports.append(report)
-    if reports[0]["call_id"] == reports[1]["call_id"]:
+        answers.append(parsed)
+        call_ids.append(report["call_id"])
+    if call_ids[0] == call_ids[1]:
         logger.warning("identity adjudication: the two answers share a call_id; nothing written")
         return
+    index_of = {tuple(pair): i for i, pair in enumerate(requested)}
     merged = apart = left = 0
-    for index, (keep, frag) in enumerate(candidates):
-        first, second = (_gate_verdict(r, index) for r in reports)
+    for keep, frag in candidates:
+        index = index_of[tuple(sorted((keep, frag)))]
+        (first, r1), (second, r2) = (answer.get(index, ("", "")) for answer in answers)
         if first != second or first not in ("same", "different") \
                 or not _adjudicable(world, keep, frag, load_bearing):
             left += 1
             continue
-        reasons = " | ".join(str(next((e.get("reason") for e in r.get("pairs") or []
-                                       if index in (e.get("requested_as") or [])), ""))
-                             for r in reports)
         if first == "same":
             _vouch_merge(world, keep, frag,
-                         evidence=f"merge gate x2 {digest}: {reasons}")  # a bad receipt stops
+                         evidence=f"merge gate x2 {digest}: {r1} | {r2}")  # a bad receipt stops
             merged += 1
             continue
         try:

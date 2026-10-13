@@ -525,3 +525,41 @@ def test_the_build_module_imports_no_engine_constant():
     names = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
              and (n.module or "").startswith("patternbuffer") for a in n.names}
     assert names == {"World"}, names
+
+
+def test_a_malformed_gate_report_ends_in_the_identity_stop_in_a_real_build(chdir_tmp,
+                                                                          monkeypatch):
+    """cr on 4951dc4, end to end: a real same-name pair (the engine's own alias_not_specific
+    residue, holder load-bearing) meets a malformed merge-gate report. Nothing is merged,
+    no stray exception escapes, and the build ends in the identity stop's ViabilityError."""
+    from patternbuffer.porcelain import Porcelain
+
+    from tests.test_identity_adjudication import FRAG as ECHO_ID, KEEP as HOLDER_ID
+    from tests.test_identity_adjudication import _person as _adj_person, gate
+    from tests.test_interview import _InterviewStub
+
+    def _cast(world, provider, arc, *a, **k):
+        # the engine's own alias_not_specific residue (the adjudication tests' witness)
+        world.porcelain.ingest_structured(
+            _adj_person(HOLDER_ID, "Tomas Breck", ["breck"]) + _adj_person(ECHO_ID, aliases=["breck"]),
+            frame="canon", classify="rules")
+        world.porcelain.reconcile()
+        return arc, (), None, {HOLDER_ID}
+    merges: list = []
+    asked: list = []
+    monkeypatch.setattr(game, "_stage_author_cast", _cast)
+    monkeypatch.setattr(game, "_source_context",
+                        lambda world, ids, text: {e: [f"{e} was seen."] for e in ids})
+    monkeypatch.setattr(Porcelain, "merge_gate",
+                        lambda self, pairs, **k: gate("same", "same", calls=asked,
+                                                      pairs=[None])(pairs, **k),
+                        raising=False)
+    real_merge = Porcelain.merge
+    monkeypatch.setattr(Porcelain, "merge",
+                        lambda self, *a, **k: (merges.append(a), real_merge(self, *a, **k))[1])
+    with pytest.raises(game.ViabilityError) as err:
+        game.create_scenario_from_interview("harbor", "a drowned harbor town", _InterviewStub())
+    assert err.value.problems[0] == game.IdentityUnresolvedError.plain
+    assert asked                                     # the gate was reached, then refused
+    assert HOLDER_ID in err.value.problems[1]
+    assert not [m for m in merges if set(m[:2]) == {HOLDER_ID, ECHO_ID}]
