@@ -30,10 +30,10 @@ An entity E is known elsewhere when all of these hold:
 - E is not `person:*`, because people keep their own path.
 - E's display name or any alias from `player_snap` appears in the player's line. The match is case-insensitive and whole-word. Aliases shorter than 3 characters do not count, and deixis does not count (`is_deixis`).
 - **E's known chain** reaches a place. Follow E's player-frame `in` and `part_of` rows (at most 4 hops, no cycles); the chain must end at a `place:*`.
-- **The player's known chain** is the same walk from the protagonist's player-frame `in`, together with the scene's player-frame `part_of` features.
+- **The player's known chain** starts from the current scene. That is the place the briefing already names to the narrator as YOU ARE AT, and the player is always shown where they stand, so it reveals nothing. To it are added the scene's player-frame `part_of` features, plus the walk from the protagonist's player-frame `in` if there is one. Run 7's player frame held no `in` row for the protagonist at turn 1, so a chain built from that row alone would never fire.
 - The two chains share no entity. If E's chain ends anywhere in the player's chain, E is here (on a table in this room, in this room's alcove).
 
-With no player-frame `in` evidence for E, or none for the protagonist, **no line is emitted**. The predicate never reads canon, so it never asserts an absence the player has not learned.
+With no player-frame `in` evidence for E, **no line is emitted**. The predicate never reads canon, so it never asserts an absence the player has not learned.
 
 **The place.** The place in the line is the `place:*` that ends E's known chain, given by display name.
 
@@ -81,7 +81,7 @@ Its diagnostics are an in-memory opening trace on the session, plus logs.
 - no line when the object's known chain ends in the player's chain (on a table here; in this room's feature);
 - no line when the player frame lacks the object;
 - no line when the player frame lacks the object's `in` row;
-- no line when the player frame lacks the protagonist's `in` row;
+- the line still fires when the player frame lacks the protagonist's `in` row (the scene anchors the player's chain);
 - **canon-only placement emits no NAMED BUT NOT HERE block at all**: the object is placed elsewhere in canon and the player frame has no `in` for it;
 - `_here` is not consulted: canon says "not colocated", but the player frame puts it here, and no line is emitted;
 - people excluded;
