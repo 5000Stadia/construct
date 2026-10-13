@@ -52,9 +52,9 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
   - the atrium.
 - **The atrium's** one retry consumes `ViabilityError` like any build failure. The guest is shown the first of `exc.problems` in plain words, never the exception's text.
 
-## Role-noise adjudication (R20 run 8; spec r3, for cr review, not built)
+## Role-noise adjudication (R20 run 8; spec r4, for cr review, not built)
 
-**Status.** r3 is written against pattern-buffer's proposed `porcelain.merge_gate` verb (mae57ff). That verb is gated for Kabe's yes (7:30, 2026-10-13); pattern-buffer estimates a merge by mid-afternoon if he says yes. Construct builds r3 only when the verb has shipped. Until then the build stop stays.
+**Status.** r4 (cr RED on r3: eligibility, no-source, independence) is written against pattern-buffer's proposed `porcelain.merge_gate` verb (mae57ff). That verb is gated for Kabe's yes (7:30, 2026-10-13); pattern-buffer estimates a merge by mid-afternoon if he says yes. Construct builds r3 only when the verb has shipped. Until then the build stop stays.
 
 **History.**
 - r1 (lexical) was RED: "Breck the baker".
@@ -75,26 +75,32 @@ Making the kinds agree does not resolve them. Tested on the real engine: with bo
 
 It runs after `_stage_vouch_merges` and before `_stage_confirm_identity`.
 
-**1. Candidates.** Each live same-name pair from `fidelity_audit()["name_collisions"]` that:
-- has no shared closure;
-- has no `distinct_between`;
-- and has **exactly one** load-bearing id in `closure(a) ∪ closure(b)`. Load-bearing ids are the protagonist plus the required-clue holders.
+**1. Candidates: a hard eligibility rule, checked per exact pair.** A pair from `fidelity_audit()["name_collisions"]` is a candidate only when all of these hold:
+- **Its engine status.** The pair's own entry has `status == "auto_declined"`, and the code is one of these two:
+  - `alias_not_specific`: the shipped vouch's allowlist (`_fidelity_vouched_pairs`), same kind;
+  - `kind_conflict`, and both ids are in the `person:` namespace, and neither folded kind is a non-person type word: place, room, object, item, thing, event, organization, org, group, document, doc, animal, vehicle, ship.
 
-A pair with no load-bearing id is skipped and held apart as today. A pair with more than one is skipped, and the confirm stage's stop fires on it.
+  The `kind_conflict` case is admitted on pattern-buffer's mdf2b11. The engine checks the decline codes in order, so a pair that reaches `kind_conflict` has already passed every fact-level test: no containment, no correlation, no distinct group, no relating edge, no durable contradiction. Here kind_conflict means only that the role words differ ("condemned man" beside "person").
+- **Never eligible.** Every other status and code: `durable_contradiction`, `relating_edge`, `containment`, `typing_slip`, `hard_blocked`, `unlinked`, and any code construct does not know. A model `same` never overrides that evidence.
+- **Not already decided.** There is no shared closure, and `distinct_between(a, b)` is empty.
+- **Exactly one load-bearing id** in `closure(a) ∪ closure(b)`. The load-bearing ids are the protagonist plus the required-clue holders. With none, the pair is held apart as today. With more than one, the confirm stop fires.
+- **Source-backed** (cr r3 P1). The build's source has at least one sentence naming each side; see context below. On the interview path, or where either side has no matching sentence, the pair is **not a candidate**, and today's stop stands.
 
-**2. Context.** The host supplies the source text, which the engine does not hold:
-- for each candidate id, the sentences of the build's source that contain any of its names or aliases (whole word, case-insensitive);
-- in source order, at most 12 per id, each cut to 300 characters;
-- deterministic, so the same build gives the same payload.
+**2. Context.** The host supplies it, because the engine holds no source:
+- for each candidate id, the source sentences that contain any of its names or aliases (whole word, case-insensitive);
+- in source order, at most 12 per id, each cut to 300 characters.
 
-The interview path has no source, so its context is empty: the gate judges on the cards alone.
+**3. Two independent asks, tied to one frozen request.**
+- **The frozen request.** The candidate list (sorted pairs, with stable pair ids) and the context are built **once**, and a digest is taken over their canonical JSON.
+- **Two fresh calls.** `porcelain.merge_gate(pairs=<frozen pairs>, context=<frozen context>, apply=False)` is invoked twice. Each call is a fresh model invocation: construct passes no cache key, and if the verb reports a cache hit or a reused result id, the second answer is rejected. Nothing is written by either call.
+- **Checking each answer against the request.** Each must carry a verdict for exactly the requested pairs: no missing pair, no extra pair, and each pair's ids equal to the request's. Otherwise that whole answer is void, and every pair is left open.
 
-**3. Two independent asks.** `porcelain.merge_gate(pairs=<candidates>, context=<context>, apply=False)` is called **twice**. Nothing is written by either call. A pair's outcome:
-- **Merged.** Both calls say `same`, and neither puts the pair in a `conflicting_component`. The host writes `porcelain.merge(keep, other, evidence="merge gate x2: <reason 1> | <reason 2>", representative=keep)`, where `keep` is the one load-bearing id. The receipt must be `merged` (or `noop` with the two already one closure), or nothing more is written and the stop stays.
-- **Held apart.** Both calls say `different`. The host writes `porcelain.reject(a, b)`. The receipt must be `rejected` or `noop_already_distinct`, and `distinct_between(a, b)` must then be non-empty. Only then does the confirm stage count the pair as decided.
-- **Left open.** Anything else: disagreement, `unsure`, a missing pair, or an error. Nothing is written, and the confirm stage stops the build as today.
+A pair's outcome:
+- **Merged.** Both answers say `same`, and neither puts the pair in a `conflicting_component`. The host writes `porcelain.merge(keep, other, evidence="merge gate x2 <digest>: <reason 1> | <reason 2>", representative=keep)`, where `keep` is the one load-bearing id. The receipt must be `merged`; otherwise the stop stays.
+- **Held apart.** Both answers say `different`. The host writes `porcelain.reject(a, b)`. The receipt must be `rejected` or `noop_already_distinct`, and `distinct_between(a, b)` must then be non-empty. Only then does the confirm stage count the pair as decided.
+- **Left open.** Anything else. Nothing is written, and the confirm stage stops the build as today.
 
-**4. Re-read per decision.** Before each write, the closures are re-read and the exactly-one-load-bearing check is repeated: an earlier merge in the same pass may have changed them.
+**4. Revalidate before each write.** Re-read the closures. The exact requested pair must still be two closures and must still pass every eligibility test in step 1, re-run against the current audit. An earlier merge in the same pass may have changed them. If it fails, the pair is left open.
 
 **Why this meets r2's objections.**
 - A merge needs two independent `same` verdicts from the engine's measured gate, plus a checked receipt.
@@ -108,19 +114,20 @@ The build's stage output reads "identity: adjudicated N pair(s): M merged, K hel
 
 ### Tests (stub `merge_gate`, real engine otherwise)
 
-- **The run 8 pairs** merge on two `same` verdicts, and the representative is the load-bearing id.
-- **Verdicts that leave the pair open:** one `same` and one `unsure`; disagreement; a `conflicting_component`. Each writes nothing, and the build stops.
-- **Held apart.** Two `different` verdicts: a checked reject, `distinct_from` written, and the build does not stop on that pair.
-- **Bad receipts.**
-  - A reject whose receipt is not `rejected` or `noop_already_distinct`: nothing counted, so the build stops.
-  - A merge receipt vetoed: the build stops.
-- **Pairs never adjudicated:**
-  - **Two load-bearing ids** (hero and a clue holder): never adjudicated, and the build stops.
-  - **No load-bearing id:** never adjudicated, and held apart as today.
-- **Context:**
-  - the run 8 payload is deterministic and capped;
-  - it holds only sentences naming the pair;
-  - on the interview path it is empty.
+- **Eligibility.**
+  - `alias_not_specific`, and person-role `kind_conflict`, are candidates.
+  - `durable_contradiction`, `relating_edge`, `containment`, `typing_slip`, `hard_blocked`, `unlinked` and an unknown code are never sent to the gate.
+  - A person-against-place `kind_conflict` is never sent.
+- **No source.** The interview path, or one side with no matching sentence: not a candidate, and the build stops.
+- **Two load-bearing ids, or none.** Not sent; the build stops, or the pair is held apart as today.
+- **The run 8 pairs.** Two `same` answers with a checked receipt merge them, with the load-bearing representative and the digest in the evidence.
+- **Left open:** a `same` with an `unsure`; disagreement; a `conflicting_component`.
+- **Held apart.** Two `different` answers: a checked reject. A bad reject receipt is not counted, and the build stops.
+- **Answer integrity.**
+  - An answer missing a pair, with an extra pair, or with mismatched ids is void for the whole answer.
+  - A reused or cached second result is rejected.
+- **Revalidation.** A pair whose closures changed between the asks and the write, or that no longer passes eligibility, is left open.
+- **Context.** Deterministic and capped, holding only sentences naming the pair.
 - **The verb's absence.** An engine without `merge_gate` skips the stage, and the build stops as today.
 
 ### Cost
