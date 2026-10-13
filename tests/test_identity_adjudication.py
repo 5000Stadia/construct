@@ -235,3 +235,61 @@ def test_a_malformed_report_fails_closed(w, monkeypatch, label, kwargs):
     _adjudicate(w)
     assert game._closure(w, KEEP) == {KEEP} and not game._held_apart(w, KEEP, FRAG)
     _stops(w)
+
+
+# ---- the real engine verb (pattern-buffer R48, MERGE-GATE-VERB-V1) -------------------------
+# Skipped on an engine pinned before R48. Only the MODEL is stubbed: the verb builds the
+# request, validates the model's batch, elects components and writes the report itself.
+
+def _verb_world(tmp_path, verdict):
+    from patternbuffer.porcelain import Porcelain
+    if not hasattr(Porcelain, "merge_gate"):
+        pytest.skip("the pinned engine has no merge_gate verb (before pattern-buffer R48)")
+    from patternbuffer.merge_gate import batch_request
+    asked = []
+
+    def model(prompt, schema):
+        request = batch_request(schema)
+        if request is None:
+            return {"items": []}
+        asked.append(request)
+        return {"verdicts": [{"pair_id": p["pair_id"], "verdict": verdict, "keep": "a",
+                              "reason": f"the source names one clerk ({verdict})"}
+                             for p in request["pairs"]]}
+    w = game._world(tmp_path / "v.world", "v", model=model)
+    w.porcelain.ingest_structured(
+        _person(HERO, "Hero") + _person(KEEP, "Tomas Breck", ["breck"])
+        + _person(FRAG, aliases=["breck"]), frame="canon", classify="rules")
+    w.porcelain.reconcile()
+    return w, asked
+
+
+def test_the_real_verb_two_same_answers_merge(tmp_path):
+    w, asked = _verb_world(tmp_path, "same")
+    try:
+        _adjudicate(w)
+        assert len(asked) == 2                                    # two fresh askings
+        assert asked[0]["pairs"][0]["a"]["context"]               # the source reached the model
+        assert game._closure(w, KEEP) == {KEEP, FRAG}
+        game._stage_confirm_identity(w, _arc(), {KEEP})
+    finally:
+        w.close()
+
+
+def test_the_real_verb_two_different_answers_hold_apart(tmp_path):
+    w, _asked = _verb_world(tmp_path, "different")
+    try:
+        _adjudicate(w)
+        assert game._held_apart(w, KEEP, FRAG) and game._closure(w, KEEP) == {KEEP}
+    finally:
+        w.close()
+
+
+def test_the_real_verb_unsure_leaves_the_stop(tmp_path):
+    w, _asked = _verb_world(tmp_path, "unsure")
+    try:
+        _adjudicate(w)
+        assert game._closure(w, KEEP) == {KEEP}
+        _stops(w)
+    finally:
+        w.close()
