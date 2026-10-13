@@ -28,6 +28,7 @@ The design flaw: **identity is a side effect of fact extraction, decided many ti
 
 The registry lists every entity: its canonical id, its **type**, its canonical name and its name variants.
 
+- **The registry describes the story; it never directs it** (Kabe asked, 2026-10-13: "Does that help things or does that make for a less organic story build"). Authoring stays prose-first. The author writes freely, inventing people as the story needs them, and then lists what it wrote, like closing credits. It need not be exhaustive: a minor character the list misses still arrives through extraction as a new-entity item and is registered by code. Cast-first planning (premise → characters → plot → scenes, as in DeepMind's Dramatron) buys long-form coherence but risks a story that feels assembled. Construct takes its coherence from the hidden arc, authored afterwards over the real cast.
 - **A generated story (the common path): zero extra calls.** `author_story`'s schema gains a `registry` beside `prose`. The author already knows its cast, places and key objects; it just has to say them.
 - **An ingested book (no author):** one deterministic scan finds name candidates: capitalised spans, with titles and honorifics stripped by rule. One batched fast-model call types and groups the candidate list (person, animal, place, object, group).
 
@@ -116,3 +117,4 @@ pattern-buffer's `docs/SPEED-PLAN-2026-10-13.md` (book builds, R27) has the same
 3. Is the fragment rule (exactly one compatible container) safe enough, or does it need the author's registry to list the fragments explicitly?
 4. Is the book-ingest path's scan plus one batched typing call enough, or does a long book need the scan per chapter?
 5. How much of today's repair machinery can be retired, and how much stays as a safety net?
+6. Craft: does asking the author to list what it wrote (after the prose, in the same call) change the prose at all? Compare a few stories with and without the registry field.
