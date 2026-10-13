@@ -171,3 +171,15 @@ pattern-buffer's `docs/SPEED-PLAN-2026-10-13.md` (book builds, R27) has the same
 4. Is the book-ingest path's scan plus one batched typing call enough, or does a long book need the scan per chapter?
 5. How much of today's repair machinery can be retired, and how much stays as a safety net?
 6. Craft: does asking the author to list what it wrote (after the prose, in the same call) change the prose at all? Compare a few stories with and without the registry field.
+
+## Fresh views (consult cb0483e, 2026-10-13; gate g2fd391 for Kabe)
+
+Two consultants from different model families (claude-opus-5-5 and gpt-5.6-terra, both at max effort) read a sourced digest with this plan left out. Both endorse a registry-first, identity-before-facts build with code resolving mentions. Their points that would change the approach went to Kabe as one gate (g2fd391):
+
+1. **The author's manifest is the sole authority** (both consultants). Category passes only check or extend it, for imported prose.
+2. **Hidden identities are written at build** as two entries plus a dated `correlate` (the engine's existing `aka` verb, which never collapses ids and shows only from its valid time), with `distinct_from` for namesakes the author lists (both).
+3. **Ambiguity is append-safe:** facts on mention nodes, plus a later `denotes(mention, entity)` edge on evidence; nothing is ever rewritten (consultant 2).
+4. **Ids carry no ontology:** neutral entity ids, with the type as a fact. This replaces "person: read as being" (consultant 2).
+5. **Acceptance on planted-trap stories:** Rex the man and Rex the dog, two Brecks, a late reveal (consultant 1).
+
+Also from consultant 1, matching eval/13: with both tiers on gpt-5.5, the only fast lever is lower reasoning effort, and batching saves cost, not wall time, when calls already run in parallel. An extractor that no longer decides identity is the one most likely to stay accurate at low effort.
