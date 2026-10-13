@@ -29,7 +29,7 @@ from construct.provider import Provider
 from construct.scenario_meta import (
     InputAuthority, PlaythroughState, ScenarioMeta, ScenarioMode,
 )
-from construct.adapter import PorcelainWorldReads, state_value
+from construct.adapter import PorcelainWorldReads, state_value, state_values
 from construct.text import (
     human_name, humanize_id, humanize_id_last, humanize_typed_id, id_local,
 )
@@ -1284,7 +1284,10 @@ class Session:
             if e.startswith("person:"):
                 cond = " ".join(filter(None, (
                     state_value(p, e, "state", as_of=_h), state_value(p, e, "condition", as_of=_h),
-                    state_value(p, e, "status", as_of=_h), kind))).lower()
+                    state_value(p, e, "status", as_of=_h), kind,
+                    # PERSON-ROLES-V1: a person's kind is "person"; "corpse" now arrives
+                    # as a role, and an older role can still hold beside the newest
+                    *map(str, state_values(p, e, "role", as_of=_h))))).lower()
                 if any(w in cond for w in ("dead", "slain", "corpse", "killed",
                                            "lifeless", "murdered", "body")):
                     items.append(f"the body of {name}")

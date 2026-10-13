@@ -109,13 +109,23 @@ def frame_knowledge(world: Any, frame: str, *, as_of: float | None = None) -> li
             latest = dict(tied[-1], entity=ent)
             facts = [f for f in facts
                      if not (f["entity"] == ent and f["attribute"] == attr)] + [latest]
+    # A served fact names the id its row was written on. For a merged identity, the members
+    # of a set-valued key (a person's `role`, PERSON-ROLES-V1) can come from several of its
+    # ids; each is labelled with the roster id it folds into, so one person reads as one.
+    rep: dict[str, str] = {}
+    for e in ents:
+        try:
+            for m in p.closure(e):
+                rep.setdefault(m, e)
+        except Exception:  # noqa: BLE001 — an unknown id keeps its own label
+            pass
     # The fold serves rows attribute-sorted; restore LOG order (assertion id) so tie-breaks
     # downstream (a notebook's per-entity cap on equal valid_from) keep the order they had.
     out = []
     for f in sorted(facts, key=_log_number):
         valid = f.get("valid") or [None, None]
         out.append(SimpleNamespace(
-            entity=f["entity"], attribute=f["attribute"], value=f["value"],
+            entity=rep.get(f["entity"], f["entity"]), attribute=f["attribute"], value=f["value"],
             valid_from=valid[0], valid_to=valid[1],
             id=(f.get("provenance") or {}).get("assertion_id")))
     return out

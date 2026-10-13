@@ -64,6 +64,27 @@ def state_value(porcelain: Any, entity: str, attribute: str,
     return hostcontrol.collapse_state(st, entity, attribute)
 
 
+def state_values(porcelain: Any, entity: str, attribute: str,
+                 *, as_of: float | None = None) -> list:
+    """Every member in force for a set-valued key (a person's `role`, PERSON-ROLES-V1),
+    or [] when none is. `state_value` serves only the fold's winner (the most recent
+    member by valid time), which can hide an older member that still holds; this reads
+    the engine's `values`. A key that is not set-valued falls back to its one value."""
+    try:
+        if as_of is None:
+            st = porcelain.state(entity, attribute)
+        else:
+            st = porcelain.state(entity, attribute, as_of=as_of)
+    except Exception:  # noqa: BLE001 — a frontier/unknown entity reads as absent
+        return []
+    if not isinstance(st, dict) or st.get("status") not in ("known", "conflicted"):
+        return []
+    if st.get("values"):
+        return [f.get("value") for f in st["values"] if f.get("value") is not None]
+    one = hostcontrol.collapse_state(st, entity, attribute)
+    return [] if one is None else [one]
+
+
 class PorcelainWorldReads:
     """WorldReads over a pattern-buffer World's porcelain."""
 

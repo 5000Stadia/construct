@@ -6,7 +6,9 @@
    place:harth). A same-namespace pair whose kinds differ could be role noise or two
    people sharing a name, and nothing tells them apart (cr RED on 381b3de), so the
    identity confirm never merges one: touching a load-bearing id it stops the build,
-   otherwise it is held apart as before.
+   otherwise it is held apart as before. Since pattern-buffer R49 (PERSON-ROLES-V1) the
+   role words are a person's `role`, not their kind, so such a pair is same-kind and
+   meets the engine's name gate instead (section 1b).
 2. An `attr:*` declaration item in a turn's batch, after the attribute holds data, made
    the engine refuse the whole batch. The turn's ingest wrapper drops such items."""
 
@@ -121,7 +123,10 @@ def test_wrapper_filters_items_passed_by_keyword(keeps_world):
     assert len(turnloop._receipt_rows(receipt)) == 1
 
 
-# ---- 1b. same name, one namespace, different kinds: through reconcile AND confirm, real engine
+# ---- 1b. same name, one namespace: through reconcile AND confirm, real engine.
+# Since pattern-buffer R49 (PERSON-ROLES-V1) a person's kind is always "person" and the
+# role words ("laundress", "condemned man") are a dated `role`, so these pairs are no longer
+# kind_conflict: they reach the engine's name gate like any same-kind pair.
 
 def _named_world(tmp_path, people):
     w = game._world(tmp_path / "n.world", "n", model=None)
@@ -146,30 +151,39 @@ def _arc(protagonist):
     return SimpleNamespace(arc_id="arc:main", protagonist=protagonist)
 
 
-def test_two_people_sharing_a_name_stay_distinct(tmp_path):
+def _decline(w, a, b):
+    for group in w.porcelain.fidelity_audit().get("name_collisions") or []:
+        for pair in group.get("pairs") or []:
+            if {pair["a"], pair["b"]} == {a, b}:
+                return pair.get("reason")
+    return None
+
+
+def test_two_people_sharing_a_name_stay_apart(tmp_path):
     w = _named_world(tmp_path, _LYSAS)
-    assert not w.porcelain.distinct_between("person:lysa", "person:lysa_fen")  # live after stage 2
+    assert w.porcelain.state("person:lysa", "kind")["fact"]["value"] == "person"
+    assert _decline(w, "person:lysa", "person:lysa_fen") == "alias_not_specific"
     game._stage_confirm_identity(w, _arc("person:hero"), set())               # not load-bearing
-    assert w.porcelain.distinct_between("person:lysa", "person:lysa_fen")
     assert set(w.porcelain.closure("person:lysa")) == {"person:lysa"}
+    assert set(w.porcelain.closure("person:lysa_fen")) == {"person:lysa_fen"}
 
 
 def test_a_load_bearing_same_name_pair_stops_the_build_and_is_never_merged(tmp_path):
     w = _named_world(tmp_path, _LYSAS)
-    with pytest.raises(IdentityUnresolvedError, match="kinds differ"):
+    with pytest.raises(IdentityUnresolvedError, match="same name 'lysa'"):
         game._stage_confirm_identity(w, _arc("person:lysa_fen"), set())
     assert set(w.porcelain.closure("person:lysa_fen")) == {"person:lysa_fen"}
 
 
-def test_run7_hero_fragment_stops_instead_of_splitting(tmp_path):
+def test_run7_hero_fragment_is_one_person_once_roles_leave_kind(tmp_path):
+    # Before R49 this pair was kind_conflict, and the build stopped rather than split the
+    # hero. Now "condemned man" is the hero's role, both ids are kind person, and the
+    # engine's own gate merges them on the distinctive shared name "venn".
     w = _named_world(tmp_path, _ELIAS)
-    with pytest.raises(IdentityUnresolvedError) as err:
-        game._stage_confirm_identity(w, _arc("person:elias_venn"), set())
-    assert {frozenset(p[:2]) for p in err.value.pairs} == {
-        frozenset(("person:elias", "person:elias_venn"))}
-    # neither held apart (the run 7 split) nor merged on no evidence
+    game._stage_confirm_identity(w, _arc("person:elias_venn"), set())
+    assert set(w.porcelain.closure("person:elias_venn")) == {"person:elias", "person:elias_venn"}
     assert not w.porcelain.distinct_between("person:elias", "person:elias_venn")
-    assert set(w.porcelain.closure("person:elias_venn")) == {"person:elias_venn"}
+    assert w.porcelain.state("person:elias_venn", "role")["fact"]["value"] == "condemned man"
 
 
 def test_a_required_holder_counts_as_load_bearing(tmp_path):

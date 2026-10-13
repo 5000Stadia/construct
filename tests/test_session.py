@@ -1079,9 +1079,12 @@ def test_build_sheet_folds_identity_and_keeps_set_members(scenario):
     s = _knows_recipe_session(scenario)
     sheet = build_sheet(s._world, PLAYER, s._arc).splitlines()
     s.close()
-    roles = [ln for ln in sheet if " · role · " in ln]
-    # CORRECTION (same_as identity): the merged clerk is ONE entity with ONE standing role
-    assert len(roles) == 1 and roles[0].endswith(" · role · the head clerk"), roles
+    roles = [ln.split(" · ") for ln in sheet if " · role · " in ln]
+    # CORRECTION (same_as identity): the merged clerk is ONE entity. `role` is set-valued
+    # and dated (PERSON-ROLES-V1): neither role was ended, so both are in force, each
+    # labelled with the one id the merge folds into.
+    assert len({e for e, _, _ in roles}) == 1, roles
+    assert {v for _, _, v in roles} == {"the clerk", "the head clerk"}, roles
     # CORRECTION (set members): both allies stand, not just the last-written one
     assert {ln for ln in sheet if " · allied_with · " in ln} == {
         f"{PLAYER} · allied_with · Reed", f"{PLAYER} · allied_with · Bell"}
