@@ -22,9 +22,9 @@ Two construct gaps let this happen. Both had to be open for it to happen.
 
 ## Part A: the "not here" line (gap 2)
 
-**Where it is computed.** In `run_turn`, beside the scene-line loop that builds `_here`. It reads only `player_snap`, the player-frame snapshot already read for the briefing. There are no new engine reads.
+**Where it is computed.** In `run_turn`, beside the scene-line loop that builds `_here`. An emission rests only on `player_snap`, the player-frame snapshot already read for the briefing. The scene's ancestor chain, used only to suppress, comes from the containment read the turn already makes for the scene (no new engine read, if one exists there; otherwise one bounded `part_of` walk).
 
-**What fires it: `known_elsewhere`, from the player frame alone.** The existing `_here` set is NOT used to decide absence: it calls `_present()`, which consults canon (`canon_table` / `p.locate()`). A "not here" decided by `_here` would leak a negative whereabouts fact (cr r1 P1). The predicate reads only `player_snap`.
+**What fires it: `known_elsewhere`, from the player frame alone.** The existing `_here` set is NOT used to decide absence: it calls `_present()`, which consults canon (`canon_table` / `p.locate()`). A "not here" decided by `_here` would leak a negative whereabouts fact (cr r1 P1).
 
 An entity E is known elsewhere when all of these hold:
 - E is not `person:*`, because people keep their own path.
@@ -37,7 +37,7 @@ An entity E is known elsewhere when all of these hold:
 
 **Canon may only suppress.** Emitting a line rests on the player frame alone: E's path and its nearest place. Canon may only *suppress* a line. The scene's features (`scene_features`) and the scene's ancestor chain are read as `_here` reads them today, and they are used only to find known-here or underdetermined cases. A suppression asserts nothing to the narrator, so it leaks nothing.
 
-With no player-frame `in` evidence for E, **no line is emitted**. The predicate never reads canon, so it never asserts an absence the player has not learned.
+With no player-frame `in` evidence for E, **no line is emitted**. Nothing canon alone holds can produce a line, so the line never asserts an absence the player has not learned.
 
 **The place.** The place in the line is E's nearest place on its known path, the warrant room in run 7, given by display name.
 
@@ -47,7 +47,7 @@ With no player-frame `in` evidence for E, **no line is emitted**. The predicate 
 
 The block goes beside CALLED FOR SOMEONE NOT HERE in `build_briefing`, through a new `BriefingInputs` field.
 
-**Telemetry.** `TurnTrace.named_elsewhere: list[str]`, holding `"<entity> · <place or ->"`, and a line in the mechanics log. The turntrace golden is regenerated; its only diff is the new key.
+**Telemetry.** `TurnTrace.named_elsewhere: list[str]`, holding `"<entity> · <nearest place>"`, and a line in the mechanics log. The turntrace golden is regenerated; its only diff is the new key.
 
 **A fetch, if the prose has one.** It is recorded the way run 7 recorded the sack (post_extract `in` row, then promote). That path is unchanged.
 
