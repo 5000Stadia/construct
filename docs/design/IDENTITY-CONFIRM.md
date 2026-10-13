@@ -52,74 +52,82 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
   - the atrium.
 - **The atrium's** one retry consumes `ViabilityError` like any build failure. The guest is shown the first of `exc.problems` in plain words, never the exception's text.
 
-## Role-noise adjudication (R20 run 8; spec r2, for cr review, not built)
+## Role-noise adjudication (R20 run 8; spec r3, for cr review, not built)
 
-r1 merged on lexical evidence and was RED (cr, <3da26109>).
-- **Lexical evidence is not enough.** In "Tomas Breck entered the yard. Breck the baker shut his stall.", a scan of full-name runs cannot show that every bare "Breck" is Tomas. So a lexical rule can merge two real people.
-- **The title rule was undefined.**
+**Status.** r3 is written against pattern-buffer's proposed `porcelain.merge_gate` verb (mae57ff). That verb is gated for Kabe's yes (7:30, 2026-10-13); pattern-buffer estimates a merge by mid-afternoon if he says yes. Construct builds r3 only when the verb has shipped. Until then the build stop stays.
 
-r2 replaces the lexical rule with the resolver decision cr named, which is also what the engine itself asks for. Its decline evidence reads "gate declined (adjudicate)".
+**History.**
+- r1 (lexical) was RED: "Breck the baker".
+- r2 (one quoted model verdict) was RED on three points:
+  - it could join two load-bearing closures;
+  - a single verdict is a proposal, not a confirmation;
+  - a `different` must be written only on a checked receipt.
+
+r3 takes all three and uses the engine's adjudicator instead of a construct one. The engine's gate is MERGE-GATE-V1 (0 wrong merges in 39 known-different pairs, measured 2026-10-13 under Kabe's yes, gf981cd).
 
 ### The failure
 
-Run 8's build stopped, by design, on four load-bearing same-name pairs in the `person:` namespace, each auto-declined `kind_conflict`:
-- `elias` ~ `elias_venn`;
-- `breck` ~ `tomas_breck`;
-- `father_oren_vale` ~ `father_vale`;
-- `nessa` ~ `nessa_reed`.
+Run 8's build stopped, by design, on four load-bearing same-name `person:` pairs, each auto-declined: `elias`/`elias_venn`, `breck`/`tomas_breck`, `father_oren_vale`/`father_vale`, `nessa`/`nessa_reed`. Each is one person in the build's own source.
 
-Each is one person in the build's own source. The kinds differ only by extraction's role words.
+Making the kinds agree does not resolve them. Tested on the real engine: with both kinds `person`, the engine declines Breck/Tomas Breck and Lysa/Lysa Fen alike, as `alias_not_specific`, "gate declined (adjudicate)".
 
-### What does not fix it
+### The stage: `_stage_adjudicate_identity`
 
-**Making the kinds agree** (pattern-buffer's root-cause point) does not merge them. Tested on the real engine (2026-10-13, scratchpad `kindexp`): with both kinds `person`, the engine declines Breck/Tomas Breck **and** Lysa/Lysa Fen alike, as `alias_not_specific`, "gate declined (adjudicate)". The engine has no evidence to tell them apart either.
+It runs after `_stage_vouch_merges` and before `_stage_confirm_identity`.
 
-### The adjudication
+**1. Candidates.** Each live same-name pair from `fidelity_audit()["name_collisions"]` that:
+- has no shared closure;
+- has no `distinct_between`;
+- and has **exactly one** load-bearing id in `closure(a) ∪ closure(b)`. Load-bearing ids are the protagonist plus the required-clue holders.
 
-`_stage_adjudicate_identity`, run just before the confirm stops. It applies to each live same-name pair that touches a load-bearing closure and that the engine left undecided: no shared closure, no `distinct_from`, and an auto-decline code of `kind_conflict` or `alias_not_specific`.
+A pair with no load-bearing id is skipped and held apart as today. A pair with more than one is skipped, and the confirm stage's stop fires on it.
 
-**Evidence.** The resolver gets two kinds:
-- **Each entity's folded canon facts.** These are kind, role, aliases, places and relations: the closure's rows, capped.
-- **The source passages that mention each name** (ingest path). Every sentence of the build's source containing either entity's name or alias, each tagged with which names it contains. The interview path has no source; its resolver gets facts only.
+**2. Context.** The host supplies the source text, which the engine does not hold:
+- for each candidate id, the sentences of the build's source that contain any of its names or aliases (whole word, case-insensitive);
+- in source order, at most 12 per id, each cut to 300 characters;
+- deterministic, so the same build gives the same payload.
 
-**The question.** One cheap-tier model call per pair: "Are A and B the same person?" The schema allows exactly one of:
-- `same`, with `quote`: the source sentence or fact that ties them, verbatim;
-- `different`, with `quote`: the sentence or fact that separates them;
-- `unsure`.
+The interview path has no source, so its context is empty: the gate judges on the cards alone.
 
-**Acting on the verdict:**
-- **`same`.** Allowed only if the quote is found verbatim in the evidence given; otherwise the verdict counts as `unsure`. The pair is merged with `porcelain.merge(a, b, evidence)`, and the representative is the load-bearing id (the hero keeps `person:elias_venn`). The evidence string is `adjudicated same person: "<quote>"`.
-- **`different`.** Allowed only with a verbatim quote, else `unsure`. The pair is held apart with `porcelain.reject(a, b)`. A pair held apart by a decision is decided, so the confirm stage does not stop on it.
-- **`unsure`, or a failed call.** Nothing is written, and the confirm stage stops the build as today.
+**3. Two independent asks.** `porcelain.merge_gate(pairs=<candidates>, context=<context>, apply=False)` is called **twice**. Nothing is written by either call. A pair's outcome:
+- **Merged.** Both calls say `same`, and neither puts the pair in a `conflicting_component`. The host writes `porcelain.merge(keep, other, evidence="merge gate x2: <reason 1> | <reason 2>", representative=keep)`, where `keep` is the one load-bearing id. The receipt must be `merged` (or `noop` with the two already one closure), or nothing more is written and the stop stays.
+- **Held apart.** Both calls say `different`. The host writes `porcelain.reject(a, b)`. The receipt must be `rejected` or `noop_already_distinct`, and `distinct_between(a, b)` must then be non-empty. Only then does the confirm stage count the pair as decided.
+- **Left open.** Anything else: disagreement, `unsure`, a missing pair, or an error. Nothing is written, and the confirm stage stops the build as today.
 
-**Scope:**
-- Only load-bearing pairs are adjudicated. Non-load-bearing pairs stay held apart as today.
-- Cast-move, vouch and confirm logic is otherwise unchanged.
+**4. Re-read per decision.** Before each write, the closures are re-read and the exactly-one-load-bearing check is repeated: an earlier merge in the same pass may have changed them.
 
-### Why this answers r1's objection
-
-The resolver reads the very sentence cr's counterexample turns on ("Breck the baker shut his stall"). A `same` verdict must quote its tie, and an unquoted or unsure answer stops the build, so the worst case is today's behaviour.
+**Why this meets r2's objections.**
+- A merge needs two independent `same` verdicts from the engine's measured gate, plus a checked receipt.
+- Two load-bearing closures are never joined.
+- `different` is written only when both calls say so and the receipt checks out.
+- The worst case is today's stop.
 
 ### Telemetry
 
-Each verdict logs at INFO with its quote. The build's stage output lists "identity: adjudicated N pair(s): M same, K different, U unsure".
+The build's stage output reads "identity: adjudicated N pair(s): M merged, K held apart, U left open". Each decision logs at INFO with both reasons.
 
-### Tests (stub provider, real engine)
+### Tests (stub `merge_gate`, real engine otherwise)
 
-- the four run 8 pairs merge on `same` with a verbatim quote;
-- `same` with a quote not in the evidence counts as unsure and stops;
-- `different` holds apart (`distinct_from`), and the build does not stop on that pair;
-- `unsure`, and a raised call, both stop;
-- the Breck-the-baker source gives `different` (scripted), and it is respected;
-- non-load-bearing pairs are never adjudicated;
-- the representative is the load-bearing id;
-- the evidence passages hold only sentences naming either entity.
+- **The run 8 pairs** merge on two `same` verdicts, and the representative is the load-bearing id.
+- **Verdicts that leave the pair open:** one `same` and one `unsure`; disagreement; a `conflicting_component`. Each writes nothing, and the build stops.
+- **Held apart.** Two `different` verdicts: a checked reject, `distinct_from` written, and the build does not stop on that pair.
+- **Bad receipts.**
+  - A reject whose receipt is not `rejected` or `noop_already_distinct`: nothing counted, so the build stops.
+  - A merge receipt vetoed: the build stops.
+- **Pairs never adjudicated:**
+  - **Two load-bearing ids** (hero and a clue holder): never adjudicated, and the build stops.
+  - **No load-bearing id:** never adjudicated, and held apart as today.
+- **Context:**
+  - the run 8 payload is deterministic and capped;
+  - it holds only sentences naming the pair;
+  - on the interview path it is empty.
+- **The verb's absence.** An engine without `merge_gate` skips the stage, and the build stops as today.
 
 ### Cost
 
-One cheap-tier call per undecided load-bearing pair, usually 0–4 per build. Run 8 would have made four.
+Two gate calls per build at most; candidates are batched, 25 to a call. Run 8 had four pairs, so one batch per call. They run on the world's injected model, which is the Codex subscription for construct's runs.
 
-### Not in scope (a separate item)
+## Not in scope (a separate item)
 
 pattern-buffer's root-cause point: `kind` should be a closed type set, with the role in its own attribute. It is still worth doing for its own sake, but the test above shows it does not by itself resolve these pairs.
 
