@@ -54,7 +54,7 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
 
 ## Role-noise adjudication (R20 run 8; spec r4, for cr review, not built)
 
-**Status.** r4 (cr RED on r3: eligibility, no-source, independence) is written against pattern-buffer's proposed `porcelain.merge_gate` verb (mae57ff). That verb is gated for Kabe's yes (7:30, 2026-10-13); pattern-buffer estimates a merge by mid-afternoon if he says yes. Construct builds r3 only when the verb has shipped. Until then the build stop stays.
+**Status.** r4 (cr RED on r3: eligibility, no-source, independence) is written against pattern-buffer's `porcelain.merge_gate(pairs, context=)` verb (R48, mae57ff; contract r1.1 mfee55c: report-only, never caches). The verb was approved by the monitor (g9e7f39) and is in pbr's review. Construct builds this stage only when the verb has shipped. Until then the build stop stays.
 
 **History.**
 - r1 (lexical) was RED: "Breck the baker".
@@ -88,12 +88,12 @@ It runs after `_stage_vouch_merges` and before `_stage_confirm_identity`.
 
 **2. Context.** The host supplies it, because the engine holds no source:
 - for each candidate id, the source sentences that contain any of its names or aliases (whole word, case-insensitive);
-- in source order, at most 12 per id, each cut to 300 characters.
+- in source order, at most 2 per id (the most the engine keeps per side, pattern-buffer mfee55c), each cut to 300 characters. The frozen request is exactly what the engine sees.
 
 **3. Two independent asks, tied to one frozen request.**
 - **The frozen request.** The candidate list (sorted pairs, with stable pair ids) and the context are built **once**, and a digest is taken over their canonical JSON.
-- **Two fresh calls.** `porcelain.merge_gate(pairs=<frozen pairs>, context=<frozen context>, apply=False)` is invoked twice. Each call is a fresh model invocation: construct passes no cache key, and if the verb reports a cache hit or a reused result id, the second answer is rejected. Nothing is written by either call.
-- **Checking each answer against the request.** Each must carry a verdict for exactly the requested pairs: no missing pair, no extra pair, and each pair's ids equal to the request's. Otherwise that whole answer is void, and every pair is left open.
+- **Two fresh calls.** `porcelain.merge_gate(<frozen pairs>, context=<frozen context>)` is invoked twice. The verb only reports and writes nothing; its contract says it never caches (pattern-buffer mfee55c). Each report must carry `cached: false` and its own fresh `call_id`. A report with `cached` true, or a second `call_id` equal to the first, is rejected. Construct's injected model (`engine_tier_dispatch(provider)`) must not memoize either, and a test pins that.
+- **Checking each answer against the request.** Each report's `requested` must equal the frozen pairs exactly, and the `requested_as` indexes over its entries must cover every index exactly once. Otherwise that whole answer is void, and every pair is left open.
 
 A pair's outcome:
 - **Merged.** Both answers say `same`, and neither puts the pair in a `conflicting_component`. The host writes `porcelain.merge(keep, other, evidence="merge gate x2 <digest>: <reason 1> | <reason 2>", representative=keep)`, where `keep` is the one load-bearing id. The receipt must be `merged`; otherwise the stop stays.
