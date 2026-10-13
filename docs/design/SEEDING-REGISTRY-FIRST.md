@@ -1,6 +1,6 @@
 # Seeding, registry first: identity decided once, by code
 
-**Status:** construct's proposal, r1.1, 2026-10-13 (adds pattern-buffer's speed-plan overlap). Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
+**Status:** r2, 2026-10-13, agreed in shape with pattern-buffer (m52998c). It still goes to two fresh views before any build. r2 changes are marked *(r2)*. Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
 
 ## Kabe's direction (2026-10-13)
 
@@ -10,6 +10,35 @@
 - "everything I'm discussing is when construct establishes a fresh story ingested into pattern buffer that length of duration for preparation before the world is available to the user"
 
 **The target:** the build, from a fresh story to a world the player can enter. About 15 to 20 minutes in R20 run 9.
+
+## r2: what changed after pattern-buffer's read (m52998c)
+
+1. **One implementation, in a shared library.** pattern-buffer's book pipeline (`evals/harness/pipeline.py`, `registry.py`, INGEST-V2) is already registry-first:
+   - pass 0 builds a `WorldRegistry` and seeds kind, name and alias rows before any fact;
+   - pass 1 extracts per chunk in parallel against a registry slice, through a strict line grammar;
+   - an unknown id comes back as an "escape" (this design's new-entity item).
+   It is promoted from the eval harness to a library that both pattern-buffer and construct use. Construct's per-chunk `extract()` never used it. The library closes its two gaps: the model writes the ids today, and aliases carry no first-known chapter.
+2. **Name resolution runs in that pre-pass, not at the engine's ingest gate.** If the gate rewrote entity ids by a fragment rule, identity would be decided silently at write time. In an append-only log, a wrong binding writes facts onto the wrong person, recoverable only by retract-and-retype. Other writers (the recorder, author sessions) write canonical ids that must never be rewritten. The engine keeps identity as explicit verbs with evidence and receipts (merge, `same_as`, `distinct_from`). It supplies registry seeding as ordinary rows (exists), `refer()` tier 1 for surface-form lookup (exists), R51's closed type set, and reads.
+3. **The registry entry is the identity; (type, normalized name) is only a blocking key.** GraphRAG's merge rule fuses namesakes; pattern-buffer's held-out novella has 29 look-alike pairs. Two Johns the author lists are two ids even with the same type and name, and the name index marks "john" ambiguous, so it goes to the queue. The (type, name) key still separates the man and the dog called Rex at once: Kabe's test.
+4. **The fragment rule is time-gated.** It counts only names known by that chunk's chapter, or "the duke" resolves early and leaks a reveal (GRADE-LEAKS-V1 charges exactly that).
+5. **The category passes are adopted for both projects,** replacing pattern-buffer's single whole-book cast call. Pass 0 never joins two names into one being. Hidden identities are interpretation (pass 2, top model), written as dated joins with their reveal chapter, so the registry is leak-safe by construction: pass 0 can't know the twist, because it isn't asked.
+6. **Fast-tier routing needs no engine change.** The engine's injected model receives the schema, and WorldService's `model_route` routes by schema, so a host can send classification batches to the fast tier today.
+
+**The split *(r2)*:**
+- **pattern-buffer:** promote INGEST-V2 to a library, containing:
+  - the registry, with code-minted ids keyed by registry entry and a first-known chapter per alias;
+  - fragment resolution, with the time gate and the ambiguity queue;
+  - the category passes;
+  - new-entity escapes;
+  - R51's closed types;
+  - a surface-form-to-id read, if `refer()` isn't enough.
+- **construct:**
+  - `author_story` returns its after-the-fact registry;
+  - categorization calls merged and routed to the fast tier;
+  - the cast author sees the registry;
+  - the build calls the library in place of per-chunk `extract()`.
+
+Sections 2 to 4 below are r1's design, kept for the record. Where they say "at the gate" or "the identity key is (type, normalized name)", r2 above supersedes them.
 
 ## How the build decides identity today
 
@@ -132,9 +161,9 @@ pattern-buffer's `docs/SPEED-PLAN-2026-10-13.md` (book builds, R27) has the same
 
 ## Open questions for the fresh views
 
-1. Where should the name index live: in the engine's gate (identity is the engine's), or as a construct pre-pass? The proposal says engine.
+1. Where should the name index live: in the engine's gate, or in a pre-pass library? *(r2: pre-pass library; put both to the fresh views.)*
 2. What is the closed type set, and how does it meet R51 (being → type → role)?
-3. Is the fragment rule (exactly one compatible container) safe enough, or does it need the author's registry to list the fragments explicitly?
+3. Is the fragment rule (exactly one compatible container, among names known by that chapter) safe enough, or does it need the author's registry to list the fragments explicitly? *(r2: also, (type, name) as the identity against registry-entry identity: put both to the fresh views.)*
 4. Is the book-ingest path's scan plus one batched typing call enough, or does a long book need the scan per chapter?
 5. How much of today's repair machinery can be retired, and how much stays as a safety net?
 6. Craft: does asking the author to list what it wrote (after the prose, in the same call) change the prose at all? Compare a few stories with and without the registry field.
