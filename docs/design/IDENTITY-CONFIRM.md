@@ -52,9 +52,9 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
   - the atrium.
 - **The atrium's** one retry consumes `ViabilityError` like any build failure. The guest is shown the first of `exc.problems` in plain words, never the exception's text.
 
-## Role-noise adjudication (R20 run 8; spec r4, for cr review, not built)
+## Role-noise adjudication (R20 run 8; spec r5, for cr review, not built)
 
-**Status.** r4 (cr RED on r3: eligibility, no-source, independence) is written against pattern-buffer's `porcelain.merge_gate(pairs, context=)` verb (R48, mae57ff; contract r1.1 mfee55c: report-only, never caches). The verb was approved by the monitor (g9e7f39) and is in pbr's review. Construct builds this stage only when the verb has shipped. Until then the build stop stays.
+**Status.** r5 (cr RED on r4: kind_conflict admission, audit field names, the API) is written against pattern-buffer's `porcelain.merge_gate(pairs, *, context=None, batch_size=25)` verb, MERGE-GATE-VERB-V1 r1.1 at pattern-buffer `36bd8b6` (`feat/merge-gate-verb`). Construct pins the engine to the merged revision when it lands. The verb is (R48, mae57ff; contract r1.1 mfee55c: report-only, never caches). The verb was approved by the monitor (g9e7f39) and is in pbr's review. Construct builds this stage only when the verb has shipped. Until then the build stop stays.
 
 **History.**
 - r1 (lexical) was RED: "Breck the baker".
@@ -65,30 +65,39 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
 
 r3 takes all three and uses the engine's adjudicator instead of a construct one. The engine's gate is MERGE-GATE-V1 (0 wrong merges in 39 known-different pairs, measured 2026-10-13 under Kabe's yes, gf981cd).
 
-### The failure
+### The failure, and what r5 does and does not fix
 
 Run 8's build stopped, by design, on four load-bearing same-name `person:` pairs, each auto-declined: `elias`/`elias_venn`, `breck`/`tomas_breck`, `father_oren_vale`/`father_vale`, `nessa`/`nessa_reed`. Each is one person in the build's own source.
 
 Making the kinds agree does not resolve them. Tested on the real engine: with both kinds `person`, the engine declines Breck/Tomas Breck and Lysa/Lysa Fen alike, as `alias_not_specific`, "gate declined (adjudicate)".
 
+**r5 does not fix run 8's four pairs by itself.** They are `kind_conflict`. They become eligible only once extraction keeps `kind` to a closed type set with the role in its own attribute: pattern-buffer's root-cause point, and its planned type/role split. They would then fold same-kind and arrive as `alias_not_specific`, as the test above shows. So R20's next run depends on both:
+- the `merge_gate` verb;
+- that split.
+
+Until both land, a world like run 8's still stops at build, by design.
+
 ### The stage: `_stage_adjudicate_identity`
 
 It runs after `_stage_vouch_merges` and before `_stage_confirm_identity`.
 
-**1. Candidates: a hard eligibility rule, checked per exact pair.** A pair from `fidelity_audit()["name_collisions"]` is a candidate only when all of these hold:
-- **Its engine status.** The pair's own entry has `status == "auto_declined"`, and the code is one of these two:
-  - `alias_not_specific`: the shipped vouch's allowlist (`_fidelity_vouched_pairs`), same kind;
-  - `kind_conflict`, and both ids are in the `person:` namespace, and neither folded kind is a non-person type word: place, room, object, item, thing, event, organization, org, group, document, doc, animal, vehicle, ship.
+**1. Candidates: a hard eligibility rule, checked per exact pair.** The audit is read field by field. A group in `fidelity_audit()["name_collisions"]` has:
+- `entities`, and `kinds` parallel to them;
+- `pairs[]`, each `{a, b, status, reason?}`.
 
-  The `kind_conflict` case is admitted on pattern-buffer's mdf2b11. The engine checks the decline codes in order, so a pair that reaches `kind_conflict` has already passed every fact-level test: no containment, no correlation, no distinct group, no relating edge, no durable contradiction. Here kind_conflict means only that the role words differ ("condemned man" beside "person").
-- **Never eligible.** Every other status and code: `durable_contradiction`, `relating_edge`, `containment`, `typing_slip`, `hard_blocked`, `unlinked`, and any code construct does not know. A model `same` never overrides that evidence.
+A pair is a candidate only when all of these hold:
+- **Its engine verdict.** The pair's own `status == "auto_declined"` and its `reason == "alias_not_specific"`. That is the shipped vouch's allowlist (`_fidelity_vouched_pairs`), where the folded kinds of a and b (read from the group's parallel `kinds`) are equal.
+- **Never eligible:**
+  - any other status: `unlinked`, `typing_slip`, `hard_blocked` (whatever its reason, `containment` or `distinct_from` included), and any unknown status;
+  - any other `auto_declined` reason, **`kind_conflict` included** (cr r4 P1). A `kind_conflict` says only that the two folded kinds differ. Nothing in construct can prove the difference is a role word ("condemned man") rather than a type ("horse"), and a negative word list is not proof.
+
 - **Not already decided.** There is no shared closure, and `distinct_between(a, b)` is empty.
 - **Exactly one load-bearing id** in `closure(a) ∪ closure(b)`. The load-bearing ids are the protagonist plus the required-clue holders. With none, the pair is held apart as today. With more than one, the confirm stop fires.
 - **Source-backed** (cr r3 P1). The build's source has at least one sentence naming each side; see context below. On the interview path, or where either side has no matching sentence, the pair is **not a candidate**, and today's stop stands.
 
 **2. Context.** The host supplies it, because the engine holds no source:
 - for each candidate id, the source sentences that contain any of its names or aliases (whole word, case-insensitive);
-- in source order, at most 2 per id (the most the engine keeps per side, pattern-buffer mfee55c), each cut to 300 characters. The frozen request is exactly what the engine sees.
+- in source order, at most 2 per id, each cut to 400 characters. That is exactly how the verb normalizes context (2 sentences per representative, at 400 characters), so the frozen request is what the model receives. A test asserts the final gate payload.
 
 **3. Two independent asks, tied to one frozen request.**
 - **The frozen request.** The candidate list (sorted pairs, with stable pair ids) and the context are built **once**, and a digest is taken over their canonical JSON.
@@ -114,13 +123,14 @@ The build's stage output reads "identity: adjudicated N pair(s): M merged, K hel
 
 ### Tests (stub `merge_gate`, real engine otherwise)
 
-- **Eligibility.**
-  - `alias_not_specific`, and person-role `kind_conflict`, are candidates.
-  - `durable_contradiction`, `relating_edge`, `containment`, `typing_slip`, `hard_blocked`, `unlinked` and an unknown code are never sent to the gate.
-  - A person-against-place `kind_conflict` is never sent.
+- **Eligibility, selected field by field from real `fidelity_audit()` group fixtures:**
+  - an `auto_declined` / `alias_not_specific` pair is a candidate;
+  - `auto_declined` / `kind_conflict` is never sent, including a person-role pair like run 8's and a `person:` id whose kind is "horse";
+  - every other status is never sent: `unlinked`, `typing_slip`, and `hard_blocked` with `containment` or `distinct_from`, as is an unknown status;
+  - a pair is matched to its kinds through the group's parallel `entities`/`kinds`.
 - **No source.** The interview path, or one side with no matching sentence: not a candidate, and the build stops.
 - **Two load-bearing ids, or none.** Not sent; the build stops, or the pair is held apart as today.
-- **The run 8 pairs.** Two `same` answers with a checked receipt merge them, with the load-bearing representative and the digest in the evidence.
+- **A same-kind role split, the run 8 shape after the type/role split.** An `alias_not_specific` pair (for example `person:breck` and `person:tomas_breck`, both of kind person) is merged on two `same` answers with a checked receipt, with the load-bearing representative and the digest in the evidence.
 - **Left open:** a `same` with an `unsure`; disagreement; a `conflicting_component`.
 - **Held apart.** Two `different` answers: a checked reject. A bad reject receipt is not counted, and the build stops.
 - **Answer integrity.**
