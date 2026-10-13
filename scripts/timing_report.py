@@ -48,7 +48,11 @@ def _builds(rows: list[dict]) -> list[tuple[str, dict, float]]:
     for sc, rs in by_scope.items():
         stages = sorted((r for r in rs if r.get("ev") == "stage"), key=lambda r: r["t"])
         if not stages:
-            continue
+            if not sc.startswith("build:"):
+                continue
+            # a build scope that emitted no stage line still gets its one-row table
+            stages = [{"ev": "stage", "t": min(r.get("t0", r["t"]) for r in rs),
+                       "label": "(whole build)"}]
         end = max(max(r.get("t", 0), r.get("t1", 0)) for r in rs)
         complete = first_turn is not None and any(
             r.get("ev") == "turn_start" and r["t"] >= stages[0]["t"] for r in rows)

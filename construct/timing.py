@@ -18,8 +18,9 @@ and every turn appends one JSON line there:
 
 Every row carries `run` (the writing process) and `scope`: the build or session it belongs
 to. One process can hold many sessions (the Discord bot keeps one per player, each
-numbering its own turns from 1), so reports group by scope. Each build entry point opens a
-build scope; each Session keeps one session scope for its turns and settles. Construct's
+numbering its own turns from 1), so reports group by scope. The outermost build entry
+point opens a build scope (`build_entry`); each Session keeps one session scope for its
+turns and settles. Construct's
 worker pools carry the scope into their threads (`submit_in_context`).
 
 `scripts/timing_report.py` turns the log into the tables. Recording is best-effort and
@@ -28,6 +29,7 @@ never raises into the caller: a timing line must never sink a build or a turn.""
 from __future__ import annotations
 
 import contextvars
+import functools
 import json
 import logging
 import os
@@ -104,18 +106,39 @@ def record(ev: str, **fields: Any) -> None:
         logger.debug("timing record failed", exc_info=True)
 
 
+def build_entry(fn):
+    """Decorate a build entry point (ingest, interview, generated, continuation). The
+    outermost one opens a build scope and restores the caller's scope and phase on
+    return; a nested one (the generated build calls the ingest build) keeps the outer
+    scope, so one user-visible build is one scope (cr RED on 7d095dd)."""
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if _scope.get().startswith("build:"):
+            return fn(*args, **kwargs)
+        name = str(args[0]) if args else str(kwargs.get("name", ""))
+        sid = f"build:{name}:{uuid.uuid4().hex[:8]}" if name else f"build:{uuid.uuid4().hex[:8]}"
+        s_tok, p_tok = _scope.set(sid), _phase.set("")
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _scope.reset(s_tok)
+            _phase.reset(p_tok)
+    return wrapper
+
+
 def stage(label: str) -> None:
-    """A build progress line. A "Stage N · ..." line begins a stage, and its "Stage N"
-    becomes the phase later calls are filed under; any other line ("…chunk 3/11
-    extracted", "…viable") is a mark inside the current stage."""
+    """A build progress line. A sub-step line ("…chunk 3/11 extracted", "…viable") is a
+    mark inside the current stage. Any other line begins a stage: the "Stage N · ..."
+    labels of a fresh build and the narrative labels of a continuation ("Dreaming up the
+    next chapter") alike. Its head becomes the phase later calls are filed under."""
     label = label.strip()
-    if label.startswith("Stage"):
-        if not _scope.get().startswith("build:"):
-            set_scope("build")  # a build entered without an explicit scope
-        set_phase(label.split(" · ", 1)[0])
-        record("stage", label=label)
-    else:
+    if label.startswith("…"):
         record("mark", label=label)
+        return
+    if not _scope.get().startswith("build:"):
+        set_scope("build")  # progress outside any build entry point
+    set_phase(label.split(" · ", 1)[0][:48])
+    record("stage", label=label)
 
 
 def call_label(prompt: str, task: str) -> str:

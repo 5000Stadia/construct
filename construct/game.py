@@ -1745,6 +1745,7 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
     return meta
 
 
+@timing.build_entry
 def create_scenario_from_ingest(name: str, prose_path: Path,
                                 provider: Provider, endless: bool = False,
                                 on_stage=None, win_direction: str = "",
@@ -1757,7 +1758,6 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
     author + the player-facing goal. `laws`/`reality_register` (#105) arrive
     only from the GENERATED path (the fiction was written on them); a real
     ingested book keeps its own implicit constitution — never retrofitted."""
-    timing.set_scope("build", name)
     WORLDS_DIR.mkdir(exist_ok=True)
     spath = scenario_path(name)
     if spath.exists():
@@ -1870,6 +1870,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         world.close()
 
 
+@timing.build_entry
 def create_scenario_from_interview(name: str, brief: str, provider: Provider,
                                    endless: bool = False, on_stage=None,
                                    win_direction: str = "", play_as: str = "",
@@ -1881,7 +1882,6 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
     spines, the opening situation — committed as `stated` canon, then the
     shared tail authors the arc and seeds frames. The brief is the human's
     input (genre/setting/characters/situation, however much they give)."""
-    timing.set_scope("build", name)
     from construct import cohorts
 
     WORLDS_DIR.mkdir(exist_ok=True)
@@ -2056,6 +2056,7 @@ def _assess_viability(name: str, meta: dict) -> list[str]:
     return problems
 
 
+@timing.build_entry
 def create_scenario_from_generated(name: str, provider: Provider, *, seed: str = "",
                                    endless: bool = False, on_stage=None,
                                    win_direction: str = "", play_as: str = "",
@@ -2068,7 +2069,6 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
     Construct's showcase loop (fiction → projection). On gate failure the
     generated source is preserved for audit and the published world is removed
     (ViabilityError) — never a playable-but-broken scenario (Cx 063 #6)."""
-    timing.set_scope("build", name)
     from construct import cohorts
 
     WORLDS_DIR.mkdir(exist_ok=True)
@@ -3142,6 +3142,7 @@ def _plan_hook_cast(world: Any, reads: Any, proposal: dict, door_place: str | No
     return kept, hook_ids
 
 
+@timing.build_entry
 def continue_episode(name: str, provider: Provider, player_id: str | None = None,
                      on_stage=None) -> dict:
     """CONCLUDE→CONTINUE (the Series hook): from a CONCLUDED slot, author the NEXT episode's
@@ -3150,7 +3151,6 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
     freezes play), and checkpoint the boundary. The world (canon, your character, the ledger) all
     carry over; only a fresh hidden arc is woven over it. Emits the same narrative build-progress
     stages a fresh build does (NARRATIVE phrasing — no internal jargon). Returns the updated meta."""
-    timing.set_scope("build", name)
     from construct import cohorts
     from construct.arc import io as arc_io
     from construct.arc.executor import (

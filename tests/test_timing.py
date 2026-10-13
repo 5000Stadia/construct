@@ -164,3 +164,71 @@ def test_every_row_carries_the_run_and_scope(log):
     timing.record("mark", label="x")
     row = _rows(log)[0]
     assert row["run"] == timing.RUN and row["scope"] == sid
+
+
+# ---- cr RED on 7d095dd: one user-visible build is one scope, whatever its entry path ----
+
+def test_the_build_entry_points_are_scoped():
+    for fn in (game.create_scenario_from_ingest, game.create_scenario_from_interview,
+               game.create_scenario_from_generated, game.continue_episode):
+        assert hasattr(fn, "__wrapped__"), fn.__name__
+
+
+def test_a_generated_build_and_its_inner_ingest_build_share_one_scope(
+        tmp_path, log, monkeypatch):
+    from construct import cohorts
+    from construct.provider import StubProvider
+    from tests.test_startup import _STORY
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "worlds").mkdir()
+    monkeypatch.setattr(cohorts, "author_story", lambda provider, **kw: dict(_STORY))
+
+    @timing.build_entry          # the real entry point is decorated the same way
+    def _fake_ingest(name, prose_path, provider, on_stage=None, **kw):
+        game._emit(on_stage, "Stage 1 · (stub ingest)")
+        timing.record("call", step="engine:Extract", tier="cheap", model="m", ok=True,
+                      t0=0.0, t1=0.0, s=0.0)
+        game.scenario_path(name).write_text("stub world")
+        game.scenario_path(name).with_suffix(".meta.json").write_text("{}")
+        return {"title": _STORY["title"], "protagonist": "person:keeper", "theme": "t"}
+
+    monkeypatch.setattr(game, "create_scenario_from_ingest", _fake_ingest)
+    monkeypatch.setattr(game, "_assess_viability", lambda name, meta: [])
+    outer = timing.set_scope("session", "caller")
+    game.create_scenario_from_generated("glass", StubProvider(), seed="a noir harbor")
+    rows = _rows(log)
+    scopes = {r["scope"] for r in rows}
+    assert len(scopes) == 1 and next(iter(scopes)).startswith("build:glass:"), scopes
+    labels = [r["label"] for r in rows if r["ev"] == "stage"]
+    assert labels[0].startswith("Stage 0") and "Stage 1 · (stub ingest)" in labels
+    assert any(lb.startswith("Stage 7") for lb in labels)
+    assert timing.scope() == outer          # the caller's scope is restored on return
+    md = report(load(str(log)))
+    assert md.count("### Build ") == 1
+
+
+def test_a_continuation_build_gets_its_own_stage_table(tmp_path, log, monkeypatch):
+    """End to end: a real continue_episode with the stub provider. Its narrative progress
+    labels are stages, in one build scope, and the report has the stage table."""
+    from tests.test_atomic_swap import _Provider, _make_slot
+    name = _make_slot(tmp_path, monkeypatch)
+    log.write_text("")                      # only the continuation's rows
+    game.continue_episode(name, _Provider(), player_id="u1")
+    rows = _rows(log)
+    stages = [r for r in rows if r["ev"] == "stage"]
+    assert {r["scope"] for r in rows} == {stages[0]["scope"]}
+    assert stages[0]["scope"].startswith(f"build:{name}:")
+    labels = [r["label"] for r in stages]
+    assert labels[0] == "Reflecting on how your story ended"
+    assert "Dreaming up the next chapter" in labels
+    md = report(load(str(log)))
+    assert "## 1. Build stages" in md and "| Dreaming up the next chapter |" in md
+
+
+def test_a_build_scope_with_no_stage_line_still_reports(log):
+    rows = [{"ev": "call", "run": "P", "scope": "build:q:1", "t": 1.0, "t0": 1.0, "t1": 4.0,
+             "s": 3.0, "step": "gnr", "tier": "cheap", "model": "m", "phase": "", "ok": True}]
+    log.write_text("\n".join(json.dumps(r) for r in rows))
+    md = report(load(str(log)))
+    assert "### Build 1 (build:q:1, no turn followed)" in md
+    assert "| (whole build) | 3 | 1 | 3 |" in md
