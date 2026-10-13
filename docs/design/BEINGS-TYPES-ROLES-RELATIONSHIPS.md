@@ -1,6 +1,6 @@
 # Beings, types, roles and relationships
 
-**Status:** construct's proposal, r1, 2026-10-13. Not built. It feeds pattern-buffer's R51 (beings) and R52 (role vs relationship), both in their Later list. Fresh views from two other model families come before anything is built, because the proposal changes R49's shipped gate rule.
+**Status:** construct's proposal, r2, 2026-10-13 (r2 adopts pattern-buffer's derive-don't-move placement). Not built. It feeds pattern-buffer's R51 (beings) and R52 (role vs relationship), both in their Later list. Fresh views from two other model families come before anything is built, because the proposal changes R49's shipped gate rule.
 
 **Source.** Kabe, 2026-10-13, after R49 recorded a dog as kind person, role dog:
 - "If a dog is a kind of person and what is the point of identifying term person? Isn't it more of a 'sentient entity' have either type person or type dog"
@@ -30,11 +30,16 @@ The **being** itself is the class: anything that acts and knows, and can be met,
 | Role | R49: set-valued, dated `role` | nothing |
 | Relationship and stance | ordinary entity-valued rows; identity already treats a relating edge between two ids as evidence that they are two (`relating_edges_between`) | vocabulary, a read from the other side, and derived titles |
 
-**Type vs role at the gate needs no word list.** Pattern-buffer's classifier already judges durability: CONSTITUTIVE (what a thing is) or STATE (how it is now).
-- Today it never sees a `kind` row: `kind` is structural, so the classifier labels it CONSTITUTIVE by rule (`classify.py`, the structural branch).
-- The gate would ask that same judgment of a being's non-person `kind` value, as if it were a role. Constitutive ("dog") stays `kind`. State ("condemned man") moves to `role`, as R49 moves it today.
-- That is one small model judgment per such row, a handful per world. The rules-only mode keeps R49's behaviour (move to role).
-- The extraction prompt asks for type and role separately, so the gate fallback is rarely needed (R49's own pattern).
+**Type vs role needs no word list, and no row is moved.** (Revised in r2, on pattern-buffer's pushback, m560af5.)
+- r1 judged at the ingest gate and moved the row. That puts a synchronous model call on the write path (builds keep model calls out of it with begin_build/seal_build). A move decided at write time can't be undone by a better verdict later, because the log is append-only.
+- r2 **derives instead of moving.** A being's `kind` rows are stored as written. The classifier, which is deferred, kept in its sidecar and rebuildable, judges each one CONSTITUTIVE or STATE. That lifts `kind`'s structural shortcut for beings only.
+- The read serves the CONSTITUTIVE kinds as the type and the STATE ones as roles. Identity's kind check reads the type.
+- Worlds already built, R49's and construct's, are fixed with no rewrite: "condemned man" is judged STATE, and the kind_conflict disappears.
+- A wrong judgment is corrected by a new verdict, not a new row.
+- Rules-only mode (no model) falls back to R49's behaviour: "person" is the type, anything else a role.
+- The cost: a deeper engine change than R49. It touches the classifier's structural guardrail and the kind fold, and R49's gate move retires.
+- To check: identity's build stages must read the type after the build's classification has run, not before.
+- The fresh views get both placements, the gate and the sidecar.
 
 **Identity gets its guard back.** `kind` holds the type again, so the existing kind check keeps a man and a dog both called Rex apart, with no new identity code. Two people's kinds are both `person` and still fold together, so R49's fix for run 8 (role noise splitting one person) is kept. A father-of edge between two ids already counts as evidence that they are two people.
 
@@ -42,7 +47,7 @@ The **being** itself is the class: anything that acts and knows, and can be met,
 
 ## What pattern-buffer would build (their design, our needs)
 
-1. **The gate:** keep a constitutive `kind` on a being; move only a state-like `kind` to `role` (amends R49 §2). The classifier gets one new question: the durability of a `kind` value on a being.
+1. **The classifier and the kind fold:** a being's `kind` rows are judged CONSTITUTIVE (type) or STATE (role) in the deferred sidecar, and read accordingly. R49's gate move retires (r2; see above).
 2. **The prompt (R52):** role is only what a being is on its own. A title that needs a party is a dated relationship to that party, chosen by the model.
 3. **A read from the other side:** "who has X as the value of A" ("whose father is he?", "who is hostile to me?"). There is no porcelain read for it today; `incoming_refs` exists internally.
 4. **Derived titles:** read a being's roles together with the titles of its relationships, so a host asks one question ("what is he?") and gets "prisoner; father of Nessa; mayor of Ironhold".
