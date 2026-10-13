@@ -20,10 +20,13 @@ import os
 import platform
 import re
 import socket
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
+
+from construct import timing
 
 logger = logging.getLogger(__name__)
 
@@ -604,10 +607,29 @@ class _ResponsesWireProvider(Provider):
 
     async def complete(self, prompt: str, schema: dict, *, tier: Tier = "main",
                        deliberate: bool = False) -> dict:
+        if not timing.enabled():
+            return await self._complete(prompt, schema, tier, deliberate, {})
+        stats: dict = {"reasks": 0, "retries": 0}
+        t0, err = time.time(), ""
+        try:
+            return await self._complete(prompt, schema, tier, deliberate, stats)
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {str(exc)[:160]}"
+            raise
+        finally:
+            t1 = time.time()
+            timing.record("call", step=timing.call_label(prompt, task_of(prompt)),
+                          tier=tier, model=self._model_for(tier), deliberate=deliberate,
+                          prompt_chars=len(prompt), reasks=stats["reasks"],
+                          retries=stats["retries"], ok=not err, error=err,
+                          t0=round(t0, 3), t1=round(t1, 3), s=round(t1 - t0, 2))
+
+    async def _complete(self, prompt: str, schema: dict, tier: Tier, deliberate: bool,
+                        stats: dict) -> dict:
         attempt_prompt = prompt
         for attempt in range(2):  # one bounded re-ask on schema mismatch
             raw = await self._call_transient_retry(attempt_prompt, schema, tier,
-                                                   deliberate)
+                                                   deliberate, stats)
             try:
                 payload = strip_nulls(json.loads(raw))
             except json.JSONDecodeError as exc:
@@ -619,6 +641,7 @@ class _ResponsesWireProvider(Provider):
                 except SchemaViolation as exc:
                     exc_msg = str(exc)
             if attempt == 0:
+                stats["reasks"] = stats.get("reasks", 0) + 1
                 logger.warning("%s schema mismatch, re-asking: %s",
                                self._label, exc_msg[:200])
                 attempt_prompt = (
@@ -629,7 +652,8 @@ class _ResponsesWireProvider(Provider):
         raise AssertionError("unreachable")
 
     async def _call_transient_retry(self, prompt: str, schema: dict, tier: Tier,
-                                    deliberate: bool = False) -> str:
+                                    deliberate: bool = False,
+                                    stats: dict | None = None) -> str:
         """Bounded retry of TRANSIENT connection failures (founder live build
         sunk by one 'peer closed connection / incomplete chunked read'): a
         dropped stream mid-response is a network blip, not a verdict — retry
@@ -645,6 +669,8 @@ class _ResponsesWireProvider(Provider):
             except ProviderTransportError as exc:
                 if i == 2 or not isinstance(exc, ProviderTransientError):
                     raise
+                if stats is not None:
+                    stats["retries"] = stats.get("retries", 0) + 1
                 logger.warning("%s transient transport failure "
                                "(retry %d/2, tier=%s): %s", self._label, i + 1,
                                tier, str(exc)[:150])

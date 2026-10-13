@@ -19,7 +19,7 @@ from typing import Any, NamedTuple
 
 from patternbuffer import World
 
-from construct import hostcontrol
+from construct import hostcontrol, timing
 from construct.adapter import PorcelainWorldReads
 from construct.arc import io as arc_io
 from construct.arc.build import (  # arc construction lives in the arc layer; re-exported
@@ -132,6 +132,7 @@ def _emit(on_stage, msg: str) -> None:
     pattern-buffer layer being exercised: progress *and* a live showcase of the
     adoption (founder request)."""
     logger.info(msg)
+    timing.stage(msg)
     if on_stage is not None:
         try:
             on_stage(msg)
@@ -1744,6 +1745,7 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
     return meta
 
 
+@timing.build_entry
 def create_scenario_from_ingest(name: str, prose_path: Path,
                                 provider: Provider, endless: bool = False,
                                 on_stage=None, win_direction: str = "",
@@ -1799,7 +1801,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
             from concurrent.futures import ThreadPoolExecutor
             cap = max(1, int(os.getenv("CONSTRUCT_EXTRACT_CONCURRENCY", "8")))
             with ThreadPoolExecutor(max_workers=cap) as pool:
-                futs = {i: pool.submit(world.porcelain.extract, chunk, extract="full")
+                futs = {i: timing.submit_in_context(pool, world.porcelain.extract, chunk,
+                                                    extract="full")
                         for i, chunk in enumerate(chunks, start=1)}
                 for i, fut in futs.items():
                     try:
@@ -1867,6 +1870,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         world.close()
 
 
+@timing.build_entry
 def create_scenario_from_interview(name: str, brief: str, provider: Provider,
                                    endless: bool = False, on_stage=None,
                                    win_direction: str = "", play_as: str = "",
@@ -2052,6 +2056,7 @@ def _assess_viability(name: str, meta: dict) -> list[str]:
     return problems
 
 
+@timing.build_entry
 def create_scenario_from_generated(name: str, provider: Provider, *, seed: str = "",
                                    endless: bool = False, on_stage=None,
                                    win_direction: str = "", play_as: str = "",
@@ -2344,7 +2349,8 @@ def seed_character_frames(world: Any, provider: Provider,
     if SEED_CONCURRENCY > 1 and len(characters) > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=SEED_CONCURRENCY) as pool:
-            results = list(pool.map(_author, characters))   # order-preserving
+            results = [f.result() for f in   # order-preserving
+                       [timing.submit_in_context(pool, _author, c) for c in characters]]
     else:
         results = [_author(char) for char in characters]
 
@@ -3136,6 +3142,7 @@ def _plan_hook_cast(world: Any, reads: Any, proposal: dict, door_place: str | No
     return kept, hook_ids
 
 
+@timing.build_entry
 def continue_episode(name: str, provider: Provider, player_id: str | None = None,
                      on_stage=None) -> dict:
     """CONCLUDE→CONTINUE (the Series hook): from a CONCLUDED slot, author the NEXT episode's
