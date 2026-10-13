@@ -195,6 +195,24 @@ R23 timings, 22 instrumented turns: whole turn in chapter 1 128–291 s, median 
 
 Criteria 1–4 pass for the first time. What stands between this and a pass is prose that places the player somewhere canon does not (runs 6 and 7), and the same truth-keeping gap shows as objects that come and go in chapter 2. The hero split (finding 2) is a build-identity defect that this run happened not to expose.
 
+### Criterion 5 traced (on paper, 2026-10-13; nothing run)
+
+From run 7's mechanics log and play world:
+
+- **The opening.** It put the torn sack and a hearth in the warrant room, seen from the cell "past Dena's shoulder, through the open angle". Canon held the sack there (`obj:torn_laundry_sack in place:warrant_room`, from the build). It held no hearth, and nothing said the warrant room can be seen from the cell. The opening's prose is shown but never read back into canon (`session.py`, `_opening_narration`; only turns run post_extract). So its hearth, firelight and sightline existed in prose only.
+- **Turn 1.** The player said "Let me see the sack and the hearth". The briefing's scene list held two rows: Quill's private-audit relation and the cell's description. The location filter (`turnloop.py`, the `_here` set) keeps anything placed elsewhere out of that list. So the sack, its place, and the warrant room were all absent, and no line told the narrator that the sack and the hearth were not here. Under "The scene is HERE and only here", the narrator brought both into the cell: Dena sets the sack down "beside the cold hearth".
+- **Canon followed the prose.** Post_extract wrote `obj:hearth` with no place, and `person:dena beside obj:hearth`. By turn 8 the sack is `in place:elias_venn_cell`. Canon and the later prose agree with each other. Only the opening disagrees, and the critic read the opening.
+
+Two gaps, both construct's:
+
+1. **The opening never becomes canon.** First-mention permanence does not cover the cold open. This is the class of finding 5.
+2. **A named thing that is elsewhere gets no "not here" line.** The location filter is right to keep elsewhere objects out of the scene list; that is the "tape followed us everywhere" fix. But when the player names one, the narrator learns nothing about where it is, and the HERE directive pulls it into the room.
+
+Fix shapes (not built):
+
+- **For gap 2, the fix that would have stopped this.** When the player's line names an entity that canon places elsewhere, the briefing carries one line: "<name> is not here: it is in <place>." The narrator can then have someone fetch it, have the player look across, or say it is not here.
+- **For gap 1, so that fix reaches what the opening named.** Run the turn's prose extraction on the opening too, so a thing the opening names is committed where the opening puts it. Without it, the hearth stays unknown to canon, and no "not here" line could place it.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
