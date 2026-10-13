@@ -32,6 +32,26 @@ The registry lists every entity: its canonical id, its **type**, its canonical n
 - **A generated story (the common path): zero extra calls.** `author_story`'s schema gains a `registry` beside `prose`. The author already knows its cast, places and key objects; it just has to say them.
 - **An ingested book (no author):** one deterministic scan finds name candidates: capitalised spans, with titles and honorifics stripped by rule. One batched fast-model call types and groups the candidate list (person, animal, place, object, group).
 
+### 1b. The pass structure (Kabe, 2026-10-13: "Pass for cast list, pass for locations, etc")
+
+For any story that doesn't arrive with an author's list (a book; or as a cross-check):
+
+- **Pass 0, the registry, as parallel category passes.**
+  - Each pass reads the whole story and answers one narrow question:
+    - **beings:** people, animals and creatures, with name variants and the chapter each name is first known;
+    - **places,** and their nesting;
+    - **key things;**
+    - perhaps **groups:** factions, crews, families.
+  - Each is homogeneous and low-judgment, so a fast model at low effort can do it. All run concurrently, so the wall time is the slowest pass, not the sum.
+  - Code merges the lists on (type, normalized name), so the being "Rex" and the ship "the Rex" never collide.
+- **Pass 1, facts,** per chunk and in parallel, against the merged registry.
+- **Pass 2, interpretation,** on the top model, in a few calls: motive, dynamics, hidden identities and reveals. This is where deep thinking belongs.
+- **Code between passes:** merging, name matching, time-gating.
+
+Two refinements:
+- **Size.** A book longer than one call runs each category pass per chapter group, and code merges by the same key. That also stamps each name's first-known chapter.
+- **Speed.** Latency follows output and thinking tokens, not input (pattern-buffer's profile). Category passes write short lists with little thinking, so re-reading the story per category should cost less wall time than one call that does everything. The timing log checks this.
+
 ### 2. Code mints the ids
 
 - **The identity key is (type, normalized name).** This is GraphRAG's merge rule. Rex the man and Rex the dog have different keys, so they get different ids at first mention.
