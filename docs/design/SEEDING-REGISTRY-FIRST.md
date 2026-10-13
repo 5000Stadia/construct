@@ -1,6 +1,6 @@
 # Seeding, registry first: identity decided once, by code
 
-**Status:** construct's proposal, r1, 2026-10-13. Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
+**Status:** construct's proposal, r1.1, 2026-10-13 (adds pattern-buffer's speed-plan overlap). Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
 
 ## Kabe's direction (2026-10-13)
 
@@ -70,6 +70,13 @@ Batching safeguards, from the batching literature (BatchPrompt and later work):
 - each answer echoes its item's key, not an index;
 - re-ask only the low-confidence items;
 - check against single-item calls on a sample before switching.
+
+## Already in pattern-buffer's speed plan (read 2026-10-13)
+
+pattern-buffer's `docs/SPEED-PLAN-2026-10-13.md` (book builds, R27) has the same shape at its step 4: one whole-book cast call writes a registry, pass 1 extracts in parallel against it, and the merge gate checks rather than repairs. pattern-buffer already has a `registry.py`. This proposal should build on that, not beside it. Two of its points change this design:
+
+- **The registry must carry time.** Each alias records the chapter where the reader first meets it, and a chunk receives only the aliases known by then. Otherwise a whole-story registry leaks a chapter-10 reveal (the stranger is the duke) into chapter 2. This is Kabe's threat model exactly: nothing narrates ahead or leaks future knowledge into characters. For a generated story, the author's registry must mark hidden identities and when each is revealed. Canon identity stays timeless; what is time-gated is which aliases each chunk is told.
+- **Effort is the biggest single lever.** Their profile measured about 96% of output tokens as hidden thinking, and latency follows output tokens (R² 0.97). Tiering effort by how hard each judgment is (Kabe: deep thinking for motive and dynamics, chore work for "gathering details accurately already established") comes before, and alongside, choosing models.
 
 ## Who builds what
 
