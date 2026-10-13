@@ -1,6 +1,6 @@
 # Seeding, registry first: identity decided once, by code
 
-**Status:** r2, 2026-10-13, agreed in shape with pattern-buffer (m52998c). It still goes to two fresh views before any build. r2 changes are marked *(r2)*. Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
+**Status:** r3, 2026-10-13. Kabe answered gate g2fd391 ("Full agree on your 5 directions"): points 1, 2, 3 (pattern-buffer's form) and 5 accepted, point 4 rejected. The settled approach is the section below. Round two of the fresh views checks it before any build. Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
 
 ## Kabe's direction (2026-10-13)
 
@@ -10,6 +10,32 @@
 - "everything I'm discussing is when construct establishes a fresh story ingested into pattern buffer that length of duration for preparation before the world is available to the user"
 
 **The target:** the build, from a fresh story to a world the player can enter. About 15 to 20 minutes in R20 run 9.
+
+## r3: the settled approach (gate g2fd391)
+
+1. **The author's manifest is the sole authority on the cast** (accepted P1).
+   - **Generated story:** the story-authoring call returns, after the prose, the entries (name, kind, aliases), the namesake pairs it intends as different people, and its secrets (persona A, persona B, the sentence that reveals them).
+   - **Code checks it against the prose:** where each alias first appears, which chunk each reveal sentence falls in, and capitalised names no entry covers.
+   - **Imported prose:** category passes (beings, places, things, groups) only check or extend a manifest; they never compete with it.
+2. **Identity is written before any fact** (accepted P2).
+   - **Code mints the ids** from manifest entries: readable and type-prefixed (`person:rex`, `animal:rex`, `person:john_2`), with the R51 type fact as the authority (P4 rejected).
+   - **Namesakes** the author lists as different get `distinct_from`.
+   - **Hidden identities** are two entries plus one `correlate` (a dated `aka`), dated to the reveal chunk. The two ids never collapse, and the link shows only from the reveal onward.
+   - **Never** a `distinct_from` between two personas of one secret.
+   - **A secret the prose never reveals** belongs to the arc, not the build.
+3. **Mentions are resolved in code.**
+   - A multi-pattern scan over the manifest's names and aliases tags each mention.
+   - A unique name resolves directly; a shared name becomes candidates. Only names known by that chunk count (time gate).
+   - Each chunk's extraction gets the prose so far, the entries known by then, and the tagged chunk. It attaches facts to entries, picks among candidates, and flags unknown entities as new.
+4. **Ambiguity is append-safe** (accepted P3, pattern-buffer's form).
+   - An unresolved mention's facts go on a provisional id, filtered out of rosters.
+   - When evidence settles it, a single explicit, evidenced `same_as` joins it. Nothing is rewritten.
+5. **Acceptance runs on planted-trap stories** (accepted P5): Rex the man and Rex the dog, two Brecks, a late-revealed stranger. Pass means:
+   - no fact on the wrong look-alike;
+   - no name bound before its reveal (GRADE-LEAKS-V1);
+   - no repair calls in the normal path;
+   - stage time measured with the timing log.
+6. **Ownership is the r2 split.** pattern-buffer promotes INGEST-V2 to the shared library. construct supplies the authored manifest and the calls into the library.
 
 ## Measured: this is a correctness design, not mainly a speed one (eval/13, 2026-10-13)
 
