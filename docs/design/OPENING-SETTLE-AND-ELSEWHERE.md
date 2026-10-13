@@ -1,6 +1,6 @@
 # The opening's settle and the "not here" line (R20 criterion 5)
 
-Status: **spec r2, for cr review. Not built.** r1 was RED (cr, <1c53e718>). There were two corrections:
+Status: **spec r3, for cr review. Not built.** r2 was RED on one point: "here" was defined by shared ancestry, and r3 makes it directional. r1 was RED (cr, <1c53e718>). There were two corrections:
 1. Part A's "not here" must be decided from the player frame alone.
 2. Part B's settle must run exactly once and leave no hidden-turn artifacts.
 
@@ -29,13 +29,17 @@ Two construct gaps let this happen. Both had to be open for it to happen.
 An entity E is known elsewhere when all of these hold:
 - E is not `person:*`, because people keep their own path.
 - E's display name or any alias from `player_snap` appears in the player's line. The match is case-insensitive and whole-word. Aliases shorter than 3 characters do not count, and deixis does not count (`is_deixis`).
-- **E's known chain** reaches a place. Follow E's player-frame `in` and `part_of` rows (at most 4 hops, no cycles); the chain must end at a `place:*`.
-- **The player's known chain** starts from the current scene. That is the place the briefing already names to the narrator as YOU ARE AT, and the player is always shown where they stand, so it reveals nothing. To it are added the scene's player-frame `part_of` features, plus the walk from the protagonist's player-frame `in` if there is one. Run 7's player frame held no `in` row for the protagonist at turn 1, so a chain built from that row alone would never fire.
-- The two chains share no entity. If E's chain ends anywhere in the player's chain, E is here (on a table in this room, in this room's alcove).
+- **E's known path** is walked upward from E through its player-frame `in` and `part_of` rows, at most 4 hops and cycle-safe. Its **nearest place** is the first `place:*` on that path.
+- **The here-set** is the current scene, the YOU ARE AT place the briefing already names (the player is always shown where they stand, so it reveals nothing), together with the scene's features contained by it.
+- **Directional, not shared-ancestor (cr r2 P1).** E is known-here when its path reaches a node of the here-set. A shared ancestor proves nothing: a cell and a warrant room that are both `part_of` the fortress are siblings, not one place.
+- **Known elsewhere, emitted:** E is not known-here, and its nearest place is a distinct location. It is neither in the here-set nor an ancestor of the scene.
+- **Underdetermined, no line:** E's nearest place is an ancestor of the scene. For example, the sack is known only to be "in Ironhold" while the player stands in a room of Ironhold. The player frame has not shown it is somewhere else.
+
+**Canon may only suppress.** Emitting a line rests on the player frame alone: E's path and its nearest place. Canon may only *suppress* a line. The scene's features (`scene_features`) and the scene's ancestor chain are read as `_here` reads them today, and they are used only to find known-here or underdetermined cases. A suppression asserts nothing to the narrator, so it leaks nothing.
 
 With no player-frame `in` evidence for E, **no line is emitted**. The predicate never reads canon, so it never asserts an absence the player has not learned.
 
-**The place.** The place in the line is the `place:*` that ends E's known chain, given by display name.
+**The place.** The place in the line is E's nearest place on its known path, the warrant room in run 7, given by display name.
 
 **The briefing block.** At most 4 entities, in the order they are named. It is emitted only for entities that pass `known_elsewhere`. The block:
 
@@ -78,7 +82,9 @@ Its diagnostics are an in-memory opening trace on the session, plus logs.
 
 **Part A:**
 - the line fires for an object the player frame places elsewhere and the player names;
-- no line when the object's known chain ends in the player's chain (on a table here; in this room's feature);
+- no line when the object's path reaches the here-set: it is on a table here, or in a feature contained by this room (the directed descendant case);
+- **sibling rooms**: cell and warrant room are both `part_of` Ironhold, and the player frame places the sack in the warrant room. "sack" gives NAMED BUT NOT HERE, warrant room;
+- coarse ancestor: the player frame places the object only "in" Ironhold while the player is in the cell. No line is emitted;
 - no line when the player frame lacks the object;
 - no line when the player frame lacks the object's `in` row;
 - the line still fires when the player frame lacks the protagonist's `in` row (the scene anchors the player's chain);
