@@ -108,3 +108,39 @@ def test_the_report_reads_stages_steps_and_turns(log):
     assert "| engine:Extract | cheap / m | 2 | 20 |" in md
     assert "| 1 | 22 | 1 | 20 |" in md and md.rstrip().endswith("|")
     assert "| Stage 1 | 2 | 2 |" in md          # the two extractions overlapped
+
+
+def _call(run, t0, t1, step="engine:Extract"):
+    return {"ev": "call", "run": run, "t": t0, "t0": t0, "t1": t1, "s": t1 - t0,
+            "step": step, "tier": "cheap", "model": "m", "phase": "", "ok": True}
+
+
+def test_the_report_splits_builds_in_an_append_only_log(log):
+    """cr RED on 8162287: one file, many builds. Build 1, then turn 1, then build 2 in the
+    same run; then a second run whose build never reached a turn."""
+    rows = [
+        {"ev": "stage", "run": "A", "t": 0.0, "label": "Stage 1 · first build"},
+        _call("A", 1.0, 5.0),
+        {"ev": "turn_start", "run": "A", "t": 10.0, "turn": 1},
+        {"ev": "turn_end", "run": "A", "t": 20.0, "turn": 1, "ok": True},
+        {"ev": "stage", "run": "A", "t": 100.0, "label": "Stage 1 · second build"},
+        _call("A", 101.0, 109.0),
+        {"ev": "turn_start", "run": "A", "t": 110.0, "turn": 2},
+        {"ev": "turn_end", "run": "A", "t": 120.0, "turn": 2, "ok": True},
+        {"ev": "stage", "run": "B", "t": 200.0, "label": "Stage 1 · unfinished build"},
+        _call("B", 201.0, 231.0),
+    ]
+    log.write_text("\n".join(json.dumps(r) for r in rows))
+    md = report(load(str(log)))
+    assert "### Build 1 (run A)" in md and "| Stage 1 · first build | 10 | 1 | 4 |" in md
+    assert "### Build 2 (run A)" in md and "| Stage 1 · second build | 10 | 1 | 8 |" in md
+    # never reached a turn: it ends at its own run's last row (the call's end, t=231)
+    assert "### Build 3 (run B, no turn followed)" in md
+    assert "| Stage 1 · unfinished build | 31 | 1 | 30 |" in md
+    # turns are numbered within their run, and each sees only its own calls
+    assert "| 1 | 10 | 0 | 0 |" in md and "| 2 | 10 | 0 | 0 |" in md
+
+
+def test_every_row_carries_the_run_id(log):
+    timing.record("mark", label="x")
+    assert _rows(log)[0]["run"] == timing.RUN

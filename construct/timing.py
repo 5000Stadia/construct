@@ -16,6 +16,10 @@ and every turn appends one JSON line there:
   the turn's own section timings (`TurnTrace.timings`).
 - `{"ev": "mark", "label": ...}`: any other point worth a timestamp.
 
+Every row carries `run` (one id per process), because the file is append-only and may
+hold many runs. Within a run, consecutive stage rows with no turn between them are one
+build: a build ends at the next turn, or, if it never reached one, at its run's last row.
+
 `scripts/timing_report.py` turns the log into the tables. Recording is best-effort and
 never raises into the caller: a timing line must never sink a build or a turn."""
 
@@ -34,6 +38,8 @@ ENV = "CONSTRUCT_TIMING_LOG"
 
 _lock = threading.Lock()
 _phase = ""  # the build stage or turn now running (process-wide; settle threads inherit it)
+#: One id per process, on every row: the log is append-only and may hold many runs.
+RUN = f"{os.getpid()}-{int(time.time())}"
 
 
 def enabled() -> bool:
@@ -54,7 +60,7 @@ def record(ev: str, **fields: Any) -> None:
     path = os.environ.get(ENV)
     if not path:
         return
-    row = {"ev": ev, "t": round(time.time(), 3), "phase": _phase,
+    row = {"ev": ev, "t": round(time.time(), 3), "run": RUN, "phase": _phase,
            "thread": threading.current_thread().name, **fields}
     try:
         line = json.dumps(row, default=str)

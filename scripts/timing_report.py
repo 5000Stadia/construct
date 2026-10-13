@@ -35,6 +35,31 @@ def _max_overlap(calls: list[dict]) -> int:
     return best
 
 
+def _builds(rows: list[dict]) -> list[tuple[str, dict, float]]:
+    """Each build as (run, {"stages": [...], "complete": bool}, end time), in log order."""
+    out: list[tuple[str, dict, float]] = []
+    by_run: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        by_run[r.get("run", "")].append(r)
+    for run, rs in by_run.items():
+        rs = sorted(rs, key=lambda r: r.get("t", 0))
+        last = max(max(r.get("t", 0), r.get("t1", 0)) for r in rs)
+        seg: dict | None = None
+        for r in rs:
+            ev = r.get("ev")
+            if ev == "stage":
+                if seg is None:
+                    seg = {"stages": [], "complete": False}
+                seg["stages"].append(r)
+            elif ev == "turn_start" and seg is not None:
+                seg["complete"] = True
+                out.append((run, seg, r["t"]))
+                seg = None
+        if seg is not None:
+            out.append((run, seg, last))
+    return sorted(out, key=lambda b: b[1]["stages"][0]["t"])
+
+
 def load(path: str) -> list[dict]:
     rows = []
     with open(path, encoding="utf-8") as fh:
@@ -51,9 +76,8 @@ def load(path: str) -> list[dict]:
 def report(rows: list[dict]) -> str:
     out: list[str] = []
     calls = [r for r in rows if r.get("ev") == "call"]
-    stages = [r for r in rows if r.get("ev") == "stage"]
-    turn_starts = {r["turn"]: r for r in rows if r.get("ev") == "turn_start"}
-    turn_ends = {r["turn"]: r for r in rows if r.get("ev") == "turn_end"}
+    turn_starts = {(r.get("run", ""), r["turn"]): r for r in rows if r.get("ev") == "turn_start"}
+    turn_ends = {(r.get("run", ""), r["turn"]): r for r in rows if r.get("ev") == "turn_end"}
     settles = [r for r in rows if r.get("ev") == "settle"]
     by_phase: dict[str, list[dict]] = defaultdict(list)
     for c in calls:
@@ -64,20 +88,23 @@ def report(rows: list[dict]) -> str:
     out.append(f"{len(calls)} model calls, {sum(c['s'] for c in calls):.0f} s of call time. "
                "Models: " + ", ".join(f"{t}={m}" for t, m in models) + "\n")
 
-    # 1. build stages
-    if stages:
-        build_end = min((r["t"] for r in turn_starts.values()), default=None)
-        if build_end is None:
-            build_end = max([c["t1"] for c in calls] + [stages[-1]["t"]])
+    # 1. build stages, per build. The log is append-only and may hold many runs (`run`,
+    # one per process). Within a run, consecutive stages with no turn between them are
+    # one build; it ends at the run's next turn, or at the run's last row if none came.
+    builds = _builds(rows)
+    if builds:
         out.append("## 1. Build stages\n")
+    for b, (run, segment, end) in enumerate(builds, 1):
+        out.append(f"### Build {b} (run {run}{'' if segment['complete'] else ', no turn followed'})\n")
         out.append("| Stage | Wall s | Calls | Call s | x parallel |")
         out.append("|---|---:|---:|---:|---:|")
-        total = 0.0
-        for i, st in enumerate(stages):
-            end = stages[i + 1]["t"] if i + 1 < len(stages) else build_end
-            wall = max(0.0, end - st["t"])
+        st_rows, total = segment["stages"], 0.0
+        for i, st in enumerate(st_rows):
+            stop = st_rows[i + 1]["t"] if i + 1 < len(st_rows) else end
+            wall = max(0.0, stop - st["t"])
             total += wall
-            inside = [c for c in calls if st["t"] <= c["t0"] < end]
+            inside = [c for c in calls
+                      if c.get("run", "") == run and st["t"] <= c["t0"] < stop]
             cs = sum(c["s"] for c in inside)
             par = f"{cs / wall:.1f}" if wall > 0 and inside else "-"
             out.append(f"| {st['label'][:70]} | {wall:.0f} | {len(inside)} | {cs:.0f} | {par} |")
@@ -105,22 +132,28 @@ def report(rows: list[dict]) -> str:
         out.append("## 3. Turns\n")
         out.append("| Turn | Wall s | Calls | Call s | x parallel | Slowest steps (s) | Settle after (s) |")
         out.append("|---:|---:|---:|---:|---:|---|---:|")
-        for n in sorted(turn_starts):
-            st, en = turn_starts[n], turn_ends.get(n)
+        order = sorted(turn_starts, key=lambda k: turn_starts[k]["t"])
+        for i, key in enumerate(order):
+            run, n = key
+            st, en = turn_starts[key], turn_ends.get(key)
             if en is None:
                 continue
             wall = en["t"] - st["t"]
-            inside = [c for c in calls if st["t"] <= c["t0"] < en["t"]]
+            inside = [c for c in calls
+                      if c.get("run", "") == run and st["t"] <= c["t0"] < en["t"]]
             cs = sum(c["s"] for c in inside)
             agg: dict[str, float] = defaultdict(float)
             for c in inside:
                 agg[c.get("step", "?")] += c["s"]
             top = ", ".join(f"{k} {v:.0f}" for k, v in sorted(agg.items(), key=lambda kv: -kv[1])[:4])
-            nxt = turn_starts.get(n + 1, {}).get("t", float("inf"))
-            sett = sum(r["s"] for r in settles if en["t"] <= r["t0"] < nxt)
+            later = [turn_starts[k]["t"] for k in order[i + 1:] if k[0] == run]
+            nxt = later[0] if later else float("inf")
+            sett = sum(r["s"] for r in settles
+                       if r.get("run", "") == run and en["t"] <= r["t0"] < nxt)
             par = f"{cs / wall:.1f}" if wall > 0 and inside else "-"
             flag = "" if en.get("ok", True) else " (failed)"
-            out.append(f"| {n}{flag} | {wall:.0f} | {len(inside)} | {cs:.0f} | {par} | {top} | {sett:.0f} |")
+            label = f"{n}" if len({k[0] for k in order}) == 1 else f"{run} / {n}"
+            out.append(f"| {label}{flag} | {wall:.0f} | {len(inside)} | {cs:.0f} | {par} | {top} | {sett:.0f} |")
         out.append("")
 
     # 4. concurrency
