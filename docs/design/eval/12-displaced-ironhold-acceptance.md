@@ -186,7 +186,7 @@ What run 7 showed:
 1. **Movement works when the arc needs it.** From turn 10 the player walked: under the laundry arch to the lower yard and river gate, onto the winch roof, down the stair into the river, along under the pier, and out at a drain mouth the world grew for them. The escape win landed there. This is the run 6 question answered by play: with an escape goal that the arc does not grant early, the player moves.
 2. **The hero is split again, and now held apart.** At build, pattern-buffer's identity reconcile (stage 2) wrote `a:1166`, `person:elias distinct_from person:elias_venn`. `person:elias` carries 70 rows of the hero (aliases "elias", "venn", "the condemned cartwright"; the wrist brand; their own cell, `place:elias_cell`), while the arc and play use `person:elias_venn` (19 rows). The vouch cannot fold a pair the engine holds apart, and IDENTITY-CONFIRM treats an engine-decided pair as decided, so no check stopped it. It did not show in play because `person:elias` sat in another cell and never entered a scene. The same pass held three Quill ids apart (`person:quill`, `person:silas_quill`, `person:warrant_clerk_quill`). This is the run 5 split, now hidden behind a keep-apart row. pattern-buffer traced it (mbaab95): the engine wrote nothing; construct's own homonym pass in the reconcile read the differing role words in `kind` as two kinds and rejected the pair. **Fixed** (`fc6c15d`, cr GREEN after one RED): the reconcile holds apart only pairs in two id namespaces. A live same-name pair in one namespace with differing kinds may be role noise or two people sharing a name, and nothing in the build tells them apart, so the identity confirm never merges one. If it touches a load-bearing id the build stops; otherwise the pair is held apart. This seed's world would now fail its build instead of building split.
 3. **A turn's ingest refused a declaration its own turn had made.** Turn 4's player-input ingest declared `keeps` set-valued (`a:2597`) and wrote two rows. A later ingest in the same turn was refused whole: "cannot declare semantics for attribute 'keeps' after folded data already exists (a:2598)". pattern-buffer found the cause (mbaab95): the refused batch carried an explicit `attr:keeps` declaration item, which the engine refuses once the attribute holds data. No host code builds such an item on purpose, and the producer is not yet found. **Mitigated** (`fc6c15d`): the turn's ingest wrapper drops `attr:*` items, logs each with its contents, and marks it on the trace (`dropped_declarations`, in the mechanics log), so the next run names the producer.
-4. **A question became fact.** The same turn-4 line asked "Quill, who keeps the wash tally ink and knife?" and the player-input ingest wrote `Quill keeps obj:wash_tally_ink` and `Quill keeps obj:knife` to canon. The question-only skip did not apply because the line mixed a question with a statement.
+4. **A question became fact.** The same turn-4 line asked "Quill, who keeps the wash tally ink and knife?" and the player-input ingest wrote `Quill keeps obj:wash_tally_ink` and `Quill keeps obj:knife` to canon. The question-only skip did not apply because the line mixed a question with a statement. **Fixed** (merge after `a35d9cd`, cr GREEN after one RED for '?!'): the player-input extraction sees only the line's statements; a question-only line extracts nothing.
 5. **Object permanence broke in chapter 2** (fiction quality, recorded): the packet's vellum, narrated in hand at ch2 t2, was "no vellum to unroll" at t3 and back at t4; the ash-blue thread, pinched free in turn 11's prose and "still with" the player at the chapter 1 close, was by canon still at the laundry sack; one lost boot became bare feet at the seam. Each is prose that canon never held, the first-mention-permanence class.
 
 R23 timings, 22 instrumented turns: whole turn in chapter 1 128–291 s, median 152 s. Player-felt (generator + narrate) min 63, median 99, p90 163, max 195 s. Salience window median 30 s, p90 100 s, max 112 s (npc_action 5–7 s; the load average was near 11). Settle tail median 56 s, max 128 s (post_extract median 30 s, promote median 24 s). Narrate median 28 s. Classify 5–19 s. Player-input ingest 15–51 s, median 20 s.
@@ -218,6 +218,33 @@ Fix shapes (not built). Run 7 needed both:
 - A named thing or place that the player frame puts elsewhere gets a binding NAMED BUT NOT HERE line.
 - Residual risk: a fresh extraction could still place a distant vista in the opening scene.
 - Not yet proven in play. That needs a run 8, which waits for its own say-so.
+
+## Run 8 — NOT PLAYED: the build stopped itself on four same-name pairs
+
+Opened by the monitor (n715eb5, 2026-10-13, under Kabe's run-7 word). It ran on local main `bb59ab3`, so it carried the criterion-5 fix (`66e9774`) but not the question fix: cr was RED on that branch at the time, and the monitor's word was to run on main as it was. Codex subscription only; about 10 minutes, all build.
+
+The build reached stage 4 and stopped: "BUILD NOT VIABLE: a key character came out as two different people". IDENTITY-CONFIRM found four load-bearing same-name pairs, each in the `person:` namespace. The engine's audit had auto-declined each as `kind_conflict` ("same name, kinds differ"):
+
+| Pair | Same name |
+|---|---|
+| `person:elias` ~ `person:elias_venn` | elias (the hero) |
+| `person:breck` ~ `person:tomas_breck` | breck, tomas breck |
+| `person:father_oren_vale` ~ `person:father_vale` | father vale, vale |
+| `person:nessa` ~ `person:nessa_reed` | nessa |
+
+**Every pair is one person.** The build's own generated source names each fully in some places and partly in others: "Tomas Breck", "Clerk Tomas Breck" and "Breck"; "Father Oren Vale" and "Father Vale".
+
+So this is the run 7 fix doing exactly what it promised: this seed's world now fails its build instead of building split. It is also its cost. Nothing in the build tells role noise from two people sharing a name, so every pair like these stops the build, and a world with several named supporting characters will rarely build.
+
+The criterion-5 fix (`66e9774`) and the question fix are untested in play until a build gets through.
+
+### What it needs (not built; design, then review)
+
+The confirm stage needs evidence that tells a name fragment of one person from two people sharing a name. Candidate sources:
+- **The build's own source text.** A short name that only one full name in the source contains is that person's fragment ("Breck" inside "Tomas Breck"). Lysa beside both "Lysa Marr" and "Lysa Fen" is ambiguous and stays held apart.
+- **The engine's vouch.** Why does the engine's audit auto-decline same-namespace kind conflicts before its vouch can judge them? The kinds are extraction's role words ("condemned man" beside "person"). That is a question for pattern-buffer.
+
+No run 9 until one of these is designed, reviewed and built.
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 

@@ -52,6 +52,57 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
   - the atrium.
 - **The atrium's** one retry consumes `ViabilityError` like any build failure. The guest is shown the first of `exc.problems` in plain words, never the exception's text.
 
+## Role-noise confirm (R20 run 8; spec r1, for cr review, not built)
+
+**The failure.** Run 8's build stopped, by design, on four load-bearing same-name pairs in the `person:` namespace:
+- `elias` ~ `elias_venn`;
+- `breck` ~ `tomas_breck`;
+- `father_oren_vale` ~ `father_vale`;
+- `nessa` ~ `nessa_reed`.
+
+The engine's audit had declined each as `kind_conflict`. Each is one person: the build's own source names them fully in some places and partly in others ("Tomas Breck", "Clerk Tomas Breck", "Breck"). The kinds differ only by extraction's role words ("condemned man" beside "person").
+
+Since the run 7 fix, the confirm stage cannot tell this from two people sharing a name, so it stops every such build.
+
+**pattern-buffer's read** (mdf2b11, from `identity.py` `_decline_context` and the porcelain):
+- `auto_declined` only says why the engine's automatic gate did not merge the pair. It never blocks a host merge; only containment and `distinct_from` do.
+- `porcelain.proposals()` carries the structured decline context. The decline codes are checked in order, so a pair that reaches `kind_conflict` has already passed every fact-level test: no containment, no correlation, no distinct group, no relating edge, no durable contradiction, and a shared name anchor.
+- Name containment is lexical, and lexical evidence belongs to the host.
+- pattern-buffer named three tests for a host confirm (below) and asked that the rule go in the evidence string.
+
+**The rule.** In `_stage_confirm_identity`, a role-kind pair that touches a load-bearing closure is **merged** with `porcelain.merge(a, b, evidence)`, instead of stopping the build, when all of these hold:
+
+1. **Decline code.** The pair's `auto_decline` code in `porcelain.proposals()` is exactly `kind_conflict`, not any earlier code.
+2. **Both are people.** Both folded kinds are person-type: the pair is in the `person:` namespace, and neither kind is a place, object or other non-person type word. A list of non-person type words is checked against each kind; anything else counts as a role word.
+3. **One owner in the source.** Let S be the shorter name and F the longer. S occurs in the build's own source text, whole-word and case-insensitive. Every full name in the source that contains S's words is F; no other full name there contains them. "Breck" is contained only in "Tomas Breck", so it passes. "Lysa" beside both "Lysa Marr" and "Lysa Fen" fails and stays apart.
+
+The **evidence string** records the rule and its facts, for example: `role-noise confirm: 'breck' is contained only in 'tomas breck' in the build source; auto_decline=kind_conflict; kinds 'clerk' / 'person'`.
+
+The representative is the id the arc or the cast uses, so the hero keeps `person:elias_venn`. This is the vouch's existing load-bearing-survivor rule.
+
+**When the rule does not apply.** Nothing changes:
+- a pair that fails any test still stops the build when it is load-bearing, and is held apart when it is not;
+- the interview path has no source text, so it never merges by this rule.
+
+**Source text and "contains".** The ingest path passes its prose into `_finalize_scenario(..., source_text=...)`, and from there to the confirm stage.
+- **The names.** S and F are the two entities' own names (their `name` or `alias` rows, else their id words).
+- **Contains.** A name *contains* S when S's words appear in it in order, not necessarily next to each other. "Father Oren Vale" contains "Father Vale", "Tomas Breck" contains "Breck", and "Elias Venn" contains "Elias".
+- **The source's full names.** These are the runs of 2–4 capitalised words in the source; a run's first word may be a title ("Clerk", "Father").
+- **The test.** S must occur in the source. Then the distinct full names there that contain S, with any title stripped, must reduce to exactly F.
+
+**Telemetry.** Each merge logs at INFO with its evidence string and is listed in the build's stage output ("identity: merged N same-person pair(s) by name in source").
+
+**Tests (real engine):**
+- the four run 8 pairs merge, given source text naming each fully and partly;
+- Lysa with both "Lysa Marr" and "Lysa Fen" in the source stops;
+- a pair whose code is not `kind_conflict` stops;
+- a person/place kind pair is never merged;
+- no source text (interview path): stops as today;
+- the evidence string is recorded on the merge;
+- the representative is the arc's id.
+
+**Not in scope (recorded follow-up).** pattern-buffer's root-cause point: `kind` should be a closed type set (person, place, object...), with the role in its own attribute. Then these pairs fold as same-kind, and the engine's own gate merges the ones that share a distinctive name. That changes extraction for every world, so it gets its own item.
+
 ## Not in scope
 
 - **Continuing the fragment's knowledge** (R36 `continue_frame`) into the hero's frame. Beat gates read `knows:<hero>` with the exact scope. Widening it would let pre-play telling-scene knowledge satisfy beats before play begins. So no beat read widens, and whether any read should is a separate decision.
