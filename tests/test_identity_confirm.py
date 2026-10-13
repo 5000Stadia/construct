@@ -317,7 +317,16 @@ def _holder_world(tmp_path, monkeypatch):
     w.porcelain.ingest_structured(_person(ECHO, "Ansel Brigg") + _person(HOLDER, "Brigg"),
                                   classify="rules")
     monkeypatch.setattr(game, "_fidelity_vouched_pairs", lambda groups, lb: [(HOLDER, ECHO)])
+    # the vouch's slot now belongs to the merge-gate adjudication (IDENTITY-CONFIRM r6):
+    # two fresh `same` answers on a source-backed request reach the same merge helper
+    from tests.test_identity_adjudication import gate
+    monkeypatch.setattr(w.porcelain, "merge_gate", gate("same", "same"), raising=False)
     return w
+
+
+def _adjudicate_holder(w):
+    game._stage_adjudicate_identity(w, _arc(), {HOLDER},
+                                    "Ansel Brigg came in from the yard. Brigg sat down.")
 
 
 @pytest.mark.parametrize("receipt", [
@@ -330,7 +339,7 @@ def test_a_bad_vouch_receipt_for_a_required_holder_stops_the_build(tmp_path, mon
     try:
         monkeypatch.setattr(w.porcelain, "merge", lambda *a, **k: receipt)
         with pytest.raises(game.IdentityUnresolvedError) as err:
-            game._stage_vouch_merges(w, _arc(), {HOLDER})
+            _adjudicate_holder(w)
         assert [(a, b) for a, b, _ in err.value.pairs] == [(HOLDER, ECHO)]
     finally:
         w.close()
@@ -343,7 +352,7 @@ def test_a_vouch_merge_that_raises_stops_the_build(tmp_path, monkeypatch):
             raise ValueError("representative not in either closure")
         monkeypatch.setattr(w.porcelain, "merge", _boom)
         with pytest.raises(game.IdentityUnresolvedError, match="ValueError"):
-            game._stage_vouch_merges(w, _arc(), {HOLDER})
+            _adjudicate_holder(w)
     finally:
         w.close()
 
@@ -352,32 +361,64 @@ def test_a_good_vouch_for_a_required_holder_keeps_the_holder(tmp_path, monkeypat
     # The control: the real engine merge, served as the holder, passes.
     w = _holder_world(tmp_path, monkeypatch)
     try:
-        game._stage_vouch_merges(w, _arc(), {HOLDER})
+        _adjudicate_holder(w)
         assert game._closure(w, HOLDER) == {HOLDER, ECHO}
     finally:
         w.close()
 
 
-def test_a_wrong_survivor_for_a_required_holder_stops_a_real_build(chdir_tmp, monkeypatch):
-    """End to end through the interview path's real finalize: the holder's vouched merge
-    comes back served as the fragment, so the build stops, the half-built world is removed,
-    and the caller gets one ViabilityError."""
+def _oracle_build(monkeypatch, verdicts, merge):
+    """A real interview-path build whose cast holds `person:rook`, with the adjudication's
+    candidate forced to (rook, rook_echo), source sentences supplied, a stub merge gate and
+    a recording `merge`. Returns the ordered log of gate calls and merges."""
     from patternbuffer.porcelain import Porcelain
 
-    from tests.test_interview import _InterviewStub
+    from tests.test_identity_adjudication import gate
+    log: list = []
+    stub = gate(*verdicts)
     monkeypatch.setattr(game, "_stage_author_cast",
                         lambda world, provider, arc, *a, **k: (arc, (), None, {"person:rook"}))
     monkeypatch.setattr(game, "_fidelity_vouched_pairs",
                         lambda groups, lb: [("person:rook", "person:rook_echo")])
+    monkeypatch.setattr(game, "_source_context",
+                        lambda world, ids, text: {e: [f"{e} was seen."] for e in ids})
+    monkeypatch.setattr(Porcelain, "merge_gate",
+                        lambda self, pairs, **k: (log.append("gate"), stub(pairs, **k))[1],
+                        raising=False)
     monkeypatch.setattr(Porcelain, "merge", lambda self, a, b, evidence, representative=None:
+                        (log.append(("merge", a, b, evidence)), merge)[1])
+    return log
+
+
+def test_a_wrong_survivor_for_a_required_holder_stops_a_real_build(chdir_tmp, monkeypatch):
+    """The ordering oracle (cr on IDENTITY-CONFIRM r5), end to end through the interview
+    path's real finalize: the gate is asked exactly twice BEFORE any merge; the merge then
+    comes back served as the fragment, so the build stops, the half-built world is removed,
+    and the caller gets one ViabilityError."""
+    from tests.test_interview import _InterviewStub
+    log = _oracle_build(monkeypatch, ("same", "same"),
                         {"outcome": "merged", "canonical_id": "person:rook_echo"})
     with pytest.raises(game.ViabilityError) as err:
         game.create_scenario_from_interview("harbor", "a drowned harbor town", _InterviewStub())
+    assert log[:2] == ["gate", "gate"] and log[2][:3] == ("merge", "person:rook",
+                                                          "person:rook_echo")
+    assert log[2][3].startswith("merge gate x2 ")
     assert err.value.problems[0] == game.IdentityUnresolvedError.plain
     assert "person:rook ~ person:rook_echo" in err.value.problems[1]
     assert not game.scenario_path("harbor").exists()
     assert not game.scenario_path("harbor").with_suffix(".meta.json").exists()
     assert (chdir_tmp / "generated" / "harbor.brief.md").is_file()
+
+
+def test_an_unsure_gate_never_reaches_merge_in_a_real_build(chdir_tmp, monkeypatch):
+    from tests.test_interview import _InterviewStub
+    log = _oracle_build(monkeypatch, ("same", "unsure"),
+                        {"outcome": "merged", "canonical_id": "person:rook"})
+    try:
+        game.create_scenario_from_interview("harbor", "a drowned harbor town", _InterviewStub())
+    except game.ViabilityError:
+        pass
+    assert log.count("gate") == 2 and not [x for x in log if x != "gate"]
 
 
 @pytest.mark.parametrize("stub", ["receipt", "raises"])

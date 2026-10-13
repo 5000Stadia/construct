@@ -8,6 +8,7 @@ pristine file over the slot. Two files, one copy operation.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -232,7 +233,9 @@ def _fidelity_vouched_pairs(name_collisions: list, load_bearing: set,
     return out
 
 
-def _vouch_merge(world: Any, keep: str, frag: str) -> str:
+def _vouch_merge(world: Any, keep: str, frag: str,
+                 evidence: str = "fidelity-repair: alias_not_specific coref folded into the "
+                                 "arc-load-bearing id (#56)") -> str:
     """Fold a fragment into a load-bearing id (#56), keeping `keep` as the closure's
     representative. The engine otherwise serves a closure under its FIRST-SEEN member, so
     a fragment seen before the protagonist would become the id the committed arc row reads
@@ -242,9 +245,7 @@ def _vouch_merge(world: Any, keep: str, frag: str) -> str:
     (IdentityUnresolvedError), because `keep` is load-bearing by construction and a wrong
     survivor would hide the split inside one closure. Returns the canonical id."""
     try:
-        mr = world.porcelain.merge(
-            keep, frag, evidence="fidelity-repair: alias_not_specific "
-            "coref folded into the arc-load-bearing id (#56)", representative=keep)
+        mr = world.porcelain.merge(keep, frag, evidence=evidence, representative=keep)
     except Exception as exc:  # noqa: BLE001 — an engine refusal leaves the pair split
         raise IdentityUnresolvedError(
             [(keep, frag, f"vouched merge raised {type(exc).__name__}: {exc}")]) from exc
@@ -945,33 +946,157 @@ def _stage_author_cast(world: Any, provider: Provider, arc: Arc, proposal: dict,
     return arc, cast_nodes, cast_proposal, _required_holders
 
 
-def _stage_vouch_merges(world: Any, arc: Arc, _required_holders: set) -> None:
-    """FIDELITY-REPAIR step 4 vouched merges. Pure move out of `_finalize_scenario_impl`."""
-    # FIDELITY-REPAIR step 4 (#56, Cx 480): vouched merge of same-name SAME-KIND
-    # true splits the safe tools declined for homonym-safety (alias_not_specific)
-    # — person:mara/person:mara_venn, person:lysa/person:lysa_fen. The host vouches
-    # ONLY when EXACTLY ONE id in the group is load-bearing (arc protagonist ∪
-    # REQUIRED-clue holder entity ids — populated only on cast acceptance); folds the other,
-    # non-load-bearing fragments INTO that id. Runs
-    # HERE — after cast authoring, BEFORE the arc_to_items write below — so the plot
-    # rows are written with the merged canonical id, and never after Stage-5's
-    # literal knows:<id> frame seeding (Cx 480 insertion-point ruling).
-    # Load-bearing = protagonist ∪ REQUIRED-clue holder ids only (Cx 486 — the
-    # entity surface of required pillars, NOT the pillar ids and NOT all cast
-    # nodes; optional/red-herring cast is a different safety claim).
-    _load_bearing = {arc.protagonist} | set(_required_holders)
-    # The vouch ALLOWLIST (Cx 482 #1): merge a same-kind fragment ONLY when the
-    # engine itself classified the exact pair as the homonym-safe alias residue —
-    # status "auto_declined" AND reason "alias_not_specific". An `unlinked` pair
-    # (also live) or any other/missing reason FAILS OPEN (never force-merged);
-    # merge() is host-authoritative past the soft heuristic, so the allowlist is
-    # the safety, not guarded_merge.
-    # Not fail-open (IDENTITY-CONFIRM, cr): every pair here touches a load-bearing id, so a
-    # refused or wrongly-served merge stops the build rather than shipping a split.
-    for _keep, _frag in _fidelity_vouched_pairs(
-            world.porcelain.fidelity_audit().get("name_collisions", []),
-            _load_bearing):
-        _vouch_merge(world, _keep, _frag)
+#: Source sentences per side handed to the merge gate: its own measured cap (pattern-buffer
+#: MERGE-GATE-VERB-V1, CONTEXT_SENTENCES) and per-sentence cut.
+_GATE_SENTENCES, _GATE_SENTENCE_CHARS = 2, 400
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])[\"'”’)\]]*\s+")
+
+
+def _id_labels(world: Any, entity: str) -> list[str]:
+    """The closure's canon names and aliases, lower-cased (the words a source names it by)."""
+    out: list[str] = []
+    for member in sorted(_closure(world, entity)):
+        try:
+            snap = world.porcelain.snapshot([member])
+        except Exception:  # noqa: BLE001 — an unreadable member names nothing
+            continue
+        for f in snap.get("facts", []) or []:
+            if f.get("entity") == member and f.get("attribute") in ("name", "alias"):
+                label = " ".join(str(f.get("value") or "").lower().split())
+                if len(label) >= 3 and label not in out:
+                    out.append(label)
+    return out
+
+
+def _source_context(world: Any, ids: list[str], source_text: str) -> dict[str, list[str]]:
+    """{id: sentences}: for each id, the build source's sentences naming it (any of its
+    names or aliases, whole word, case-insensitive), in source order, capped as the gate
+    caps them. Pre-filter input: the verb normalizes it again before the model call."""
+    sentences = [x.strip() for x in _SENTENCE_SPLIT.split(source_text or "") if x.strip()]
+    out: dict[str, list[str]] = {}
+    for entity in ids:
+        pats = [re.compile(rf"(?<!\w){re.escape(lbl)}(?!\w)", re.IGNORECASE)
+                for lbl in _id_labels(world, entity)]
+        hits = [x[:_GATE_SENTENCE_CHARS] for x in sentences if any(p.search(x) for p in pats)]
+        out[entity] = hits[:_GATE_SENTENCES]
+    return out
+
+
+def _gate_report_ok(report: Any, requested: list[list[str]]) -> bool:
+    """One merge_gate report is usable only if it is a fresh, uncached answer to exactly
+    this request: `cached` false, a call_id, `requested` echoed exactly, and `requested_as`
+    covering every request index exactly once across asked and not-asked entries."""
+    if not isinstance(report, dict) or report.get("cached") is not False:
+        return False
+    if not report.get("call_id") or report.get("requested") != requested:
+        return False
+    seen: list[int] = []
+    for entry in list(report.get("pairs") or []) + list(report.get("not_asked") or []):
+        seen += list(entry.get("requested_as") or [])
+    return sorted(seen) == list(range(len(requested)))
+
+
+def _gate_verdict(report: dict, index: int) -> str:
+    """The verdict a report gives request `index`: same / different / unsure, or "" when
+    it was not asked. A `same` inside a conflicting component counts as unsure."""
+    entry = next((e for e in report.get("pairs") or [] if index in (e.get("requested_as") or [])),
+                 None)
+    if entry is None:
+        return ""
+    verdict = str(entry.get("verdict") or "")
+    if verdict == "same":
+        pair = {entry.get("a"), entry.get("b")}
+        for comp in report.get("components") or []:
+            if pair <= set(comp.get("members") or []) and comp.get("status") != "would_merge":
+                return "unsure"
+    return verdict if verdict in ("same", "different", "unsure") else "unsure"
+
+
+def _adjudicable(world: Any, keep: str, frag: str, load_bearing: set) -> bool:
+    """IDENTITY-CONFIRM role-noise adjudication eligibility, re-read now: still two
+    closures, not held apart, exactly one load-bearing id across both closures, and the
+    exact pair still the engine's same-kind auto_declined/alias_not_specific residue."""
+    a_closure, b_closure = _closure(world, keep), _closure(world, frag)
+    if a_closure == b_closure or _held_apart(world, keep, frag):
+        return False
+    if len((a_closure | b_closure) & load_bearing) != 1:
+        return False
+    return (keep, frag) in _fidelity_vouched_pairs(
+        world.porcelain.fidelity_audit().get("name_collisions", []), load_bearing)
+
+
+def _stage_adjudicate_identity(world: Any, arc: Arc, _required_holders: set,
+                               source_text: str = "") -> None:
+    """IDENTITY-CONFIRM role-noise adjudication (spec r6, cr GREEN; R20 run 8). It replaces
+    the evidence-free vouch in its slot: a same-kind alias_not_specific pair with exactly one
+    load-bearing id is merged only when pattern-buffer's merge gate, asked twice afresh on
+    one frozen, source-backed request, answers `same` both times; held apart only on two
+    `different`s with a checked receipt. Anything else writes nothing, and the identity
+    confirm stage stops the build on it, as it would without this stage."""
+    load_bearing = {arc.protagonist} | set(_required_holders)
+    candidates = [(k, f) for k, f in _fidelity_vouched_pairs(
+        world.porcelain.fidelity_audit().get("name_collisions", []), load_bearing)
+        if _adjudicable(world, k, f, load_bearing)]
+    if not candidates:
+        return
+    gate = getattr(world.porcelain, "merge_gate", None)
+    if gate is None:
+        logger.warning("identity adjudication: the engine has no merge_gate; %d pair(s) left "
+                       "for the identity stop", len(candidates))
+        return
+    context = _source_context(world, sorted({e for pair in candidates for e in pair}),
+                              source_text)
+    candidates = [(k, f) for k, f in candidates if context.get(k) and context.get(f)]
+    if not candidates:
+        logger.info("identity adjudication: no source-backed pair; left for the identity stop")
+        return
+    requested = [sorted(pair) for pair in candidates]
+    frozen_context = {e: context[e] for pair in requested for e in pair}
+    digest = hashlib.sha256(json.dumps(
+        {"pairs": requested, "context": frozen_context}, sort_keys=True).encode()).hexdigest()[:12]
+    reports: list[dict] = []
+    for _ in range(2):
+        try:
+            report = gate([list(pair) for pair in requested], context=frozen_context)
+        except Exception as exc:  # noqa: BLE001 — no answer: the stop stands
+            logger.warning("identity adjudication: merge_gate raised %s: %s",
+                           type(exc).__name__, exc)
+            return
+        if not _gate_report_ok(report, requested):
+            logger.warning("identity adjudication: a merge_gate report did not answer the "
+                           "request %s; nothing written", digest)
+            return
+        reports.append(report)
+    if reports[0]["call_id"] == reports[1]["call_id"]:
+        logger.warning("identity adjudication: the two answers share a call_id; nothing written")
+        return
+    merged = apart = left = 0
+    for index, (keep, frag) in enumerate(candidates):
+        first, second = (_gate_verdict(r, index) for r in reports)
+        if first != second or first not in ("same", "different") \
+                or not _adjudicable(world, keep, frag, load_bearing):
+            left += 1
+            continue
+        reasons = " | ".join(str(next((e.get("reason") for e in r.get("pairs") or []
+                                       if index in (e.get("requested_as") or [])), ""))
+                             for r in reports)
+        if first == "same":
+            _vouch_merge(world, keep, frag,
+                         evidence=f"merge gate x2 {digest}: {reasons}")  # a bad receipt stops
+            merged += 1
+            continue
+        try:
+            outcome = world.porcelain.reject(keep, frag).get("outcome")
+        except Exception as exc:  # noqa: BLE001 — not held apart: the stop stands
+            outcome = f"{type(exc).__name__}: {exc}"
+        if outcome in ("rejected", "noop_already_distinct") and _held_apart(world, keep, frag):
+            apart += 1
+        else:
+            logger.warning("identity adjudication: reject %s / %s gave %r; left open",
+                           keep, frag, outcome)
+            left += 1
+    logger.info("identity: adjudicated %d pair(s): %d merged, %d held apart, %d left open "
+                "(request %s)", len(candidates), merged, apart, left, digest)
 
 
 class BuildIdentityError(RuntimeError):
@@ -1544,7 +1669,7 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
                             game_types: list | None = None,
                             source_step: float | None = None,
                             laws: list | None = None,
-                            reality_register: str = "") -> dict:
+                            reality_register: str = "", source_text: str = "") -> dict:
     """Shared session-zero tail (both creation paths): once canon is
     established, author the hidden arc over it (lint-gated), seed
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION.
@@ -1570,7 +1695,9 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
     arc, cast_nodes, cast_proposal, _required_holders = _stage_author_cast(
         world, provider, arc, proposal, digest, people, known_ids, resolved_game_types,
         _laws_block)
-    _stage_vouch_merges(world, arc, _required_holders)
+    # IDENTITY-CONFIRM role-noise adjudication (spec r6) takes the evidence-free vouch's slot:
+    # one owner for the same-kind alias_not_specific load-bearing residue.
+    _stage_adjudicate_identity(world, arc, _required_holders, source_text)
     _stage_confirm_identity(world, arc, _required_holders)
     _stage_commit_arc(world, arc)
     seeded = _stage_seed_knowledge(world, provider, on_stage, arc, people, digest, cast_nodes,
@@ -1696,7 +1823,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
                                   on_stage, win_direction=win_direction,
                                   play_as=play_as, game_types=game_types,
                                   source_step=SOURCE_STEP,
-                                  laws=laws, reality_register=reality_register)
+                                  laws=laws, reality_register=reality_register,
+                                  source_text=text)
     except BaseException as exc:
         world.close()
         spath.unlink(missing_ok=True)
