@@ -29,6 +29,8 @@ _MAX_HOPS = 4
 #: Labels shorter than this never match ("it", "ox" would fire on everything).
 _MIN_LABEL = 3
 _LABEL_ATTRS = ("name", "alias")
+#: Kinds too generic to be what the player called a thing.
+_GENERIC_KINDS = {"object", "thing", "item", "feature", "container", "entity", "proposition"}
 _CONTAINMENT = ("in", "part_of")
 
 
@@ -59,18 +61,33 @@ def _known_path(world: Any, entity: str, frame: str, as_of: float | None) -> lis
     return path
 
 
-def _labels(world: Any, frame: str, as_of: float | None, protagonist: str) -> list[tuple[str, str]]:
-    """(entity, label) for every player-frame name/alias that could match a line:
-    no people (they keep CALLED FOR SOMEONE NOT HERE), no short labels, no deixis."""
-    out: list[tuple[str, str]] = []
-    for attr in _LABEL_ATTRS:
+def _labels(world: Any, frame: str, as_of: float | None, protagonist: str) -> dict[str, str]:
+    """label (lower-cased) -> the one entity it names, from the player frame: names,
+    aliases, a non-generic kind, and the id's own words ("torn laundry sack" and its head
+    noun "sack" for `obj:torn_laundry_sack`; prose-read objects often carry no name row).
+    People keep CALLED FOR SOMEONE NOT HERE and places are movement's, so neither is here.
+    A label that names more than one entity names none: an ambiguous word asserts nothing."""
+    owners: dict[str, set[str]] = {}
+
+    def _add(label: str, ent: str) -> None:
+        label = " ".join(label.lower().split())
+        if len(label) >= _MIN_LABEL and not is_deixis(label):
+            owners.setdefault(label, set()).add(ent)
+
+    for attr in _LABEL_ATTRS + ("kind", "in"):
         for row in frame_facts(world, frame, attribute=attr, as_of=as_of):
-            ent, label = str(row.entity), str(row.value or "").strip()
-            if (ent.startswith("person:") or ent == protagonist
-                    or len(label) < _MIN_LABEL or is_deixis(label)):
+            ent = str(row.entity)
+            if ent.startswith(("person:", "place:")) or ent == protagonist or ":" not in ent:
                 continue
-            out.append((ent, label))
-    return out
+            if attr in _LABEL_ATTRS:
+                _add(str(row.value or ""), ent)
+            elif attr == "kind" and str(row.value or "").lower() not in _GENERIC_KINDS:
+                _add(str(row.value or ""), ent)
+            words = human_name_typed_id(ent).split()
+            if words:
+                _add(" ".join(words), ent)
+                _add(words[-1], ent)
+    return {label: next(iter(ents)) for label, ents in owners.items() if len(ents) == 1}
 
 
 def named_elsewhere(world: Any, *, player_frame: str, player_input: str, protagonist: str,
@@ -92,7 +109,7 @@ def named_elsewhere(world: Any, *, player_frame: str, player_input: str, protago
     here = {scene, protagonist, *map(str, scene_features)}
     above = set(map(str, ancestors))
     hits: list[tuple[int, str, str]] = []
-    for ent, label in _labels(world, player_frame, as_of, protagonist):
+    for label, ent in _labels(world, player_frame, as_of, protagonist).items():
         m = re.search(rf"(?<!\w){re.escape(label)}(?!\w)", player_input, re.IGNORECASE)
         if m:
             hits.append((m.start(), ent, label))

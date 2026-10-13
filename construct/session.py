@@ -262,6 +262,11 @@ class Session:
         # JOINED defensively at the START of the next turn so a back-to-back message can
         # never read canon before the prior turn finished writing it. None = nothing pending.
         self._pending_settle: Any = None
+        # OPENING-SETTLE (Part B): the cold open is rendered once per session and its prose
+        # read into canon once; later calls return the cached text and settle nothing.
+        self._opening_cache: tuple[str, str] | None = None
+        self._opening_settle_scheduled = False
+        self.opening_trace: TurnTrace | None = None  # the opening settle's in-memory trace
 
     @classmethod
     def open(cls, scenario: str, player_id: str | None = None,
@@ -550,6 +555,8 @@ class Session:
         THEMATIC tone hint, but is never shown to the player as a crawl. Starts the scene-image
         render UP FRONT so it generates while the (slow) narration is composed. NO forced
         'aim'/objective banner — the call to action arises in the fiction (founder)."""
+        if self._opening_cache is not None:
+            return self._opening_cache  # rendered once: no second render, no second settle
         title = self.title
         intro = (self._meta.get("intro") or "").strip()  # tone hint for the scene render ONLY
         # SCENE-IMAGERY: furnish + START the render now (furnish otherwise runs only
@@ -561,7 +568,30 @@ class Session:
             who = self._display_name(self._arc.protagonist)
             where = self._display_name(self.location())
             scene = f"You are {who}" + (f", at {where}." if where else ".")
+        self._opening_cache = (title, scene)
+        self._schedule_opening_settle(scene)
         return title, scene
+
+    def _schedule_opening_settle(self, prose: str) -> None:
+        """Queue the opening prose's fact settle in the deferred-settle slot (OPENING-SETTLE
+        Part B), exactly once per session: the flag is set when it is SCHEDULED. The
+        transport flushes it post-send like a turn's settle, and `turn()` joins it before
+        turn 1 reads anything. A settle already pending runs first, so none is lost."""
+        if self._opening_settle_scheduled:
+            return
+        self._opening_settle_scheduled = True
+        self._flush_settle()
+        from construct.turnloop import settle_opening
+        turn = max(next_turn_number(self._world) - 1, 0)
+        horizon = self._horizon()
+        scope = self._scope
+
+        def _settle() -> None:
+            from construct.arc.executor import set_entry_epoch
+            set_entry_epoch(self._entry_epoch)
+            self.opening_trace = settle_opening(self._world, self._arc, prose, turn=turn,
+                                                scope=scope, horizon=horizon)
+        self._pending_settle = _settle
 
     def opening(self) -> str:
         """The cold open as ONE string (CLI / non-image transports / tests): framing +

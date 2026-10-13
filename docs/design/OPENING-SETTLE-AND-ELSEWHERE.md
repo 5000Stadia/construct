@@ -1,6 +1,6 @@
 # The opening's settle and the "not here" line (R20 criterion 5)
 
-Status: **spec r3, for cr review. Not built.** r2 was RED on one point: "here" was defined by shared ancestry, and r3 makes it directional. r1 was RED (cr, <1c53e718>). There were two corrections:
+Status: **spec r3, cr GREEN; built on `fix/opening-settle-elsewhere`, for code review.** r2 was RED on one point: "here" was defined by shared ancestry, and r3 makes it directional. r1 was RED (cr, <1c53e718>). There were two corrections:
 1. Part A's "not here" must be decided from the player frame alone.
 2. Part B's settle must run exactly once and leave no hidden-turn artifacts.
 
@@ -77,6 +77,20 @@ Its diagnostics are an in-memory opening trace on the session, plus logs.
 **The risk, and what the test does and does not cover.** The extractor might place a distant vista in the opening scene, putting the hearth `in` the cell. That would make the failure worse. A recorded-extraction replay (the run 7 opening's rows, through a stub provider) proves that the pipeline keeps a correct payload correct: the raw rows say warrant room, and the promoted rows preserve it. **It cannot stop a fresh model extraction from asserting the hearth in the cell.** That residual risk stands. Removing it would need a separate extraction or placement policy, which is out of scope here; the next probe run's opening rows are where it would show.
 
 **Fail-open.** If extraction fails, the opening stays shown, a warning is logged, the failure is recorded on the in-memory opening trace, and turn 1 proceeds as today.
+
+## Found while building (after the r3 GREEN; for the code review)
+
+1. **The labels come from one bounded player-frame read, not from `player_snap`.** `player_snap` covers only the arc's scope. A thing the opening or play grew (the hearth) is never in it, so a `player_snap`-only Part A could not fire in run 7. The read is still the player frame only (`frame_facts` on `knows:<protagonist>`), so the secrecy rule is unchanged.
+2. **A prose-read object matches by its own words.** In run 7 the sack carried no name or alias, only `kind "object"`, and the player said "the sack". So the labels are:
+   - names and aliases;
+   - a non-generic kind;
+   - the id's own words (`obj:torn_laundry_sack` gives "torn laundry sack", and its head noun "sack").
+
+   **A label that names more than one entity names none**, so an ambiguous word asserts nothing.
+3. **Places are left out as well as people.** Naming a place is movement's business ("take me to the warrant room").
+4. **The carried case is here.** The here-set includes the protagonist, so a thing in the player's hands is never "not here".
+5. **The place's display name is player-frame too.** It is the player-frame `name`, else the id's own words, never canon's name.
+6. **Part B's turn stamp.** `settle_opening` stamps positional rows at the last turn already played: 0 at a fresh start, later for a resumed session's re-entry opening. The session's existing deferred-settle slot carries it, so the transport's post-send flush runs it and `turn()` joins it.
 
 ## Tests
 

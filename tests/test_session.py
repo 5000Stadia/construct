@@ -1154,3 +1154,45 @@ def test_declared_memory_sees_a_pre_play_row(scenario):
          "valid_from": -11.0}])
     assert _existing_value(s._world, "person:rival", "signed", "canon") == "the old treaty"
     s.close()
+
+
+def test_opening_renders_and_settles_exactly_once(scenario, monkeypatch):
+    # OPENING-SETTLE Part B (cr r1 P1): opening()/opening_parts() may be called more than
+    # once; the render and the settle of its prose happen once.
+    import construct.cohorts as cohorts_mod
+    import construct.turnloop as turnloop_mod
+    renders, settles = [], []
+    monkeypatch.setattr(cohorts_mod, "open_scene",
+                        lambda *a, **k: renders.append(1) or "You stand in the study.")
+    monkeypatch.setattr(turnloop_mod, "settle_opening",
+                        lambda world, arc, prose, **kw: settles.append(prose))
+    s = Session.open(scenario, player_id="u1", provider=_provider())
+    first = s.opening()
+    assert s.opening() == first and s.opening_parts()[1] in first
+    s.flush_settle()
+    s.flush_settle()
+    assert len(renders) == 1
+    assert len(settles) == 1 and "You stand in the study." in settles[0]
+    s.close()
+
+
+def test_turn_one_joins_the_opening_settle_before_it_reads(scenario, monkeypatch):
+    import construct.cohorts as cohorts_mod
+    import construct.session as session_mod
+    import construct.turnloop as turnloop_mod
+    order = []
+    monkeypatch.setattr(cohorts_mod, "open_scene", lambda *a, **k: "You stand in the study.")
+    monkeypatch.setattr(turnloop_mod, "settle_opening",
+                        lambda *a, **kw: order.append("opening settle"))
+    real = session_mod.run_turn
+
+    def _spy(*a, **kw):
+        order.append("turn 1")
+        return real(*a, **kw)
+
+    monkeypatch.setattr(session_mod, "run_turn", _spy)
+    s = Session.open(scenario, player_id="u1", provider=_provider())
+    s.opening()                       # the transport has not flushed: turn() must join it
+    s.turn("I look around the study.")
+    assert order[:2] == ["opening settle", "turn 1"]
+    s.close()

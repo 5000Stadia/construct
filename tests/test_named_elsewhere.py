@@ -120,3 +120,28 @@ def test_cycle_and_hop_cap_terminate(w):
             ("obj:c4", "in", "place:warrant_room")]
     _ingest(w, deep, K)
     assert _ask(w, "The box and the pin.") == []
+
+
+def test_a_prose_read_object_matches_by_its_own_words(w):
+    # run 7: obj:torn_laundry_sack carried no name or alias row; the player said "the sack"
+    _ingest(w, [("obj:torn_laundry_sack", "kind", "object"),
+                ("obj:torn_laundry_sack", "in", "place:warrant_room")], K)
+    assert _ask(w, "Let me see the sack.") == [
+        ("obj:torn_laundry_sack", "sack", "the warrant room")]
+
+
+def test_an_ambiguous_word_asserts_nothing(w):
+    _ingest(w, [("obj:torn_sack", "in", "place:warrant_room"),
+                ("obj:grain_sack", "in", "place:warrant_room")], K)
+    assert _ask(w, "Let me see the sack.") == []
+    assert _ask(w, "Let me see the grain sack.") == [
+        ("obj:grain_sack", "grain sack", "the warrant room")]
+
+
+def test_places_are_left_to_movement(w):
+    assert _ask(w, "Take me to the warrant room.") == []
+
+
+def test_a_generic_kind_is_not_a_label(w):
+    _ingest(w, [("obj:x1", "kind", "object"), ("obj:x1", "in", "place:warrant_room")], K)
+    assert _ask(w, "Is there an object here?") == []
