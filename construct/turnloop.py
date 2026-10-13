@@ -5220,7 +5220,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     # office) so a return home doesn't mint a duplicate (founder cohesion test).
                     # SAME MOVEMENT GATES AS THE OTHER TRAVEL PATHS: route check, then
                     # deliberation, then commit (a blocked way is never walked).
-                    _gated_move_commit(_known, moves_to)
+                    _gated_move_commit(_known, moves_to,
+                                       carry=(_unplaced_obj,) if _unplaced_obj else ())
                 elif _known == pre_scene:
                     trace.movement_status = MovementStatus.CLEAR  # naming the current place → already here
                     trace.same_place = True          # Cx 445: no time charge for a no-op

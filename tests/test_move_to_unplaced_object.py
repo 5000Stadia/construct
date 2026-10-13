@@ -33,7 +33,7 @@ def _obj(oid, name, kind="table", where=None):
     return rows
 
 
-def _turn(world, line, moves_to, *answers, within=..., turn=2):
+def _turn(world, line, moves_to, *answers, within=..., turn=2, scope_extra=()):
     arc = make_arc()
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
@@ -41,7 +41,8 @@ def _turn(world, line, moves_to, *answers, within=..., turn=2):
     if within is not ...:
         verdict["within_scene"] = within
     provider = StubProvider([verdict, *answers, {"prose": "You go."}])
-    r = run_turn(world, arc, provider, line, turn=turn, scope=[PLAYER, "place:study"])
+    r = run_turn(world, arc, provider, line, turn=turn,
+                 scope=[PLAYER, "place:study", *scope_extra])
     return r, provider
 
 
@@ -155,6 +156,17 @@ def test_existing_place_bind_carries_the_object(world):
                  {"verdict": "existing", "match": "place:quay"}, within=False)
     assert _where(world, PLAYER) == "place:quay"
     assert _where(world, "obj:gate_table") == "place:quay"
+
+
+def test_known_place_token_reuse_carries_the_object(world):
+    """cr RED on 119fc0a: the phrase resolves exactly to the unlocated object, and a
+    different known place shares a token, so known-place reuse wins before the semantic
+    bind. Both the player and the object end at the reused place."""
+    _ingest(world, _place("place:gate", "the gate") + _obj("obj:gate_table", "gate table"))
+    r, _ = _turn(world, "I go out to the gate table.", "gate table", within=False,
+                 scope_extra=["place:gate"])
+    assert _where(world, PLAYER) == "place:gate"
+    assert _where(world, "obj:gate_table") == "place:gate"
 
 
 def test_blocked_route_moves_neither_player_nor_object(world, monkeypatch):
