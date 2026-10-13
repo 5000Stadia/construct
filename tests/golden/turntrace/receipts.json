@@ -823,7 +823,7 @@
   "drift": [],
   "dropped": "",
   "dropped_cohorts": [
-   "post_extract (unscripted model call: 'Extract world-state assertions from this narrative passage.\\nReturn triples (enti')"
+   "player_ingest (questions not extracted)"
   ],
   "dropped_declarations": [],
   "events_fired": [],
