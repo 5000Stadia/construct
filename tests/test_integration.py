@@ -5793,6 +5793,50 @@ def test_mid_sentence_title_word_is_never_an_address(world):
     assert "SPOKEN TO BY TITLE" not in _np
 
 
+def _named_sack_turn(world, sack_rows_player_frame):
+    """A turn where the player names a sack the canon keeps in the next room."""
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _chief_and_witness(world, chief_at="place:office")
+    world.porcelain.ingest_structured([
+        {"entity": "place:office", "attribute": "name", "value": "the office"},
+        {"entity": "obj:sack", "attribute": "alias", "value": "sack"},
+        {"entity": "obj:sack", "attribute": "in", "value": "place:office"},
+    ], frame="canon", classify="rules")
+    if sack_rows_player_frame:
+        world.porcelain.ingest_structured([
+            {"entity": "place:office", "attribute": "name", "value": "the office"},
+            {"entity": "obj:sack", "attribute": "alias", "value": "sack"},
+            {"entity": "obj:sack", "attribute": "in", "value": "place:office"},
+        ], frame=PLAYER_FRAME, classify="rules")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "The witness glances toward the office door."},
+    ])
+    result = run_turn(world, arc, provider, "Let me see the sack.", turn=2, cast=cast,
+                      scope=["person:witness", "person:chief", PLAYER, "place:study"])
+    return result, _narrate_prompt(provider)
+
+
+def test_named_thing_known_elsewhere_gets_a_not_here_line(world):
+    # OPENING-SETTLE-AND-ELSEWHERE Part A (R20 run 7): the player frame places the sack
+    # in the office; the narrator is told so instead of bringing it into the study
+    result, _np = _named_sack_turn(world, sack_rows_player_frame=True)
+    assert result.trace.named_elsewhere == ["obj:sack · the office"]
+    assert "NAMED BUT NOT HERE (binding): the player named sack" in _np
+    assert "it is in the office" in _np
+
+
+def test_named_thing_only_canon_places_gets_no_line(world):
+    # cr r1 P1: canon whereabouts never reach the narrator as an absence claim
+    result, _np = _named_sack_turn(world, sack_rows_player_frame=False)
+    assert result.trace.named_elsewhere == []
+    assert "NAMED BUT NOT HERE" not in _np
+
+
 def test_vocative_token_forms():
     # the deterministic detector: leading / sole / trailing address forms in;
     # interjections and mid-sentence uses out.

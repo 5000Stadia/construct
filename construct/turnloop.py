@@ -84,6 +84,7 @@ from construct.arc.generator import (
 from construct.arc.grammar import Arc, Phase, Rung, Weight
 from construct.arc import drift
 from construct.cast import beat_delivery_targets
+from construct.named_elsewhere import named_elsewhere
 from construct.pins import resolve_active_pins
 from construct.intent import FAIL_OPEN as FAIL_INTENT, TurnIntent
 from construct.provider import Provider, ProviderError
@@ -1215,6 +1216,9 @@ class TurnTrace:
     # attr:* declaration items the turn's ingest wrapper dropped ("entity · attribute");
     # a marker, not a fix: the producer is still unknown (R20 run 7, cr on 381b3de)
     dropped_declarations: list[str] = field(default_factory=list)
+    # things the player named that the player frame places elsewhere ("entity · place"),
+    # each given a NAMED BUT NOT HERE line (OPENING-SETTLE-AND-ELSEWHERE Part A)
+    named_elsewhere: list[str] = field(default_factory=list)
     furnished: list[str] = field(default_factory=list)
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
     movement_status: MovementStatus = MovementStatus.NONE  # how the move resolved (route() passability etc.)
@@ -6147,6 +6151,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         else:
             scene_lines.append(f"{_disp(f['entity'])} · {f['attribute']} · {_disp(f['value'])}")
     trace.briefing_frames = [player_frame]
+    # NAMED BUT NOT HERE (OPENING-SETTLE-AND-ELSEWHERE Part A, R20 run 7): the filter above
+    # rightly keeps elsewhere things out of the scene list, but a thing the player NAMES
+    # that the player frame places elsewhere gets one honest line, so the HERE directive
+    # does not pull it into the room. Player frame only; canon context only suppresses.
+    _named_elsewhere: list[tuple[str, str, str]] = []
+    try:
+        _named_elsewhere = named_elsewhere(
+            world, player_frame=player_frame, player_input=player_input,
+            protagonist=arc.protagonist, scene=scene, scene_features=scene_features,
+            ancestors=list(chain or [])[1:], as_of=_h)
+    except Exception:  # noqa: BLE001 — an enrichment line, never a broken turn
+        logger.exception("named-elsewhere read failed")
+    trace.named_elsewhere = [f"{e} · {pl}" for e, _l, pl in _named_elsewhere]
 
     # Irony delta via the designed sixth read (frame_diff) — restored
     # after PB's indexed read path landed (letter 024; measured 0.68s on
@@ -6769,6 +6786,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         voc_holder=_voc_holder,
         voc_absent=_voc_absent,
         voc_name=_voc_name,
+        named_elsewhere=[(lbl, pl) for _e, lbl, pl in _named_elsewhere],
         commitment=commitment,
         commitment_clarified=commitment_clarified,
         commitment_bounced=commitment_bounced,
@@ -7269,6 +7287,7 @@ def _write_mechanics_log(arc: Arc, turn: int, player_input: str, prose: str,
             f"- cohorts fired: {_g('cohort_calls') or '-'}",
             f"- dropped: {_g('dropped_cohorts') or '-'}",
             f"- dropped attr declarations: {_g('dropped_declarations') or '-'}",
+            f"- named but not here: {_g('named_elsewhere') or '-'}",
             f"- movement: status={_g('movement_status') or '-'}  same_place={_g('same_place')}  "
             f"debug={_g('move_debug') or '-'}  obstruction={_g('movement_obstruction') or '-'}",
             f"- time: {_g('time_now')} (+{_g('time_advanced')}m)  "
