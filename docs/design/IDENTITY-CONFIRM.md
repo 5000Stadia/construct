@@ -97,7 +97,9 @@ A pair is a candidate only when all of these hold:
 
 **2. Context.** The host supplies it, because the engine holds no source:
 - for each candidate id, the source sentences that contain any of its names or aliases (whole word, case-insensitive);
-- in source order, at most 2 per id, each cut to 400 characters. That is exactly how the verb normalizes context (2 sentences per representative, at 400 characters), so the frozen request is what the model receives. A test asserts the final gate payload.
+- in source order, at most 2 per id, each cut to 400 characters.
+
+This is pre-filter input. The verb normalizes context itself before the model call: canonical representatives, sorted keys, trimmed and de-duplicated sentences, its own 2-sentence cap. So construct does not claim its frozen request is byte-for-byte what the model reads. The digest is over construct's frozen request, which is what both calls receive. A test asserts the verb's report (`requested`, `requested_as`) against that request.
 
 **3. Two independent asks, tied to one frozen request.**
 - **The frozen request.** The candidate list (sorted pairs, with stable pair ids) and the context are built **once**, and a digest is taken over their canonical JSON.
