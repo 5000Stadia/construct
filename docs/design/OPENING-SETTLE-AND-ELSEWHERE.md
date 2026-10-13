@@ -1,6 +1,6 @@
 # The opening's settle and the "not here" line (R20 criterion 5)
 
-Status: **spec r3, cr GREEN; built on `fix/opening-settle-elsewhere`, for code review.** r2 was RED on one point: "here" was defined by shared ancestry, and r3 makes it directional. r1 was RED (cr, <1c53e718>). There were two corrections:
+Status: **built and merged (`66e9774`); spec r3 cr GREEN; code cr GREEN at `3049d31` after one RED (places).** r2 was RED on one point: "here" was defined by shared ancestry, and r3 makes it directional. r1 was RED (cr, <1c53e718>). There were two corrections:
 1. Part A's "not here" must be decided from the player frame alone.
 2. Part B's settle must run exactly once and leave no hidden-turn artifacts.
 

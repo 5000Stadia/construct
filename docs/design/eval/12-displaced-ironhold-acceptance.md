@@ -213,6 +213,12 @@ Fix shapes (not built). Run 7 needed both:
 - **For gap 2.** When the player's line names an entity that the player's own frame places elsewhere, the briefing carries one line: "<name> is not here: it is in <place>." The narrator can then have someone fetch it, have the player look across, or say it is not here. The line reads the player's frame, never canon, so it gives away no whereabouts the player has not learned.
 - **For gap 1.** Run the turn's prose extraction on the opening too, so that what the opening shows is committed where the opening puts it, in canon and in the player's frame. In run 7 the player's frame held nothing about the sack before turn 1 (one warrant-room row, the clue turn 1 delivered). Only canon knew where the sack was, and the hearth was nowhere. Without this fix, the gap-2 line has nothing to read.
 
+**Built (`66e9774`, cr GREEN at `3049d31`).** Spec: `docs/design/OPENING-SETTLE-AND-ELSEWHERE.md` (cr GREEN at r3, after two REDs). Code review: one RED, places, fixed.
+- The opening's prose now settles once into canon and the player frame before turn 1.
+- A named thing or place that the player frame puts elsewhere gets a binding NAMED BUT NOT HERE line.
+- Residual risk: a fresh extraction could still place a distant vista in the opening scene.
+- Not yet proven in play. That needs a run 8, which waits for its own say-so.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
