@@ -5844,6 +5844,22 @@ def test_a_question_in_the_players_line_is_never_extracted(world):
     assert not any("who keeps the ledger ink" in p for p in prompts)
 
 
+def test_an_emphatic_question_is_never_extracted(world):
+    # cr RED on 15cda1f: "?!" (inside a closing quote) is a question too
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"prose": "You wait."},
+    ])
+    run_turn(world, arc, provider, "“Rival, who keeps the ledger ink?!” I wait.", turn=2)
+    prompts = _extract_prompts(world)
+    assert any("I wait." in p for p in prompts)
+    assert not any("who keeps the ledger ink" in p for p in prompts)
+
+
 def test_a_question_only_line_extracts_nothing_from_the_player(world):
     arc = make_arc()
     seed_arc(world, arc)

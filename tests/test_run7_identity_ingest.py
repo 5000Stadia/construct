@@ -199,6 +199,12 @@ def test_the_run7_question_is_not_extracted():
     ("I open the drawer and take the letter", "I open the drawer and take the letter"),
     ("I say, “Wait here.” Then I go.", "I say, “Wait here.” Then I go."),
     ("“Where were you?” I ask her.", "I ask her."),
+    # cr RED on 15cda1f: an emphatic question still asks
+    ("Who keeps the ledger ink?!", ""),
+    ("Who keeps the ledger ink?! I wait.", "I wait."),
+    ("“Who keeps the ledger ink?!” I wait.", "I wait."),
+    ("Really!? I sit down.", "I sit down."),
+    ("Wait... I sit down.", "Wait... I sit down."),
 ])
 def test_declarative_part(line, expected):
     assert turnloop._declarative_part(line) == expected

@@ -1459,10 +1459,18 @@ def _declarative_part(text: str) -> str:
     "Quill, who keeps the wash tally ink and knife?" was read as `Quill keeps ...` and
     written to canon). A sentence ending in "?" (closing quotes allowed) asks; it asserts
     nothing about the world, so it is never extracted. Statements and actions stay
-    verbatim, in order. A line that is only questions returns ""."""
+    verbatim, in order. A line that is only questions returns "". An emphatic "?!" or
+    "!?" asks too."""
     kept = [m.group(0) for m in _SENTENCE.finditer(text or "")
-            if m.group(0).strip() and "?" not in m.group(0).rstrip(" \t\n\"'”’»)]")[-1:]]
+            if m.group(0).strip() and "?" not in _terminal_run(m.group(0))]
     return "".join(kept).strip()
+
+
+def _terminal_run(sentence: str) -> str:
+    """The sentence's closing punctuation run, past any closing quotes: "?!", "!?", "?",
+    "...". Any "?" in it makes the sentence a question (cr RED on 15cda1f: "?!")."""
+    core = sentence.rstrip(" \t\n\"'”’»)]")
+    return core[len(core.rstrip(".!?")):]
 
 
 def _canonicalize_containment(rows: list[dict]) -> list[dict]:
