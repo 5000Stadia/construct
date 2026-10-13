@@ -52,56 +52,76 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
   - the atrium.
 - **The atrium's** one retry consumes `ViabilityError` like any build failure. The guest is shown the first of `exc.problems` in plain words, never the exception's text.
 
-## Role-noise confirm (R20 run 8; spec r1, for cr review, not built)
+## Role-noise adjudication (R20 run 8; spec r2, for cr review, not built)
 
-**The failure.** Run 8's build stopped, by design, on four load-bearing same-name pairs in the `person:` namespace:
+r1 merged on lexical evidence and was RED (cr, <3da26109>).
+- **Lexical evidence is not enough.** In "Tomas Breck entered the yard. Breck the baker shut his stall.", a scan of full-name runs cannot show that every bare "Breck" is Tomas. So a lexical rule can merge two real people.
+- **The title rule was undefined.**
+
+r2 replaces the lexical rule with the resolver decision cr named, which is also what the engine itself asks for. Its decline evidence reads "gate declined (adjudicate)".
+
+### The failure
+
+Run 8's build stopped, by design, on four load-bearing same-name pairs in the `person:` namespace, each auto-declined `kind_conflict`:
 - `elias` ~ `elias_venn`;
 - `breck` ~ `tomas_breck`;
 - `father_oren_vale` ~ `father_vale`;
 - `nessa` ~ `nessa_reed`.
 
-The engine's audit had declined each as `kind_conflict`. Each is one person: the build's own source names them fully in some places and partly in others ("Tomas Breck", "Clerk Tomas Breck", "Breck"). The kinds differ only by extraction's role words ("condemned man" beside "person").
+Each is one person in the build's own source. The kinds differ only by extraction's role words.
 
-Since the run 7 fix, the confirm stage cannot tell this from two people sharing a name, so it stops every such build.
+### What does not fix it
 
-**pattern-buffer's read** (mdf2b11, from `identity.py` `_decline_context` and the porcelain):
-- `auto_declined` only says why the engine's automatic gate did not merge the pair. It never blocks a host merge; only containment and `distinct_from` do.
-- `porcelain.proposals()` carries the structured decline context. The decline codes are checked in order, so a pair that reaches `kind_conflict` has already passed every fact-level test: no containment, no correlation, no distinct group, no relating edge, no durable contradiction, and a shared name anchor.
-- Name containment is lexical, and lexical evidence belongs to the host.
-- pattern-buffer named three tests for a host confirm (below) and asked that the rule go in the evidence string.
+**Making the kinds agree** (pattern-buffer's root-cause point) does not merge them. Tested on the real engine (2026-10-13, scratchpad `kindexp`): with both kinds `person`, the engine declines Breck/Tomas Breck **and** Lysa/Lysa Fen alike, as `alias_not_specific`, "gate declined (adjudicate)". The engine has no evidence to tell them apart either.
 
-**The rule.** In `_stage_confirm_identity`, a role-kind pair that touches a load-bearing closure is **merged** with `porcelain.merge(a, b, evidence)`, instead of stopping the build, when all of these hold:
+### The adjudication
 
-1. **Decline code.** The pair's `auto_decline` code in `porcelain.proposals()` is exactly `kind_conflict`, not any earlier code.
-2. **Both are people.** Both folded kinds are person-type: the pair is in the `person:` namespace, and neither kind is a place, object or other non-person type word. A list of non-person type words is checked against each kind; anything else counts as a role word.
-3. **One owner in the source.** Let S be the shorter name and F the longer. S occurs in the build's own source text, whole-word and case-insensitive. Every full name in the source that contains S's words is F; no other full name there contains them. "Breck" is contained only in "Tomas Breck", so it passes. "Lysa" beside both "Lysa Marr" and "Lysa Fen" fails and stays apart.
+`_stage_adjudicate_identity`, run just before the confirm stops. It applies to each live same-name pair that touches a load-bearing closure and that the engine left undecided: no shared closure, no `distinct_from`, and an auto-decline code of `kind_conflict` or `alias_not_specific`.
 
-The **evidence string** records the rule and its facts, for example: `role-noise confirm: 'breck' is contained only in 'tomas breck' in the build source; auto_decline=kind_conflict; kinds 'clerk' / 'person'`.
+**Evidence.** The resolver gets two kinds:
+- **Each entity's folded canon facts.** These are kind, role, aliases, places and relations: the closure's rows, capped.
+- **The source passages that mention each name** (ingest path). Every sentence of the build's source containing either entity's name or alias, each tagged with which names it contains. The interview path has no source; its resolver gets facts only.
 
-The representative is the id the arc or the cast uses, so the hero keeps `person:elias_venn`. This is the vouch's existing load-bearing-survivor rule.
+**The question.** One cheap-tier model call per pair: "Are A and B the same person?" The schema allows exactly one of:
+- `same`, with `quote`: the source sentence or fact that ties them, verbatim;
+- `different`, with `quote`: the sentence or fact that separates them;
+- `unsure`.
 
-**When the rule does not apply.** Nothing changes:
-- a pair that fails any test still stops the build when it is load-bearing, and is held apart when it is not;
-- the interview path has no source text, so it never merges by this rule.
+**Acting on the verdict:**
+- **`same`.** Allowed only if the quote is found verbatim in the evidence given; otherwise the verdict counts as `unsure`. The pair is merged with `porcelain.merge(a, b, evidence)`, and the representative is the load-bearing id (the hero keeps `person:elias_venn`). The evidence string is `adjudicated same person: "<quote>"`.
+- **`different`.** Allowed only with a verbatim quote, else `unsure`. The pair is held apart with `porcelain.reject(a, b)`. A pair held apart by a decision is decided, so the confirm stage does not stop on it.
+- **`unsure`, or a failed call.** Nothing is written, and the confirm stage stops the build as today.
 
-**Source text and "contains".** The ingest path passes its prose into `_finalize_scenario(..., source_text=...)`, and from there to the confirm stage.
-- **The names.** S and F are the two entities' own names (their `name` or `alias` rows, else their id words).
-- **Contains.** A name *contains* S when S's words appear in it in order, not necessarily next to each other. "Father Oren Vale" contains "Father Vale", "Tomas Breck" contains "Breck", and "Elias Venn" contains "Elias".
-- **The source's full names.** These are the runs of 2–4 capitalised words in the source; a run's first word may be a title ("Clerk", "Father").
-- **The test.** S must occur in the source. Then the distinct full names there that contain S, with any title stripped, must reduce to exactly F.
+**Scope:**
+- Only load-bearing pairs are adjudicated. Non-load-bearing pairs stay held apart as today.
+- Cast-move, vouch and confirm logic is otherwise unchanged.
 
-**Telemetry.** Each merge logs at INFO with its evidence string and is listed in the build's stage output ("identity: merged N same-person pair(s) by name in source").
+### Why this answers r1's objection
 
-**Tests (real engine):**
-- the four run 8 pairs merge, given source text naming each fully and partly;
-- Lysa with both "Lysa Marr" and "Lysa Fen" in the source stops;
-- a pair whose code is not `kind_conflict` stops;
-- a person/place kind pair is never merged;
-- no source text (interview path): stops as today;
-- the evidence string is recorded on the merge;
-- the representative is the arc's id.
+The resolver reads the very sentence cr's counterexample turns on ("Breck the baker shut his stall"). A `same` verdict must quote its tie, and an unquoted or unsure answer stops the build, so the worst case is today's behaviour.
 
-**Not in scope (recorded follow-up).** pattern-buffer's root-cause point: `kind` should be a closed type set (person, place, object...), with the role in its own attribute. Then these pairs fold as same-kind, and the engine's own gate merges the ones that share a distinctive name. That changes extraction for every world, so it gets its own item.
+### Telemetry
+
+Each verdict logs at INFO with its quote. The build's stage output lists "identity: adjudicated N pair(s): M same, K different, U unsure".
+
+### Tests (stub provider, real engine)
+
+- the four run 8 pairs merge on `same` with a verbatim quote;
+- `same` with a quote not in the evidence counts as unsure and stops;
+- `different` holds apart (`distinct_from`), and the build does not stop on that pair;
+- `unsure`, and a raised call, both stop;
+- the Breck-the-baker source gives `different` (scripted), and it is respected;
+- non-load-bearing pairs are never adjudicated;
+- the representative is the load-bearing id;
+- the evidence passages hold only sentences naming either entity.
+
+### Cost
+
+One cheap-tier call per undecided load-bearing pair, usually 0–4 per build. Run 8 would have made four.
+
+### Not in scope (a separate item)
+
+pattern-buffer's root-cause point: `kind` should be a closed type set, with the role in its own attribute. It is still worth doing for its own sake, but the test above shows it does not by itself resolve these pairs.
 
 ## Not in scope
 
