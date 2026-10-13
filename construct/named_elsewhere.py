@@ -44,6 +44,12 @@ def _folded(world: Any, entity: str, frame: str, as_of: float | None) -> dict:
             if f.get("entity") == entity}
 
 
+def _display(world: Any, place: str, frame: str, as_of: float | None) -> str:
+    """A place's player-frame name, else its id's own words (never canon's name)."""
+    name = _folded(world, place, frame, as_of).get("name")
+    return str(name) if name else human_name_typed_id(place)
+
+
 def _known_path(world: Any, entity: str, frame: str, as_of: float | None) -> list[str]:
     """The entity's player-frame containment path upward, nearest first: follows `in`,
     else `part_of`, for at most `_MAX_HOPS` hops, stopping at a cycle or an unknown."""
@@ -65,7 +71,8 @@ def _labels(world: Any, frame: str, as_of: float | None, protagonist: str) -> di
     """label (lower-cased) -> the one entity it names, from the player frame: names,
     aliases, a non-generic kind, and the id's own words ("torn laundry sack" and its head
     noun "sack" for `obj:torn_laundry_sack`; prose-read objects often carry no name row).
-    People keep CALLED FOR SOMEONE NOT HERE and places are movement's, so neither is here.
+    People keep CALLED FOR SOMEONE NOT HERE, so they are not here. Places are (cr on cdf79d0):
+    a question about a remote room is not a move, and must not be rendered as this one.
     A label that names more than one entity names none: an ambiguous word asserts nothing."""
     owners: dict[str, set[str]] = {}
 
@@ -74,19 +81,22 @@ def _labels(world: Any, frame: str, as_of: float | None, protagonist: str) -> di
         if len(label) >= _MIN_LABEL and not is_deixis(label):
             owners.setdefault(label, set()).add(ent)
 
-    for attr in _LABEL_ATTRS + ("kind", "in"):
+    for attr in _LABEL_ATTRS + ("kind", "in", "part_of"):
         for row in frame_facts(world, frame, attribute=attr, as_of=as_of):
             ent = str(row.entity)
-            if ent.startswith(("person:", "place:")) or ent == protagonist or ":" not in ent:
+            if ent.startswith("person:") or ent == protagonist or ":" not in ent:
                 continue
+            is_place = ent.startswith("place:")
             if attr in _LABEL_ATTRS:
                 _add(str(row.value or ""), ent)
-            elif attr == "kind" and str(row.value or "").lower() not in _GENERIC_KINDS:
+            elif (attr == "kind" and not is_place
+                  and str(row.value or "").lower() not in _GENERIC_KINDS):
                 _add(str(row.value or ""), ent)
             words = human_name_typed_id(ent).split()
             if words:
                 _add(" ".join(words), ent)
-                _add(words[-1], ent)
+                if not is_place:  # a place's head noun ("room", "yard") is too common
+                    _add(words[-1], ent)
     return {label: next(iter(ents)) for label, ents in owners.items() if len(ents) == 1}
 
 
@@ -96,7 +106,10 @@ def named_elsewhere(world: Any, *, player_frame: str, player_input: str, protago
                     cap: int = NAMED_ELSEWHERE_CAP) -> list[tuple[str, str, str]]:
     """`(entity, the label the player used, the nearest place's display name)` for each
     thing the player's line names that the player frame places elsewhere, in the order
-    named, at most `cap`.
+    named, at most `cap`. For a named PLACE the third item is its known parent place
+    ("" when the player frame holds none): a place is a different place from the scene
+    unless it is the scene, one of its features, or an ancestor (the player in a room of
+    the fortress is in the fortress).
 
     - Known here (no line): the thing's path reaches the here-set: the scene, its
       features, or the protagonist (carried).
@@ -120,13 +133,20 @@ def named_elsewhere(world: Any, *, player_frame: str, player_input: str, protago
             continue
         done.add(ent)
         path = _known_path(world, ent, player_frame, as_of)
+        if ent.startswith("place:"):
+            if ent in above:
+                continue  # an ancestor of the scene: the player is in it
+            parent = next((node for node in path if node.startswith("place:")), "")
+            out.append((ent, label, _display(world, parent, player_frame, as_of) if parent else ""))
+            if len(out) >= cap:
+                break
+            continue
         if any(node in here for node in path):
             continue  # known here (on a table here, in this room's alcove, carried)
         place = next((node for node in path if node.startswith("place:")), "")
         if not place or place in above:
             continue  # no known place, or only a coarse ancestor: underdetermined
-        pname = _folded(world, place, player_frame, as_of).get("name")
-        out.append((ent, label, str(pname) if pname else human_name_typed_id(place)))
+        out.append((ent, label, _display(world, place, player_frame, as_of)))
         if len(out) >= cap:
             break
     return out

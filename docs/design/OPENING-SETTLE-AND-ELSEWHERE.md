@@ -87,7 +87,10 @@ Its diagnostics are an in-memory opening trace on the session, plus logs.
    - the id's own words (`obj:torn_laundry_sack` gives "torn laundry sack", and its head noun "sack").
 
    **A label that names more than one entity names none**, so an ambiguous word asserts nothing.
-3. **Places are left out as well as people.** Naming a place is movement's business ("take me to the warrant room").
+3. **Places get their own line** (cr RED on `cdf79d0`). The build had left places out, but movement sees only a classified move. A question about a remote room ("what happened in the warrant room?") would reach the narrator with nothing saying the room is elsewhere.
+   - A named place is here when it is the scene, one of the scene's features, or an ancestor of the scene.
+   - Otherwise the line reads: "<label>, a different place from where they stand (it lies within <its player-known parent>). Unless they travel there, render it from here … never as the room around them."
+   - A place matches only by its name, alias or full id words, never by its head noun or kind. "The room" must not name the warrant room.
 4. **The carried case is here.** The here-set includes the protagonist, so a thing in the player's hands is never "not here".
 5. **The place's display name is player-frame too.** It is the player-frame `name`, else the id's own words, never canon's name.
 6. **Part B's turn stamp.** `settle_opening` stamps positional rows at the last turn already played: 0 at a fresh start, later for a resumed session's re-entry opening. The session's existing deferred-settle slot carries it, so the transport's post-send flush runs it and `turn()` joins it.

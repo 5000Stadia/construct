@@ -5830,6 +5830,31 @@ def test_named_thing_known_elsewhere_gets_a_not_here_line(world):
     assert "it is in the office" in _np
 
 
+def test_a_question_about_a_remote_place_gets_the_place_line(world):
+    # cr on cdf79d0: no move is classified, so movement never sees it; the narrator must
+    # still be told the office is not the room the player stands in
+    arc = make_arc()
+    seed_arc(world, arc)
+    cast = _chief_and_witness(world, chief_at="place:office")
+    world.porcelain.ingest_structured([
+        {"entity": "place:office", "attribute": "name", "value": "the office"},
+    ], frame=PLAYER_FRAME, classify="rules")
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": "", "commits": False, "commitment": ""},
+        {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
+        {"prose": "The witness shrugs toward the hall."},
+    ])
+    result = run_turn(world, arc, provider, "What happened in the office last night?",
+                      turn=2, cast=cast,
+                      scope=["person:witness", "person:chief", PLAYER, "place:study"])
+    assert result.trace.named_elsewhere == ["place:office · -"]
+    _np = _narrate_prompt(provider)
+    assert "NAMED BUT NOT HERE (binding): the player named the office, a different place" in _np
+    assert "never as the room around them" in _np
+
+
 def test_named_thing_only_canon_places_gets_no_line(world):
     # cr r1 P1: canon whereabouts never reach the narrator as an absence claim
     result, _np = _named_sack_turn(world, sack_rows_player_frame=False)

@@ -6433,7 +6433,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             ancestors=list(chain or [])[1:], as_of=_h)
     except Exception:  # noqa: BLE001 — an enrichment line, never a broken turn
         logger.exception("named-elsewhere read failed")
-    trace.named_elsewhere = [f"{e} · {pl}" for e, _l, pl in _named_elsewhere]
+    trace.named_elsewhere = [f"{e} · {pl or '-'}" for e, _l, pl in _named_elsewhere]
 
     # Irony delta via the designed sixth read (frame_diff) — restored
     # after PB's indexed read path landed (letter 024; measured 0.68s on
@@ -7056,7 +7056,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         voc_holder=_voc_holder,
         voc_absent=_voc_absent,
         voc_name=_voc_name,
-        named_elsewhere=[(lbl, pl) for _e, lbl, pl in _named_elsewhere],
+        named_elsewhere=[(lbl, pl, e.startswith("place:")) for e, lbl, pl in _named_elsewhere],
         commitment=commitment,
         commitment_clarified=commitment_clarified,
         commitment_bounced=commitment_bounced,

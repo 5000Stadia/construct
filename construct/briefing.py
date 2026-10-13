@@ -124,7 +124,7 @@ class BriefingInputs:
     voc_holder: str  # run_turn's `_voc_holder`
     voc_absent: bool  # run_turn's `_voc_absent`
     voc_name: str  # run_turn's `_voc_name`
-    named_elsewhere: list  # (the label the player used, its known place); run_turn's `_named_elsewhere`
+    named_elsewhere: list  # (the label the player used, its known place, is a place); run_turn's `_named_elsewhere`
     commitment: str
     commitment_clarified: str
     commitment_bounced: bool
@@ -450,10 +450,18 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
             f"render the address landing on their absence honestly (the room notes it; "
             f"someone may say plainly they are not here, and where they might be found "
             f"if that is established). Never teleport them in.")
-    for _label, _place in _named_elsewhere:
-        # OPENING-SETTLE-AND-ELSEWHERE Part A (R20 run 7): the player named a thing the
-        # player frame places elsewhere; the scene list rightly omits it, so say where it is
-        # or the HERE directive pulls it into the room.
+    for _label, _place, _is_place in _named_elsewhere:
+        # OPENING-SETTLE-AND-ELSEWHERE Part A (R20 run 7): the player named a thing or a
+        # place the player frame puts elsewhere; the scene list rightly omits it, so say so,
+        # or the HERE directive pulls it into the room (or turns this room into it).
+        if _is_place:
+            _within = f" (it lies within {_place})" if _place else ""
+            briefing_parts.append(
+                f"\nNAMED BUT NOT HERE (binding): the player named {_label}, a different "
+                f"place from where they stand{_within}. Unless they travel there, render it "
+                f"from here: seen, heard or spoken of at a distance, never as the room "
+                f"around them.")
+            continue
         briefing_parts.append(
             f"\nNAMED BUT NOT HERE (binding): the player named {_label}, which is not in "
             f"this place: it is in {_place}. Render that honestly. Someone present may "

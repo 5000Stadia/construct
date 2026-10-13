@@ -138,8 +138,19 @@ def test_an_ambiguous_word_asserts_nothing(w):
         ("obj:grain_sack", "grain sack", "the warrant room")]
 
 
-def test_places_are_left_to_movement(w):
-    assert _ask(w, "Take me to the warrant room.") == []
+def test_a_named_remote_place_gets_the_place_line(w):
+    # cr on cdf79d0: a question about a remote room is not a move, and needs the line too
+    assert _ask(w, "What happened in the warrant room?") == [
+        ("place:warrant_room", "the warrant room", "Ironhold")]
+
+
+def test_the_scene_and_its_ancestors_are_not_elsewhere(w):
+    assert _ask(w, "I pace the cell.") == []
+    assert _ask(w, "Nobody leaves Ironhold.") == []
+
+
+def test_a_place_head_noun_is_not_a_label(w):
+    assert _ask(w, "I look around the room.") == []
 
 
 def test_a_generic_kind_is_not_a_label(w):
