@@ -267,6 +267,33 @@ Opened under the monitor's pre-approval (n94c4cd), on local main `f038999`, engi
 
 The identity route works: the build gets through. The run needs repeating once Codex is logged in again. The world built in this run was moved out of `worlds/` into the session scratchpad, so the rerun builds fresh. Findings 1 and 2 are the next real fiction work. Finding 3 needs a look at the source story first.
 
+## Run 9, restart — FAIL (criteria 2 and 5): chapter 1 concluded, but the player never left the cell
+
+Restarted from scratch at 14:05 PDT, after the monitor redid the Codex login (n7c1df5), under the same approval (n94c4cd), on main `f55fcbb` with pattern-buffer `9e0620f`. The build took about 15 minutes and published a viable world. The identity stop did not fire. Chapter 1 concluded at turn 12, chapter 2 played 6 turns, and the probe exited 0 at 15:13. The output is archived at `/media/k/Blank/construct-scratch/run9` (the first attempt at `run9a`).
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Chapter 1 concludes | **PASS**, at turn 12 |
+| 2 | Chapter 1 ends in a place grown in play | **FAIL**: end state `place:tomas_cell`, the starting cell |
+| 3 | Chapter 2 opens where chapter 1 ended | PASS by the engine (`place:tomas_cell` both). But the reader saw a jump: chapter 1's last prose has the player at the gate table, and chapter 2 opens back in the cell |
+| 4 | No ENGINE ERROR or empty prose | **PASS** |
+| 5 | No critic WHERE breaker | **FAIL**: chapter 2's opening put "a black-edged slip just inside the barred door"; the next reply said "There is no loose paper on the floor" and moved it into the Chaplain's book (critic, ch2 t102 and t103). Jory was also present without being staged |
+
+### Why the player never left the cell (criterion 2)
+
+Turns 9, 11 and 12 moved "to the gate table". The movement step resolved each to `obj:gate_table`, an object born in play with kind "table" and **no location**, and returned `in_scene`, which treats an unlocated object as here. So no move was committed, and no place was grown. The prose narrated the walk anyway, which caused criterion 3's jump. The fix belongs in movement: a move whose target is an object that isn't located in the current scene (unlocated, or elsewhere) is a destination, not an in-scene approach. An unlocated one should go to world growth, so the place around it is made real. This is the same family as run 7's sack: an object's place unknown to the player frame.
+
+### Also seen
+
+- `person:jory_kest_2`: the cast's #92 identity gate split a character again, as Hester in the first attempt. The cause is known: the cast author reuses canon names without seeing their roles. SEEDING-REGISTRY-FIRST.md fixes it at the root.
+- The chapter 2 opening named the chalk clerk "Did Not Blow", a model glitch in naming.
+- Object and presence continuity flickered again (the slip; Jory), as in the first attempt's stone tag.
+- Turn time was about 2 to 4 minutes. The salience window (cp_salience_done) took 42 to 97 s of each turn, as R23 found.
+
+### Where R20 stands after run 9
+
+The identity route works: two builds in a row passed. Chapter 1 concludes. What fails is the move itself: an object target with no location swallows the escape. That is the next fix (movement), together with the object-continuity flicker, which now shows in both attempts.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
