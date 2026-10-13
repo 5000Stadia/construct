@@ -84,6 +84,7 @@ from construct.arc.generator import (
 from construct.arc.grammar import Arc, Phase, Rung, Weight
 from construct.arc import drift
 from construct.cast import beat_delivery_targets
+from construct.named_elsewhere import named_elsewhere
 from construct.pins import resolve_active_pins
 from construct.intent import FAIL_OPEN as FAIL_INTENT, TurnIntent
 from construct.provider import Provider, ProviderError
@@ -1215,6 +1216,9 @@ class TurnTrace:
     # attr:* declaration items the turn's ingest wrapper dropped ("entity · attribute");
     # a marker, not a fix: the producer is still unknown (R20 run 7, cr on 381b3de)
     dropped_declarations: list[str] = field(default_factory=list)
+    # things the player named that the player frame places elsewhere ("entity · place"),
+    # each given a NAMED BUT NOT HERE line (OPENING-SETTLE-AND-ELSEWHERE Part A)
+    named_elsewhere: list[str] = field(default_factory=list)
     furnished: list[str] = field(default_factory=list)
     point_reads: int = 0  # fallback per-key reads (the expensive kind)
     movement_status: MovementStatus = MovementStatus.NONE  # how the move resolved (route() passability etc.)
@@ -4025,6 +4029,276 @@ def _advance_diegetic_time(world: Any, clock: Any, player_input: str, trace: "Tu
         trace.dropped_cohorts.append(f"estimate_elapsed ({exc})")
 
 
+
+def _settle_prose_facts(p: Any, world: Any, arc: Arc, prose: str, *, scene: str | None,
+                        turn: int, trace: TurnTrace, canon_table: dict, snap_scope: list,
+                        live_reads: Any, horizon: float | None, player_frame: str,
+                        pre_keys: set, briefing_keys: set, reshape_license: set,
+                        dropped: str | None = None, epilogue: bool = False,
+                        cast_moves: Callable[[list], None] | None = None,
+                        ) -> tuple[list[dict], list[dict], list[tuple], list[tuple]]:
+    """The narrator prose's FACT pipeline, shared by a turn's settle and the opening's
+    (OPENING-SETTLE-AND-ELSEWHERE Part B): extract, frame partition, containment
+    canonicalising, name reconstruction, resolve, stage to `proposed:main`, the quarantine
+    gates, promote to canon and mirror into the player frame. Moved verbatim out of
+    `run_turn._settle`; the turn-only work (audit rows, transcript, memory, clock,
+    last-seen, world tick) stays there.
+
+    `cast_moves` runs the turn's licensed cast-movement lane on the movement candidates;
+    None (the opening) leaves them unapplied. `epilogue` drops every promotion (EPILOGUE-
+    NO-CANON). `canon_table` is updated in place after a promote, as before. Returns
+    `(promote, promote_receipt_rows, contradictions, quarantined)`."""
+    canon_before = dict(canon_table)  # established values BEFORE this render
+    # `defer`: don't durability-classify the QUARANTINE staging — these rows are
+    # only here to diff against canon for contradictions; the survivors get a single
+    # batch classification on PROMOTION below. Kills the per-turn double-classify.
+    # FAIL-OPEN: the PROSE is the player-facing deliverable and is already rendered;
+    # the post-render extraction is bookkeeping (staging for the canon-commit gate). A
+    # schema violation here (the cheap extractor malforming its JSON, raising after a
+    # re-ask) must NOT sink an already-delivered turn — the harness caught this sinking
+    # turns. Ship the prose; skip this turn's canon-commit (logged). (Turn-loop policy:
+    # "the narrator failing is the turn failing" — this is POST-narrator.)
+    # ENTITY AUTHORITY (ENTITY-AUTHORITY.md / Cx 304): READ-ONLY extract → RESOLVE → structured
+    # stage. The narrator's prose is a PROPOSAL, never a free canon source (map-governs). The
+    # resolver binds each mention to a known scene entity, mints one correctly-typed entity only
+    # when genuinely novel, and DROPS voice/malformed/deixis-phantoms + person-in-object rows
+    # BEFORE they reach the staging frame — so the misshapen graph is never created (vs the old
+    # `p.ingest(prose)` that free-minted fragments/phantoms the promote-gate band-aids then chased).
+    _resolve_cands = {e for (e, _a) in canon_table if isinstance(e, str) and ":" in e}
+    if scene:
+        _resolve_cands.add(scene)
+    # #98 (Cx 415 #4): bind-before-mint must see past the current scene — a named inn
+    # established two scenes ago must BIND its second mention, never mint a twin. Widen
+    # the roster with every NAMED canon place/person (horizon-safe); ambiguity still
+    # drops, so a bigger roster can only prevent duplicates, never force a bad bind.
+    # CANON-FRAMED on purpose (Cx 433 blocker): unframed visible() would admit
+    # plot:/session:/knows: name rows — private memory or plot topology must never
+    # enter the canon bind path and get promoted into world truth.
+    try:
+        for _pfx in ("place:", "person:"):
+            from construct.adapter import frame_facts as _ff2
+            for _nr in _ff2(world, "canon", attribute="name", prefix=_pfx,
+                            as_of=horizon):
+                _resolve_cands.add(str(_nr.entity))
+    except Exception:  # noqa: BLE001 — roster widening is enrichment, never a gate
+        pass
+
+    def _resolve_name_of(e: str) -> str:
+        return table_or_read_name(canon_table, live_reads, e)
+    try:
+        with _phase(trace, "post_extract"):
+            _raw = p.extract(prose, scene=scene, extract="lean",
+                             pov=arc.protagonist)  # READ-ONLY; "you" = the protagonist (PB 4c)
+            # FRAME PARTITION — the FIRST step after extract (Cx 552: it must
+            # precede reconstruct_names too, else a dropped knows:* row's subject
+            # still spawns an unframed synthetic NAME row that stubs/promotes as
+            # the dropped row's derivative). Policy + rationale: _partition_frames.
+            _canon_items, _dropped_framed = _partition_frames(list(_raw))
+            if _dropped_framed:
+                logger.info(
+                    "narrator settle: dropped %d non-canon-framed row(s) "
+                    "(knowledge-promotion gate not yet built): %s",
+                    len(_dropped_framed), _dropped_framed[:5])
+                trace.dropped_cohorts.append(
+                    f"settle_noncanon_frames ({len(_dropped_framed)})")
+            # #80 CAST-MOVES §1 (Cx r1 gap 1): the containment-synonym set collapses to
+            # `in` BEFORE resolve_rows — must precede reconstruct_names/resolve_rows so
+            # every downstream step (the resolver, the movement lane) sees one spelling.
+            _canon_items = _canonicalize_containment(_canon_items)
+            # #98 live-probe finding: the lean extractor omits name rows — reconstruct
+            # the cased surface form from the prose (the stub gate's only evidence);
+            # synthetic names commit only WITH a stub, never onto bound entities.
+            # Runs over the ACCEPTED copy only (Cx 552).
+            from construct.resolve import reconstruct_names
+            _canon_items = list(_canon_items) + reconstruct_names(
+                list(_canon_items), prose)
+            # #98 (Cx 415 #2): the NARRATION channel — person leaves the free mint set;
+            # place/person enter ONLY through the proper-name stub gate (minimal rows,
+            # non-present).
+            # #80 CAST-MOVES §1: the out-of-band `ResolutionOutcome` collector — the
+            # per-row correlation surface the movement lane consumes below, additive to
+            # the legacy `_receipts` triples (byte-identical, untouched).
+            _move_outcomes: list[ResolutionOutcome] = []
+            _resolved, _receipts = resolve_rows(
+                _canon_items, scene=_resolve_cands, protagonist=arc.protagonist,
+                name_of=_resolve_name_of, allow_mint=True,
+                mint_kinds=_NARRATION_MINT_KINDS,
+                stub_kinds=_NARRATION_STUB_KINDS,
+                outcomes=_move_outcomes)
+            trace.resolver = (trace.resolver or []) + _receipts
+            # #80 CAST-MOVES §1-§4: partition licensed person-movement out of ordinary
+            # promotion (BOUND MOVE / UNBOUND EXIT), gate it through the five stagecraft
+            # rules, and commit direct to canon — never through the quarantine stage
+            # below (a narrated `in` change is exactly the contradiction that stage
+            # exists to catch; movement needs its own licensed lane).
+            _resolved, _cast_candidates, _cast_guard_drops = _partition_cast_moves(
+                _resolved, _canon_items, _move_outcomes, scene=scene,
+                scene_name=str(canon_table.get((scene, "name")) or "") if scene else "")
+            trace.cast_move_drops.extend(_cast_guard_drops)
+            if _cast_candidates:
+                if cast_moves is not None:
+                    cast_moves(_cast_candidates)
+                else:  # the opening: its prose stages the cast, it does not move them
+                    logger.info("opening settle: %d cast move(s) not applied", len(_cast_candidates))
+            staged = _receipt_rows(p.ingest_structured(
+                _resolved, frame=_PROPOSED, classify="defer"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("render extraction failed; shipping prose, skipping commit: %s", exc)
+        trace.dropped_cohorts.append(f"post_extract ({exc})")
+        staged = []
+    # the entities the narrator's prose touched (drop meta/assertion ids); read
+    # their proposed-frame values (snapshot facts are fact-only — no meta noise)
+    staged_entities = sorted({
+        r["entity"] for r in staged
+        if ":" in r["entity"] and not r["entity"].startswith(("a:", "attr:"))})
+    proposed_vals = _table(_snap_or_empty(p, staged_entities, frame=_PROPOSED))
+
+    # EPILOGUE-NO-CANON (Cx 189): on a TERMINAL / conclusion-curtain turn the narrator renders
+    # FATE/SUMMARY prose ("walks back into the rain with his name cleared", "keeps his pride but not
+    # his clean hands") — it must mint NOTHING into canon. Promoting it canonized descriptive ALIASES
+    # onto the cast, which the next episode then surfaced as character NAMES ("With His Name Cleared").
+    # The prose is still archived in session:main (the transcript below); any real consequence is
+    # written BEFORE narration via the explicit conclusion/consequence paths, never mined back out of
+    # curtain prose. So drop all promotion candidates on the epilogue turn.
+    if epilogue:
+        proposed_vals = {}
+
+    protected_keys = arc_protected_keys(arc, live_reads)  # the arc's load-bearing (hidden) facts
+    # The objects the protagonist HOLDS at the play horizon (after this turn's deterministic
+    # take/drop). Possession is HOST-owned: the narrator's prose extraction must never relocate
+    # the player's inventory into furniture or a "pocket" pseudo-container (founder live cohesion
+    # test, 2026-06-29: a held pencil was extracted `in obj:desk`/`obj:table`, a held token
+    # `in obj:pocket` — stranding them off the player so the carry briefing lost them).
+    try:
+        _held_now = {h for h in p.contents(arc.protagonist, as_of=horizon)
+                     if str(h).startswith("obj:")}
+    except Exception:
+        _held_now = set()
+    promote: list[dict] = []
+    contradictions: list[tuple] = []
+    quarantined: list[tuple] = []
+
+    def _promote_row(_entity: Any, _attribute: str, _value: Any) -> dict:
+        # Narrator PROVENANCE (Cx 022): re-stamp `source_doc` so a promoted improv fact is
+        # auditable as narrator-origin. Temporal stamping of positional `in` state happens
+        # in one place — `_stamp_temporal_state`, applied to the whole batch at ingest.
+        return {"entity": _entity, "attribute": _attribute,
+                "value": _value, "source_doc": _NARRATOR_SOURCE}
+
+    for (entity, attribute), newv in proposed_vals.items():
+        # ENTITY AUTHORITY (verified-then-strip, Cx 313): the malformed / narrator-voice / pronoun-
+        # deixis / person-in-object band-aids that USED to live here are GONE — the resolver
+        # (`resolve_rows`, run at the read-only `extract` boundary before staging) drops/binds those
+        # classes upstream, so they never reach `proposed_vals`. Live-proven on bodycase:
+        # `trace.quarantined` was empty all 7 turns. The guards BELOW stay — they are NOT resolver-
+        # subsumed: the held-object guard knows live inventory + same-turn drop licensing (which the
+        # identity resolver does not), and the arc-key/contradiction gates are concealment/canon-diff
+        # policy, a different layer.
+        # POSSESSION IS HOST-OWNED: the narrator may not relocate a PLAYER-HELD object. A held
+        # object's `in` changes ONLY via the deterministic take/drop steps; a narrator row that
+        # moves it elsewhere (`obj:pencil in obj:desk`, `obj:token in obj:pocket`, `obj:hymn held_by
+        # person:x` — any `_HELD_RELOCATING_ATTRS`) is drift that
+        # strands it off the player. Quarantine it unless the player licensed the move THIS turn
+        # (a drop the deterministic step already committed → key in pre_keys). Keeps inventory on
+        # the player across locations (founder live cohesion test, 2026-06-29).
+        if (attribute in _HELD_RELOCATING_ATTRS and str(entity) in _held_now
+                and str(newv) != arc.protagonist and (entity, attribute) not in pre_keys
+                and entity != (dropped or None)):
+            quarantined.append((entity, attribute))
+            continue
+        key = (entity, attribute)
+        established = canon_before.get(key, _ABSENT)
+        # STRICT license for a PROTECTED arc fact (Cx 022 blocking #1): the mystery's
+        # answer may enter canon AND the player frame ONLY if the player legitimately
+        # surfaced it THIS turn — it is in their own action receipt (pre_keys) or
+        # already in their knowledge frame (briefing_keys = the player-frame snapshot,
+        # i.e. earned by prior play). Token matching (_licensed) is too loose here: a
+        # narrator that merely RESTATES a hidden canon fact (SAME value) would otherwise
+        # slip past the contradiction check and promote+mirror it into knows:<player>,
+        # handing over the solution. So a protected key the player didn't earn this turn
+        # is QUARANTINED — new OR same-value. A legitimately discovered arc fact is in
+        # the player frame → licensed_strict → promotes normally (discovery still works).
+        licensed_strict = (key in pre_keys or key in briefing_keys
+                           or (entity, attribute, newv) in reshape_license)
+        # Promoted rows carry their narrator PROVENANCE (Cx 022 non-blocking): the
+        # promote path is structured-ingest, which drops the `source` the staging
+        # ingest stamped — re-stamp via `source_doc` so a promoted improv fact is
+        # auditable as narrator-origin (vs player/author/canon-seed).
+        if key in protected_keys:
+            if licensed_strict:
+                promote.append(_promote_row(entity, attribute, newv))
+            else:
+                quarantined.append(key)
+            continue
+        if established is not _ABSENT and established != newv and not licensed_strict:
+            contradictions.append(key)  # narrator overwrote established truth
+        else:
+            promote.append(_promote_row(entity, attribute, newv))
+    # The narrator_promote batch is a quarantine-gate audit/receipt surface retained
+    # for future drift-handling readers. Cx 567 §2 retired it as a salience input;
+    # the opportunistic generator does not read it. PB receipts carry entity/attribute
+    # but NOT value, so confirmed_batch() retains candidate values for confirmed keys.
+    _promote_receipt_rows: list[dict] = []
+    if promote:
+        # Stamp positional `in` state at THIS turn so a promoted relocation advances the
+        # play horizon (bodycase teleport) — the same rule the player-input path uses.
+        promote = _stamp_temporal_state(promote, turn)
+        with _phase(trace, "promote"):
+            _promote_receipt = p.ingest_structured(promote, frame="canon", classify="batch")
+            _promote_receipt_rows = _receipt_rows(_promote_receipt)
+            canon_table.update(_table(_snap_or_empty(p, snap_scope, as_of=horizon)))
+            _mirror_rows(p, promote, player_frame, canon_table, trace, as_of=horizon)
+    return promote, _promote_receipt_rows, contradictions, quarantined
+
+
+def settle_opening(world: Any, arc: Arc, prose: str, *, turn: int,
+                   scope: list[str] | None = None,
+                   horizon: float | None = None) -> TurnTrace:
+    """Read the cold open's prose into canon and the player frame, once, before turn 1
+    reads (OPENING-SETTLE-AND-ELSEWHERE Part B, R20 run 7: the opening showed a sack and a
+    hearth in the next room that no frame ever held). The FACT pipeline only, shared with a
+    turn's settle (`_settle_prose_facts`). It is not a hidden turn: no `event:turn_*` row,
+    transcript entry, memory compaction, clock advance, last-seen or world-tick row, and no
+    cast move (the opening stages the cast; it does not move them).
+
+    `turn` is the last turn already played (0 at a fresh start); positional rows are
+    stamped at its time. Fail-open: the opening is already shown, so any failure is logged
+    and noted on the returned in-memory trace, and play proceeds as before."""
+    trace = TurnTrace(turn=turn)
+    if not (prose or "").strip():
+        return trace
+    try:
+        p = _FailOpenIngest(world.porcelain, trace)
+        live_reads = PorcelainWorldReads(world, horizon=horizon)
+        chain = p.locate(arc.protagonist, as_of=horizon)
+        scene = chain[0] if chain else None
+        if scope is None:
+            scope = sorted(e for e in arc_entities(arc, live_reads) if live_reads.has_entity(e))
+        features: list = []
+        if scene:
+            try:
+                features = list(p.features(scene, as_of=horizon))
+            except Exception:  # noqa: BLE001 — read unsupported: no features
+                features = []
+        snap_scope = list(scope) + ([scene] if scene else []) + features
+        player_frame = _player_frame(arc)
+        canon_table = _table(_snap_or_empty(p, snap_scope, as_of=horizon))
+        briefing_keys = set(_table(_snap_or_empty(p, snap_scope, frame=player_frame,
+                                                  as_of=horizon)))
+        _promote, _receipts, contradictions, quarantined = _settle_prose_facts(
+            p, world, arc, prose, scene=scene, turn=turn, trace=trace,
+            canon_table=canon_table, snap_scope=snap_scope, live_reads=live_reads,
+            horizon=horizon, player_frame=player_frame, pre_keys=set(),
+            briefing_keys=briefing_keys, reshape_license=set())
+        trace.contradictions = sorted(contradictions)
+        trace.quarantined = sorted(quarantined)
+        logger.info("opening settle: promoted %d row(s), quarantined %d, contradictions %d",
+                    len(_promote), len(quarantined), len(contradictions))
+    except Exception as exc:  # noqa: BLE001 — the opening is already shown
+        logger.warning("opening settle failed; the opening stays shown: %s", exc)
+        trace.dropped_cohorts.append(f"opening_settle ({exc})")
+    return trace
+
 def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              turn: int, scope: list[str] | None = None,
              mode: str = "pure", endless: bool = False,
@@ -6147,6 +6421,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         else:
             scene_lines.append(f"{_disp(f['entity'])} · {f['attribute']} · {_disp(f['value'])}")
     trace.briefing_frames = [player_frame]
+    # NAMED BUT NOT HERE (OPENING-SETTLE-AND-ELSEWHERE Part A, R20 run 7): the filter above
+    # rightly keeps elsewhere things out of the scene list, but a thing the player NAMES
+    # that the player frame places elsewhere gets one honest line, so the HERE directive
+    # does not pull it into the room. Player frame only; canon context only suppresses.
+    _named_elsewhere: list[tuple[str, str, str]] = []
+    try:
+        _named_elsewhere = named_elsewhere(
+            world, player_frame=player_frame, player_input=player_input,
+            protagonist=arc.protagonist, scene=scene, scene_features=scene_features,
+            ancestors=list(chain or [])[1:], as_of=_h)
+    except Exception:  # noqa: BLE001 — an enrichment line, never a broken turn
+        logger.exception("named-elsewhere read failed")
+    trace.named_elsewhere = [f"{e} · {pl or '-'}" for e, _l, pl in _named_elsewhere]
 
     # Irony delta via the designed sixth read (frame_diff) — restored
     # after PB's indexed read path landed (letter 024; measured 0.68s on
@@ -6769,6 +7056,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         voc_holder=_voc_holder,
         voc_absent=_voc_absent,
         voc_name=_voc_name,
+        named_elsewhere=[(lbl, pl, e.startswith("place:")) for e, lbl, pl in _named_elsewhere],
         commitment=commitment,
         commitment_clarified=commitment_clarified,
         commitment_bounced=commitment_bounced,
@@ -6890,207 +7178,16 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             return all(tok in license_tokens
                        for tok in id_stem_parts(entity, hyphens=True))
 
-        canon_before = dict(canon_table)  # established values BEFORE this render
-        # `defer`: don't durability-classify the QUARANTINE staging — these rows are
-        # only here to diff against canon for contradictions; the survivors get a single
-        # batch classification on PROMOTION below. Kills the per-turn double-classify.
-        # FAIL-OPEN: the PROSE is the player-facing deliverable and is already rendered;
-        # the post-render extraction is bookkeeping (staging for the canon-commit gate). A
-        # schema violation here (the cheap extractor malforming its JSON, raising after a
-        # re-ask) must NOT sink an already-delivered turn — the harness caught this sinking
-        # turns. Ship the prose; skip this turn's canon-commit (logged). (Turn-loop policy:
-        # "the narrator failing is the turn failing" — this is POST-narrator.)
-        # ENTITY AUTHORITY (ENTITY-AUTHORITY.md / Cx 304): READ-ONLY extract → RESOLVE → structured
-        # stage. The narrator's prose is a PROPOSAL, never a free canon source (map-governs). The
-        # resolver binds each mention to a known scene entity, mints one correctly-typed entity only
-        # when genuinely novel, and DROPS voice/malformed/deixis-phantoms + person-in-object rows
-        # BEFORE they reach the staging frame — so the misshapen graph is never created (vs the old
-        # `p.ingest(prose)` that free-minted fragments/phantoms the promote-gate band-aids then chased).
-        _resolve_cands = {e for (e, _a) in canon_table if isinstance(e, str) and ":" in e}
-        if scene:
-            _resolve_cands.add(scene)
-        # #98 (Cx 415 #4): bind-before-mint must see past the current scene — a named inn
-        # established two scenes ago must BIND its second mention, never mint a twin. Widen
-        # the roster with every NAMED canon place/person (horizon-safe); ambiguity still
-        # drops, so a bigger roster can only prevent duplicates, never force a bad bind.
-        # CANON-FRAMED on purpose (Cx 433 blocker): unframed visible() would admit
-        # plot:/session:/knows: name rows — private memory or plot topology must never
-        # enter the canon bind path and get promoted into world truth.
-        try:
-            for _pfx in ("place:", "person:"):
-                from construct.adapter import frame_facts as _ff2
-                for _nr in _ff2(world, "canon", attribute="name", prefix=_pfx,
-                                as_of=_h):
-                    _resolve_cands.add(str(_nr.entity))
-        except Exception:  # noqa: BLE001 — roster widening is enrichment, never a gate
-            pass
-
-        def _resolve_name_of(e: str) -> str:
-            return table_or_read_name(canon_table, live_reads, e)
-        try:
-            with _phase(trace, "post_extract"):
-                _raw = p.extract(prose, scene=scene, extract="lean",
-                                 pov=arc.protagonist)  # READ-ONLY; "you" = the protagonist (PB 4c)
-                # FRAME PARTITION — the FIRST step after extract (Cx 552: it must
-                # precede reconstruct_names too, else a dropped knows:* row's subject
-                # still spawns an unframed synthetic NAME row that stubs/promotes as
-                # the dropped row's derivative). Policy + rationale: _partition_frames.
-                _canon_items, _dropped_framed = _partition_frames(list(_raw))
-                if _dropped_framed:
-                    logger.info(
-                        "narrator settle: dropped %d non-canon-framed row(s) "
-                        "(knowledge-promotion gate not yet built): %s",
-                        len(_dropped_framed), _dropped_framed[:5])
-                    trace.dropped_cohorts.append(
-                        f"settle_noncanon_frames ({len(_dropped_framed)})")
-                # #80 CAST-MOVES §1 (Cx r1 gap 1): the containment-synonym set collapses to
-                # `in` BEFORE resolve_rows — must precede reconstruct_names/resolve_rows so
-                # every downstream step (the resolver, the movement lane) sees one spelling.
-                _canon_items = _canonicalize_containment(_canon_items)
-                # #98 live-probe finding: the lean extractor omits name rows — reconstruct
-                # the cased surface form from the prose (the stub gate's only evidence);
-                # synthetic names commit only WITH a stub, never onto bound entities.
-                # Runs over the ACCEPTED copy only (Cx 552).
-                from construct.resolve import reconstruct_names
-                _canon_items = list(_canon_items) + reconstruct_names(
-                    list(_canon_items), prose)
-                # #98 (Cx 415 #2): the NARRATION channel — person leaves the free mint set;
-                # place/person enter ONLY through the proper-name stub gate (minimal rows,
-                # non-present).
-                # #80 CAST-MOVES §1: the out-of-band `ResolutionOutcome` collector — the
-                # per-row correlation surface the movement lane consumes below, additive to
-                # the legacy `_receipts` triples (byte-identical, untouched).
-                _move_outcomes: list[ResolutionOutcome] = []
-                _resolved, _receipts = resolve_rows(
-                    _canon_items, scene=_resolve_cands, protagonist=arc.protagonist,
-                    name_of=_resolve_name_of, allow_mint=True,
-                    mint_kinds=_NARRATION_MINT_KINDS,
-                    stub_kinds=_NARRATION_STUB_KINDS,
-                    outcomes=_move_outcomes)
-                trace.resolver = (trace.resolver or []) + _receipts
-                # #80 CAST-MOVES §1-§4: partition licensed person-movement out of ordinary
-                # promotion (BOUND MOVE / UNBOUND EXIT), gate it through the five stagecraft
-                # rules, and commit direct to canon — never through the quarantine stage
-                # below (a narrated `in` change is exactly the contradiction that stage
-                # exists to catch; movement needs its own licensed lane).
-                _resolved, _cast_candidates, _cast_guard_drops = _partition_cast_moves(
-                    _resolved, _canon_items, _move_outcomes, scene=scene,
-                    scene_name=str(canon_table.get((scene, "name")) or "") if scene else "")
-                trace.cast_move_drops.extend(_cast_guard_drops)
-                if _cast_candidates:
-                    _run_cast_moves_lane(
-                        p, live_reads=live_reads, trace=trace, turn=turn,
-                        protagonist=arc.protagonist, scene=scene, present=_present,
-                        engaged_this_turn=_engaged_this_turn, candidates=_cast_candidates,
-                        horizon=_h)
-                staged = _receipt_rows(p.ingest_structured(
-                    _resolved, frame=_PROPOSED, classify="defer"))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("render extraction failed; shipping prose, skipping commit: %s", exc)
-            trace.dropped_cohorts.append(f"post_extract ({exc})")
-            staged = []
-        # the entities the narrator's prose touched (drop meta/assertion ids); read
-        # their proposed-frame values (snapshot facts are fact-only — no meta noise)
-        staged_entities = sorted({
-            r["entity"] for r in staged
-            if ":" in r["entity"] and not r["entity"].startswith(("a:", "attr:"))})
-        proposed_vals = _table(_snap_or_empty(p, staged_entities, frame=_PROPOSED))
-
-        # EPILOGUE-NO-CANON (Cx 189): on a TERMINAL / conclusion-curtain turn the narrator renders
-        # FATE/SUMMARY prose ("walks back into the rain with his name cleared", "keeps his pride but not
-        # his clean hands") — it must mint NOTHING into canon. Promoting it canonized descriptive ALIASES
-        # onto the cast, which the next episode then surfaced as character NAMES ("With His Name Cleared").
-        # The prose is still archived in session:main (the transcript below); any real consequence is
-        # written BEFORE narration via the explicit conclusion/consequence paths, never mined back out of
-        # curtain prose. So drop all promotion candidates on the epilogue turn.
-        if trace.terminal or (trace.concluded and not endless):
-            proposed_vals = {}
-
-        protected_keys = arc_protected_keys(arc, live_reads)  # the arc's load-bearing (hidden) facts
-        # The objects the protagonist HOLDS at the play horizon (after this turn's deterministic
-        # take/drop). Possession is HOST-owned: the narrator's prose extraction must never relocate
-        # the player's inventory into furniture or a "pocket" pseudo-container (founder live cohesion
-        # test, 2026-06-29: a held pencil was extracted `in obj:desk`/`obj:table`, a held token
-        # `in obj:pocket` — stranding them off the player so the carry briefing lost them).
-        try:
-            _held_now = {h for h in p.contents(arc.protagonist, as_of=_h)
-                         if str(h).startswith("obj:")}
-        except Exception:
-            _held_now = set()
-        promote: list[dict] = []
-        contradictions: list[tuple] = []
-        quarantined: list[tuple] = []
-
-        def _promote_row(_entity: Any, _attribute: str, _value: Any) -> dict:
-            # Narrator PROVENANCE (Cx 022): re-stamp `source_doc` so a promoted improv fact is
-            # auditable as narrator-origin. Temporal stamping of positional `in` state happens
-            # in one place — `_stamp_temporal_state`, applied to the whole batch at ingest.
-            return {"entity": _entity, "attribute": _attribute,
-                    "value": _value, "source_doc": _NARRATOR_SOURCE}
-
-        for (entity, attribute), newv in proposed_vals.items():
-            # ENTITY AUTHORITY (verified-then-strip, Cx 313): the malformed / narrator-voice / pronoun-
-            # deixis / person-in-object band-aids that USED to live here are GONE — the resolver
-            # (`resolve_rows`, run at the read-only `extract` boundary before staging) drops/binds those
-            # classes upstream, so they never reach `proposed_vals`. Live-proven on bodycase:
-            # `trace.quarantined` was empty all 7 turns. The guards BELOW stay — they are NOT resolver-
-            # subsumed: the held-object guard knows live inventory + same-turn drop licensing (which the
-            # identity resolver does not), and the arc-key/contradiction gates are concealment/canon-diff
-            # policy, a different layer.
-            # POSSESSION IS HOST-OWNED: the narrator may not relocate a PLAYER-HELD object. A held
-            # object's `in` changes ONLY via the deterministic take/drop steps; a narrator row that
-            # moves it elsewhere (`obj:pencil in obj:desk`, `obj:token in obj:pocket`, `obj:hymn held_by
-            # person:x` — any `_HELD_RELOCATING_ATTRS`) is drift that
-            # strands it off the player. Quarantine it unless the player licensed the move THIS turn
-            # (a drop the deterministic step already committed → key in pre_keys). Keeps inventory on
-            # the player across locations (founder live cohesion test, 2026-06-29).
-            if (attribute in _HELD_RELOCATING_ATTRS and str(entity) in _held_now
-                    and str(newv) != arc.protagonist and (entity, attribute) not in pre_keys
-                    and entity != (trace.dropped or None)):
-                quarantined.append((entity, attribute))
-                continue
-            key = (entity, attribute)
-            established = canon_before.get(key, _ABSENT)
-            # STRICT license for a PROTECTED arc fact (Cx 022 blocking #1): the mystery's
-            # answer may enter canon AND the player frame ONLY if the player legitimately
-            # surfaced it THIS turn — it is in their own action receipt (pre_keys) or
-            # already in their knowledge frame (briefing_keys = the player-frame snapshot,
-            # i.e. earned by prior play). Token matching (_licensed) is too loose here: a
-            # narrator that merely RESTATES a hidden canon fact (SAME value) would otherwise
-            # slip past the contradiction check and promote+mirror it into knows:<player>,
-            # handing over the solution. So a protected key the player didn't earn this turn
-            # is QUARANTINED — new OR same-value. A legitimately discovered arc fact is in
-            # the player frame → licensed_strict → promotes normally (discovery still works).
-            licensed_strict = (key in pre_keys or key in briefing_keys
-                               or (entity, attribute, newv) in _reshape_license)
-            # Promoted rows carry their narrator PROVENANCE (Cx 022 non-blocking): the
-            # promote path is structured-ingest, which drops the `source` the staging
-            # ingest stamped — re-stamp via `source_doc` so a promoted improv fact is
-            # auditable as narrator-origin (vs player/author/canon-seed).
-            if key in protected_keys:
-                if licensed_strict:
-                    promote.append(_promote_row(entity, attribute, newv))
-                else:
-                    quarantined.append(key)
-                continue
-            if established is not _ABSENT and established != newv and not licensed_strict:
-                contradictions.append(key)  # narrator overwrote established truth
-            else:
-                promote.append(_promote_row(entity, attribute, newv))
-        # The narrator_promote batch is a quarantine-gate audit/receipt surface retained
-        # for future drift-handling readers. Cx 567 §2 retired it as a salience input;
-        # the opportunistic generator does not read it. PB receipts carry entity/attribute
-        # but NOT value, so confirmed_batch() retains candidate values for confirmed keys.
-        _promote_receipt_rows: list[dict] = []
-        if promote:
-            # Stamp positional `in` state at THIS turn so a promoted relocation advances the
-            # play horizon (bodycase teleport) — the same rule the player-input path uses.
-            promote = _stamp_temporal_state(promote, turn)
-            with _phase(trace, "promote"):
-                _promote_receipt = p.ingest_structured(promote, frame="canon", classify="batch")
-                _promote_receipt_rows = _receipt_rows(_promote_receipt)
-                canon_table.update(_table(_snap_or_empty(p, snap_scope, as_of=_h)))
-                _mirror_rows(p, promote, player_frame, canon_table, trace, as_of=_h)
+        promote, _promote_receipt_rows, contradictions, quarantined = _settle_prose_facts(
+            p, world, arc, prose, scene=scene, turn=turn, trace=trace,
+            canon_table=canon_table, snap_scope=snap_scope, live_reads=live_reads,
+            horizon=_h, player_frame=player_frame, pre_keys=pre_keys,
+            briefing_keys=briefing_keys, reshape_license=_reshape_license,
+            dropped=trace.dropped, epilogue=trace.terminal or (trace.concluded and not endless),
+            cast_moves=lambda _cands: _run_cast_moves_lane(
+                p, live_reads=live_reads, trace=trace, turn=turn,
+                protagonist=arc.protagonist, scene=scene, present=_present,
+                engaged_this_turn=_engaged_this_turn, candidates=_cands, horizon=_h))
         # Build the receipt-confirmed batch: promote candidates whose (entity, attribute)
         # appear in the receipt (failed ingests produce an empty receipt via _FailOpenIngest
         # — those candidates are uncommitted and must never enter the batch). Empty on
@@ -7269,6 +7366,7 @@ def _write_mechanics_log(arc: Arc, turn: int, player_input: str, prose: str,
             f"- cohorts fired: {_g('cohort_calls') or '-'}",
             f"- dropped: {_g('dropped_cohorts') or '-'}",
             f"- dropped attr declarations: {_g('dropped_declarations') or '-'}",
+            f"- named but not here: {_g('named_elsewhere') or '-'}",
             f"- movement: status={_g('movement_status') or '-'}  same_place={_g('same_place')}  "
             f"debug={_g('move_debug') or '-'}  obstruction={_g('movement_obstruction') or '-'}",
             f"- time: {_g('time_now')} (+{_g('time_advanced')}m)  "
