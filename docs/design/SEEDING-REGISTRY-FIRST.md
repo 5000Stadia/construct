@@ -183,3 +183,9 @@ Two consultants from different model families (claude-opus-5-5 and gpt-5.6-terra
 5. **Acceptance on planted-trap stories:** Rex the man and Rex the dog, two Brecks, a late reveal (consultant 1).
 
 Also from consultant 1, matching eval/13: with both tiers on gpt-5.5, the only fast lever is lower reasoning effort, and batching saves cost, not wall time, when calls already run in parallel. An extractor that no longer decides identity is the one most likely to stay accurate at low effort.
+
+### pattern-buffer's weighing of the engine points (mf08994)
+
+- **Point 2 (hidden identities as dated `aka` via `correlate`, plus `distinct_from` for listed namesakes): endorsed.** Both verbs exist (AKA-CORRELATION-V1). `aka` keeps the facets apart in default reads; a correlated read joins them on purpose; the reveal is a `knows:` fact. Grading caveat: `aka` is not identity closure, so book grading counts an aka-joined reveal as joined.
+- **Point 3 (mention nodes plus `denotes`): the goal is right, the engine already has it.** Facts go on a provisional id for the ambiguous mention, joined later with `same_as`: an explicit, evidenced, retractable assertion whose facts fold into the entity's closure. A new `denotes` would duplicate `same_as` with weaker tooling. Hosts filter provisional ids out of rosters by a kind or flag.
+- **Point 4 (neutral ids): lean no, on cost against gain.** Registry-entry identity, minted by code, solves Rex. R49, and R51 for every type, make the kind fact authoritative over the namespace. Neutral ids would ripple through `ID_RE`, the person/place predicates, the mirror, every test and every host's readability. Instead: code-minted, readable, type-prefixed ids (`person:rex`, `animal:rex`, `person:john_2` for a listed namesake), with the R51 type fact as the authority and the namespace a readable hint only.
