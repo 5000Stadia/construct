@@ -1085,6 +1085,7 @@ class Session:
         from construct.arc.executor import set_entry_epoch
         set_entry_epoch(self._entry_epoch)
         n = next_turn_number(self._world)
+        self._timing_enter()
         timing.set_phase(f"turn {n}")
         timing.record("turn_start", turn=n)
         # AS-OF PLAY HORIZON (B' S3): bind this turn's reads (terminal check + the whole turn
@@ -1174,11 +1175,22 @@ class Session:
         close() so the deferred work is never silently dropped."""
         self._flush_settle()
 
+    def _timing_enter(self) -> None:
+        """Put this session's timing scope on the current context (the timing log groups
+        by it: one process can hold many sessions, each numbering its turns from 1)."""
+        sid = getattr(self, "_timing_scope", None)
+        if sid is None:
+            self._timing_scope = timing.set_scope(
+                "session", f"{self.scenario}/{self.player_id}")
+        else:
+            timing.use_scope(sid)
+
     def _flush_settle(self) -> None:
         settle = self._pending_settle
         self._pending_settle = None
         if settle is None:
             return
+        self._timing_enter()
         t0 = time.time()
         try:
             settle()

@@ -16,20 +16,24 @@ and every turn appends one JSON line there:
   the turn's own section timings (`TurnTrace.timings`).
 - `{"ev": "mark", "label": ...}`: any other point worth a timestamp.
 
-Every row carries `run` (one id per process), because the file is append-only and may
-hold many runs. Within a run, consecutive stage rows with no turn between them are one
-build: a build ends at the next turn, or, if it never reached one, at its run's last row.
+Every row carries `run` (the writing process) and `scope`: the build or session it belongs
+to. One process can hold many sessions (the Discord bot keeps one per player, each
+numbering its own turns from 1), so reports group by scope. Each build entry point opens a
+build scope; each Session keeps one session scope for its turns and settles. Construct's
+worker pools carry the scope into their threads (`submit_in_context`).
 
 `scripts/timing_report.py` turns the log into the tables. Recording is best-effort and
 never raises into the caller: a timing line must never sink a build or a turn."""
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
 import threading
 import time
+import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -37,9 +41,15 @@ logger = logging.getLogger(__name__)
 ENV = "CONSTRUCT_TIMING_LOG"
 
 _lock = threading.Lock()
-_phase = ""  # the build stage or turn now running (process-wide; settle threads inherit it)
-#: One id per process, on every row: the log is append-only and may hold many runs.
+#: One id per process, on every row: the file writer. Reports group by `scope`, not this.
 RUN = f"{os.getpid()}-{int(time.time())}"
+#: The build or session this work belongs to (cr RED on c8904ad: one process can hold many
+#: sessions, e.g. the Discord bot's one per player, each numbering its own turns from 1).
+#: A context variable, so each thread and task carries its own; construct's worker pools
+#: copy the submitting context into each worker (`submit_in_context`).
+_scope: contextvars.ContextVar[str] = contextvars.ContextVar("timing_scope", default="")
+#: The build stage or turn now running, within the scope.
+_phase: contextvars.ContextVar[str] = contextvars.ContextVar("timing_phase", default="")
 
 
 def enabled() -> bool:
@@ -47,12 +57,35 @@ def enabled() -> bool:
 
 
 def set_phase(label: str) -> None:
-    global _phase
-    _phase = label
+    _phase.set(label)
 
 
 def phase() -> str:
-    return _phase
+    return _phase.get()
+
+
+def scope() -> str:
+    return _scope.get()
+
+
+def set_scope(kind: str, name: str = "") -> str:
+    """Begin a new build or session scope in the current context and return its id."""
+    sid = f"{kind}:{name}:{uuid.uuid4().hex[:8]}" if name else f"{kind}:{uuid.uuid4().hex[:8]}"
+    _scope.set(sid)
+    _phase.set("")
+    return sid
+
+
+def use_scope(sid: str) -> None:
+    """Re-enter a known scope (a session's id, kept on the session object)."""
+    _scope.set(sid)
+
+
+def submit_in_context(pool, fn, *args, **kwargs):
+    """`pool.submit` that runs `fn` in a copy of the caller's context, so a worker's calls
+    keep the caller's scope and phase. One copy per task: a Context can't be entered by
+    two threads at once."""
+    return pool.submit(contextvars.copy_context().run, fn, *args, **kwargs)
 
 
 def record(ev: str, **fields: Any) -> None:
@@ -60,7 +93,8 @@ def record(ev: str, **fields: Any) -> None:
     path = os.environ.get(ENV)
     if not path:
         return
-    row = {"ev": ev, "t": round(time.time(), 3), "run": RUN, "phase": _phase,
+    row = {"ev": ev, "t": round(time.time(), 3), "run": RUN, "scope": _scope.get(),
+           "phase": _phase.get(),
            "thread": threading.current_thread().name, **fields}
     try:
         line = json.dumps(row, default=str)
@@ -76,6 +110,8 @@ def stage(label: str) -> None:
     extracted", "…viable") is a mark inside the current stage."""
     label = label.strip()
     if label.startswith("Stage"):
+        if not _scope.get().startswith("build:"):
+            set_scope("build")  # a build entered without an explicit scope
         set_phase(label.split(" · ", 1)[0])
         record("stage", label=label)
     else:

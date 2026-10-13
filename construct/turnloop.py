@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 from construct import cohorts
 from construct import resolution
+from construct import timing
 from construct.resolve import (
     resolve_rows, bind_or_mint, _PLAYER_INPUT_MINT_KINDS,
     _NARRATION_MINT_KINDS, _NARRATION_STUB_KINDS, _PLACE_LIKE_KINDS,
@@ -1041,7 +1042,7 @@ def _parallel(thunks: list) -> list:
             return [exc]
     out: list = [None] * len(thunks)
     with ThreadPoolExecutor(max_workers=min(len(thunks), 6)) as ex:
-        futs = {ex.submit(t): i for i, t in enumerate(thunks)}
+        futs = {timing.submit_in_context(ex, t): i for i, t in enumerate(thunks)}
         for fut, i in futs.items():
             try:
                 out[i] = fut.result()

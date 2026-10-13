@@ -1757,6 +1757,7 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
     author + the player-facing goal. `laws`/`reality_register` (#105) arrive
     only from the GENERATED path (the fiction was written on them); a real
     ingested book keeps its own implicit constitution — never retrofitted."""
+    timing.set_scope("build", name)
     WORLDS_DIR.mkdir(exist_ok=True)
     spath = scenario_path(name)
     if spath.exists():
@@ -1800,7 +1801,8 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
             from concurrent.futures import ThreadPoolExecutor
             cap = max(1, int(os.getenv("CONSTRUCT_EXTRACT_CONCURRENCY", "8")))
             with ThreadPoolExecutor(max_workers=cap) as pool:
-                futs = {i: pool.submit(world.porcelain.extract, chunk, extract="full")
+                futs = {i: timing.submit_in_context(pool, world.porcelain.extract, chunk,
+                                                    extract="full")
                         for i, chunk in enumerate(chunks, start=1)}
                 for i, fut in futs.items():
                     try:
@@ -1879,6 +1881,7 @@ def create_scenario_from_interview(name: str, brief: str, provider: Provider,
     spines, the opening situation — committed as `stated` canon, then the
     shared tail authors the arc and seeds frames. The brief is the human's
     input (genre/setting/characters/situation, however much they give)."""
+    timing.set_scope("build", name)
     from construct import cohorts
 
     WORLDS_DIR.mkdir(exist_ok=True)
@@ -2065,6 +2068,7 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
     Construct's showcase loop (fiction → projection). On gate failure the
     generated source is preserved for audit and the published world is removed
     (ViabilityError) — never a playable-but-broken scenario (Cx 063 #6)."""
+    timing.set_scope("build", name)
     from construct import cohorts
 
     WORLDS_DIR.mkdir(exist_ok=True)
@@ -2345,7 +2349,8 @@ def seed_character_frames(world: Any, provider: Provider,
     if SEED_CONCURRENCY > 1 and len(characters) > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=SEED_CONCURRENCY) as pool:
-            results = list(pool.map(_author, characters))   # order-preserving
+            results = [f.result() for f in   # order-preserving
+                       [timing.submit_in_context(pool, _author, c) for c in characters]]
     else:
         results = [_author(char) for char in characters]
 
@@ -3145,6 +3150,7 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
     freezes play), and checkpoint the boundary. The world (canon, your character, the ledger) all
     carry over; only a fresh hidden arc is woven over it. Emits the same narrative build-progress
     stages a fresh build does (NARRATIVE phrasing — no internal jargon). Returns the updated meta."""
+    timing.set_scope("build", name)
     from construct import cohorts
     from construct.arc import io as arc_io
     from construct.arc.executor import (
