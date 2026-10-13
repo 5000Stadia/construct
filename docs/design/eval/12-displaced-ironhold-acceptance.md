@@ -208,10 +208,10 @@ Two gaps, both construct's:
 1. **The opening never becomes canon.** First-mention permanence does not cover the cold open. This is the class of finding 5.
 2. **A named thing that is elsewhere gets no "not here" line.** The location filter is right to keep elsewhere objects out of the scene list; that is the "tape followed us everywhere" fix. But when the player names one, the narrator learns nothing about where it is, and the HERE directive pulls it into the room.
 
-Fix shapes (not built):
+Fix shapes (not built). Run 7 needed both:
 
-- **For gap 2, the fix that would have stopped this.** When the player's line names an entity that canon places elsewhere, the briefing carries one line: "<name> is not here: it is in <place>." The narrator can then have someone fetch it, have the player look across, or say it is not here.
-- **For gap 1, so that fix reaches what the opening named.** Run the turn's prose extraction on the opening too, so a thing the opening names is committed where the opening puts it. Without it, the hearth stays unknown to canon, and no "not here" line could place it.
+- **For gap 2.** When the player's line names an entity that the player's own frame places elsewhere, the briefing carries one line: "<name> is not here: it is in <place>." The narrator can then have someone fetch it, have the player look across, or say it is not here. The line reads the player's frame, never canon, so it gives away no whereabouts the player has not learned.
+- **For gap 1.** Run the turn's prose extraction on the opening too, so that what the opening shows is committed where the opening puts it, in canon and in the player's frame. In run 7 the player's frame held nothing about the sack before turn 1 (one warrant-room row, the clue turn 1 delivered). Only canon knew where the sack was, and the hearth was nowhere. Without this fix, the gap-2 line has nothing to read.
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
