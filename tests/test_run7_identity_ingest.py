@@ -176,3 +176,29 @@ def test_a_required_holder_counts_as_load_bearing(tmp_path):
     w = _named_world(tmp_path, _LYSAS)
     with pytest.raises(IdentityUnresolvedError):
         game._stage_confirm_identity(w, _arc("person:hero"), {"person:lysa"})
+
+
+# 3. A question is not a fact (R20 run 7, finding 4): the turn-4 line mixed a statement with
+#    "Quill, who keeps the wash tally ink and knife?", and the player-input ingest wrote
+#    `Quill keeps obj:wash_tally_ink` / `obj:knife` to canon. Only statements are extracted.
+
+_RUN7_T4 = ("I nod at the key still hanging useless in Quill’s hand. “Leave chapel dangling; "
+            "the wet scrape is the road. Quill, who keeps the wash tally ink and knife, and who "
+            "had the ledger open between the hymn and the moment Dena brought it here?”")
+
+
+def test_the_run7_question_is_not_extracted():
+    kept = turnloop._declarative_part(_RUN7_T4)
+    assert "who keeps" not in kept
+    assert kept.startswith("I nod at the key") and "the wet scrape is the road." in kept
+
+
+@pytest.mark.parametrize("line,expected", [
+    ("Who did it?", ""),
+    ("Is it locked? I try the handle.", "I try the handle."),
+    ("I open the drawer and take the letter", "I open the drawer and take the letter"),
+    ("I say, “Wait here.” Then I go.", "I say, “Wait here.” Then I go."),
+    ("“Where were you?” I ask her.", "I ask her."),
+])
+def test_declarative_part(line, expected):
+    assert turnloop._declarative_part(line) == expected

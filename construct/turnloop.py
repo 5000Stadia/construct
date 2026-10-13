@@ -1450,6 +1450,21 @@ def _stamp_temporal_state(rows: list, turn: int) -> list:
     return out
 
 
+#: One sentence: text up to its terminal punctuation, with any closing quotes after it.
+_SENTENCE = re.compile(r"[^.!?]*(?:[.!?]+[\"'”’»)\]]*|$)")
+
+
+def _declarative_part(text: str) -> str:
+    """The player's line WITHOUT its questions, for the player-input extraction (R20 run 7:
+    "Quill, who keeps the wash tally ink and knife?" was read as `Quill keeps ...` and
+    written to canon). A sentence ending in "?" (closing quotes allowed) asks; it asserts
+    nothing about the world, so it is never extracted. Statements and actions stay
+    verbatim, in order. A line that is only questions returns ""."""
+    kept = [m.group(0) for m in _SENTENCE.finditer(text or "")
+            if m.group(0).strip() and "?" not in m.group(0).rstrip(" \t\n\"'”’»)]")[-1:]]
+    return "".join(kept).strip()
+
+
 def _canonicalize_containment(rows: list[dict]) -> list[dict]:
     """Rewrite every containment-synonym row (`inside`/`located_in`/`within`) to the canonical
     `in` spelling — run on the ACCEPTED RAW extraction rows, BEFORE `resolve_rows` sees them
@@ -4646,8 +4661,13 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                               | ({pre_scene} if pre_scene else set()) | {arc.protagonist})
                 # pov= (PB SHAPE-FIX 4c, #108): the player's "I" IS the protagonist —
                 # deixis binds to them; person:you/person:i can never mint.
-                _raw = p.extract(player_input, scene=pre_scene, extract="lean",
-                                 pov=arc.protagonist)  # read-only
+                # QUESTIONS ASSERT NOTHING (R20 run 7): only the line's statements and
+                # actions are extracted; a question-only line extracts nothing.
+                _declared = _declarative_part(player_input)
+                if _declared != player_input.strip():
+                    trace.dropped_cohorts.append("player_ingest (questions not extracted)")
+                _raw = (p.extract(_declared, scene=pre_scene, extract="lean",
+                                  pov=arc.protagonist) if _declared else [])  # read-only
                 # FRAME PARTITION (Cx 552: the player channel is the SAME structural
                 # bypass — a knows:* extraction row landed directly in the NPC frame,
                 # ungated, no telemetry). First step after extract; policy + rationale:
