@@ -244,7 +244,28 @@ The confirm stage needs evidence that tells a name fragment of one person from t
 - **The build's own source text.** A short name that only one full name in the source contains is that person's fragment ("Breck" inside "Tomas Breck"). Lysa beside both "Lysa Marr" and "Lysa Fen" is ambiguous and stays held apart.
 - **The engine's vouch.** Why does the engine's audit auto-decline same-namespace kind conflicts before its vouch can judge them? The kinds are extraction's role words ("condemned man" beside "person"). That is a question for pattern-buffer.
 
-No run 9 until one of these is designed, reviewed and built.
+No run 9 until one of these is designed, reviewed and built. (Built as IDENTITY-CONFIRM r6 plus pattern-buffer R48 and R49; see run 9.)
+
+## Run 9 — INCOMPLETE: built and played 25 clean turns, then the Codex login expired
+
+Opened under the monitor's pre-approval (n94c4cd), on local main `f038999`, engine pinned at pattern-buffer `9e0620f` (R48 merge gate plus R49 person roles). Main suite 1686 passed, 1 skipped. Codex subscription only. Started 12:11 PDT 2026-10-13. Stopped by hand at about 13:20, at turn 28.
+
+**The build passed.** The identity check that stopped run 8 did not fire: under R49 a person's role words are no longer their kind. The viability gate published the world after about 20 minutes.
+
+**Chapter 1 played 25 turns with no engine error**, average about 2 minutes a turn. The play was escape work on condemned row through Hester, Mara and Jory: door marks, the stone tag, the laundry bundle. Chapter 1 had not concluded by turn 25. No turn cap applies (chapter ends on climax only).
+
+**At turn 26 every model call failed:** "Codex auth failed (401): Your authentication token has expired." The token in `~/.codex/auth.json` was last refreshed 2026-10-04. Construct's Codex provider reads that file and does not refresh it. The probe was stopped at turn 28; turns 26 to 28 are failed turns, not play. **The run proves nothing about criteria 1 to 3 and 5.** Criterion 4 failed on infrastructure, not code.
+
+### Findings from the 25 turns (for the next run and R20's open items)
+
+1. **Object permanence flickers within one scene** (critic, turns 17 to 20). The stone tag was in the player's cell, then "there is no tag under it", then "your fingers find the stone beneath you: not gone", then "you have hidden only filth in the crack", then "the hidden stone" again. Hester likewise vanished from the passage and came back. This is R20's open item, object permanence, now seen in chapter 1.
+2. **The world denied the player's own clothing** (turn 21). The player tore a strip from their shirt hem, which Hester had just suggested ("Shirt, sheet, bandage"). The narration: "your teeth and fingers find no shirt there." There was no canon row for the player's clothes, so the permanence check refused an ordinary belonging. This is a make-it-real gap: World-Growth's commit-on-first-mention, applied to the player's own things.
+3. **"Hester Rook 2."** The cast's #92 identity gate remapped the cast's Hester (`person:hester_rook`, a chapel cook) to `person:hester_rook_2`, because canon's `person:hester_rook` now carries R49 roles "soldier, sergeant" that share no words with "chapel cook". Before R49, those words sat in `kind` and the gate saw no role, so it reused the id. The world now holds a nameless soldier `person:hester_rook` and the cook `person:hester_rook_2` (named "Hester Rook"). Labels built from the id ("Hester Rook 2") reach the cast listing and the mechanics log, but not the prose. To check: is the source story's Hester a soldier at all, or did extraction fuse two people? The gate also reads only the newest role, not every role in force.
+4. A smaller continuity snag (critic, turn 4): "Mara's empty stool" while Mara stood in the passage.
+
+### Where R20 stands after run 9
+
+The identity route works: the build gets through. The run needs repeating once Codex is logged in again. The world built in this run was moved out of `worlds/` into the session scratchpad, so the rerun builds fresh. Findings 1 and 2 are the next real fiction work. Finding 3 needs a look at the source story first.
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
