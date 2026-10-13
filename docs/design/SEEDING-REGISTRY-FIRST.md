@@ -11,6 +11,10 @@
 
 **The target:** the build, from a fresh story to a world the player can enter. About 15 to 20 minutes in R20 run 9.
 
+## Measured: this is a correctness design, not mainly a speed one (eval/13, 2026-10-13)
+
+The first timed build (474 s, 27 calls) spent about 11 s on identity reconcile, with no model calls, and about 9 s on literal categorization. Build time sits in extraction (104 s wall), story authoring (120 s), the serial arc and cast (96 s), and serial post-arc stages (about 100 s). Registry-first earns its place by **correctness**: no fused or split characters, no `_2` remaps, the Rex test, leak-safe reveals. The speed levers are separate, and ranked in eval/13: the extraction model and effort, parallel post-arc stages, and per-stage effort.
+
 ## r2: what changed after pattern-buffer's read (m52998c)
 
 1. **One implementation, in a shared library.** pattern-buffer's book pipeline (`evals/harness/pipeline.py`, `registry.py`, INGEST-V2) is already registry-first:
