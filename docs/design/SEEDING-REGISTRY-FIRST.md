@@ -1,6 +1,6 @@
 # Seeding, registry first: identity decided once, by code
 
-**Status:** r3, 2026-10-13. Kabe answered gate g2fd391 ("Full agree on your 5 directions"): points 1, 2, 3 (pattern-buffer's form) and 5 accepted, point 4 rejected. The settled approach is the section below. Round two of the fresh views checks it before any build. Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
+**Status:** r4, 2026-10-13. r4 folds in round two of the fresh views (consult c33a2ae). Earlier: Kabe answered gate g2fd391 ("Full agree on your 5 directions"): points 1, 2, 3 (pattern-buffer's form) and 5 accepted, point 4 rejected. The settled approach is the section below. Round two of the fresh views checks it before any build. Not built. It changes pattern-buffer's ingest and identity, so it is co-designed with pattern-buffer and goes to two fresh views from other model families before anything is built. The baseline numbers come from the first run with the timing log (`CONSTRUCT_TIMING_LOG`, feat/timing-log).
 
 ## Kabe's direction (2026-10-13)
 
@@ -36,6 +36,29 @@
    - no repair calls in the normal path;
    - stage time measured with the timing log.
 6. **Ownership is the r2 split.** pattern-buffer promotes INGEST-V2 to the shared library. construct supplies the authored manifest and the calls into the library.
+
+## r4: round two's checks, folded in (consult c33a2ae)
+
+Round two (claude-opus-5-5 and gpt-6.1-sol, both at max effort) checked r3 against the code. Its closing instruction was "fix what the checks found that holds up, and go on". All five hold up:
+
+1. **The time gate is per entry, not per string.**
+   - The manifest gives each entry its entry anchor: the sentence where that being first appears. A chunk's candidates are the entries that have entered by then.
+   - A reveal is anchored to its sentence. A reveal falling mid-chunk splits the chunk there, so nothing before the sentence sees the link.
+   - Tests: a namesake who enters mid-story (Rex the dog in chapter 6); a duke mentioned before the stranger's reveal; a mid-chunk reveal. Each chunk's candidate set is logged and GRADE-LEAKS-V1 is run.
+2. **Secrets are checked by code.** No secret persona's name may also appear as a plain alias of an entry, or the scan would bind it from its first appearance and leak it. The manifest validator refuses that. Test: a late-revealed nickname ("the Crow").
+3. **Beings stay in `person:`; no `animal:` namespace** (corrects r3; this is the "person: read as being" plan that rejecting P4 keeps).
+   - construct branches on the `person:` prefix in about 70 places, including the scene's NPC list (`turnloop.py`), the arc inputs (`game.py`) and the world digest. A dog under `animal:` would silently vanish.
+   - So Rex the man and Rex the dog are `person:rex` and `person:rex_2`, with types `person` and `dog` (R51's type fact as the authority).
+   - A provisional id for an unresolved mention gets a neutral prefix that claims no type (for example `mention:`), filtered out of rosters.
+   - Tests: the Rex fixture through ingestion and the whole of world preparation; both survive, with the dog's facts, into the arc inputs, the digest and a played scene.
+4. **A model's pick between candidates is evidence, not identity.**
+   - Only a unique-candidate resolution in code writes facts directly onto an entry.
+   - A mention with several candidates gets a provisional id even when the extractor picks one. Its pick is recorded as the evidence on a proposed `same_as`, which a later, evidenced decision accepts.
+   - Test: force the extractor to pick one Breck for an ambiguous mention; the facts land on the provisional id.
+5. **Stage 2 is scoped.**
+   - The reconcile's name passes (auto-merge, `adjudicate_deferred`, the homonym `distinct_from`, `typing_conflicts`) act only on provisional and new-escape ids, never on manifest ids.
+   - Two parallel chunks reporting the same unlisted figure as new (the innkeeper) are joined at the serial commit by code: same normalized name, compatible type, and no manifest namesake. Otherwise they stay provisional.
+   - Test: stage 2 on the trap manifest plus one provisional "Rex" makes no merge or `distinct_from` the manifest didn't author.
 
 ## Measured: this is a correctness design, not mainly a speed one (eval/13, 2026-10-13)
 
