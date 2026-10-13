@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -29,6 +30,7 @@ from construct.provider import Provider
 from construct.scenario_meta import (
     InputAuthority, PlaythroughState, ScenarioMeta, ScenarioMode,
 )
+from construct import timing
 from construct.adapter import PorcelainWorldReads, state_value, state_values
 from construct.text import (
     human_name, humanize_id, humanize_id_last, humanize_typed_id, id_local,
@@ -1083,6 +1085,8 @@ class Session:
         from construct.arc.executor import set_entry_epoch
         set_entry_epoch(self._entry_epoch)
         n = next_turn_number(self._world)
+        timing.set_phase(f"turn {n}")
+        timing.record("turn_start", turn=n)
         # AS-OF PLAY HORIZON (B' S3): bind this turn's reads (terminal check + the whole turn
         # loop) to opening_as_of + n. None for legacy worlds — the head read, unchanged.
         horizon = self._horizon(n)
@@ -1123,8 +1127,11 @@ class Session:
                               on_scene=self._note_scene_image)
         except Exception as exc:  # loud, but the session lives
             logger.exception("turn failed for %s/%s", self.scenario, self.player_id)
+            timing.record("turn_end", turn=n, ok=False, error=f"{type(exc).__name__}")
             return Reply(prose=f"(the turn could not complete: {exc})",
                          trace=None, ok=False)
+        timing.record("turn_end", turn=n, ok=True,
+                      timings=dict(getattr(result.trace, "timings", None) or {}))
         if result.trace is not None and getattr(result.trace, "growth_retry", False):
             # WORLD-GROWTH §3 proposal-failure seam — checked BEFORE every
             # post-turn mutation (cr wiring blocker 3): no portfolio reload,
@@ -1172,11 +1179,13 @@ class Session:
         self._pending_settle = None
         if settle is None:
             return
+        t0 = time.time()
         try:
             settle()
         except Exception:  # never let deferred bookkeeping break the live session
             logger.exception("deferred settle failed for %s/%s",
                              self.scenario, self.player_id)
+        timing.record("settle", t0=round(t0, 3), s=round(time.time() - t0, 2))
 
     def _note_scene_image(self) -> Any:
         """SCENE-IMAGERY hook: DETECT whether the location is new/changed (a fast hash

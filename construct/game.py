@@ -19,7 +19,7 @@ from typing import Any, NamedTuple
 
 from patternbuffer import World
 
-from construct import hostcontrol
+from construct import hostcontrol, timing
 from construct.adapter import PorcelainWorldReads
 from construct.arc import io as arc_io
 from construct.arc.build import (  # arc construction lives in the arc layer; re-exported
@@ -132,6 +132,7 @@ def _emit(on_stage, msg: str) -> None:
     pattern-buffer layer being exercised: progress *and* a live showcase of the
     adoption (founder request)."""
     logger.info(msg)
+    timing.stage(msg)
     if on_stage is not None:
         try:
             on_stage(msg)
