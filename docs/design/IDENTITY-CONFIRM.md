@@ -52,9 +52,9 @@ All of this happens at the **vouch slot** (`construct/game.py`, after cast autho
   - the atrium.
 - **The atrium's** one retry consumes `ViabilityError` like any build failure. The guest is shown the first of `exc.problems` in plain words, never the exception's text.
 
-## Role-noise adjudication (R20 run 8; spec r5, for cr review, not built)
+## Role-noise adjudication (R20 run 8; spec r6, for cr review, not built)
 
-**Status.** r5 (cr RED on r4: kind_conflict admission, audit field names, the API) is written against pattern-buffer's `porcelain.merge_gate(pairs, *, context=None, batch_size=25)` verb, MERGE-GATE-VERB-V1 r1.1 at pattern-buffer `36bd8b6` (`feat/merge-gate-verb`). Construct pins the engine to the merged revision when it lands. The verb is (R48, mae57ff; contract r1.1 mfee55c: report-only, never caches). The verb was approved by the monitor (g9e7f39) and is in pbr's review. Construct builds this stage only when the verb has shipped. Until then the build stop stays.
+**Status.** r6 (cr RED on r5: the existing vouch already merges this exact residue first, so the gate must REPLACE it, not follow it) is written against pattern-buffer's `porcelain.merge_gate(pairs, *, context=None, batch_size=25)` verb, MERGE-GATE-VERB-V1 r1.1 at pattern-buffer `36bd8b6` (`feat/merge-gate-verb`). Construct pins the engine to the merged revision when it lands. The verb is (R48, mae57ff; contract r1.1 mfee55c: report-only, never caches). The verb was approved by the monitor (g9e7f39) and is in pbr's review. Construct builds this stage only when the verb has shipped. Until then the build stop stays.
 
 **History.**
 - r1 (lexical) was RED: "Breck the baker".
@@ -77,9 +77,17 @@ Making the kinds agree does not resolve them. Tested on the real engine: with bo
 
 Until both land, a world like run 8's still stops at build, by design.
 
-### The stage: `_stage_adjudicate_identity`
+### The stage: `_stage_adjudicate_identity` replaces `_stage_vouch_merges`
 
-It runs after `_stage_vouch_merges` and before `_stage_confirm_identity`.
+**One owner for this residue (cr r5 P1).** Today `_stage_vouch_merges` (FIDELITY-REPAIR step 4, Cx 480–486) merges every same-kind, `auto_declined` / `alias_not_specific` pair with exactly one load-bearing id, on the allowlist alone, without reading any evidence. That is exactly r6's candidate set.
+
+A gate placed after it would never see a pair. A gate placed before it would be overridden: an unsure, different or failed answer would still be merged by the vouch afterward. And once pattern-buffer's R49 makes every person's kind `person`, the vouch's reach widens to nearly every same-name person pair. "Breck the baker" would be folded into a load-bearing Tomas Breck with no source check.
+
+So:
+- **`_stage_adjudicate_identity` takes the vouch's slot** in `_finalize_scenario_impl`: after cast authoring, before `_stage_confirm_identity`. `_stage_vouch_merges` is removed from the build.
+- **What stays.** `_fidelity_vouched_pairs` stays as the candidate predicate, and its allowlist test stays. `_vouch_merge`'s representative rule stays as the merge helper, so the load-bearing id survives (`test_vouch_representative`).
+- **The vouch's merge without evidence is gone.** Its stage tests (`test_identity_confirm` vouch cases, `test_generator`'s vouch wiring) are rewritten against the new stage: same candidates, but a merge only on two gate `same` answers.
+- **No engine without the verb.** Construct pins the engine to a revision carrying both R48 (`merge_gate`) and R49 (person kinds), in the same change that lands this stage. An engine with R49 and no gate never runs under construct. If the verb is still missing (an unpinned engine), the stage writes nothing and the confirm stage stops on the pair. That is stricter than today's evidence-free vouch, and is stated as such.
 
 **1. Candidates: a hard eligibility rule, checked per exact pair.** The audit is read field by field. A group in `fidelity_audit()["name_collisions"]` has:
 - `entities`, and `kinds` parallel to them;
@@ -140,7 +148,12 @@ The build's stage output reads "identity: adjudicated N pair(s): M merged, K hel
   - A reused or cached second result is rejected.
 - **Revalidation.** A pair whose closures changed between the asks and the write, or that no longer passes eligibility, is left open.
 - **Context.** Deterministic and capped, holding only sentences naming the pair.
-- **The verb's absence.** An engine without `merge_gate` skips the stage, and the build stops as today.
+- **The verb's absence.** An engine without `merge_gate`: the stage writes nothing, and the load-bearing pair reaches the confirm stop. This replaces today's merge without evidence, and the test pins it.
+- **Ordering oracle (cr r5).** In a real `_finalize_scenario_impl` run with a stub gate, a same-kind `alias_not_specific` load-bearing pair:
+  - reaches `merge_gate` exactly twice;
+  - is not passed to `porcelain.merge` before both `same` reports;
+  - after an unsure, different or no-verb answer, gets no merge at all and reaches the identity stop.
+- **No evidence-free merge remains.** `_stage_vouch_merges` is not called anywhere in the build.
 
 ### Cost
 
