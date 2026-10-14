@@ -106,15 +106,27 @@ def test_quincy_turn_is_a_pending_decision(world):
 
 # ------------------------------------------------------------ 5. the pure-mode declaration
 
-def test_deferred_declaration_is_not_denied_in_pure_mode(world):
-    arc = _covered_arc(world)
+def test_deferred_declaration_is_not_denied_in_pure_mode(world, monkeypatch):
+    """Not denied as fact-by-fiat, AND the player's line is never extracted (cr code review:
+    extracted, the accusation would reach canon as a fact). A spy on the extract verb proves
+    the line itself never reaches it; the narrator's settle extraction is a separate input."""
+    arc = _covered_arc(world, covered=False)
     world._extractions.extend([{"items": []}, {"items": []}])
+    seen: list[str] = []
+    real_extract = world.porcelain.extract
+
+    def spy(text, *a, **kw):
+        seen.append(str(text))
+        return real_extract(text, *a, **kw)
+    monkeypatch.setattr(world.porcelain, "extract", spy)
     provider = StubProvider([{**_deferred(), "kind": "declaration"},
                              {"prose": "The words hang, unspent."}])
     r = run_turn(world, arc, provider, "It was the rival — but first I'll check the clock.",
                  turn=5, scenario_mode="win_loss", mode="pure", scope=SCOPE)
     assert "canon-strict" not in (r.prose or "")
     assert _record(world)["commitment"] == "accuses the rival"
+    assert not any("but first I'll check the clock" in t for t in seen)
+    assert "player_ingest (deferred conclusion: a pending decision)" in r.trace.dropped_cohorts
 
 
 # --------------------------------------------------------------------- 6. hedge unchanged

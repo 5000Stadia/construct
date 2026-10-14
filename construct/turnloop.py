@@ -4767,7 +4767,14 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # spine-touch check, but PB receipts carry only entity/attribute (no value).
     # Captured here so confirmed_batch() can hydrate confirmed keys from candidates.
     _player_delta_candidates: list[dict] = []
-    if asserts_or_reveals:
+    # HEDGE-VS-CONDITION (R38, cr code review): a DEFERRED conclusion is a pending decision,
+    # never world truth — its claim is not extracted (the raw `conclusory` flag only spares it
+    # the pure-mode denial; it must not let the accusation reach canon as a fact).
+    from construct.intent import DEFERRING_CONDITIONS as _DEFER
+    _deferred_conclusion = (intent.conclusory and intent.commit_condition in _DEFER)
+    if asserts_or_reveals and _deferred_conclusion:
+        trace.dropped_cohorts.append("player_ingest (deferred conclusion: a pending decision)")
+    if asserts_or_reveals and not _deferred_conclusion:
         try:
             with _phase(trace, "player_ingest"):
                 # ENTITY AUTHORITY (Cx 304): READ-ONLY extract → RESOLVE → structured ingest, so the
