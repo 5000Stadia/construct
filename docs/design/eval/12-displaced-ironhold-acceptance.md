@@ -432,7 +432,7 @@ The monitor authorised this run for Kabe (note n4f4a40). It tests the night's th
 ### Next fixes (not built; each needs a spec)
 
 - **Bind a container mention to the scene before minting a twin.** "The hold" while the player stands in `place:laundry_hold` should bind to the scene, not mint `obj:hold`. This sits on the resolver's bind-before-mint path, and pattern-buffer's R55 (play-time extraction against what exists at the horizon) is the engine half.
-- **NPC staging drift (t4):** the briefing's PRESENT CHARACTERS block could carry each present NPC's in-scene position, so the narrator doesn't reach back to the last room's furniture.
+- **NPC staging drift (t4).** Turn 2's "the scullery threshold" was ruled in-scene (underdetermined, no target; g855759 keeps it so), so canon kept the player in the counting room while the prose walked into the passage. A related finding: **the briefing's location anchor ran name-free on almost every turn** of runs 10–12 ("YOU ARE AT the place you now stand in"). It names the scene only from the player frame, and the player frame held no scene name (run 12: 865 rows, zero place names). PLACE-NAME-ANCHOR (spec r1, at cr) gives the player the name of the place they stand in. Each present NPC's in-scene position in PRESENT CHARACTERS is a further option.
 - **Chapter-length floor for a continuation arc:** a chapter-2 arc should not reach climax-ready within its first turns. This is a pacing question for R36/R37 (the chapter bridge), and it needs Kabe's view on chapter length.
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
