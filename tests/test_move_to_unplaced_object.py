@@ -13,7 +13,7 @@ from tests.test_integration import (PLAYER, PLAYER_FRAME, make_arc, run_turn,  #
                                     seed_arc, world)
 
 _CLASSIFY = {"requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
-             "commitment": ""}
+             "commitment": "", "claims_are": "act"}
 
 
 def _ingest(world, rows, frame="canon"):
@@ -53,7 +53,7 @@ def _where(world, entity):
 # ---- the field is tri-state end to end ------------------------------------------------
 
 def test_within_scene_is_tri_state():
-    base = {"kind": "action", "moves_to": "the table"}
+    base = {"kind": "action", "claims_are": "act", "moves_to": "the table"}
     assert TurnIntent.from_verdict(dict(base), "x").within_scene is None
     assert TurnIntent.from_verdict(dict(base, within_scene=True), "x").within_scene is True
     assert TurnIntent.from_verdict(dict(base, within_scene=False), "x").within_scene is False

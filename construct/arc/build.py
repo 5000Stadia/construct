@@ -100,10 +100,18 @@ def _slug(s: str) -> str:
     return slugify_keep_underscores(s)
 
 
+#: Event kinds the host reserves (R40 abandonment, R42 speech): never an authored beat's kind.
+_RESERVED_EVENT_KINDS = frozenset({"player_speech"})
+
+
 def _beat_expr(beat: dict, player_frame: str):
     if beat["kind"] == "player_learns":
         return InFrame(player_frame, beat["entity"], beat["attribute"], beat["value"])
-    return Occurred(beat["entity"])
+    kind = str(beat["entity"])
+    if kind in _RESERVED_EVENT_KINDS or kind.startswith("event:abandoned"):
+        # a failed attempt, retried like any unbuildable proposal (UTTERANCE-NOT-FACT r2)
+        raise ValueError(f"event kind {kind!r} is reserved by the host")
+    return Occurred(kind)
 
 
 def _failure_expr(spec: dict | None, player_frame: str):

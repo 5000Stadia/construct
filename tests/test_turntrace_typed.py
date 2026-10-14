@@ -30,7 +30,7 @@ GOLDEN = Path(__file__).parent / "golden" / "turntrace" / "receipts.json"
 REGEN = os.environ.get("CONSTRUCT_REGEN_TURNTRACE_GOLDEN") == "1"
 
 _CLASSIFY = {"requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
-             "commitment": ""}
+             "commitment": "", "claims_are": "act"}
 
 
 def _receipts(trace) -> dict:

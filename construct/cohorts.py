@@ -182,6 +182,13 @@ CLASSIFY_SCHEMA = {
                   "description": "the object the player SETS DOWN / drops / leaves / puts "
                   "down / places here this turn (the inverse of takes), as they named it "
                   "('the letter-opener'); empty if they set nothing down."},
+        "claims_are": {"type": "string", "enum": ["act", "speech", "mixed"],
+                       "description": "what this input's claims ARE: act = what the "
+                       "character does or changes in the world ('I pocket the key'); speech = "
+                       "every claim is something the character SAYS — dialogue, telling, "
+                       "accusing, lying, answering (\"'Tovan didn't steal anything.'\", 'I "
+                       "tell Quincy Ellis was at the docks'); mixed = both ('I hand Quincy "
+                       "the ledger and tell him Ellis cooked it'). A pure action is act."},
         "asserts_or_reveals": {"type": "boolean",
                   "description": "true if this input could ESTABLISH or CHANGE a world fact "
                   "that isn't already captured by moves_to/takes/takes_more — i.e. the player asserts "
@@ -246,7 +253,9 @@ CLASSIFY_SCHEMA = {
                   "when the question is generic, the input is not questioning anyone, or no "
                   "candidate fits. The ASK channel twin of examines_target."},
     },
-    "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of"],
+    # `claims_are` (R42 r3) is REQUIRED: every provider honours the raw contract; a missing
+    # value can come only from a non-conforming source and then normalises to "unknown".
+    "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of", "claims_are"],
 }
 
 #: TURN-LATENCY Lever 4: a single per-NPC call decides BOTH the world-action and the

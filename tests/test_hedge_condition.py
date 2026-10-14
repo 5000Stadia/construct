@@ -21,7 +21,7 @@ SCOPE = ["fact:secret", "person:rival", PLAYER, "place:study"]
 def StubProvider(responses):  # noqa: N802 — a stub that also answers pacing nudges silently
     return _Stub(responses, silent_defaults={
         **_SILENT_DEFAULTS, "ndg": ("directive", {"thread": "", "directive": ""})})
-_BASE = {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+_BASE = {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""}
 
 

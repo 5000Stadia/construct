@@ -573,7 +573,7 @@ def test_run_turn_clock_firing_suppresses_same_turn_drift(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The pressure builds; nothing else moves."},
     ])
@@ -654,7 +654,7 @@ def test_mark_nudge_failure_never_sinks_the_turn(world, monkeypatch):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"thread": "fact:secret · culprit · person:rival",
          "directive": "A runner arrives with word from the archive."},
@@ -1205,7 +1205,7 @@ def test_run_turn_missed_moment_full_arc_suppress_classify_surface_once(world):
     world._extractions.extend([{"items": []}] * 8)
     # ---- (A) the firing/closing turn: classified; the R3 scene deferred.
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The hour slips past; somewhere a door goes unknocked."},
     ])
@@ -1218,7 +1218,7 @@ def test_run_turn_missed_moment_full_arc_suppress_classify_surface_once(world):
     assert rA.trace.repairs == []                           # no terminal threat → no rescue
     # ---- (B) the next quiet turn: classify D-MISSED, commit the response.
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"subjects": ["person:aldous"], "confidence": 0.9},
         {"prose": "The evening settles."},
@@ -1237,7 +1237,7 @@ def test_run_turn_missed_moment_full_arc_suppress_classify_surface_once(world):
          "value_type": "entity", "valid_from": turn_time(6)},
     ])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "Aldous is here, and something unsaid hangs about him."},
@@ -1255,7 +1255,7 @@ def test_run_turn_missed_moment_full_arc_suppress_classify_surface_once(world):
     assert "passed unmet" in rC.trace.briefing        # the HOST-built directive
     # ---- (D) once-only: the same touch never re-surfaces it.
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "The room holds its quiet."},
@@ -1650,7 +1650,7 @@ def test_absence_restart_oracle_surfaces_after_reopen_once(tmp_path):
         # present — the briefing carries NO callback.
         ex2.extend([{"items": []}, {"items": []}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "The study keeps its quiet."},
         ])
@@ -1665,7 +1665,7 @@ def test_absence_restart_oracle_surfaces_after_reopen_once(tmp_path):
         ])
         ex2.extend([{"items": []}, {"items": []}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Aldous stands near the shelves, waiting to be noticed."},
@@ -1684,7 +1684,7 @@ def test_absence_restart_oracle_surfaces_after_reopen_once(tmp_path):
         # (iii) never again.
         ex2.extend([{"items": []}, {"items": []}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Nothing more hangs in the air."},
@@ -2240,7 +2240,7 @@ def test_call_order_drift_before_lifecycle_and_fallout(world, monkeypatch):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The room holds its quiet."},
     ])
@@ -2327,7 +2327,7 @@ def test_same_turn_closure_ledger_and_the_verdict_doctrine(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The door stays shut; the hour turns anyway."},
     ])
@@ -2368,7 +2368,7 @@ def test_side_closure_repairs_before_side_lifecycle_and_fallout(world, monkeypat
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"hook": "Word comes round by the coal-yard gate.", "confidence": 0.9},
         {"prose": "The evening goes on without him."},
@@ -2401,7 +2401,7 @@ def test_side_repair_defers_silently_at_main_peak(world, monkeypatch):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The evening goes on."},
     ])
@@ -2416,7 +2416,7 @@ def test_side_repair_defers_silently_at_main_peak(world, monkeypatch):
     monkeypatch.setattr(tl, "main_at_peak", lambda *a, **k: False)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider2 = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"hook": "Word comes round by the coal-yard gate.", "confidence": 0.9},
         {"prose": "The evening goes on."},
@@ -2466,7 +2466,7 @@ def test_promote_gate_covers_replacement_only_protected_key(world):
          "frame": "canon"},
     ]})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "You sense a way through, half-formed."},
     ])
@@ -2586,7 +2586,7 @@ def test_side_refusal_fired_concludes_without_futile_deferral(world, monkeypatch
     ], frame=PLOT)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The evening holds."},
     ])
@@ -2616,7 +2616,7 @@ def test_side_deferral_holds_when_main_response_consumed_the_quota(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"hook": "A clerk from the assizes arrives.", "confidence": 0.9},
         {"prose": "The evening holds."},
@@ -2720,7 +2720,7 @@ def test_side_cancelled_verdict_is_never_held(world, monkeypatch):
     ], frame="session:main")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The evening holds."},
     ])
@@ -2749,7 +2749,7 @@ def test_side_failure_when_verdict_is_never_held(world, monkeypatch):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The evening holds."},
     ])
@@ -2989,7 +2989,7 @@ def test_dead_holder_cannot_deliver_a_clue_in_interview(world):
                           surface_fact=("fact:motive", "reason", "greed")),))}
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True,
          "uncertain_of": ""},
         {"prose": "The body offers no answers."},
     ])
@@ -3015,7 +3015,7 @@ def test_dead_holder_cannot_deliver_a_clue_in_interview(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider2 = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True,
          "uncertain_of": ""},
         {"acts": False, "action": "", "speaks": True, "intent": "answers",
          "line_hint": ""},
@@ -3121,7 +3121,7 @@ def test_dead_present_npc_briefs_as_a_body_not_an_interlocutor(world):
                                        location=SCENE, holds_clues=())}
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The room is quiet around the covered shape."},
     ])
@@ -3522,7 +3522,7 @@ def test_briefing_location_anchor_is_player_frame_scoped(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The room holds its quiet."},
     ])
@@ -3538,7 +3538,7 @@ def test_briefing_location_anchor_is_player_frame_scoped(world):
     ], frame=f"knows:{PLAYER}")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider2 = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The vault holds its quiet."},
     ])

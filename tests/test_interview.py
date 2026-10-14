@@ -107,7 +107,7 @@ def test_interview_is_playable_through_session(chdir_tmp):
         async def complete(self, prompt, schema, *, tier="main", deliberate=False):
             if task_of(prompt) == "cls":
                 self.calls.append(("classify", tier))
-                return {"kind": "action", "moves_to": "", "requires": []}
+                return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
             if task_of(prompt) == "ndg":
                 return {"thread": "", "directive": ""}
             if task_of(prompt) == "nar":

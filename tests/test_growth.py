@@ -332,7 +332,7 @@ def test_classify_fields_fail_closed(world):
     world._extractions.extend([{"items": []}, {"items": []}])
     from construct.provider import StubProvider
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "The study holds its quiet."},
     ])
@@ -361,7 +361,7 @@ def test_classify_signal_unpack_is_strict_and_provider_error_safe(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "moves_open": "true", "seeks_encounter": 1},
         {"prose": "The study holds its quiet."},
     ])
@@ -1128,7 +1128,7 @@ def _wired_arc():
 
 
 def _classify(**over):
-    v = {"kind": "action", "moves_to": "away", "requires": [],
+    v = {"kind": "action", "claims_are": "act", "moves_to": "away", "requires": [],
          "needs_test": False, "uncertain_of": "", "moves_open": True}
     v.update(over)
     return v

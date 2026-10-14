@@ -198,7 +198,7 @@ def test_a_turn_never_shows_the_classifier_a_host_control_row(world):  # noqa: F
         {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""},
         {"prose": "You find the culprit's name in the ledger."},
     ])

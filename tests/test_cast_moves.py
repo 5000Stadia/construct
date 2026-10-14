@@ -661,7 +661,7 @@ class TestCastMovesEndToEnd:
              "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "Harl comes in from the yard, stamping snow."},
         ])
@@ -687,7 +687,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -763,7 +763,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -802,7 +802,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -842,7 +842,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -875,7 +875,7 @@ class TestCastMovesEndToEnd:
              "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Nothing here moves as the room briefly describes elsewhere."},
@@ -905,7 +905,7 @@ class TestCastMovesEndToEnd:
              "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "Elsewhere, unseen, someone crosses a different room."},
         ])
@@ -932,7 +932,7 @@ class TestCastMovesEndToEnd:
              "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "Anna, Bruno, and Cora all arrive together."},
         ])
@@ -958,7 +958,7 @@ class TestCastMovesEndToEnd:
              "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Harl wanders off to some unnamed place."},
@@ -979,7 +979,7 @@ class TestCastMovesEndToEnd:
             {"entity": "person:harl", "attribute": "mood", "value": "uneasy"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Harl seems uneasy tonight."},
@@ -1009,7 +1009,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -1047,7 +1047,7 @@ class TestCastMovesEndToEnd:
         try:
             # npcs sorted: person:nell, person:reed (alphabetical) — align stub order
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": True, "intent": "warn",
@@ -1083,7 +1083,7 @@ class TestCastMovesEndToEnd:
              "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "Harl comes in from the yard."},
         ])
@@ -1119,7 +1119,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -1163,7 +1163,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -1193,7 +1193,7 @@ class TestCastMovesEndToEnd:
              "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "She answers curtly, then edges toward the flat."},
@@ -1227,7 +1227,7 @@ class TestCastMovesEndToEnd:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                  "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -1287,7 +1287,7 @@ class TestAddressesPresentSignal:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [],
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [],
                  "needs_test": False, "uncertain_of": "",
                  "addresses_present": False},
                 {"acts": False, "action": "", "speaks": False, "intent": "",
@@ -1319,7 +1319,7 @@ class TestAddressesPresentSignal:
         mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
         try:
             provider = StubProvider([
-                {"kind": "action", "moves_to": "", "requires": [],
+                {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [],
                  "needs_test": False, "uncertain_of": ""},
                 {"acts": False, "action": "", "speaks": False, "intent": "",
                  "line_hint": ""},
@@ -1343,7 +1343,8 @@ def test_classify_failure_keeps_sole_npc_protection(world):
     arc = make_arc()
     seed_arc(world, arc)
     _seed_person(world, "person:edda", "Edda", "place:study")
-    world._extractions.append({"items": []})
+    # UTTERANCE-NOT-FACT (R42 r3): a failed classify is `claims_are=unknown`, which fails
+    # CLOSED — no player-input extraction — so the only extraction is the narrator settle's.
     world._extractions.append({"items": [
         {"entity": "person:edda", "attribute": "in", "value": "place:flat",
          "value_type": "entity"},
@@ -1391,7 +1392,7 @@ def test_present_homonym_tripwire(world):
     mp.setattr(tl, "_parallel", lambda thunks: [t() for t in thunks])
     try:
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
