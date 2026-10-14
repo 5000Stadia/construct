@@ -1,12 +1,16 @@
 # The chapter bridge, B1: chapter 2 answers what the player did (R36)
 
-**Status:** spec r2, 2026-10-13, for cr review. Not built.
+**Status:** spec r3, 2026-10-13, for cr review. Not built.
 
 **r2 (cr RED on r1):**
 - each arc's walk-away gets its own event entity;
 - a pending walk-away has a bounded confirmation window and clearing rules;
 - every episode-cast and seeded-clue row carries the chapter's turn time, so the horizon view sees it;
-- the delivery check covers every `InFrame` beat on the protagonist, optional ones included. It builds on READS-AT-PLAY-HORIZON (merged 17d90eb), and reads R35's report where it lands.
+- the delivery check covers every `InFrame` beat on the protagonist, optional ones included.
+
+**r3 (cr RED on r2):** two delivery-path mismatches.
+- **Person holders can only use `none` or `pressure`.** The ASK path calls `revealable_clues(node, pressure=…)` and never passes `examined`/`scrutiny`; those are EXAMINE-only, for object and site holders.
+- **Reachability is judged at the horizon.** `_reachable_nodes` reads the authored `presence`/`location`, which go stale over chapter 1. So the episode cast's nodes are **re-derived from the world at `h`** before validation. It builds on READS-AT-PLAY-HORIZON (merged 17d90eb), and reads R35's report where it lands.
 **Source:**
 - Kabe's plan item B, approved 2026-10-13 ("Sounds good on A and B"), from his Picard-noir example: the outcome (right, wrong, abandoned, elsewhere) causally drives the next chapter.
 - The founder's refusal directive, 2026-06-23 (memory: player-avoidance-and-refusal-conclusion).
@@ -100,7 +104,16 @@ A hollow or wrong landing also writes a concrete canon consequence (COMMITMENT-A
 
 ### 5. Chapter-2 clues get deliverers
 
-- **The schema** gains `clues: [{beat_id, holder, reveal_condition}]`, one per new `InFrame(knows:<protagonist>, e, a, v)` beat, **required or optional**. The holder is a person at the horizon or a hook-cast id; `reveal_condition` is one of the live conditions (`LIVE_REVEAL_CONDITIONS`).
+- **The schema** gains `clues: [{beat_id, holder, reveal_condition}]`, one per new `InFrame(knows:<protagonist>, e, a, v)` beat, **required or optional**.
+  - **The holder** is a person (`person:`) at the horizon, or a hook-cast id.
+  - **`reveal_condition` is `none` or `pressure` only (r3):** the two conditions the ASK path (`revealable_clues(node, pressure=…)`) can satisfy for a person. `examined` and `scrutiny` are EXAMINE-only, for object and site holders, which B1 doesn't author.
+  - Any other value is a failed attempt, naming the clue.
+- **Horizon re-derivation (r3).** Before validation, every node in the episode cast, carried over from chapter 1 or new, gets its `location` and `presence` recomputed from the world at `h`, through the view:
+  - `location = locate(node)[0]`, or none;
+  - `presence = at_scene` if that location is the doorway place, `nearby` if the node has any location, `offscene` if it has none;
+  - a hook-cast holder is staged at the doorway place (its staged `in` row), so it's `at_scene`.
+
+  The authored chapter-1 values aren't trusted for chapter 2. A holder who moved during chapter 1 is validated (and persisted) where they actually are; a holder with no location at `h` is unreachable unless a live clue names them, as `_reachable_nodes`' discovery chain already allows.
 - **Code builds the episode cast:**
   - the chapter-1 cast nodes, plus new or extended nodes holding these clues;
   - it checks delivery for **every** `InFrame` beat on the protagonist's frame, required **and** optional: an exact-match clue, with a live reveal condition, on a holder that is physically reachable (`_reachable_nodes`) and able to act at the horizon. `validate_beat_delivery` (today: required beats only) gains an `include_optional` flag for this.
@@ -147,6 +160,12 @@ The confirmation window (`ABANDON_WINDOW`, default 6 turns) is mine to tune. It 
    - a reopened Session on that **horizon** slot (`opening_as_of` set, reading through its HorizonView) loads the episode cast, and an ASK of that holder delivers the clue and achieves the beat;
    - **negative control:** with the seed items untimed (the old `cast_seed_plan` output), the reopened Session can't see the holder's fact.
 6b. **(r2) Optional beats:** an optional `InFrame` beat whose holder is unreachable (offscene, with no naming chain) is a failed attempt naming that beat. With a reachable holder it's accepted.
+6c. **(r3) A person holder with a non-ASK condition:** a proposal whose person-held clue has `reveal_condition: examined` is a failed attempt naming the clue. `pressure` is accepted, and on the reopened horizon Session, pressing the holder delivers it.
+6d. **(r3) Stale chapter-1 metadata:**
+   - **Setup:** a horizon slot whose `meta["cast"]` records `person:witness` as `at_scene` in `place:study`, while at `h` the witness is `in place:docks` (moved during chapter 1).
+   - The new arc's clue held by the witness validates with the re-derived node (`nearby`, `place:docks`), and the persisted episode cast records `place:docks`.
+   - On the reopened Session, the player moves to the docks, asks, and the beat is achieved.
+   - **Variant:** the witness has **no** location at `h`, and no live clue names them. The proposal retries with the note "holder person:witness is not reachable at the horizon".
 7. **Legacy:** a slot without an episode cast plays exactly as today, and existing continuation tests pass unchanged.
 8. **The full suite.**
 
