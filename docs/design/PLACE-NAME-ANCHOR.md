@@ -1,6 +1,13 @@
 # The player knows the name of the place they stand in (R20, criterion 5)
 
-**Status:** spec r1, 2026-10-14, for cr review. Not built.
+**Status:** spec r2, 2026-10-14, for cr review. Not built.
+
+**r2 (cr RED on r1):** three precision clauses.
+- The "already known" check reads the player frame at the play horizon.
+- Concealment fails closed and is checked first.
+- `place_named` means a receipt-confirmed write.
+
+The opening's blank-prose return is now stated.
 
 **Source:** R20 runs 10–12 mechanics logs (archived on Blank), read 2026-10-14.
 
@@ -18,15 +25,17 @@ Run 12's player frame holds 865 rows and **no place name**. Run 11's holds two, 
 
 ## The rule
 
-**The player knows the name of the place they are standing in.** Once per turn, after movement has committed and before the briefing's player-frame snapshot, construct mirrors the scene's canon name into the player frame when the frame lacks it:
+**The player knows the name of the place they are standing in.** Once per turn, after movement has committed and before the briefing's player-frame snapshot, construct mirrors the scene's canon name into the player frame when the frame lacks it, in this order:
 1. **The scene:** `scene`, the protagonist's place at the play horizon, as the turn already computes it after movement.
-2. **The name:** `p.state(scene, "name", as_of=horizon)`. Only a `known` literal counts.
-3. **Skip** when:
-   - the player frame already has a `name` for the scene (any value);
-   - `(scene, "name")` is in `arc_protected_keys(arc, live_reads)` (a concealed place, such as a lair or a hidden room, keeps its frame discipline);
-   - the read raises. The anchor then stays name-free, as today.
-4. **The write:** `{"entity": scene, "attribute": "name", "value": <name>}` into `knows:<protagonist>`, `valid_from = turn_time(turn)`, with `classify="rules"` (a name is CONSTITUTIVE by the guardrail; no model call). It is traced as `trace.place_named = scene`.
-5. **The opening:** `settle_opening` does the same for the opening scene, so turn 1's anchor is named.
+2. **Concealment first, failing closed (r2).** `arc_protected_keys(arc, live_reads)` is evaluated before any name read.
+   - If `(scene, "name")` is in it, nothing is written.
+   - If it raises, nothing is written either: protection that can't be read is never treated as empty. The skip is recorded in `trace.dropped_cohorts` as `place_name (protection unreadable)`.
+3. **Already known, read at the horizon (r2):** `p.state(scene, "name", frame=knows:<protagonist>, as_of=horizon)`. A `known` or `conflicted` frame name, of any value, means no write. A frame name stamped past the horizon does not count, so it never suppresses a needed mirror.
+4. **The canon name:** `p.state(scene, "name", as_of=horizon)`. Only a `known` literal counts.
+5. **Any read that raises** in steps 3–4 means no write. The anchor stays name-free, as today.
+6. **The write:** `{"entity": scene, "attribute": "name", "value": <name>}` into `knows:<protagonist>`, `valid_from = turn_time(turn)`, with `classify="rules"` (a name is CONSTITUTIVE by the guardrail; no model call).
+7. **Receipt-confirmed (r2).** `trace.place_named = scene` only when the write's receipt contains the `(scene, "name")` row (`confirmed_batch`). An empty or partial receipt (the fail-open ingest), or a raising write, leaves `place_named` empty and the anchor name-free. The turn always completes.
+8. **The opening (r2 clarification).** `settle_opening` runs the same helper first, before its blank-prose early return, so a turn-0 frame names the opening scene even when the opening prose is blank. Turn 1's own mirror is the fallback in any case.
 
 What it changes: the briefing's `names` map (built from the player frame) now resolves the scene, so the anchor reads "YOU ARE AT: the laundry hold." The same name labels the scene wherever `_disp` renders it.
 
@@ -51,4 +60,8 @@ What it changes: the briefing's `names` map (built from the player frame) now re
 5. **Unreadable:** `state` raises, so nothing is written and the turn completes.
 6. **After a move:** a granted, improvised place (`place:deck`, canon name "deck") is named in the same turn's briefing.
 7. **Opening:** `settle_opening` names the opening scene in the frame.
-8. **The full suite,** with the turntrace golden moved only by the new `place_named` field.
+8. **A future frame name (r2):** the canon name is visible now, and the player frame names the scene only past the horizon. The current turn writes and shows the canon name.
+9. **Protection unreadable (r2):** `arc_protected_keys` raises, so nothing is written, the skip is recorded, and the anchor is name-free.
+10. **Write refused (r2):** the frame write returns an empty receipt (and, separately, raises). `trace.place_named` is empty, the anchor is name-free, and the turn completes.
+11. **Opening with blank prose (r2):** `settle_opening(world, arc, "", turn=0)` still names the opening scene in the frame.
+12. **The full suite,** with the turntrace golden moved only by the new `place_named` field.
