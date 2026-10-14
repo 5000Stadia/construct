@@ -46,7 +46,8 @@ So identity is decided once, by code.
 - A persona's `correlate` lands at its reveal chunk's time, so it's invisible at any earlier horizon.
 
 **4b. Identities are stamped at their gates: a library precondition (r2).**
-- Every entry's identity rows (shape, `name`, `alias`, `role`) must carry `valid_from = time_of(the chunk holding the entry's gate sentence)`, and every persona's name rows the time of its own gate, not timeless.
+- Every entry's identity rows (shape, `name`, `alias`, `role`) must carry `valid_from = time_of(the chunk holding the entry's gate sentence)`, not timeless.
+- **Every persona's shape rows** (`kind`, `being_type`, `species`) **and name rows** must carry `valid_from = time_of(the persona's own gate chunk)` (r2, cr): a timeless shape alone would put the persona in `entities(canon, as_of=h)` before its intro. pattern-buffer's r1.8 states exactly this (med4ef1: "each persona's shape and name rows get its own gate's time").
 - Then a chapter-3 entry is future-only at the opening, exactly as a future source entity is today. It's absent from `entities(canon, as_of=h)`, from every HorizonView roster, and from construct's identity rule (`is_future_only`).
 - **This is pattern-buffer's change** (asked in m3310d2). **The wiring doesn't build until the pinned library provides it.**
   - **Accepted, 2026-10-14 (pattern-buffer med4ef1):** BUILD-LIBRARY-V1 r1.8 makes it the default, `commit(identity_time='gate')`.
@@ -102,9 +103,10 @@ The skip is logged as `Stage 2 · identity decided by the manifest (library)`.
 3. **Rex** (r4's planted trap): the man and the dog stay two entities after commit. They're held apart (`distinct_from`), and both reach `_known_people`, the world digest, the arc inputs and a played scene, with the dog's facts.
 4. **Two Brecks:** an ambiguous "Breck" mention the stub extractor resolves to one Breck lands its facts on `mention:breck_1`, with a `maybe_same_as` proposal. No fact lands on either Breck. The roster excludes the mention id. The identity confirm stage doesn't stop the build.
 5. **A late reveal and a late entry** (once the library stamps at gates, rule 4b):
-   - "the stranger", revealed as the duke in chapter 3, and an entry first appearing in chapter 3;
+   - "the stranger", revealed as the duke in chapter 3; an entry first appearing in chapter 3; and **a persona first introduced in chapter 3** (its intro gate there);
    - **a direct opening-horizon read oracle:** at `opening_as_of`, `entities(canon, as_of=h)`, `_canon_entity_ids` through a HorizonView, the world digest and a played scene's reads contain neither the chapter-3 entry nor the duke's name nor the link;
-   - at the head, all three are present (the negative control);
+   - the late persona's **id** and **name** are both absent at the opening (no shape row either);
+   - at the head, all of them are present (the negative control);
    - this test gates the library pin.
 6. **The time mapping:** chapter-1 facts sit below `opening_as_of`; chapter-2 facts sit at or above `next_source_as_of`. A two-chunk chapter (split at a reveal) gets distinct, increasing times.
 7. **Chunk errors:** one chunk errors once and is retried successfully, so the build completes. One that errors twice stops the build with its cause, and nothing is committed.
