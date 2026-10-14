@@ -1,6 +1,8 @@
 # The engine classifier at effort "none"
 
-**Status:** spec r2, 2026-10-13, for cr review. Not built. r2 (cr RED on r1): acceptance is row-level and comes before any user play; the knob ships defaulting to `low`. It replaces TURN-CLASSIFY-ONCE r1 (c718141), which is parked: cr RED, and see "Why not batching" below.
+**Status:** spec r3, 2026-10-13, for cr review. Not built.
+- r2 (cr RED on r1): acceptance is row-level and comes before any user play; the knob ships defaulting to `low`.
+- r3 (cr RED on r2): the movable set takes its containment part from the audited world's own semantics, and fails closed. It replaces TURN-CLASSIFY-ONCE r1 (c718141), which is parked: cr RED, and see "Why not batching" below.
 **Source:** R20 run 10's timing log (eval/12), and two measurements on run 10's played world, archived at `/media/k/Blank/construct-scratch/effort-probe/`.
 
 ## The facts
@@ -61,7 +63,13 @@ cr's point (RED on r1): an aggregate verdict mix can hide a wrong row behind an 
    - The 10 batched prompts (51 rows) and 45 per-row prompts captured from run 10's world are replayed at `low` and at `none`, with every (row, verdict) pair recorded.
    - The corpus holds play text, so it stays untracked at `/media/k/Blank/construct-scratch/effort-probe/`.
    - The replay script lands as `scripts/classify_effort_audit.py`. It takes a corpus path; no corpus is committed.
-   - **Pass:** no row whose attribute is in the movable set gets `CONSTITUTIVE` at `none`. The movable set is `in`, `on`, `at`, `near`, `position`, `formerly_in`, `held*`, `carried*`, `state`, `condition`, `status`, plus any attribute the engine's guardrails treat as containment. Every per-row delta from `low` is listed in the build note.
+   - **Pass:** no row whose attribute is in the movable set gets `CONSTITUTIVE` at `none`.
+   - **The movable set (r3)** is the union of two parts:
+     - **The audited world's own containment family,** read from that world: `world.semantics.containment_family()`. These are the engine's built-ins plus every attribute declared `relation_family=containment` (patternbuffer semantics.py:340-363). A handwritten list would miss a declared containment attribute such as `stowed_at`.
+     - **Construct's conservative extras:** `at`, `near`, `position`, `formerly_in`, `held*`, `carried*`, `state`, `condition`, `status`.
+   - **Fail closed:** if the world's semantics can't be read, the script exits non-zero and reports no pass. It never falls back to the extras alone.
+   - **For the corpus replay,** the corpus carries a manifest naming its source world, and the script opens that world (read-only, from the Blank drive) to resolve the family.
+   - **This is a dev-tool coupling** to an engine object that isn't porcelain (`world.semantics`), documented in the script. No shipped code uses it; the pinned porcelain has no containment-family read. Every per-row delta from `low` is listed in the build note.
    - **Today's result:** pass. There were 3 batched deltas and 6 per-row deltas. The one `none`-CONSTITUTIVE delta is `obj:stamped_nail_pouch · instrument`, which is not in the movable set.
 2. **A disposable-world turn trace.**
    - The next R20 probe run sets `HOLODECK_CODEX_CLASSIFY_EFFORT=none`. It needs Kabe's or the monitor's yes, as every run does. Its world is a probe world, never a user's.
@@ -77,4 +85,8 @@ A guard that prevents a wrong class before it is stored would need an engine bou
 
 7. **The real routing prefix:** the existing real-PB routing test (the cheap-prefix dispatch) also asserts that the engine's actual classifier prompt, from the pinned engine, starts with the prefix this rule keys on. A change in the engine's wording fails it.
 8. **The default:** with the knob unset, a classifier prompt on `gpt-5.5` sends `low` (the shipped default in r2). With it set to `none`, it sends `none`. The global override still wins, and the narrator's high floor applies after it.
-9. **The audit script** on a synthetic world fixture: a movable `in` row stored as CONSTITUTIVE is reported, and a `kind` row is not flagged as movable.
+9. **The audit script** on a synthetic world fixture:
+   - a movable `in` row stored as CONSTITUTIVE is reported;
+   - a `kind` row is not flagged;
+   - **(r3)** the fixture declares `attr:stowed_at · relation_family · containment`, and a CONSTITUTIVE `stowed_at` row makes the script fail;
+   - **(r3)** a world whose semantics read raises makes the script exit non-zero, never pass.
