@@ -253,10 +253,9 @@ CLASSIFY_SCHEMA = {
                   "when the question is generic, the input is not questioning anyone, or no "
                   "candidate fits. The ASK channel twin of examines_target."},
     },
-    # `claims_are` (R42) is NOT in this list on purpose: the live wires coerce every property
-    # to required (force_strict_object_schema: optional → nullable), so the model always
-    # answers it, and a null normalises to "unknown" — fail closed (no factual extraction).
-    "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of"],
+    # `claims_are` (R42 r3) is REQUIRED: every provider honours the raw contract; a missing
+    # value can come only from a non-conforming source and then normalises to "unknown".
+    "required": ["kind", "moves_to", "requires", "needs_test", "uncertain_of", "claims_are"],
 }
 
 #: TURN-LATENCY Lever 4: a single per-NPC call decides BOTH the world-action and the

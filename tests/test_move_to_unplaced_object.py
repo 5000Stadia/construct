@@ -13,7 +13,7 @@ from tests.test_integration import (PLAYER, PLAYER_FRAME, make_arc, run_turn,  #
                                     seed_arc, world)
 
 _CLASSIFY = {"requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
-             "commitment": ""}
+             "commitment": "", "claims_are": "act"}
 
 
 def _ingest(world, rows, frame="canon"):

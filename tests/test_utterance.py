@@ -217,3 +217,10 @@ def test_named_gap_unquoted_reported_speech_in_a_mixed_line(world, monkeypatch):
     _turn(world, {"claims_are": "mixed"},
           "I hand Quincy the ledger and tell him Ellis cooked it.")
     assert any("Ellis cooked it" in t for t in seen)
+
+
+def test_claims_are_is_required_in_the_raw_schema():
+    """cr code review: the raw contract every provider honours requires claims_are."""
+    from construct.cohorts import CLASSIFY_SCHEMA
+    assert "claims_are" in CLASSIFY_SCHEMA["required"]
+    assert CLASSIFY_SCHEMA["properties"]["claims_are"]["enum"] == ["act", "speech", "mixed"]

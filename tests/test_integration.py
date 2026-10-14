@@ -872,7 +872,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})                      # player input
         world._extractions.append({"items": []})                      # narrator prose
         provider = StubProvider([
-            {"kind": "question", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "question", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "The clerk only shrugs; the record is silent on that."},
         ])
         result = run_turn(world, arc, provider, "Who is the culprit, really?", turn=1,
@@ -893,7 +893,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "question", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "question", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "The nearest canteen is two corridors over, past the pumps."},
         ])
         result = run_turn(world, arc, provider, "Where's the closest place to eat?",
@@ -2754,7 +2754,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "question", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "question", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "asks_self": True},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "You had a room at the inn above the coach yard."},
@@ -3568,7 +3568,7 @@ class TestFullTurn:
         # transport to confirm leaving (GAME-TYPES/exit flow).
         arc = make_arc()
         seed_arc(world, arc)
-        provider = StubProvider([{"kind": "exit", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}])
+        provider = StubProvider([{"kind": "exit", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}])
         r = run_turn(world, arc, provider, "can we do a new story?", turn=1)
         assert r.exit_requested is True
         assert r.prose == ""
@@ -3582,7 +3582,7 @@ class TestFullTurn:
         arc = make_arc()
         seed_arc(world, arc)
         provider = StubProvider([
-            {"kind": "ooc", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "ooc", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "Reed considers, then shakes his head. \"Nothing more from them for now.\""},
         ])
         result = run_turn(world, arc, provider, "do you have any more questions for these two?",
