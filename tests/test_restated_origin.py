@@ -132,3 +132,54 @@ def test_the_settle_folds_the_key_ring_to_the_player(world):
     assert ("obj:key_ring", "obj:belt") in trace.restated_origin
     st = world.porcelain.state("obj:key_ring", "in")
     assert st["status"] == "known" and st["fact"]["value"] == PLAYER
+
+
+# ------------------------------------------- negative controls and the unreadable branch (cr)
+
+def _drop_off(monkeypatch):
+    from construct import turnloop
+    monkeypatch.setattr(turnloop, "_drop_restated_origins", lambda p, rows, as_of: (rows, []))
+
+
+def test_without_the_drop_the_player_channel_leaves_the_key_ring_conflicted(world,
+                                                                           monkeypatch):
+    _drop_off(monkeypatch)
+    _seed_ring(world)
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([
+        {"items": [{"entity": "obj:key_ring", "attribute": "in", "value": "obj:belt"},
+                   {"entity": "obj:key_ring", "attribute": "in", "value": "person:you"}]},
+        {"items": []}])
+    prov = StubProvider([dict(_BASE), {"prose": "The key-ring comes away in your fist."}])
+    run_turn(world, arc, prov, "I grab the key-ring at his belt.", turn=2,
+             scope=[PLAYER, "place:study", "obj:belt", "obj:key_ring"])
+    assert world.porcelain.state("obj:key_ring", "in")["status"] == "conflicted"
+
+
+def test_without_the_drop_the_settle_serves_the_belt(world, monkeypatch):
+    # the bad shape the proposed-frame snapshot hides: one of the pair wins arbitrarily
+    _drop_off(monkeypatch)
+    _seed_ring(world)
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.append({"items": [
+        {"entity": "obj:key_ring", "attribute": "in", "value": "obj:belt"},
+        {"entity": "obj:key_ring", "attribute": "held_by", "value": PLAYER}]})
+    settle_opening(world, arc, "The key-ring is yours, lifted off his belt.", turn=0)
+    st = world.porcelain.state("obj:key_ring", "in")
+    assert st["status"] == "known" and st["fact"]["value"] == "obj:belt"
+
+
+def test_an_unreadable_container_keeps_both_rows_and_records_nothing(world, monkeypatch,
+                                                                     caplog):
+    _seed_ring(world)
+
+    def boom(*a, **k):
+        raise RuntimeError("store unreadable")
+    monkeypatch.setattr(world.porcelain, "state", boom)
+    rows = [_row("obj:key_ring", "in", "obj:belt"), _row("obj:key_ring", "in", PLAYER)]
+    with caplog.at_level("INFO"):
+        kept, dropped = _drop_restated_origins(world.porcelain, rows, as_of=None)
+    assert kept == rows and dropped == []
+    assert "restated origins dropped" not in caplog.text
