@@ -154,6 +154,17 @@ CLASSIFY_SCHEMA = {
                              "ask Quincy about the clock'), conditional (commit IF something "
                              "proves true: 'if Quincy confirms the clock, it's Ellis'); "
                              "none when not committing"},
+        "declares_giving_up": {"type": "boolean",
+                               "description": "true ONLY when the player DECLARES their "
+                               "character is giving up the story's main aim FOR GOOD — "
+                               "walking away from it. Going somewhere, doing something else "
+                               "first, resting, or asking one more question is NOT giving "
+                               "up. Almost always false."},
+        "confirms_walkaway": {"type": "boolean",
+                              "description": "only while a walk-away QUESTION is standing "
+                              "(the prompt says so): true ONLY for an explicit YES, they are "
+                              "giving it up for good; false otherwise and when no question "
+                              "stands"},
         "commit_precondition": {"type": "string",
                                 "description": "for precondition/conditional: the condition "
                                 "as ONE short clause ('Quincy confirms the clock'); empty "
@@ -2626,7 +2637,8 @@ _DECISIVE_ACTS = {
 
 def classify(provider: Provider, player_input: str, actor: str = "",
              ask_candidates: list = (), npc_candidates: list = (),
-             laws: str = "", decisive: str | None = None, scene: str = "") -> dict:
+             laws: str = "", decisive: str | None = None, scene: str = "",
+             walkaway: dict | None = None) -> dict:
     """Returns {kind, moves_to, requires, needs_test, uncertain_of, ...} — movement intent
     AND the assured-vs-uncertain resolution judgment ride the same cheap call (no extra
     latency; letter 026 + ACTION-RESOLUTION.md). `actor` is the protagonist's
@@ -2757,9 +2769,26 @@ def classify(provider: Provider, player_input: str, actor: str = "",
         f"focused on inspecting one detail.\n"
         f"Additionally: set `mortal_risk` TRUE only when the move risks the player "
         f"character's own LIFE given what the scene has established — not mere injury, "
-        f"not risk to others. Almost always false.\n\n"
-        f"INPUT: {player_input}",
+        f"not risk to others. Almost always false.\n"
+        + _walkaway_note(walkaway)
+        + f"\nINPUT: {player_input}",
         CLASSIFY_SCHEMA, tier="cheap", task="cls")
+
+
+def _walkaway_note(walkaway: dict | None) -> str:
+    """WALK-AWAY-DECLARED (R40): the aim is named to the classifier ONLY while the walk-away
+    is eligible or a question stands; otherwise both fields stay false by omission."""
+    if not walkaway or not walkaway.get("aim"):
+        return ""
+    aim = str(walkaway["aim"])[:200]
+    if walkaway.get("standing"):
+        return (f"A QUESTION IS STANDING: whether the player is truly giving up {aim}. Set "
+                f"`confirms_walkaway` TRUE ONLY for an explicit yes. A no, a deflection, "
+                f"another action, a question, or silence is false. `declares_giving_up` "
+                f"stays false.\n")
+    return (f"THE STORY'S MAIN AIM: {aim}. Set `declares_giving_up` TRUE only if this input "
+            f"DECLARES the character is giving it up for good. `confirms_walkaway` stays "
+            f"false.\n")
 
 
 #: make-it-real (NARRATION-DISCIPLINE.md): the decision an off-script PURSUED thread maps to.

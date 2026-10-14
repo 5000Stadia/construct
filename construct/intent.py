@@ -41,6 +41,9 @@ class TurnIntent:
     conclusory: bool = False
     commit_condition: str = "none"       # none | hedge | precondition | conditional
     commit_precondition: str = ""
+    #: WALK-AWAY-DECLARED (R40, IR-16): strict flags, fail CLOSED (only a literal True).
+    declares_giving_up: bool = False
+    confirms_walkaway: bool = False
     takes: str = ""
     takes_more: tuple[str, ...] = ()     # further objects taken in the same move (run 5 t22)
     drops: str = ""
@@ -83,6 +86,8 @@ class TurnIntent:
             commits=_effective_commits(verdict, acts),
             conclusory=bool(verdict.get("commits")) and acts,
             commit_condition=_condition(verdict),
+            declares_giving_up=verdict.get("declares_giving_up") is True,
+            confirms_walkaway=verdict.get("confirms_walkaway") is True,
             commit_precondition=(verdict.get("commit_precondition").strip()
                                  if isinstance(verdict.get("commit_precondition"), str)
                                  else ""),

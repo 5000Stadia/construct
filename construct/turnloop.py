@@ -3941,6 +3941,8 @@ def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Pro
                 continue  # already achieved/closed → no candidate, no duplicate event
             if only_kinds is not None and cond.kind not in only_kinds:
                 continue  # restricted pass (failure-tier result-event minting — see caller)
+            if str(cond.kind).startswith(_RESERVED_ABANDON):
+                continue  # R40 r3: the walk-away transition is the SOLE abandonment writer
             cands.setdefault(cond.kind, beat.beat_id)
     if not cands:
         return []
@@ -4031,6 +4033,92 @@ def _pending_decision_pass(p: Any, live_reads: Any, intent: Any, commitment: str
     except Exception:  # noqa: BLE001
         logger.warning("pending-decision pass skipped", exc_info=True)
         return ""
+
+
+#: WALK-AWAY-DECLARED (R40): the reserved abandonment kinds (never a generic detector kind).
+_RESERVED_ABANDON = "event:abandoned"
+#: One story day before a declined walk-away question may be asked again (IR-21/22).
+WALKAWAY_RETRY_MIN = 1440.0
+
+_WALKAWAY_LINE = (
+    "THE PLAYER MAY BE WALKING AWAY from {aim}. Make what they would leave behind concrete "
+    "and immediate, and let a present character, or the scene itself if no one is there, "
+    "ask plainly whether they are truly done with it. Never decide for them, and never "
+    "block them.")
+
+
+def _walkaway_state(world: Any, p: Any, live_reads: Any, arc: Arc, goal: str) -> dict | None:
+    """The MAIN arc's walk-away state (R40 r3), or None when it can never apply (no bare
+    `Occurred` refusal clock). Episode-scoped: a record from another episode is no record.
+    No clock = no `time:elapsed` row at all (read_clock would report 0, never None)."""
+    try:
+        from construct.adapter import state_value
+        from construct.arc.conditions import Occurred
+        from construct.clock import ELAPSED_ATTR, ELAPSED_ENTITY, read_clock
+        rc = getattr(arc, "refusal_clock", None)
+        if rc is None or not isinstance(rc.fires_when, Occurred):
+            return None
+        armed = live_reads.state(rc.clock_id, "status", frame=PLOT) in (None, "armed")
+        since = _episode_since(live_reads)
+        raw = live_reads.state("session:walkaway", "record", frame=SESSION)
+        rec = json.loads(raw) if isinstance(raw, str) and raw.strip() else None
+        if rec is not None and rec.get("episode_since") != since:
+            rec = None                                   # another episode's record
+        clocked = state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) is not None
+        minutes = float(read_clock(world).minutes) if clocked else None
+        standing = bool(rec) and rec.get("status") == "asked"
+        if rec is None:
+            eligible = armed
+        elif rec.get("status") == "declined":
+            eligible = (armed and minutes is not None
+                        and rec.get("declined_minutes") is not None
+                        and minutes - float(rec["declined_minutes"]) >= WALKAWAY_RETRY_MIN)
+        else:
+            eligible = False                             # asked (standing) or confirmed
+        aim = (goal or "").strip() or ("the story's main aim (" + humanize_id(
+            str((arc.shape.tension or ("", "the case"))[1])) + ")")
+        return {"aim": aim, "standing": standing, "eligible": eligible, "since": since,
+                "minutes": minutes, "kind": rc.fires_when.kind, "record": rec}
+    except Exception:  # noqa: BLE001 — never sink a turn; no state = no walk-away this turn
+        logger.warning("walk-away state unreadable", exc_info=True)
+        return None
+
+
+def _walkaway_transition(p: Any, intent: Any, wa: dict | None, turn: int,
+                         arc: Arc) -> tuple[bool, str]:
+    """WALK-AWAY-DECLARED (R40 r3, IR-16): the ONE deterministic transition.
+    Returns (confirmed, briefing line). Never infers: a question opens only on a declaration,
+    and the ending only on an explicit yes to a standing question."""
+    if not wa:
+        return False, ""
+    at = turn_time(turn)
+
+    def _record(**fields: Any) -> None:
+        rec = {"arc_id": arc.arc_id, "episode_since": wa["since"],
+               **{k: v for k, v in (wa.get("record") or {}).items()
+                  if k in ("asked_turn", "asked_minutes")}, **fields}
+        p.ingest_structured([{"entity": "session:walkaway", "attribute": "record",
+                              "value": json.dumps(rec), "value_type": "literal",
+                              "valid_from": at}], frame=SESSION, classify="rules")
+    try:
+        if wa["standing"]:
+            if intent.confirms_walkaway:
+                eid = f"event:abandoned_main_{turn}"
+                p.ingest_structured([
+                    {"entity": eid, "attribute": "kind", "value": wa["kind"], "valid_from": at},
+                    {"entity": eid, "attribute": "agent", "value": arc.protagonist,
+                     "value_type": "entity", "valid_from": at}])
+                _record(status="confirmed")
+                logger.info("walk-away CONFIRMED (turn %d): %s", turn, eid)
+                return True, ""
+            _record(status="declined", declined_minutes=wa["minutes"])
+            return False, ""
+        if wa["eligible"] and intent.declares_giving_up:
+            _record(status="asked", asked_turn=turn, asked_minutes=wa["minutes"])
+            return False, _WALKAWAY_LINE.format(aim=wa["aim"])
+    except Exception:  # noqa: BLE001
+        logger.warning("walk-away transition skipped", exc_info=True)
+    return False, ""
 
 
 def _episode_since(reads: Any) -> float | None:
@@ -4439,7 +4527,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
              death_policy: str = "shielded",
              laws: list | None = None,
              reality: str = "",
-             on_scene: Callable[[], None] | None = None) -> TurnResult:
+             on_scene: Callable[[], None] | None = None,
+             goal: str = "") -> TurnResult:
     """mode: 'pure' (canon-strict; the default for determined scenarios —
     declarations are refused, claimed items are adjudicated) or
     'coauthor' (the player may declare facts into the world).
@@ -4588,6 +4677,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     # MOVE-TO-UNPLACED-OBJECT (cr r1): the scene is read BEFORE classify (the same
     # horizon-bound locate `pre_scene` uses below), so the classifier can tell a step within
     # this place from a move somewhere else (`within_scene`).
+    # WALK-AWAY-DECLARED (R40): the main arc's walk-away state, read BEFORE classify so the
+    # aim is named only while eligible or a question stands.
+    _wa = _walkaway_state(world, p, live_reads, arc, goal)
     _scene_label = ""
     try:
         _sc0 = (p.locate(arc.protagonist, as_of=_h) or [None])[0]
@@ -4601,13 +4693,22 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                                        ask_candidates=ask_candidates,
                                        npc_candidates=npc_candidates,
                                        laws=_laws_full, decisive=_decisive,
-                                       scene=_scene_label)
+                                       scene=_scene_label,
+                                       walkaway=(_wa if _wa and (_wa["standing"]
+                                                                 or _wa["eligible"])
+                                                 else None))
         intent = TurnIntent.from_verdict(verdict, player_input)
         trace.cohort_calls.append("classify:cheap")
     except ProviderError as exc:
         intent = FAIL_INTENT
         trace.dropped_cohorts.append(f"classify ({exc})")
     kind, moves_to, requires = intent.kind, intent.moves_to, list(intent.requires)
+    # WALK-AWAY-DECLARED (R40 r3): the one transition, BEFORE every early return and before
+    # clock_pass. A confirmed walk-away is played as an action, so the refusal clock fires
+    # THIS turn through the ordinary clock/outcome path.
+    _wa_confirmed, walkaway_question = _walkaway_transition(p, intent, _wa, turn, arc)
+    if _wa_confirmed:
+        kind = "action"
     needs_test, uncertain_of = intent.needs_test, intent.uncertain_of
     mortal_risk, reshape_attempt = intent.mortal_risk, intent.reshape_attempt
     commits, commitment = intent.commits, intent.commitment
@@ -7271,6 +7372,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         commitment=commitment,
         commitment_clarified=commitment_clarified,
         pending_decision=pending_decision,
+        walkaway_question=walkaway_question,
         commitment_bounced=commitment_bounced,
         commitment_grade=commitment_grade,
         discovered=discovered,
