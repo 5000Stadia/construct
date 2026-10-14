@@ -8,7 +8,7 @@ Step into a book, or a world built from one conversation. Put something in a dra
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-800%2B%20green-brightgreen.svg)](#engineering-proof)
+[![Tests](https://img.shields.io/badge/tests-1,900%2B%20green-brightgreen.svg)](#engineering-proof)
 [![Substrate](https://img.shields.io/badge/substrate-pattern--buffer-8A2BE2.svg)](https://github.com/5000Stadia/pattern-buffer)
 [![Status](https://img.shields.io/badge/status-research%20active-blueviolet.svg)](#project-status)
 
@@ -67,7 +67,7 @@ s.close()
 Every model call routes through one provider interface — bring any LLM behind it. Two wires ship, selected by `CONSTRUCT_PROVIDER`:
 
 - **Default (recommended): a metered OpenAI API key.** Set `OPENAI_API_KEY`; calls go to the official `api.openai.com/v1/responses` endpoint. This is the right path for anything shared, automated, hosted, production, or multi-user — including running the Telegram/Discord transports for anyone but yourself.
-- **Opt-in: `CONSTRUCT_PROVIDER=codex` — ChatGPT-subscription OAuth.** Reuses the credential from `codex login` (`~/.codex/auth.json`).
+- **Development opt-in: `CONSTRUCT_PROVIDER=codex` — ChatGPT-subscription OAuth.** Reuses the credential from `codex login` (`~/.codex/auth.json`).
 
 > **Warning — the `codex` opt-in uses your personal ChatGPT-subscription credentials.** Per OpenAI's guidance, subscription auth is intended for personal, interactive use; programmatic or automated use should prefer an API key, and subscription credentials should not be exposed in untrusted, public, shared, or multi-user environments. The operator is responsible for compliance with [OpenAI's Terms of Use](https://openai.com/policies/terms-of-use/).
 >
@@ -149,7 +149,7 @@ The claim of a system like this can't be proven by unit tests alone — the prod
 - **An adversarial critic campaign** — player-agents *primed to break immersion and file their own bug reports* through the in-game `/feedback` channel, including deliberate off-path runs (pursuing a romance the story never offered) and cross-chapter continuations. Every filing was independently triaged against engine ground truth before anything was "fixed": [`eval/09-critic-campaign.md`](docs/design/eval/09-critic-campaign.md).
 - **A five-probe live acceptance set** — object permanence, loop closure, frame non-leak, player agency, honest adjudication — passed 5/5 in live play and re-verified as the engine grew.
 - **A generalized synthesis** — the campaign's findings distilled into five portable pillars of the optimal interactive-fiction experience (truth-keeping, the player's story is the story, proportion, initiative, the ending is the payoff): [`docs/design/OPTIMAL-IF-EXPERIENCE.md`](docs/design/OPTIMAL-IF-EXPERIENCE.md).
-- **1100+ test functions across 38 files** — including structural pins for every invariant the design docs promise (frame non-leak, protected-key concealment, mint-channel discipline, terminal precedence, no-reopen of settled history).
+- **1,900+ passing tests (1 skipped, as of 2026-10-14)** — including structural pins for every invariant the design docs promise (frame non-leak, protected-key concealment, mint-channel discipline, terminal precedence, no-reopen of settled history).
 
 ### Development methodology
 
@@ -161,13 +161,13 @@ The engine was built through a **multi-agent adversarial review loop**: every su
 
 The shipped example, ***The Rain in Bluegate Yard*** — a complete original Victorian murder mystery (London, 1888; a dock messenger dead in Bluegate Yard; a plain-clothes bureau racing the Met) — plays end-to-end on a real model: grounded cold open, earned clue trail, companion texture, a staged conclusion scene, a consequence-bearing epilogue, and a next chapter grown from the wake of the first. Two further worlds (a dark-fantasy pilgrimage, an undersea survival thriller) exercise the other genre shapes.
 
-Worlds are built, not hand-coded: drop any prose document in and it becomes a playable world, or build one live from a one-line brief through the session-zero interview.
+Worlds are built, not hand-coded: drop any prose document in and it becomes a playable world, or build one live from a one-line brief through the session-zero interview. Fresh worlds use pattern-buffer's build library by default (BUILD-LIBRARY r1.9.1), with the engine revision pinned in [`engine.pin`](engine.pin). See [SEEDING-LIBRARY-WIRING](docs/design/SEEDING-LIBRARY-WIRING.md).
 
 ---
 
 ## Documents
 
-The project is **design-first**: 60 design documents, each recording a decision, the live failure that motivated it, and the review verdict it shipped under.
+The project is **design-first**: design documents record decisions, the live failures that motivated them, and their review status.
 
 - **[docs/CONCEPT.md](docs/CONCEPT.md)** — the founding brief: vision, host architecture, the arc layer.
 - **[docs/design/00-INDEX.md](docs/design/00-INDEX.md)** — the curated map of all design docs, by layer.
@@ -181,7 +181,7 @@ The project is **design-first**: 60 design documents, each recording a decision,
 
 ## Engineering proof
 
-- **1100+ test functions, 38 files, zero live model calls in the suite** — engine extraction via pattern-buffer's `StubModel`, host cohorts via a canned provider; the full suite runs in under two minutes.
+- **1,900+ passing tests (1 skipped, as of 2026-10-14), zero live model calls in the suite** — engine extraction via pattern-buffer's `StubModel`, host cohorts via a canned provider.
 - **Deterministic spine, model calls only at the boundaries.** Classification, adjudication, arc evaluation, entity resolution, and all bookkeeping are deterministic or cheap-tier; the expensive model renders prose and voices characters, nothing else. Turn latency is protected by a deferred-settle design: post-narration bookkeeping overlaps the player reading.
 - **Fail-open discipline everywhere it must be.** No enrichment call may sink a turn; the climax cannot be lost to a provider hiccup; every dropped cohort is receipted in the turn trace.
 - **Receipts-first debugging.** Every turn emits a structured trace — writes, resolver decisions with reasons, clocks fired, clues surfaced, cohort calls — the same record the debug CLI, the tests, and the eval reports all read.
@@ -194,7 +194,8 @@ The project is **design-first**: 60 design documents, each recording a decision,
 | Surface | Status | Notes |
 | --- | --- | --- |
 | Turn loop (classify → adjudicate → arc → narrate → commit) | Live | Deterministic spine; model at the boundaries only |
-| World ingestion (document → playable world) | Live | Build narrated in plain stages; identity-coherence gate at build |
+| World ingestion (document → playable world) | Live | Registry-first seeding through pattern-buffer's build library; build narrated in plain stages |
+| World growth along the player's path | Live; acceptance open | The world grows where the player walks. [R20 acceptance runs](docs/design/eval/12-displaced-ironhold-acceptance.md) show chapter 2 opening where chapter 1 ended, in a place grown in play; R20 is not closed |
 | Session-zero interview + character creation (the Foyer) | Live | Play-as-anyone; name/pronouns/background authoritative over authored defaults |
 | Hidden arc: beats, clocks, pacing, convergence | Live | Anti-railroading guards; refusal handled diegetically |
 | Interview/examine clue delivery + case-board notebook | Live | Topic-aware; earned-only; the notebook is the player's own frame |
@@ -202,6 +203,10 @@ The project is **design-first**: 60 design documents, each recording a decision,
 | Death & the testament (per-chapter policy) | Live | Staged peril; premise-transformed death for loop/ghost shapes |
 | The Remembrancer + player-authored memory (retcon) | Live | Contradictions quarantine; world-claims become beliefs |
 | Entity Authority + first-mention permanence | Live | Channel-scoped minting; prose-casing evidence, fail-closed |
+| Place-name anchoring | Live | The player learns the name of the place they stand in, unless concealed; the briefing uses that name ([design](docs/design/PLACE-NAME-ANCHOR.md)) |
+| Authored-event grounding | Live | The detector judges the action against the authored act and current place, not just an event label; older worlds retain the label fallback ([design](docs/design/EVENT-DETECT-GROUNDING.md)) |
+| Narrated-object placement | Live | Confirmed narrated objects without a location land in canon at the scene when tied to something present; untied objects remain unplaced ([design](docs/design/NARRATED-OBJECTS-LAND.md)) |
+| Intent, consequence and interpretation | Adopted; implementation partial | The player owns intentions, the world owns consequences, characters own interpretations. The [intent ruleset](docs/design/INTENT-RULESET.md) records the remaining work |
 | Build-seal fidelity repair (coreference / typing) | Live | Tiered safest-first pass; arc-vouched merge only for load-bearing ids; fail-open |
 | Shape-aware place granularity | Live | Intimate/domestic shapes ground the interior at room scale; the opening anchors to the most specific place, not the enclosing city |
 | Living-World Generator (multi-arc portfolio + the opportunistic DM) | Live | Arc lifecycle with fallout-as-canon; regenerative/opportunistic/ambient triggers; one mint per turn behind six guards + dramatic right-of-way |
@@ -227,9 +232,9 @@ Three projects, one line of research — each a résumé of the last:
 
 ## Project status
 
-**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (1200+ tests); the evaluation corpus and design record are current through July 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
+**Pre-1.0, research active.** The engine plays end-to-end on a real model; the current suite is green (1,900+ passing tests, 1 skipped, as of 2026-10-14); the evaluation corpus and design record are current through October 2026. The remaining named gaps are documented as future work in the [synthesis](docs/design/OPTIMAL-IF-EXPERIENCE.md) and the [capability table](#capability-status), not left implied.
 
-> **⏭️ Next up:** the headline build after this button-up is the RESOLUTION-FAN §5b chapter-boundary reshape (the arc-layer contribution). See **[docs/design/NEXT-UP.md](docs/design/NEXT-UP.md)** — designed and audited, needs a broad design pass on its open forks before implementation is pieced out.
+> **⏭️ Acceptance still open:** [R20 run 13](docs/design/eval/12-displaced-ironhold-acceptance.md) passed the five listed criteria, but an authored climax fired on the wrong act. Event grounding is now implemented; the report still records chapter-seam coherence gaps. R20 is not closed.
 
 ## License
 
