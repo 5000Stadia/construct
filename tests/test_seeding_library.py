@@ -90,9 +90,14 @@ def _cands(prompt: str) -> dict[str, str]:
 class Extractor:
     """The library's model: scripted grammar lines per chapter; counts its calls."""
 
-    def __init__(self, fail_chunk: int | None = None, fail_times: int = 0):
+    def __init__(self, schedule: dict | None = None, unused_handle_chunk: int | None = None):
+        """`schedule`: {chunk index: ["raise" | "refuse", ...]}, consumed one per call to
+        that chunk; then the chunk answers normally. "refuse" returns an answer the library
+        refuses whole (a line using an undeclared handle). `unused_handle_chunk` declares an
+        escape no line uses (r1.9.1 drops it with a receipt)."""
         self.calls: list[int] = []
-        self.fail_chunk, self.fail_times = fail_chunk, fail_times
+        self.schedule = {k: list(v) for k, v in (schedule or {}).items()}
+        self.unused_handle_chunk = unused_handle_chunk
         self.classify = rule_classifier_fallback()
 
     def __call__(self, prompt: str, schema: dict):
@@ -101,8 +106,13 @@ class Extractor:
         assert prompt.startswith("Extract world-state facts (build library"), prompt[:60]
         chunk = int(re.search(r"PASSAGE \(chunk (\d+), chapter \d+\)", prompt).group(1))
         self.calls.append(chunk)
-        if chunk == self.fail_chunk and self.calls.count(chunk) <= self.fail_times:
-            raise RuntimeError("model call failed")
+        plan = self.schedule.get(chunk) or []
+        if plan:
+            action = plan.pop(0)
+            n = self.calls.count(chunk)               # 1st, 2nd... call to this chunk
+            if action == "raise":
+                raise RuntimeError(f"model call failed #{n}")
+            return {"lines": [f"s{_first_sentence(prompt)}|new:{10 + n}|role|nobody"]}
         c = _cands(prompt)
         lines, picks = [], []
 
@@ -123,7 +133,15 @@ class Extractor:
         at("The stranger watched", lambda: f"{c['the stranger']}|in|@{c['Low Crossing']}")
         at("Duke Orrin came", lambda: f"{c['Duke Orrin']}|role|duke")
         at("Mara Venn had", lambda: f"{c['Mara Venn']}|in|@{c['Low Crossing']}")
-        return {"lines": lines, "picks": picks}
+        escapes = []
+        if chunk == self.unused_handle_chunk:
+            escapes.append({"handle": "new:7", "type": "object", "name": "a stray oar",
+                            "species": None, "quote": "the ferry"})
+        return {"lines": lines, "picks": picks, "escapes": escapes}
+
+
+def _first_sentence(prompt: str) -> int:
+    return int(re.search(r"\[s(\d+)\]", prompt).group(1))
 
 
 def _dog(prompt: str) -> str:
@@ -361,28 +379,87 @@ def test_chapter_one_facts_sit_below_the_opening(tmp_path):
         w.close()
 
 
-# ---------------------------------------------------------------- 7. chunk errors
+# ---------------------------------------------------------------- 7. chunk errors (r2.2)
 
-def test_a_chunk_that_errors_once_is_retried_and_the_build_completes(tmp_path):
-    ex = Extractor(fail_chunk=1, fail_times=1)
-    w, _, _ = _build(tmp_path, extractor=ex)
+def _try_build(tmp_path, ex):
+    w = game._world(tmp_path / "s.world", "s", model=None)
+    w.porcelain.begin_build()
+    before = len(w.porcelain.facts("canon"))
     try:
-        assert ex.calls.count(1) == 2 and ex.calls.count(0) == 1   # only the refused one re-runs
+        seeding.ingest_library(w, game._chunk_chapters(STORY), STORY, MANIFEST, model=ex,
+                               repair=Repairs(), source_step=SOURCE_STEP,
+                               on_stage=lambda m: None)
+        return w, before, None
+    except RuntimeError as exc:
+        return w, before, exc
+
+
+def test_refuse_then_accept_is_the_library_retry_and_builds(tmp_path):
+    ex = Extractor(schedule={1: ["refuse"]})
+    w, _, err = _try_build(tmp_path, ex)
+    try:
+        assert err is None and ex.calls.count(1) == 2 and ex.calls.count(0) == 1
     finally:
         w.close()
 
 
-def test_a_chunk_that_errors_twice_stops_the_build_and_commits_nothing(tmp_path):
-    ex = Extractor(fail_chunk=1, fail_times=2)
+def test_raise_then_accept_is_construct_s_rerun_and_builds(tmp_path):
+    ex = Extractor(schedule={1: ["raise"]})
+    w, _, err = _try_build(tmp_path, ex)
+    try:
+        assert err is None and ex.calls.count(1) == 2
+    finally:
+        w.close()
+
+
+def test_raise_then_refuse_stops_after_exactly_two_calls(tmp_path):
+    ex = Extractor(schedule={1: ["raise", "refuse", "refuse"]})
+    w, before, err = _try_build(tmp_path, ex)
+    try:
+        assert err is not None and "chunk 1 refused" in str(err)
+        assert "model call failed #1" in str(err)             # the original exception
+        assert "new:12" not in str(err)                       # not the re-run's refusal
+        assert ex.calls.count(1) == 2                         # no third call
+        assert len(w.porcelain.facts("canon")) == before      # nothing committed
+    finally:
+        w.close()
+
+
+def test_refuse_then_refuse_stops_without_a_construct_rerun(tmp_path):
+    ex = Extractor(schedule={1: ["refuse", "refuse", "refuse"]})
+    w, before, err = _try_build(tmp_path, ex)
+    try:
+        assert err is not None and ex.calls.count(1) == 2
+        assert "new:11" in str(err) and "new:12" not in str(err)   # the FIRST refusal
+        assert len(w.porcelain.facts("canon")) == before
+    finally:
+        w.close()
+
+
+def test_raise_then_raise_stops_after_two_calls(tmp_path):
+    ex = Extractor(schedule={1: ["raise", "raise", "raise"]})
+    w, before, err = _try_build(tmp_path, ex)
+    try:
+        assert err is not None and ex.calls.count(1) == 2
+        assert "model call failed #1" in str(err) and "#2" not in str(err)   # the FIRST
+        assert len(w.porcelain.facts("canon")) == before
+    finally:
+        w.close()
+
+
+def test_an_unused_handle_is_dropped_logged_and_the_build_completes(tmp_path, caplog):
+    ex = Extractor(unused_handle_chunk=0)
+    stages = []
     w = game._world(tmp_path / "s.world", "s", model=None)
     try:
         w.porcelain.begin_build()
-        before = len(w.porcelain.facts("canon"))
-        with pytest.raises(RuntimeError, match="refused twice"):
+        with caplog.at_level("INFO"):
             seeding.ingest_library(w, game._chunk_chapters(STORY), STORY, MANIFEST,
                                    model=ex, repair=Repairs(), source_step=SOURCE_STEP,
-                                   on_stage=lambda m: None)
-        assert len(w.porcelain.facts("canon")) == before
+                                   on_stage=stages.append)
+        assert "dropped handle" in caplog.text and "a stray oar" in caplog.text
+        assert any("1 dropped handle(s)" in m for m in stages)
+        assert ex.calls.count(0) == 1                         # no retry for a drop
     finally:
         w.close()
 

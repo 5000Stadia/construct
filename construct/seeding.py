@@ -124,25 +124,46 @@ def chunk_times(chunks: list, source_step: float) -> dict[int, float]:
     return out
 
 
+def _raised_once(result: Any) -> bool:
+    """r2.2: the chunk made exactly one call, and it raised (pattern-buffer's precise test;
+    an error text alone can also follow the library's own retry)."""
+    attempts = getattr(result, "attempts", ()) or ()
+    return len(attempts) == 1 and attempts[0].raw is None
+
+
 def extract_with_retry(chunks: list, registry: Any, model: Callable,
                        on_stage: Callable[[str], None], workers: int = 8) -> list:
-    """Rule 5: extract every chunk; re-run the errored ones once; if any still errors, stop
-    the build with the first cause (never ship a world with a chapter silently missing)."""
+    """Rule 5 (r2.2): at most two model calls per chunk, ever. The library re-asks a chunk
+    whose RETURNED answer refused it (`retries=1`); construct re-runs only a chunk whose one
+    call RAISED, with `retries=0`. A chunk still in error stops the build with its first
+    cause, before any commit. Every dropped handle is logged and counted (it carries no fact,
+    so it never stops a build)."""
     from patternbuffer.build import extract
 
-    results = extract(chunks, registry, model, workers=workers)
+    results = extract(chunks, registry, model, workers=workers, retries=1)
+    # the INITIAL failing attempt (attempts[0]), not the final error the library's retry left
+    first_cause = {r.index: ((r.attempts[0].error if getattr(r, "attempts", None) else None)
+                             or r.error) for r in results if r.error}
+    raised = [c for c, r in zip(chunks, results) if r.error and _raised_once(r)]
+    if raised:
+        logger.warning("extract: %d chunk(s) raised; one re-run: %s", len(raised),
+                       [(r.index, r.error) for r in results if r.error and _raised_once(r)])
+        again = {r.index: r for r in extract(raised, registry, model, workers=workers,
+                                             retries=0)}
+        results = [again.get(r.index, r) for r in results]
+    dropped = [d for r in results for d in (getattr(r, "dropped_handles", ()) or ())]
+    for d in dropped:
+        logger.info("extract: dropped handle chunk %s %s %s %r candidates=%s", d.chunk,
+                    d.kind, d.handle, d.name, list(d.candidates))
     for r in results:
         on_stage(f"   …chunk {r.index} {'REFUSED' if r.error else 'extracted'}")
-    errored = [c for c, r in zip(chunks, results) if r.error]
-    if errored:
-        logger.warning("extract: %d chunk(s) refused; one retry: %s", len(errored),
-                       [(r.index, r.error) for r in results if r.error])
-        again = {r.index: r for r in extract(errored, registry, model, workers=workers)}
-        results = [again.get(r.index, r) for r in results]
-        still = [r for r in results if r.error]
-        if still:
-            raise RuntimeError(f"ingest failed: chunk {still[0].index} refused twice; "
-                               f"first cause: {still[0].error}")
+    if dropped:
+        on_stage(f"   …{len(dropped)} dropped handle(s)")
+    still = [r for r in results if r.error]
+    if still:
+        bad = still[0]
+        raise RuntimeError(f"ingest failed: chunk {bad.index} refused; "
+                           f"first cause: {first_cause.get(bad.index, bad.error)}")
     return results
 
 
