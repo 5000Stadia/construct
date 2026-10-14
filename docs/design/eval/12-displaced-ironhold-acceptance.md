@@ -348,7 +348,9 @@ The monitor authorised this run for Kabe (note n96b11a): one run, after the cont
 **The first attempt stopped at the identity stop, about 6 minutes in:** `person:seal_press_keeper_1 ~ person:seal_press_keeper_2`.
 - Both carried the name "one of two seal-press keepers", and the engine declined the pair as `not_name_like`.
 - The story plainly makes them two people: "two seal-press keepers behind him", and later "One seal-press keeper followed; the other froze."
-- The adjudication stage takes only `alias_not_specific` pairs, so it never asked. This was a false stop. The fix is IDENTITY-CONFIRM amendment r7 (with cr): a `not_name_like` pair is held apart on two `different` answers from the merge gate, and is never merged without source backing.
+- The adjudication stage takes only `alias_not_specific` pairs, so it never asked. In this story the stop was false, but it stays: an honest stop.
+- A fix was proposed and withdrawn. Amendment r7 would have held a `not_name_like` pair apart on two `different` answers from the merge gate. cr returned RED. The class also covers speaker-relative labels ("my apprentice"), which can be one person extracted twice. Without case evidence, a reject would make a false split permanent, and the engine has no sentence-level provenance to supply that evidence.
+- The real fix is SEEDING-LIBRARY-WIRING r2.1 (cr GREEN; it waits on pattern-buffer's BUILD-LIBRARY-V1 merge). There, the author's manifest declares each person, and same-named entries are held apart by that declaration.
 - The build also logged five `valid_to_before_valid_from` skipped edges, all reported by the engine's ingest.
 
 As with run 10a, the retry runs under the same single-run approval.
