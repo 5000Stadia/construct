@@ -1512,6 +1512,24 @@ def _stage_seed_knowledge(world: Any, provider: Provider, on_stage, arc: Arc, pe
     return seeded
 
 
+def _report_soundness(world: Any, arc: Arc, cast_nodes: Any, horizon: float | None,
+                      where: str, *, kind: str = "fresh", goal: str = "",
+                      hook_ids: Any = ()) -> None:
+    """STORY SOUNDNESS (R35, STORY-SOUNDNESS.md r4): the producer fixed point over the
+    accepted arc, at the horizon. ADVISORY ONLY — it logs and records; it never fails,
+    retries or changes the build."""
+    try:
+        from construct.adapter import HorizonView
+        from construct.arc.soundness import analyse, report_to_log
+        view = HorizonView(world, horizon)
+        rep = analyse(arc, tuple(cast_nodes or ()), arc.protagonist,
+                      PorcelainWorldReads(view), horizon=horizon, world=view, kind=kind,
+                      goal_statement=goal, hook_ids=tuple(hook_ids or ()))
+        report_to_log(rep, where, arc.arc_id)
+    except Exception:  # noqa: BLE001 — an advisory report never sinks a build
+        logger.warning("soundness report skipped (%s)", where, exc_info=True)
+
+
 def _stage_distill_flavor(world: Any, provider: Provider, digest: str, reads: Any,
                           on_stage) -> str:
     """Build stage 5.5 (narrative flavor). Pure move out of `_finalize_scenario_impl`."""
@@ -1741,6 +1759,8 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
                                 source_step, win_direction, on_stage)
     _stage_author_meta_prose(provider, digest, meta, proposal, title, style, laws,
                              resolved_game_types, on_stage)
+    _report_soundness(world, arc, cast_nodes, opening_as_of, "build",
+                      goal=meta.get("goal_statement", ""))
     _stage_seal(world, spath, meta, on_stage)
     return meta
 
@@ -3377,6 +3397,7 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         if prior_protagonist and new_arc.protagonist != prior_protagonist:
             raise RuntimeError(
                 f"continuation protagonist drift: {new_arc.protagonist!r} != {prior_protagonist!r}")
+
         all_ids = [a.arc_id for a in prior_arcs] + [new_id]
 
         # ---- COMPUTE (continued): everything the write phase needs that is a READ or a MODEL
@@ -3467,6 +3488,19 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # the doorway place before the opening renders (see _plan_hook_cast).
         _hc_rows, _hook_ids = _plan_hook_cast(world, reads, proposal, _door_place,
                                               prior_protagonist, at=turn_time(turn))
+        # STORY SOUNDNESS (R35, advisory): the new chapter's arc, at the chapter horizon, with
+        # the cast play will actually use (the scenario meta cast, as Session loads it) and the
+        # hook cast it will stage.
+        _cont_cast: tuple = ()
+        try:
+            if meta.get("cast"):
+                from construct.cast import cast_from_proposal
+                _cont_cast = tuple(cast_from_proposal(meta.get("cast"))[0])
+        except Exception:  # noqa: BLE001 — a bad cast blob only empties the report's cast
+            logger.warning("soundness: scenario cast unreadable", exc_info=True)
+        _report_soundness(world, new_arc, _cont_cast, _h, "continuation",
+                          kind="continuation", goal=meta.get("goal_statement", ""),
+                          hook_ids=_hook_ids)
         # DURABLE PER-PLAYER episode epoch (Cx 138 #2): persist the raised epoch into THIS slot's
         # session frame so the reopened Session stamps episode-N+1 turns ABOVE the boundary (scenario
         # meta is shared + stale; the slot is per-player). Session prefers this over meta["entry_epoch"].

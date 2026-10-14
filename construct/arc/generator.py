@@ -437,6 +437,13 @@ def _preflight(arc: Arc, reads: Any) -> tuple[bool, str]:
         if beat.unreachable_if is not None and \
                 evaluate(beat.unreachable_if, reads) is Truth.TRUE:
             return False, "born_unreachable"
+    # STORY SOUNDNESS (R35, advisory): reported beside the lint result; never a decline.
+    try:
+        from construct.arc.soundness import analyse, report_to_log
+        report_to_log(analyse(arc, (), arc.protagonist, reads, kind="fresh"),
+                      "generator", arc.arc_id)
+    except Exception:  # noqa: BLE001 — an advisory report never declines an arc
+        logger.debug("generator soundness report skipped", exc_info=True)
     return True, "ok"
 
 
