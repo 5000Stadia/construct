@@ -66,7 +66,7 @@ def check_threads(proposal: dict, n_threads: int, arc: Any,
     """Change 3: every numbered personal thread disposed EXACTLY once — no index out of range,
     no disposition other than carried/closed, no extras — and a `carried` one names an id or
     beat of the new arc (or an ADMITTED hook-cast person)."""
-    disp_all = [d for d in (proposal.get("thread_disposition") or []) if isinstance(d, dict)]
+    disp_all = list(proposal.get("thread_disposition") or [])
     if n_threads <= 0:
         return ([f"{len(disp_all)} thread disposition(s) given, but there are no personal "
                  "threads"] if disp_all else [])
@@ -74,10 +74,12 @@ def check_threads(proposal: dict, n_threads: int, arc: Any,
     seen: dict[int, dict] = {}
     problems = []
     for d in disp_all:
-        try:
-            i = int(d.get("index"))
-        except (TypeError, ValueError):
-            problems.append(f"a thread disposition has no valid index ({d.get('index')!r})")
+        if not isinstance(d, dict):
+            problems.append(f"a thread disposition is not an object ({d!r})")
+            continue
+        i = d.get("index")
+        if type(i) is not int:   # bool and float excluded: malformed output never coerces
+            problems.append(f"a thread disposition has no valid integer index ({i!r})")
             continue
         if not 0 <= i < n_threads:
             problems.append(f"thread index {i} is out of range (0..{n_threads - 1})")

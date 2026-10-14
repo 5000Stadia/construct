@@ -272,3 +272,13 @@ def test_malformed_hook_holder_is_sent_back_with_nothing_written(tmp_path, monke
         assert not any(e.startswith("event:episode_start_") for e, _a in rows)
     finally:
         w.close()
+
+
+def test_thread_accounting_rejects_malformed_entries():
+    """cr re-review: a non-object entry or a non-integer index is a problem, never coerced."""
+    arc = _arc([Beat("beat:a", Phase.CLIMAX, Weight.REQUIRED, achievable_via=Occurred("k"))])
+    ok = {"index": 0, "disposition": "closed", "how": "x"}
+    assert bridge.check_threads({"thread_disposition": [ok, "junk"]}, 1, arc)
+    assert bridge.check_threads({"thread_disposition": [{**ok, "index": 0.5}]}, 1, arc)
+    assert bridge.check_threads({"thread_disposition": [{**ok, "index": True}]}, 1, arc)
+    assert bridge.check_threads({"thread_disposition": [ok]}, 1, arc) == []
