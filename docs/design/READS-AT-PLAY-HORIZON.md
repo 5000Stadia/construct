@@ -1,6 +1,6 @@
 # Reads at the play horizon: the move check, the mint check, and the chapter-2 build
 
-**Status:** spec r5, 2026-10-13, for cr review. Not built.
+**Status:** spec r6, 2026-10-13, for cr review. Not built.
 **Source:** R20 run 10 (eval/12): criterion 5 failed, and three new-place moves logged "move grant ... did not take".
 **r2 (cr RED on r1, 327d2fe):**
 - `_plan_episode_doorway` and `_plan_hook_cast` read the head on their own; they are now bound, with a fallback-path test.
@@ -21,8 +21,10 @@
 
 **r5 (cr RED on r4, 8d8c2ef):** the legacy path through Session. `Session._horizon` is always a callable, and it returns None on a legacy world, so r4's Session would have wrapped a legacy world anyway. r5 fixes it this way:
 - **Session decides once, at construction,** from `self._opening_as_of` (session.py:110, the only assignment): a legacy world gets literal None, and so the raw world.
-- **`HorizonView` with a callable** resolves it at construction, and if it returns None, returns the raw world too.
+- **`HorizonView` with a callable** probes it once at construction, only to detect legacy: if the probe returns None, it returns the raw world too. Otherwise it keeps the callable, never the probe's value (see r6).
 - **An integration test** checks the Session path, not only the constructor (test 14).
+
+**r6 (cr RED on r5):** r5's "resolves it at construction" could be read as caching the horizon. If it were cached, every read after the first turn would stay at the opening horizon. r6 states it plainly: the construction-time probe only detects legacy, and the callable is re-evaluated on every mediated read. Test 9b checks two sequential turns.
 
 ## The facts
 
@@ -79,7 +81,8 @@ Construct's play code uses none of them today: a grep of `world.`/`_world.` in `
 **Where the view is installed:**
 - **Session:** `self._world` becomes `HorizonView(world, self._horizon if self._opening_as_of is not None else None)` when the session opens. For a legacy world that is `HorizonView(world, None)`, which is the raw world itself.
   - **Why it can't change later:** `_opening_as_of` is assigned once, from scenario meta (session.py:110). A legacy world never gains one mid-session, and the chapter-2 build keeps the origin (`continue_episode` writes no `opening_as_of`).
-  - **Belt and braces:** `HorizonView` also calls a callable `horizon` once at construction, and returns the raw world if that gives None. So every turn (`run_turn` receives it at session.py:1111), the opening, the foyer, the settle, `author_replan` (called from `run_turn`), growth, and the clock render read through it.
+  - **Belt and braces:** `HorizonView` also probes a callable `horizon` once at construction, and returns the raw world if the probe gives None.
+  - **The probe's value is never cached (r6).** For a non-None probe, the view keeps the callable and calls it afresh on every mediated read: each porcelain valid-time call, each `events` call, and each `refer` call. So the horizon advances with the turns exactly as `Session._horizon()` does today. The callable reads `next_turn_number` through `view.head`, never through the proxy. So every turn (`run_turn` receives it at session.py:1111), the opening, the foyer, the settle, `author_replan` (called from `run_turn`), growth, and the clock render read through it.
 - **`continue_episode`:** `world = HorizonView(raw, h)` right after the world opens, with `h` computed by `play_horizon`. Every helper gets the view; the single atomic commit goes through its passthrough `commit_set`/`ingest_structured`.
 - **Build-time code** (`create_scenario_*`, the `_stage_*` passes, `_assess_viability`) and CLI tools get no view: no horizon exists yet, and the hidden-plot author is meant to see the whole story.
 
@@ -215,6 +218,12 @@ The files searched are `turnloop.py`, `session.py`, `game.py`, `growth.py`, `foy
    - `events(until=None)` reaches it as `until=h`.
    - Writes reach it unchanged.
 9. **No recursion:** a Session over a horizon world opens and plays a stub turn. Its horizon callable reads through `.head`, and a spy confirms the horizon computation makes no call through the proxy.
+9b. **The horizon advances** (cr r5).
+    - **Setup:** a horizon Session with a source-future value for one attribute. Two sequential stub turns each write that attribute at their own `turn_time`.
+    - A spy on the porcelain's valid-time reads and on `refer` records the `as_of` each mediated read receives.
+    - **In each turn,** every such `as_of` equals `Session._horizon()` evaluated at that read, computed independently from the raw world. The second turn's value is exactly one greater than the first's.
+    - **Neither turn** reads the source-future value.
+    - **Negative control:** a view built with the probe's float instead of the callable fails this test.
 10. **The clock oracle** (cr r2, C1 to C5).
     - **Setup:** a source-future `time:elapsed` row and a source-future calendar property at 10,000,000, with a different elapsed value and calendar at the opening horizon.
     - The scene's clock render, the briefing's clock, and `continue_episode`'s staged time delta and phase all derive from the horizon values.
