@@ -207,3 +207,24 @@ def test_a_settle_whose_promotion_returns_an_empty_receipt_lands_nothing(world, 
     assert trace.landed == []
     assert _in(world, "canon", "obj:lower_pin") is None
     assert _in(world, PLAYER_FRAME, "obj:lower_pin") is None
+
+
+def test_a_settle_whose_promotion_ingest_raises_lands_nothing(world, monkeypatch):
+    # cr on 6fe9154: the first-phase boundary itself. The promotion's canon/batch ingest
+    # raises; the settle's fail-open ingest yields an empty receipt, so nothing lands.
+    arc = _seed(world)
+    real = world.porcelain.ingest_structured
+
+    raised = []
+
+    def raising_promote(rows, *a, frame=None, classify=None, **kw):
+        if frame == "canon" and classify == "batch":
+            raised.append([r.get("entity") for r in rows])
+            raise RuntimeError("promotion gate refused")
+        return real(rows, *a, frame=frame, classify=classify, **kw)
+    monkeypatch.setattr(world.porcelain, "ingest_structured", raising_promote)
+    trace = _settle(world, arc, _PIN)
+    assert raised and "obj:lower_pin" in raised[0]            # the promotion did raise
+    assert trace.landed == []
+    assert _in(world, "canon", "obj:lower_pin") is None
+    assert _in(world, PLAYER_FRAME, "obj:lower_pin") is None
