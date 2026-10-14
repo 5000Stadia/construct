@@ -1,6 +1,8 @@
 # Construct's own placements are movable state, by rule (R23 lever)
 
-**Status:** spec r1, 2026-10-14, for cr review. Not built.
+**Status:** spec r2, 2026-10-14, for cr review. Not built.
+
+**r2 (cr RED on r1):** the three build-stage staging sites are added; they place people too, so a model could freeze staging. The site spies enumerate every table row, including the less obvious ones.
 **Source:**
 - A read-only audit of `run_turn`'s writes and same-turn reads (2026-10-14, against main 1e46d42).
 - Run 10's timing log: 69 in-turn "Classify the lifetime" calls, 247 s over 20 turns.
@@ -32,7 +34,15 @@
 | the drop (~5849) | `obj in pre_scene` | batch |
 | `_mint_held_object` (~2125) | a fresh object's `kind` / `name` / `in protagonist` | inline |
 
-`commit_carrier_move` (~2691) already uses `rules`.
+**Build-time staging (r2):** the same rule, the same reason. Construct decides these placements itself.
+
+| Site | Rows | Today |
+|---|---|---|
+| `game._stage_ensure_located_people` | the selected person `in` the selected place | default |
+| `game._stage_ground_play_as_figure` | the protagonist `in` the opening place | default |
+| `game._stage_cast_in_place` | `cast_location_plan()` rows, plus the protagonist's entry-scene `in` | default |
+
+`commit_carrier_move` (~2691) already uses `rules`. So does the continuation's hook-cast staging (via `arc_io.commit_ops`, whose atomic path is rules-classified).
 
 **What it yields:**
 - Every row in the table is classified at write time, with no model call. Placements of objects and people are STATE, which they are by definition: construct just moved them.
@@ -62,7 +72,17 @@ Per turn, the classifier calls for the host-placement sites go to zero. Run 10's
 
 ## Tests
 
-1. **Each site, by spy:** a scripted move, take, drop, NPC follow and grant pass `classify="rules"` for their placement rows (a spy on `ingest_structured`'s kwargs). The player-input extraction still passes `batch`.
+1. **Each site, by spy, one test per table row (r2):** a spy on `ingest_structured`'s kwargs records `classify` per placement row, for:
+   - a move (`_gated_move_commit`, with a carried object);
+   - the pre-scene object placement;
+   - an improvised-place grant (`_grant_moved_place`);
+   - an NPC follow;
+   - a join and a dismissal (`accompanying` set and cleared, the departure event);
+   - a take;
+   - a drop;
+   - a fresh object mint (`_mint_held_object`);
+   - each of the three build stages (`_stage_ensure_located_people`, `_stage_ground_play_as_figure`, `_stage_cast_in_place`, through a stub-provider build).
+   Each passes `classify="rules"`. The player-input extraction still passes `batch` (a control).
 2. **No model call for a host placement:**
    - a turn where the player takes an object and the extraction returns nothing makes **zero** "Classify the lifetime" calls (stub provider count);
    - the taken object's `in` row is stored STATE (sidecar verdict, read right after the turn).
