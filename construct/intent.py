@@ -33,8 +33,14 @@ class TurnIntent:
     uncertain_of: str = ""
     mortal_risk: bool = False            # #95, action only
     reshape_attempt: bool = False        # action only
-    commits: bool = False                # action or declaration
+    commits: bool = False                # EFFECTIVE: conclusory AND condition none|hedge (R38)
     commitment: str = ""                 # the committed words; the input itself when blank
+    #: HEDGE-VS-CONDITION (R38, IR-18): the model's RAW conclusory flag — read ONLY by the
+    #: pure-mode declaration exemption — and the move's condition. A precondition/conditional
+    #: conclusion is a PENDING DECISION, never an effective commitment.
+    conclusory: bool = False
+    commit_condition: str = "none"       # none | hedge | precondition | conditional
+    commit_precondition: str = ""
     takes: str = ""
     takes_more: tuple[str, ...] = ()     # further objects taken in the same move (run 5 t22)
     drops: str = ""
@@ -74,7 +80,12 @@ class TurnIntent:
             uncertain_of=(verdict.get("uncertain_of") or "").strip(),
             mortal_risk=bool(verdict.get("mortal_risk")) and action,
             reshape_attempt=bool(verdict.get("reshape_attempt")) and action,
-            commits=bool(verdict.get("commits")) and acts,
+            commits=_effective_commits(verdict, acts),
+            conclusory=bool(verdict.get("commits")) and acts,
+            commit_condition=_condition(verdict),
+            commit_precondition=(verdict.get("commit_precondition").strip()
+                                 if isinstance(verdict.get("commit_precondition"), str)
+                                 else ""),
             commitment=(verdict.get("commitment") or "").strip() or player_input,
             takes=(verdict.get("takes") or "").strip(),
             takes_more=tuple(t.strip() for t in (verdict.get("takes_more") or [])
@@ -99,6 +110,22 @@ class TurnIntent:
             within_scene=(verdict.get("within_scene")
                           if isinstance(verdict.get("within_scene"), bool) else None),
         )
+
+
+#: Conditions that defer a conclusion (R38): the move is a pending decision, not a commitment.
+DEFERRING_CONDITIONS = frozenset({"precondition", "conditional"})
+
+
+def _condition(verdict: dict) -> str:
+    """The move's commit condition; missing/unknown → "none" (legacy behaviour holds)."""
+    c = verdict.get("commit_condition")
+    return c if c in ("none", "hedge", "precondition", "conditional") else "none"
+
+
+def _effective_commits(verdict: dict, acts: bool) -> bool:
+    """IR-18: only a plain or hedged conclusion commits; a deferred one never does."""
+    return (bool(verdict.get("commits")) and acts
+            and _condition(verdict) not in DEFERRING_CONDITIONS)
 
 
 #: The provider failed: a plain action with every protection on and every mutation gate shut.

@@ -151,6 +151,9 @@ class BriefingInputs:
     death_staged: bool  # run_turn's `_death_staged`
     mortal_risk: bool
 
+    #: HEDGE-VS-CONDITION (R38): the player's standing deferred conclusion, rendered; "" = none.
+    pending_decision: str = ""
+
 
 def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
     """The narrator briefing's parts, in order, from the game-type directive through the
@@ -476,6 +479,10 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
         briefing_parts.append(
             "\nTHE DECISIVE MOVE NEEDS ITS STAGE (render this as ONE in-world beat, then stop): "
             + commitment_clarified)
+    if inp.pending_decision:
+        # HEDGE-VS-CONDITION (R38, IR-18): a conclusion the player DEFERRED is a pending
+        # decision — never fired by the host; the world may invite it back once settled.
+        briefing_parts.append("\n" + inp.pending_decision)
     if commitment_bounced:
         # COMMITMENT-AS-EFFECT slice 1: the player tried to force the finale before the causes are
         # covered. The world DECLINES to conclude on it — NOT a failure, a "not yet": the authority
