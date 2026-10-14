@@ -16,6 +16,24 @@
 - pattern-buffer's BUILD-LIBRARY-V1 r1.7: merged at 6073bfe, docs at 958691d, pbr GREEN. Construct was GREEN on its spec.
 - The library surface was mapped read-only on 2026-10-14. Moving from engine 9e0620f changes no porcelain API (`git diff` touches only the new `patternbuffer/build/` package).
 
+## Amendment r2.2: adopting BUILD-LIBRARY r1.9.1 (pin pattern-buffer c4a8eba; spec for cr review, not built)
+
+**Why now.** R20 run 13's first build (archived as `run13a`) stopped at Stage 1. Three of its six chunks were refused for "handles: declared but not used", and chunk 0 again on its retry. Run 12 had one such refusal and passed on retry. Under r1.9.1 the library drops an unused declared handle with a typed receipt instead of refusing the chunk.
+
+**The pin.** pattern-buffer `c4a8eba`. Its engine source is identical to `30c5ede` (BUILD-SPEED-V1). It carries BUILD-LIBRARY r1.9.1, BEATS-V1 r1.1 and RECIPE-VOCAB-V1, all merged and pbr GREEN. ONE-LOCATION-V1 is **not** in it: that code lives on pattern-buffer's `feat/one-location` branch, waiting on Kabe's metered check. Main's suite is run against `c4a8eba` before the pin.
+
+**The changes:**
+1. **One retry owner.** `extract(..., retries=1)`: the library re-asks a chunk whose returned answer refused it. Construct re-runs a chunk itself **only** when `len(result.attempts) == 1 and result.attempts[0].raw is None`, meaning exactly one call, and it raised. pattern-buffer's precise test, m8d16d6: an error text such as "model call failed" can also follow the library's own retry. So no chunk is ever retried twice. A chunk still in error after that stops the build with its first cause, as today.
+2. **Dropped handles are logged, not stopped on.** A dropped handle is one no accepted line used, so it carries no fact. Nothing about a manifest entry is lost, so there is nothing for a load-bearing stop to protect. Construct logs every `DroppedHandle` (chunk, kind, name, candidates) at INFO and counts them in the Stage 1 line ("…N dropped handle(s)"). The "load-bearing pick" stop discussed with pattern-buffer is not adopted, for this reason.
+3. **Nothing else changes.** The extraction prompt is byte-identical (r1.9.1). `vocabulary` is not passed; RECIPE adoption waits on g8f1157 and a metered check.
+
+**Tests:**
+- a chunk that refuses once and is accepted on the library's retry builds, with two attempts and no construct re-run;
+- a chunk whose single call raised is re-run once by construct;
+- a chunk refused, retried by the library, and refused again is not re-run by construct (two attempts), and the build stops with its cause;
+- an answer that declares an unused handle builds, with the dropped handle logged and counted;
+- the full suite on `c4a8eba`.
+
 ## What changes, in one paragraph
 
 Today every chunk's extraction call invents its own ids, and stage 2 repairs the result afterwards (merges, retypes, homonym rejects, `_2` remaps). With the library:
