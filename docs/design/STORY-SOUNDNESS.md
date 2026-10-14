@@ -1,6 +1,6 @@
 # Story soundness: can this story be finished? (R35)
 
-**Status:** spec r4, 2026-10-13, for cr review. Not built. It builds after READS-AT-PLAY-HORIZON (it reads through `HorizonView`).
+**Status:** spec r4, 2026-10-13. cr GREEN; building. Not built. It builds after READS-AT-PLAY-HORIZON (it reads through `HorizonView`).
 
 **r2 (cr RED on r1, 502d46d).** Three counterexamples to r1's "no false fatal" claim:
 1. **Reshape** (on by default, `reshape_enabled()`) writes arbitrary state, frame and consequence rows after a player action, including revival (`alive` false → true; tests/test_reshape.py:19-78). It's a write channel r1 left out.
@@ -13,7 +13,7 @@
 - **restage rows on a landing** (`person:x · in · place:y`), which makes `Located`;
 - **consequence rows on any tier,** including a non-landing one, and a row `{event:x, kind, signal}` makes `Occurred(signal)`.
 
-P10 now covers both, and fixtures 17 and 18 test them. What P10 can't write is the plot frame: beat status (`BeatAchieved`) and clock firings (`ClockFired`) are written only by `beat_pass` and `clock_pass`. So with reshape enabled, S1 and S2 can only arise through those.
+P10 now covers both, and fixtures 17 and 18 test them. What P10 can't write is the plot frame: beat status (`BeatAchieved`) and clock firings (`ClockFired`) are written only by `beat_pass` and `clock_pass`. So with reshape enabled, S1 and S2 arise through those, through a non-`knows:` `InFrame`, or through an `Occurred` whose window closed before `h` (r4).
 
 **r4 (cr RED on r3):** P10's domain is narrowed to what the reshape code can actually write:
 - **`InFrame` only on a `knows:` frame.** `reshape_canon` rejects any other frame, and `plan_from_proposal` builds `knows:` frame rows only.
