@@ -1,6 +1,12 @@
 # The engine classifier at effort "none"
 
-**Status:** spec r4, 2026-10-13, for cr review. Building on `feat/classify-effort`.
+**Status: CLOSED 2026-10-13. Rejected by measurement; nothing ships.** The third corpus (12 batches, 70 rows, 36 object `in` rows, archived at `/media/k/Blank/construct-scratch/effort-probe/in-rows/`) shows `none` making **7 object locations CONSTITUTIVE that `low` kept STATE**, 6 of them portable:
+- a pallet, covered crates, metal chairs, a bucket, a torn slip corner, a property slip;
+- plus a filing cabinet (arguably a fixture).
+
+That is the costly error, so the classifier stays at the cheap tier's effort. The branch `feat/classify-effort` is parked; its knob is not merged (no unmeasured config). Below is the record of r1–r4 as reviewed.
+
+**What it found about `low` itself** (sent to pattern-buffer): run 10's world at `low` already holds portable objects as CONSTITUTIVE, for example `obj:execution_page in obj:book`, `obj:split_seal in obj:execution_page` and `obj:wedge in obj:fall_board`. In the audit script's world mode, 39 movable-set CONSTITUTIVE rows came back, mixing fixtures with portable objects.
 - r2 (cr RED on r1): acceptance is row-level and comes before any user play; the knob ships defaulting to `low`.
 - r3 (cr RED on r2): the movable set takes its containment part from the audited world's own semantics, and fails closed.
 - **r4 (found while building, two facts that change the gate):**
