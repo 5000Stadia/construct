@@ -31,7 +31,10 @@ def chdir_tmp(tmp_path, monkeypatch):
 
 
 _STORY = {"title": "The Glass Tide",
-          "prose": "## One\nThe harbor woke grey.\n\n## Two\nThe keeper lied."}
+          "prose": "## One\nThe harbor woke grey.\n\n## Two\nThe keeper lied.",
+          # SEEDING-LIBRARY-WIRING: the story author returns its cast list too
+          "manifest": {"entries": [{"key": "keeper", "type": "person", "names": ["the keeper"],
+                                    "anchor_quote": "The keeper lied."}], "namesakes": []}}
 
 
 class TestSeedHardening:

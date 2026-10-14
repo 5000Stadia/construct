@@ -195,7 +195,10 @@ def engine_callable(provider: Provider, tier: Tier | None = "main") -> ModelCall
 #: the founder's assignment (letter 012: "ingestion extraction" and the
 #: classifier are cheap; only narration and character interpretation
 #: are good-tier).
-_CHEAP_ENGINE_PREFIXES = ("Extract world-state", "Classify the lifetime")
+_CHEAP_ENGINE_PREFIXES = ("Extract world-state", "Classify the lifetime",
+                          # SEEDING-LIBRARY-WIRING rule 5: the build library's category passes
+                          # are literal sorting (its EXTRACT_HEAD already matches the first)
+                          "Name the beings, places and things")
 
 #: Reasoning-effort (thinking-level) ordering for gpt-5 models, low→high.
 _EFFORT_RANK = {"minimal": 0, "low": 1, "medium": 2, "high": 3}

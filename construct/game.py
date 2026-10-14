@@ -19,7 +19,7 @@ from typing import Any, NamedTuple
 
 from patternbuffer import World
 
-from construct import hostcontrol, timing
+from construct import hostcontrol, seeding, timing
 from construct.adapter import PorcelainWorldReads, is_future_only
 from construct.arc import io as arc_io
 from construct.arc.build import (  # arc construction lives in the arc layer; re-exported
@@ -423,6 +423,21 @@ def _stage_reconcile_identity(world: Any, on_stage) -> None:
         logger.warning("identity reconcile skipped: %s", exc)
 
 
+def _hold_manifest_namesakes_apart(world: Any, registry: Any) -> int:
+    """SEEDING-LIBRARY-WIRING rule 7: the author's same-named entries are held apart by code
+    (`reject`, a `distinct_from`): the man and the dog called Rex stay two. The manifest is
+    the sole authority on the cast. A refused reject stops the build."""
+    held = 0
+    for a, b in seeding.same_named_entry_pairs(registry):
+        outcome = world.porcelain.reject(a, b).get("outcome")
+        if outcome not in ("rejected", "noop_already_distinct"):
+            raise RuntimeError(f"holding namesakes apart: reject {a} / {b} gave {outcome!r}")
+        held += 1
+    if held:
+        logger.info("library build: %d same-named entry pair(s) held apart", held)
+    return held
+
+
 def _stage_declare_policy(world: Any, on_stage) -> None:
     """Build stage 3 (traversal-policy declaration). Pure move out of `_finalize_scenario_impl`."""
     # Passability policy (PB RFC-003): declare which portal kinds gate, so
@@ -824,7 +839,7 @@ def _admit_disambiguated_cast(world: Any, _remaps: dict, _cprop: dict) -> None:
 
 def _stage_author_cast(world: Any, provider: Provider, arc: Arc, proposal: dict, digest: str,
                        people: list, known_ids: list, resolved_game_types: list,
-                       _laws_block: str):
+                       _laws_block: str, cast_note: str = ""):
     """The populated cast + pillars (fail-open, except an identity stop). Pure move out of
     `_finalize_scenario_impl`; returns (arc, cast_nodes, cast_proposal, _required_holders)."""
     # The POPULATED CAST (STORY-SHAPES §8): author the causal PILLARS + the people who hold
@@ -879,7 +894,8 @@ def _stage_author_cast(world: Any, provider: Provider, arc: Arc, proposal: dict,
                                          _shape, arc.protagonist, people, feedback=_feedback,
                                          signature_directive=_sig_dir,
                                          beat_targets=_beat_targets,
-                                         laws_directive=_laws_block)
+                                         laws_directive=_laws_block,
+                                         cast_note=cast_note)
                 # IDENTITY COHERENCE GATE (#92, Cx 404 A): a reused canon person id whose
                 # established role contradicts the proposed conception is DISAMBIGUATED on
                 # the RAW proposal (the persisted meta["cast"] must carry the fresh id too —
@@ -1238,6 +1254,8 @@ def _role_kind_pairs(world: Any) -> list[tuple[str, str]]:
         ents, kinds = g.get("entities") or [], g.get("kinds") or []
         for i in range(len(ents)):
             for j in range(i + 1, len(ents)):
+                if seeding.is_mention(ents[i]) or seeding.is_mention(ents[j]):
+                    continue  # SEEDING-LIBRARY-WIRING rule 8: a provisional id never stops
                 ka = kinds[i] if i < len(kinds) else None
                 kb = kinds[j] if j < len(kinds) else None
                 if (ka and kb and ka != kb
@@ -1260,6 +1278,8 @@ def _identity_stops(world: Any, load_bearing: set) -> list[tuple[str, str, str]]
         for pr in g.get("pairs") or []:
             if pr.get("status") not in ("unlinked", "auto_declined", "typing_slip"):
                 continue
+            if seeding.is_mention(pr["a"]) or seeding.is_mention(pr["b"]):
+                continue  # SEEDING-LIBRARY-WIRING rule 8: its facts sit quarantined on it
             a_closure, b_closure = _closure(world, pr["a"]), _closure(world, pr["b"])
             if not (a_closure | b_closure) & load_bearing:
                 continue
@@ -1721,7 +1741,8 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
                             game_types: list | None = None,
                             source_step: float | None = None,
                             laws: list | None = None,
-                            reality_register: str = "", source_text: str = "") -> dict:
+                            reality_register: str = "", source_text: str = "",
+                            library_entries: list | None = None) -> dict:
     """Shared session-zero tail (both creation paths): once canon is
     established, author the hidden arc over it (lint-gated), seed
     knowledge frames, and write the scenario meta. ENTRY + DESTINATION.
@@ -1736,7 +1757,12 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
     # substring-matches (world.md F10) and are preserved byte-for-byte, including the
     # duplicated "Stage 6.2" (thematic premise AND durability classification here; the
     # separate "Stage 0" labels live in the creation paths below).
-    _stage_reconcile_identity(world, on_stage)
+    if library_entries is None:
+        _stage_reconcile_identity(world, on_stage)
+    else:
+        # SEEDING-LIBRARY-WIRING rule 6: the library decided identity; stage 2's passes
+        # (reconcile, adjudicate_deferred, retypes, the homonym reject) would undo it.
+        _emit(on_stage, "Stage 2 · identity decided by the manifest (library)")
     _stage_declare_policy(world, on_stage)
     entry_epoch, opening_as_of, next_source_as_of = _stage_establish_epoch(world, source_step)
     laws, _laws_block = _stage_commit_laws(world, laws, on_stage)
@@ -1746,7 +1772,7 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
                                                     game_types)
     arc, cast_nodes, cast_proposal, _required_holders = _stage_author_cast(
         world, provider, arc, proposal, digest, people, known_ids, resolved_game_types,
-        _laws_block)
+        _laws_block, cast_note=seeding.cast_note(library_entries or []))
     # IDENTITY-CONFIRM role-noise adjudication (spec r6) takes the evidence-free vouch's slot:
     # one owner for the same-kind alias_not_specific load-bearing residue.
     _stage_adjudicate_identity(world, arc, _required_holders, source_text)
@@ -1803,6 +1829,24 @@ def create_scenario_from_ingest(name: str, prose_path: Path,
         chunks = _chunk_chapters(text)
         _emit(on_stage, f"Stage 1 · Ingesting prose → pattern-buffer · model "
                         f"extraction → assertions, provenance-tracked ({len(chunks)} chunks)")
+        if seeding.library_enabled():
+            # SEEDING-LIBRARY-WIRING r2.1: identity decided once, by code, from the manifest
+            # (or the library's category passes for prose with no author).
+            from construct import cohorts as _co
+            registry = seeding.ingest_library(
+                world, chunks, text, seeding.load_manifest(prose_path),
+                model=engine_tier_dispatch(provider),
+                repair=lambda prose, manifest, problems: _co.repair_manifest(
+                    provider, prose, manifest, problems),
+                source_step=SOURCE_STEP, on_stage=lambda m: _emit(on_stage, m))
+            _hold_manifest_namesakes_apart(world, registry)
+            entries = registry.entries()
+            return _finalize_scenario(world, name, title, provider, spath, endless,
+                                      on_stage, win_direction=win_direction,
+                                      play_as=play_as, game_types=game_types,
+                                      source_step=SOURCE_STEP,
+                                      laws=laws, reality_register=reality_register,
+                                      source_text=text, library_entries=entries)
         # BUILD LATENCY #3 Win 2 (PB 081): EXTRACTION is the slow LM step and the chunks are
         # independent (coreference is the Stage-2 reconcile pass). `porcelain.extract` is
         # READ-ONLY (no buffer write), so run all chunk extractions CONCURRENTLY (PB's only
@@ -2006,6 +2050,9 @@ def _save_generated_prose(name: str, work: dict) -> Path:
     while path.exists():
         path, n = GENERATED_DIR / f"{name}_{n}.md", n + 1
     path.write_text(prose)
+    manifest = seeding.manifest_from_author(work.get("manifest"))
+    if manifest is not None:
+        seeding.manifest_path(path).write_text(json.dumps(manifest, indent=1))
     return path
 
 
@@ -2145,7 +2192,7 @@ def create_scenario_from_generated(name: str, provider: Provider, *, seed: str =
 def _canon_entity_ids(world: Any) -> set[str]:
     """All entity ids that appear in canon — the porcelain roster verb
     (BOUNDED-READS take-up, PB 092/094): frame-bound by construction."""
-    return set(world.porcelain.entities("canon"))
+    return {e for e in world.porcelain.entities("canon") if not seeding.is_mention(e)}
 
 
 def _known_people(world: Any) -> list[str]:
