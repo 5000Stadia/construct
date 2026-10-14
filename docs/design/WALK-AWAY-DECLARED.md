@@ -1,6 +1,12 @@
 # The walk-away as a declared decision (R40)
 
-**Status:** spec r2, 2026-10-13, for cr review. Not built. It replaces CHAPTER-BRIDGE-B1 change 1, which was never built.
+**Status:** spec r3, 2026-10-13, for cr review.
+
+**r3 (cr RED on r2):**
+- A confirmation now takes precedence over every early return: the turn is played as an action through `clock_pass`.
+- `caused_by` is dropped: there's no action anchor at that point in the turn.
+- "No clock" is defined by the elapsed row's absence. `read_clock` returns 0, never None.
+- The abandonment kinds are reserved from the generic event detector. Not built. It replaces CHAPTER-BRIDGE-B1 change 1, which was never built.
 
 **r2 (cr RED on r1):** the event detector is the wrong carrier.
 - `clock_pass` (turnloop.py:5714) runs before it (6248-6285), so a confirmation couldn't fire the refusal clock the same turn.
@@ -32,7 +38,10 @@ Missing counts as false.
 
 **3. The transition runs right after classify,** before every early return (`exit`, `question`, the pure-mode declaration denial) and before `clock_pass`. It's one deterministic step, `_walkaway_transition`, over the record in rule 4:
 - **A question stands** (`status == asked`, in this episode):
-  - `confirms_walkaway` true: write `event:abandoned_main_<turn>`, with `kind` = the main refusal clock's kind (`event:abandoned`), `agent` = the protagonist, `caused_by` = the turn's action anchor, in canon at `turn_time(turn)`. Set the record to `confirmed`. Because this lands **before** `clock_pass`, the refusal clock fires **this** turn, exactly once (it's `status=fired` afterwards, as for any non-repeat clock).
+  - `confirms_walkaway` true: write `event:abandoned_main_<turn>`, with `kind` = the main refusal clock's kind (`event:abandoned`) and `agent` = the protagonist, in canon at `turn_time(turn)`.
+    - **No `caused_by` (r3):** the turn's action anchor (`event:action_<turn>`) is minted only by `_fire_event_occurs`, long after this point and only when an authored event fires. The abandonment event is its own cause: the player's declared decision.
+    - Set the record to `confirmed`.
+    - **A confirmed turn is played as an action (r3).** `kind` is set to `action` for the rest of the turn, whatever classify said (`exit`, `question`, `declaration`). So no early return (4594-4611, 4631-4645) can skip `clock_pass`. Because the event lands before `clock_pass`, the refusal clock fires **this** turn, exactly once (it's `status=fired` afterwards, as for any non-repeat clock). The conclusion path and B1's `outcome_category = abandoned` follow as designed.
   - **Anything else, on whatever path** (no, deflection, a question, a denied declaration, `exit`, a failed action): set the record to `declined`, with `declined_minutes` = now. This is the literal reading (IR-22).
 - **No question stands, the walk-away is eligible, and `declares_giving_up` is true:** set the record to `asked`, with `asked_turn` and `asked_minutes`. That turn's briefing carries the question directive (rule 5). Nothing else is written; it's never an ending.
 - **Otherwise:** nothing.
@@ -45,7 +54,7 @@ Missing counts as false.
   - the main arc's refusal clock is armed;
   - no record in this episode, or the record is `declined` **and** `minutes_now - declined_minutes >= 1440` (offered again at exactly 1,440; not at 1,439);
   - and the record isn't `confirmed`.
-- **A world without a diegetic clock** (`minutes_now` None): a declined record suppresses for the rest of the episode. That fails closed: never re-ask without a clock.
+- **A world without a diegetic clock (r3):** `state_value(p, "time:elapsed", "elapsed_minutes")` is None, i.e. there's no elapsed row at all. (`read_clock` returns a zero-minute clock then, so the row's absence is the test.) There, a declined record suppresses for the rest of the episode. That fails closed: never re-ask without a clock.
 
 **5. The question is asked in the story, once, with the stakes plain.** On the `asked` turn, the briefing carries:
 
@@ -53,7 +62,10 @@ Missing counts as false.
 
 The form is a fixed, medium-tempo in-world beat. Tempo-selected forms come with R46.
 
-**6. Nothing else infers abandonment:** no movement, distance, idle time or turn count. `_walkaway_transition`'s confirm branch is the **sole** writer of `event:abandoned*`. The refusal clock's counter guard stays.
+**6. Nothing else infers abandonment:** no movement, distance, idle time or turn count.
+- **The sole writer:** `_walkaway_transition`'s confirm branch is the **sole** writer of an abandonment event.
+- **Reserved kinds (r3):** `_fire_event_occurs` excludes any candidate whose kind starts with `event:abandoned` (the reserved abandonment kinds), so the generic arbitrary-kind writer can never mint one, even if an authored beat named it.
+- **The refusal clock's counter guard stays.**
 
 ## Not in scope
 
@@ -66,6 +78,11 @@ The form is a fixed, medium-tempo in-world beat. Tempo-selected forms come with 
 
 1. **Declaring asks, never ends:** `declares_giving_up` on turn 5 makes the record `asked` (`asked_turn` 5, `asked_minutes` m). There's no `event:abandoned*`, and the refusal clock hasn't fired. The turn-5 briefing carries the question.
 2. **An explicit yes ends it, the same turn:** `confirms_walkaway` on turn 6 writes `event:abandoned_main_6` with kind `event:abandoned`. The refusal clock fires **on turn 6, exactly once**: one firing event, one `refusal_conclusion` effect. The receipt's `outcome_category` is `abandoned`.
+2b. **(r3) A confirmation on every early-return kind,** each ending the chapter with the same oracle as test 2 (one refusal firing, one effect, `abandoned`):
+   - `exit` with `confirms_walkaway` ("Yes, I'm done with it. Quit.");
+   - a `question` ("Done? Yes. Isn't it obvious?");
+   - a pure-mode `declaration` ("I am finished with this case.").
+2c. **(r3) Alongside an authored event:** a confirmed turn on which an authored `Occurred` beat also fires gives two distinct event entities (`event:abandoned_main_<t>`, `event:<kind>_<t>` with its `event:action_<t>` anchor), and the refusal clock fires once.
 3. **Every other next submission declines,** each with `declined_minutes` set and no abandonment:
    - (a) asking Reginald one last question as an action;
    - (b) an answerable `question` that returns early;
@@ -74,7 +91,8 @@ The form is a fixed, medium-tempo in-world beat. Tempo-selected forms come with 
    - (e) an action whose resolution fails.
 4. **The suppression boundary:** declined at minute m. At m + 1439 there's no `declares_giving_up` prompt text and no `asked` transition. At m + 1440 it's eligible again.
 5. **Episode reset:** a record `asked` (or `declined`) in chapter 1, then `continue_episode`. In chapter 2 the record is ignored: the question can't be confirmed, and there's no suppression.
-6. **No clock:** in a world without `time:elapsed`, a decline suppresses for the rest of the episode.
+6. **No clock (r3):** a world with **no** `time:elapsed` · `elapsed_minutes` row. A decline suppresses for the rest of the episode. A world whose elapsed row reads 0 counts as clocked.
+6b. **(r3) Reserved kinds:** an arc with an authored beat `Occurred("event:abandoned")`, and a detector stub that flags it. `_fire_event_occurs` offers no such candidate and writes nothing.
 7. **Main arc only:** a side arc never gets the walk-away prompt text or a record.
 8. **No inference from movement:** 30 turns of travel with `declares_giving_up` false give no record and no abandonment.
 9. **Sole writer:** a grep-style test finds no other code path writing an `event:abandoned` kind. The counter-refusal guard still holds (the existing test).
