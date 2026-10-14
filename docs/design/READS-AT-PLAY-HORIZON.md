@@ -1,6 +1,6 @@
 # Reads at the play horizon: the move check, the mint check, and the chapter-2 build
 
-**Status:** spec r3, 2026-10-13, for cr review. Not built.
+**Status:** spec r4, 2026-10-13, for cr review. Not built.
 **Source:** R20 run 10 (eval/12): criterion 5 failed, and three new-place moves logged "move grant ... did not take".
 **r2 (cr RED on r1, 327d2fe):**
 - `_plan_episode_doorway` and `_plan_hook_cast` read the head on their own; they are now bound, with a fallback-path test.
@@ -13,6 +13,11 @@
 - **The change:** r3 makes the boundary structural. Play code holds a **horizon-bound view** of the world, so any read through it, however deep, is at the horizon unless it explicitly asks for the head.
 - **The table** stays as the verification list, with the clock rows added (C1 to C5).
 - **One more identity-rule site:** growth's id allocation (T5).
+
+**r4 (cr RED on r3, 4027915):** r3 proxied only `.porcelain`, and delegated every other World attribute unchanged. But construct also reads through the raw World: `world.refer`, a `Refer` instance attribute that takes `as_of`. `reshape._canonical_id` (reshape.py:153) calls it unbound during `run_turn`. r4 makes the view **deny by default on both surfaces:**
+- the World exposes exactly four members (`porcelain`, `refer`, `close`, `head`);
+- the porcelain proxy raises on any method it hasn't classified;
+- a reshape new-entity id follows the identity rule (T6).
 
 ## The facts
 
@@ -47,17 +52,22 @@ Joining the player's thing to the later source thing, if they turn out to be the
 - `horizon` is a float, a zero-argument callable returning float-or-None (so a Session's horizon advances with its turns), or None.
 - **With None** (a legacy world) the constructor returns the world itself, unwrapped, so legacy behaviour is byte-identical.
 
-**`view.porcelain`** is a proxy over the real porcelain. Each public porcelain method falls in exactly one class:
-- **Valid-time reads,** every method whose signature (on the pinned engine) takes `as_of`: `aggregate`, `ask`, `composition`, `confidence`, `contents`, `correlation_conflicts`, `correlations`, `entities`, `facts`, `features`, `fidelity_audit`, `frame_diff`, `in_transit`, `locate`, `neighborhood`, `path`, `refer`, `route`, `salience`, `snapshot`, `state`, `state_union`, `where`, `who_knows`.
-  - **No `as_of`, or `as_of=None`:** the proxy passes `as_of=h`. Explicit None counts as absent, because the adapters pass their own `None` horizon through explicitly.
-  - **A numeric `as_of`:** clamped to `min(as_of, h)`, so no play read can see past the horizon. A clamp that changes the value is logged at debug.
-- **`events`,** which takes no `as_of`: `until` is capped at `h`, as `PorcelainWorldReads.events` already does.
-- **Passthrough:** the write verbs (`ingest`, `ingest_structured`, `retract`, `commit_set`, `begin_build`/`seal_build`/`abort_build`, `merge`, `confirm`, `reject`, `resolve`, `retype`, `reconcile`, `adjudicate_deferred`, `continue_frame`, `build`, `extract`, `correlate`, `merge_gate`), plus the asserted-axis and identity reads, which have no valid-time coordinate (`closure`, `distinct_between`, `identity_conflicts`, `typing_conflicts`, `axis_heads`, `canonical_attribute`, `proposals`).
-- **A test pins this classification against the pinned engine's public methods.** An engine bump that adds a method, or adds `as_of` to one, fails the test until the method is classified. Nothing passes through by accident.
+**The World surface of the view, deny by default.** It exposes exactly four members:
+- **`porcelain`:** the proxy below.
+- **`refer`:** a valid-time read, handled like the porcelain's reads. It is `World.refer`, an instance attribute holding a `Refer` callable whose signature takes `as_of`. A call's `as_of` is set to `h` when absent or None, and clamped with `min(as_of, h)` when numeric.
+- **`close`:** passthrough.
+- **`head`:** the raw world.
 
+**Any other attribute raises** `AttributeError` with "not available through the horizon view; read via view.porcelain, or view.head for an id-collision check". That covers:
+- the World's own read methods (`state`, `locate`, `snapshot`, `materialize`, `resolve`, `charter` and the rest);
+- its internals (`buffer`, `projector`, `truth`, `resolver`, `registry`, `indexes`, `ingestor`, `classifier`, `semantics`, `policy`, `salience_index`, `world_id`).
+
+Construct's play code uses none of them today: a grep of `world.`/`_world.` in `construct/` finds only `porcelain`, `refer` and `close`, and the `world.state`/`world.events` calls in `arc/conditions.py` are on a `WorldReads` adapter, not a World. So the block costs nothing, and a future raw read fails loudly in tests instead of reading the head.
+
+**`view.porcelain`** is a proxy over the real porcelain, **also deny by default.** Each public porcelain method is in exactly one class, and a method in none of them raises `AttributeError`:
 **Other attributes:**
 - **`view.head`** is the raw world: the only sanctioned head read on a play path. Used only for the identity rule's collision checks (H1, T2, T5, G8), each grep-able as `.head`.
-- **Everything else** on the world (`close`, paths, `buffer`) is delegated unchanged.
+- **Everything else** on the world is denied (see above); only `close` is passed through.
 
 **The horizon callable reads through `view.head`.** `Session._horizon` counts turn events via `next_turn_number`, and if that read went through the view it would recurse.
 
@@ -130,6 +140,7 @@ The files searched are `turnloop.py`, `session.py`, `game.py`, `growth.py`, `foy
 | S2 | session.py:482 → foyer.py:128 `ingest_character` → `_world_digest(world)` | the foyer, before turn 1 | through the session's view, the digest's `entities` and `snapshot` read at the opening horizon. Today the model that binds the player's additions sees the source ending. `ground_character` (the next line) is already bound |
 | R1 | game.py:2718 / 2733 `author_replan`: `_canon_entity_ids`, `_known_people` | mid-play re-plan (turnloop.py:6339) | `run_turn`'s world is the session's view, so bound. Same leak as G4, mid-chapter |
 | T5 | turnloop.py:655 growth `_exists` → growth.py:436 `_alloc` | world growth minting a place, region or person | **the identity rule:** `_exists` reads `view.head`, because it is id-collision avoidance. Today it reads `live_reads` (the horizon), so a grown place named like a future source place takes the future id and writes onto it. The growth roster and existence reads elsewhere stay at the horizon |
+| T6 | reshape.py:145-181 `_canonical_id` / `canonicalize_plan`, called by `apply_reshape` in `run_turn` | a world reshape's rows | `world.refer` goes through the view, so it resolves at the horizon, and a future-only coreferent is not a candidate. **The identity rule** covers the fail-soft branch: an id refer can't resolve is "a genuinely new entity, kept as-is". If that id exists at `view.head` but not at the horizon (future-only), it takes the next free suffix (`person:x_1`) before the plan is applied, consistently across all the plan's rows and frames (one mapping per plan). So the reshape neither resolves to nor writes onto the future entity |
 | C1 | session.py:348 `read_clock(self._world, loc)` | the scene's time render | through the view |
 | C2 | turnloop.py:5620 `read_clock(world, scene)` | the briefing's clock | through the view |
 | C3 | turnloop.py:2009 and 7379 `read_clock(world).minutes` | elapsed-time bookkeeping in the turn | through the view |
@@ -204,5 +215,16 @@ The files searched are `turnloop.py`, `session.py`, `game.py`, `growth.py`, `foy
 11. **Growth's collision** (T5). `place:ice_cutter_shed` exists only at 10,000,000. A growth chunk proposes a place named "Ice Cutter Shed".
     - The chunk allocates `place:ice_cutter_shed_2` (growth's ordinal probe).
     - No row lands on `place:ice_cutter_shed`.
-12. **Legacy worlds:** with no `opening_as_of`, `HorizonView` returns the raw world, and today's behaviour is byte-identical (the existing continuation, grant, growth, clock and foyer tests pass unchanged).
-13. **The full suite.**
+12. **The reshape oracle** (cr r3, T6). At horizon `h`, a future-only `person:future` (name "Future") exists only at 10,000,000. A stub reshape plan writes rows for `person:future`, and for the loose name "Future".
+    - `canonicalize_plan` resolves neither to `person:future`. Both become `person:future_1` (one mapping), and `apply_reshape` writes no row on `person:future`.
+    - **Negative control:** on the raw world, `refer` binds "Future" to `person:future`, and the plan writes onto it.
+13. **Deny by default:**
+    - `view.buffer`, `view.state(...)` and `view.porcelain.<unclassified>` each raise `AttributeError`.
+    - `view.refer(x)` reaches `Refer` with `as_of=h`.
+    - A stub World with an extra public member makes the classification test fail.
+14. **Legacy worlds:** with no `opening_as_of`, `HorizonView` returns the raw world, and today's behaviour is byte-identical (the existing continuation, grant, growth, clock, reshape and foyer tests pass unchanged).
+15. **The full suite.**
+
+## Adjacent, not in scope
+
+**Engine-side ids in prose extraction.** The settle's `extract`/ingest path resolves narrator mentions inside the engine. Whether the engine's resolver can bind a play-time mention to a future-only entity is pattern-buffer's question, and has been asked separately. Construct's side of that path goes through the view like everything else.
