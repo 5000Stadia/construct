@@ -3816,10 +3816,10 @@ def test_cast_staging_anchors_to_opening_not_aftermath(world):
     assert world.porcelain.locate("person:hero", as_of=opening_as_of)[0] == "place:home"
 
 
-def test_refer_resolves_aftermath_entity_by_name_so_presence_guard_is_needed(world):
-    # Cx 257 fresh-hunt: refer() resolves an entity by its REGISTERED NAME even as-of the
-    # opening — tier-1 identity lookup bypasses the as_of candidate filter. This is the exact
-    # reason the as_of bind ALONE is insufficient and a horizon-presence guard is required.
+def test_refer_honours_as_of_and_the_presence_guard_still_denies(world):
+    # Cx 257 found refer()'s tier-1 name lookup bypassing as_of, which is why construct
+    # added the horizon-presence guard. pattern-buffer BUILD-LIBRARY r1.8.3 (e3101a4) made
+    # refer's name vocabulary honour as_of; the guard stays as defence in depth.
     from construct.adapter import PorcelainWorldReads
     from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP
     STEP = SOURCE_STEP
@@ -3831,12 +3831,10 @@ def test_refer_resolves_aftermath_entity_by_name_so_presence_guard_is_needed(wor
         {"entity": "place:keepruins", "attribute": "name", "value": "the Keep Ruins",
          "valid_from": 3.0 * STEP},
     ])
-    # refer matches by name even as-of the opening (tier-1 bypass) — so as_of alone won't deny.
     r = world.refer("the Keep Ruins", frame="canon", as_of=opening_as_of)
-    assert getattr(r, "entity_id", None) == "place:keepruins"
-    # The horizon-presence guard is what actually denies it: has_entity is horizon-bound, so a
-    # future-only entity is ABSENT at the opening (kind row is in its future) — movement/take
-    # in run_turn drop the target on exactly this check.
+    assert getattr(r, "entity_id", None) != "place:keepruins"        # not before it exists
+    assert getattr(world.refer("the Keep Ruins", frame="canon"), "entity_id",
+                   None) == "place:keepruins"                        # the head: found
     assert not PorcelainWorldReads(world, horizon=opening_as_of).has_entity("place:keepruins")
     assert PorcelainWorldReads(world).has_entity("place:keepruins")   # head: present
 

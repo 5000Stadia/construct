@@ -472,8 +472,18 @@ def _canon_count(w):
 
 def test_reshape_declines_when_presence_is_unreadable(hworld, monkeypatch):
     """refer resolves 'Later Person' to the future-only id; the presence check raises; the
-    reshape must neither return that id nor write anything."""
+    reshape must neither return that id nor write anything. Since pattern-buffer e3101a4,
+    refer at the horizon no longer resolves a future name, so the resolve is simulated:
+    the guard is the backstop for any path that still binds one."""
+    from types import SimpleNamespace
     from construct import cohorts, reshape
+    real_refer = hworld.refer
+
+    def refer(text, *a, **k):
+        if text == "Later Person":
+            return SimpleNamespace(status="resolved", entity_id="person:later")
+        return real_refer(text, *a, **k)
+    monkeypatch.setattr(hworld, "refer", refer)
     v = HorizonView(hworld, H)
     plan = ReshapePlan(slug="x", state_rows=[
         {"entity": "obj:note", "attribute": "about", "value": "Later Person"}])
