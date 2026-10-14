@@ -1512,6 +1512,23 @@ def _stage_seed_knowledge(world: Any, provider: Provider, on_stage, arc: Arc, pe
     return seeded
 
 
+def _report_soundness(world: Any, arc: Arc, cast_nodes: Any, horizon: float | None,
+                      where: str, *, kind: str = "fresh", goal: str = "") -> None:
+    """STORY SOUNDNESS (R35, STORY-SOUNDNESS.md r4): the producer fixed point over the
+    accepted arc, at the horizon. ADVISORY ONLY — it logs and records; it never fails,
+    retries or changes the build."""
+    try:
+        from construct.adapter import HorizonView
+        from construct.arc.soundness import analyse, report_to_log
+        view = HorizonView(world, horizon)
+        rep = analyse(arc, tuple(cast_nodes or ()), arc.protagonist,
+                      PorcelainWorldReads(view), horizon=horizon, world=view, kind=kind,
+                      goal_statement=goal)
+        report_to_log(rep, where, arc.arc_id)
+    except Exception:  # noqa: BLE001 — an advisory report never sinks a build
+        logger.warning("soundness report skipped (%s)", where, exc_info=True)
+
+
 def _stage_distill_flavor(world: Any, provider: Provider, digest: str, reads: Any,
                           on_stage) -> str:
     """Build stage 5.5 (narrative flavor). Pure move out of `_finalize_scenario_impl`."""
@@ -1741,6 +1758,8 @@ def _finalize_scenario_impl(world: Any, name: str, title: str, provider: Provide
                                 source_step, win_direction, on_stage)
     _stage_author_meta_prose(provider, digest, meta, proposal, title, style, laws,
                              resolved_game_types, on_stage)
+    _report_soundness(world, arc, cast_nodes, opening_as_of, "build",
+                      goal=meta.get("goal_statement", ""))
     _stage_seal(world, spath, meta, on_stage)
     return meta
 
@@ -3377,6 +3396,17 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         if prior_protagonist and new_arc.protagonist != prior_protagonist:
             raise RuntimeError(
                 f"continuation protagonist drift: {new_arc.protagonist!r} != {prior_protagonist!r}")
+        # STORY SOUNDNESS (R35, advisory): the new chapter's arc, at the chapter horizon, with
+        # the cast play will actually use (the scenario meta cast, as Session loads it).
+        _cont_cast: tuple = ()
+        try:
+            if meta.get("cast"):
+                from construct.cast import cast_from_proposal
+                _cont_cast = tuple(cast_from_proposal(meta.get("cast"))[0])
+        except Exception:  # noqa: BLE001 — a bad cast blob only empties the report's cast
+            logger.warning("soundness: scenario cast unreadable", exc_info=True)
+        _report_soundness(world, new_arc, _cont_cast, _h, "continuation",
+                          kind="continuation", goal=meta.get("goal_statement", ""))
         all_ids = [a.arc_id for a in prior_arcs] + [new_id]
 
         # ---- COMPUTE (continued): everything the write phase needs that is a READ or a MODEL
