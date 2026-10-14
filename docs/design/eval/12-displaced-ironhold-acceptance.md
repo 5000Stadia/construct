@@ -419,7 +419,13 @@ The monitor authorised this run for Kabe (note n4f4a40). It tests the night's th
 
 ### What the night's fixes did
 
-- **No host-placement flicker, and no two-place object:** RESTATED-ORIGIN dropped no row (`restated_origin` stayed empty), and no `conflicted` containment appears.
+- **No two-place object in play:** no containment read was `conflicted` at chapter 1's horizon. Whether RESTATED-ORIGIN dropped a row is not known: its log line is INFO, which the probe didn't capture.
+- **At the head, three conflicts come from the library build's extraction, all at source-chapter times past chapter 1, so none was visible in play:**
+  - `obj:ash_peg` is both `in obj:pike_s_left_pocket` and `in obj:wrapped_twist_of_oiled_cloth` (nested containers written as two direct `in`s, chapter 5);
+  - the protagonist is both `in place:lower_dock_2` and `in obj:laundry_barge` (chapter 7);
+  - `place:ironhold` is in two containers, both CONSTITUTIVE.
+
+  These belong to the build-side "one direct container per move" rule, pattern-buffer's extraction prompt fix, and are sent to them.
 - **Chapter 1's objects held for 10 turns** before the hold's twin and the untied packet broke them. Run 11's first break came at turn 9.
 - **Timing:** in-turn lifetime classifier calls were 72 (254 s) over 18 measured turns, 4.0 a turn (run 11: 1.8). Settle calls were 30 (220 s). Mean turn wall time was 112 s (run 11: 60 s). This is a different story and a busy machine (load about 30), so it is measured, not explained. The next run's log decides whether it is the content.
 
