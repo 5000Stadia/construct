@@ -1,6 +1,8 @@
 # One end per move: drop a restated origin before ingest (R20 run 11)
 
-**Status:** spec r1, 2026-10-14, for cr review. Not built.
+**Status:** spec r2, 2026-10-14, for cr review. Not built.
+
+**r2 (cr RED on r1):** under r1, the holding forms could never group with an `in` row. `_canonicalize_containment` leaves `held_by` / `worn_by` / `carried_by` as written, and `_stamp_temporal_state` stamps only `in`. So `in obj:belt` (stamped T) and `held_by person:player` (unstamped) fell into different groups. r2 chooses its route explicitly: **stamp the whole containment family at the turn, attributes kept as written** (rule 0 below). The holding forms stay as the extractor wrote them; pattern-buffer's advice is that they are STATE by guardrail, with no model call. This also fixes a latent stale-state fault: an unstamped holding row lands at the ingest default and can lose the fold to an older, properly-timed `in` row, which is the same bodycase-teleport reasoning that made `in` temporal.
 
 **Source:**
 - R20 run 11 (eval/12; archive `/media/k/Blank/construct-scratch/run11`, world included).
@@ -18,6 +20,8 @@ The containment family is one functional key, so the engine serves it `conflicte
 
 **Before a batch of extracted rows is written, construct drops a containment row that only restates the subject's current container, when the same batch moves that subject somewhere else.**
 
+**0. The family is stamped together (r2).** `_TEMPORAL_PROMOTE_ATTRS` grows from `{"in"}` to `{"in", "held_by", "worn_by", "carried_by"}`. `_stamp_temporal_state` gives every unstamped containment-family row `valid_from = turn_time(turn)`, keeping its attribute. A row that already carries a `valid_from` keeps it, so different explicit times stay separate (test 4). Both channels already stamp before ingest: the player path does so after resolve, and the settle does so at promote.
+
 `_drop_restated_origins(p, rows, *, as_of) -> (kept, dropped)`, a pure function over one batch:
 1. **Group** the batch's containment-family rows (`in`, `held_by`, `worn_by`, `carried_by`, after `_canonicalize_containment`) by `(entity, valid_from)`. Unstamped rows group under `None`.
 2. **The current container,** read once per grouped entity: `p.state(entity, "in", as_of=as_of)`, taken before the batch is written. Only a `known` status counts. `conflicted`, `unknown` or an unreadable read means no drop for that entity.
@@ -31,7 +35,7 @@ The containment family is one functional key, so the engine serves it `conflicte
 
 **Where it runs:** on both extraction channels, after resolve and the temporal stamp, before the batch's ingest:
 - **The player channel** (`run_turn`'s player ingest): on `_resolved`, after `_stamp_temporal_state`, before both the growth-deferred stage and the direct `ingest_structured`.
-- **The narrator settle** (`_settle_prose_facts`): on `_resolved`, before the staging ingest to `proposed:main`. The staging snapshot is keyed by (entity, attribute), so a pair there today resolves to an arbitrary one of the two.
+- **The narrator settle** (`_settle_prose_facts`): on `_resolved`, stamped first by `_stamp_temporal_state` (the same stamp promote applies later; stamping twice is idempotent, because a stamped row keeps its time), before the staging ingest to `proposed:main`. The staging snapshot is keyed by (entity, attribute), so a pair there today resolves to an arbitrary one of the two.
 
 `as_of` is the turn's play horizon (`_h` / `horizon`). The batch isn't written yet, so the read is the pre-turn container.
 
@@ -50,7 +54,8 @@ The containment family is one functional key, so the engine serves it `conflicte
 4. **Different valid times:** `in obj:belt` at T and `in person:player` at T+1: both kept (they're different groups).
 5. **A lone restatement** (only `in obj:belt`): kept.
 6. **Other attributes untouched:** the same entity's `alias` and `name` rows in the batch survive the drop.
-7. **Holding forms:** `held_by person:player` beside `in obj:belt` is the same family, so the belt row is dropped.
+7. **Holding forms (r2):** the extractor's unstamped `in obj:belt` and `held_by person:player`, run through `_stamp_temporal_state` and then the drop. Both are stamped T and kept as written; the belt row is dropped and `held_by` is kept. End to end on the player channel, `state(obj:key_ring, in)` folds to the player.
+7b. **The stamp (r2):** an unstamped `held_by` / `worn_by` / `carried_by` row gets `turn_time(turn)`; a pre-stamped one keeps its time; a non-containment attribute (`colour`) is untouched.
 8. **End-to-end, the player channel:** a turn whose stubbed player extraction yields run 11's pair. After the turn, `state(obj:key_ring, in)` is `known` as the player, not `conflicted`.
 9. **End-to-end, the settle:** the narrator extraction yields the pair, and after the settle the key-ring is the player's.
 10. **The full suite,** with the turntrace golden moved only by the new `restated_origin` field.
