@@ -1,6 +1,6 @@
 # Reads at the play horizon: the move check, the mint check, and the chapter-2 build
 
-**Status:** spec r6, 2026-10-13, for cr review. Not built.
+**Status:** spec r7, 2026-10-13. cr GREEN on r6; r7 splits test 4's oracle at cr's request. Building on `fix/reads-at-play-horizon`.
 **Source:** R20 run 10 (eval/12): criterion 5 failed, and three new-place moves logged "move grant ... did not take".
 **r2 (cr RED on r1, 327d2fe):**
 - `_plan_episode_doorway` and `_plan_hook_cast` read the head on their own; they are now bound, with a fallback-path test.
@@ -194,11 +194,17 @@ The files searched are `turnloop.py`, `session.py`, `game.py`, `growth.py`, `foy
 3. **The mint split** (T3, H1).
    - A future-only `obj:pass` exists; a take of "the pass" mints `obj:pass_1` (collision at the head), and the verification at `at` succeeds, so it returns `obj:pass_1`.
    - With `at=None`, behaviour is as today.
-4. **Run 10's shape, chapter 2, through the prompts** (G1 to G4).
-   - **Setup:** the source future has the protagonist `in place:ice_cutter_shed` and holding `obj:northbound_pass` at 10,000,000. Play ends in `place:streetlamp_smoke`, with a terminal-location receipt.
-   - `continue_episode` with a stub provider: no prompt it sends (generator, personal threads, death policy, opening) contains "ice cutter shed" or "northbound pass".
-   - `known_ids` and the region-card order come from the horizon.
-   - **Negative control:** with `h` forced to None, they do appear.
+4. **Run 10's shape, chapter 2, through the prompts** (G1 to G4). **Split in r7.**
+   - **The finding behind the split:** in run 10's played world many source entities have timeless or 0.0 `kind`/`alias` rows. `place:ice_cutter_shed` has `kind` with no `valid_from`, and `obj:northbound_pass` has `kind` at 0.0, so both exist at the horizon as legitimate parts of the world. What run 10 leaked was the future-dated *facts*, not the names. (96 of 652 canon entities do have `kind` only after the play band, so future-only ids are real too.)
+   - **4a. A known entity with a future fact** (the realistic fixture).
+     - **Setup:** the shed's and the pass's `kind`/`name` are timeless. `person:prot · in · place:ice_cutter_shed` and the protagonist's possession of the pass are at 10,000,000. Play ends with the protagonist in `place:streetlamp_smoke`, with a terminal-location receipt.
+     - With a stub provider, `continue_episode` passes nothing that carries those relationship facts: the doorway place, the staged rows, `_episode_fuel`, the region-card order, and every snapshot or digest sent to an author hold no `in place:ice_cutter_shed` for the protagonist and no possession of the pass.
+     - The names may appear as known ids.
+     - **Negative control:** on the raw world, the future location reaches the doorway or the prompts.
+   - **4b. A genuinely future-only id.**
+     - **Setup:** `person:later` and `obj:later_thing` have `kind`/`name` only at 10,000,000.
+     - They are absent from `available_ids` and `present_characters`, and from every prompt.
+     - **Negative control:** on the raw world, they appear.
 5. **The doorway fallback path** (G5). The same world, **without** the terminal-location receipt, so the doorway falls back to a live locate.
    - The doorway place is `place:streetlamp_smoke`, not the shed.
    - The committed chapter-2 rows contain no `in` row to the shed.
