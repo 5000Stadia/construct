@@ -237,3 +237,38 @@ def test_reopened_session_prefers_the_episode_cast(tmp_path, monkeypatch):
         assert ("fact:secret", "is", "out") in {c.surface_fact for c in node.holds_clues}
     finally:
         s.close()
+
+
+def test_thread_accounting_is_exact():
+    """cr code review P2: no unknown disposition, no out-of-range or extra index."""
+    arc = _arc([Beat("beat:a", Phase.CLIMAX, Weight.REQUIRED, achievable_via=Occurred("k"))])
+    dropped = {"thread_disposition": [{"index": 0, "disposition": "dropped", "how": "x"}]}
+    assert bridge.check_threads(dropped, 1, arc)
+    extra = {"thread_disposition": [{"index": 0, "disposition": "closed", "how": "x"},
+                                    {"index": 99, "disposition": "closed", "how": "y"}]}
+    assert any("out of range" in p for p in bridge.check_threads(extra, 1, arc))
+    assert bridge.check_threads({"thread_disposition": [
+        {"index": 0, "disposition": "closed", "how": "x"}]}, 0, arc)
+
+
+def test_malformed_hook_holder_is_sent_back_with_nothing_written(tmp_path, monkeypatch):
+    """cr code review P1: a hook id the gate filter drops (malformed) never certifies a clue:
+    every attempt is sent back, the continuation raises, and the slot is untouched."""
+    from construct.arc.executor import SESSION
+    from tests.test_world_polish import _ContProvider
+    name = _bridge_slot(tmp_path, monkeypatch)
+    bad = {**_CH2,
+           "hook_cast": [{"id": "person:BAD", "name": "Bad", "role": "ghost"}],
+           "clues": [{"beat_id": "beat:learn", "holder": "person:BAD",
+                      "reveal_condition": "none"}],
+           "responds_to_outcome": {"how": "x", "ids": ["person:BAD"]}}
+    path = game.slot_path(name, "u1")
+    with pytest.raises(RuntimeError, match="could not be built"):
+        game.continue_episode(name, _ContProvider([bad]), player_id="u1")
+    w = World(path, world_id=f"w:{name}", stance="fiction", model=StubModel(fallback=_fallback))
+    try:
+        rows = [(str(r.entity), str(r.attribute)) for r in w.buffer.visible(frame=SESSION)]
+        assert ("session:episode", "cast") not in rows
+        assert not any(e.startswith("event:episode_start_") for e, _a in rows)
+    finally:
+        w.close()

@@ -61,19 +61,30 @@ def outcome_category(reads: Any, arc: Any, *, refusal_fired: bool, outcome: str 
 
 # ---- the continuation's deterministic accountings (B1 changes 3-5) -------------------------
 
-def check_threads(proposal: dict, n_threads: int, arc: Any) -> list[str]:
-    """Change 3: every numbered personal thread disposed exactly once; a `carried` one names
-    an id or beat of the new arc (or its hook cast)."""
+def check_threads(proposal: dict, n_threads: int, arc: Any,
+                  hook_ids: list[str] | None = None) -> list[str]:
+    """Change 3: every numbered personal thread disposed EXACTLY once — no index out of range,
+    no disposition other than carried/closed, no extras — and a `carried` one names an id or
+    beat of the new arc (or an ADMITTED hook-cast person)."""
+    disp_all = [d for d in (proposal.get("thread_disposition") or []) if isinstance(d, dict)]
     if n_threads <= 0:
-        return []
+        return ([f"{len(disp_all)} thread disposition(s) given, but there are no personal "
+                 "threads"] if disp_all else [])
     from construct.arc.concealment import arc_entities
-    disp = [d for d in (proposal.get("thread_disposition") or []) if isinstance(d, dict)]
     seen: dict[int, dict] = {}
     problems = []
-    for d in disp:
+    for d in disp_all:
         try:
             i = int(d.get("index"))
         except (TypeError, ValueError):
+            problems.append(f"a thread disposition has no valid index ({d.get('index')!r})")
+            continue
+        if not 0 <= i < n_threads:
+            problems.append(f"thread index {i} is out of range (0..{n_threads - 1})")
+            continue
+        if d.get("disposition") not in ("carried", "closed"):
+            problems.append(f"thread {i}: disposition must be carried or closed, not "
+                            f"{d.get('disposition')!r}")
             continue
         if i in seen:
             problems.append(f"thread {i} disposed twice")
@@ -82,8 +93,7 @@ def check_threads(proposal: dict, n_threads: int, arc: Any) -> list[str]:
     if missing:
         problems.append(f"personal thread(s) {missing} have no disposition (carry or close "
                         "each one)")
-    named = arc_entities(arc) | {b.beat_id for b in arc.beats} | {
-        str((h or {}).get("id")) for h in (proposal.get("hook_cast") or [])}
+    named = arc_entities(arc) | {b.beat_id for b in arc.beats} | set(hook_ids or ())
     for i, d in seen.items():
         if 0 <= i < n_threads and d.get("disposition") == "carried" and not any(
                 tok in str(d.get("how") or "") for tok in named if tok):
@@ -106,7 +116,8 @@ def closed_threads(proposal: dict, threads: list[dict]) -> list[str]:
     return out
 
 
-def check_response(proposal: dict, reads: Any, arc: Any, category: str) -> list[str]:
+def check_response(proposal: dict, reads: Any, arc: Any, category: str,
+                   hook_ids: list[str] | None = None) -> list[str]:
     """Change 4: the chapter answers the outcome, grounded at the horizon and in the arc.
     No recorded outcome (no receipt: a legacy or never-concluded slot) → nothing to answer."""
     if not category:
@@ -115,7 +126,7 @@ def check_response(proposal: dict, reads: Any, arc: Any, category: str) -> list[
     r = proposal.get("responds_to_outcome") or {}
     how = str(r.get("how") or "").strip()
     ids = [str(i) for i in (r.get("ids") or []) if i]
-    hook = {str((h or {}).get("id")) for h in (proposal.get("hook_cast") or [])}
+    hook = set(hook_ids or ())   # ADMITTED hook-cast ids only (their `in` row will commit)
     in_arc = arc_entities(arc) | hook
     grounded = [i for i in ids if i in in_arc and (i in hook or _has(reads, i))]
     if not how or not grounded:

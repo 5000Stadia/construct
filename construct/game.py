@@ -3466,11 +3466,16 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
             # failed attempt with the reasons as the retry note — nothing is written yet.
             _hc_rows, _hook_ids = _plan_hook_cast(world, reads, proposal, _door_place,
                                                   prior_protagonist, at=turn_time(turn))
+            # Only hook-cast people whose `in` row survived the gate filter will exist and
+            # stand at the doorway (cr code review): the B1 checks and the scope use those.
+            _hook_ids = sorted({r["entity"] for r in _hc_rows if r["attribute"] == "in"})
             _ep_cast, _cast_problems = _bridge.build_episode_cast(
                 proposal, new_arc, _base_cast, reads, door_place=_door_place,
                 hook_ids=list(_hook_ids), protagonist=prior_protagonist or "")
-            _problems = (_bridge.check_threads(proposal, len(_personal), new_arc)
-                         + _bridge.check_response(proposal, reads, new_arc, _category)
+            _problems = (_bridge.check_threads(proposal, len(_personal), new_arc,
+                                               hook_ids=list(_hook_ids))
+                         + _bridge.check_response(proposal, reads, new_arc, _category,
+                                                  hook_ids=list(_hook_ids))
                          + _cast_problems)
             if not _problems:
                 break
