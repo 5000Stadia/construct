@@ -49,6 +49,13 @@ So identity is decided once, by code.
 - Every entry's identity rows (shape, `name`, `alias`, `role`) must carry `valid_from = time_of(the chunk holding the entry's gate sentence)`, and every persona's name rows the time of its own gate, not timeless.
 - Then a chapter-3 entry is future-only at the opening, exactly as a future source entity is today. It's absent from `entities(canon, as_of=h)`, from every HorizonView roster, and from construct's identity rule (`is_future_only`).
 - **This is pattern-buffer's change** (asked in m3310d2). **The wiring doesn't build until the pinned library provides it.**
+  - **Accepted, 2026-10-14 (pattern-buffer med4ef1):** BUILD-LIBRARY-V1 r1.8 makes it the default, `commit(identity_time='gate')`.
+    - Each entry's shape, name, aliases, role and fixture rows are stamped at its gate chunk's time.
+    - Persona shape and name rows are stamped at their own gate; the correlate stays at the reveal.
+    - Escapes and mentions are stamped at their declaring chunk.
+    - Rows are still written first by seq; only valid time moves.
+    - A CONSTITUTIVE row with a `valid_from` has no value before it, so state at an earlier horizon is unknown.
+  - Construct pins r1.8's merge.
 - **The fallback, if pattern-buffer keeps identities timeless:** a construct presentation filter from `Registry.entries()` gates, applied to every roster, digest, scene and cast path. cr judges it fragile, so it would need its own spec and review; it isn't adopted here.
 
 **5. Extraction, then commit, inside the existing build session.**
