@@ -157,8 +157,9 @@ def _canonical_id(world: Any, eid: str, mapping: dict | None = None) -> str:
     except Exception:
         logger.debug("reshape canonicalize: refer(%r) failed; keeping as-is", eid)
         res = None
-    # refer's tier-1 name lookup bypasses as_of (Cx 257), so a resolution onto an id that
-    # exists only past the play horizon is refused here — the presence guard. An unreadable
+    # refer's tier-1 name lookup once bypassed as_of (Cx 257; fixed in pattern-buffer
+    # e3101a4). Kept as defence in depth: a resolution onto an id that exists only past the
+    # play horizon is refused here — the presence guard. An unreadable
     # check RAISES (IdentityUnavailable): apply_reshape then declines before any write.
     if (getattr(res, "status", None) == "resolved" and getattr(res, "entity_id", None)
             and not is_future_only(world, res.entity_id)):

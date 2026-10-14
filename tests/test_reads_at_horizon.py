@@ -517,3 +517,48 @@ def test_hook_staging_declines_when_presence_is_unreadable(hworld, monkeypatch):
         v, PorcelainWorldReads(v), {"hook_cast": [{"id": "person:later", "name": "L"}]},
         None, PROT, at=H)
     assert rows == [] and ids == []
+
+
+# ------------------------------------- known but not yet (cr on cd4161f, pattern-buffer e3101a4)
+
+def test_future_only_referent_names_what_the_horizon_misses(hworld):
+    from construct.turnloop import _future_only_referent
+    v = HorizonView(hworld, H)
+    reads = PorcelainWorldReads(v)
+    assert getattr(v.refer("far hut", frame="canon"), "entity_id", None) != "place:far_hut"
+    assert _future_only_referent(v, reads, "far hut", horizon=H) == "place:far_hut"
+    assert _future_only_referent(v, reads, "Later Person", horizon=H) == "person:later"
+    assert _future_only_referent(v, reads, "ice cutter shed", horizon=H) is None  # present now
+    assert _future_only_referent(v, reads, "nowhere at all", horizon=H) is None   # a real miss
+    assert _future_only_referent(hworld, reads, "far hut", horizon=None) is None  # legacy
+
+
+def test_adjudicate_denies_a_future_only_item_and_never_grants_it(hworld, monkeypatch):
+    from construct import turnloop
+    granted = []
+    monkeypatch.setattr(turnloop, "_grant_equipment",
+                        lambda *a, **k: granted.append(a) or True)
+    hworld.ingest_structured([
+        {"entity": "obj:silver_key", "attribute": "kind", "value": "key", "valid_from": FUTURE},
+        {"entity": "obj:silver_key", "attribute": "name", "value": "silver key",
+         "valid_from": FUTURE}])
+    v = HorizonView(hworld, H)
+    why = turnloop.adjudicate(v, v.porcelain, PROT, "place:street", ["the silver key"],
+                              as_of=H)
+    assert why == "'the silver key' is not at hand" and granted == []
+    assert "obj:silver_key" not in why                        # the future id stays unnamed
+    assert turnloop.adjudicate(v, v.porcelain, PROT, "place:street", ["a fresh rag"],
+                               as_of=H) is None and granted   # an ordinary miss still grants
+
+
+def test_adjudicate_fails_closed_when_the_head_is_unreadable(hworld, monkeypatch):
+    from construct import turnloop
+    monkeypatch.setattr(turnloop, "_grant_equipment", lambda *a, **k: True)
+
+    def boom(*a, **k):
+        raise RuntimeError("store unreadable")
+    monkeypatch.setattr(hworld, "refer", boom)
+    v = HorizonView(hworld, H)
+    monkeypatch.setattr(v, "refer", lambda *a, **k: None, raising=False)
+    assert turnloop.adjudicate(v, v.porcelain, PROT, "place:street", ["a fresh rag"],
+                               as_of=H) == "'a fresh rag' is not at hand"

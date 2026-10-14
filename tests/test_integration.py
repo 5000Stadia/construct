@@ -7276,3 +7276,43 @@ class TestWorldLaws:
         assert "THE REALITY REGISTER: REAL" in _narrate_prompt(provider)
         assert "THE REALITY REGISTER: REAL" in provider.calls[0][0]  # classify
         assert result.trace.laws == []
+
+
+def test_a_move_to_an_aftermath_only_place_neither_travels_nor_mints(world):
+    # cr on cd4161f: since refer honours as_of (pattern-buffer e3101a4), naming a place that
+    # exists only in the hidden story's future misses with zero candidates at the horizon.
+    # The move must still be "known but not yet": no relocation, no place:keepruins_1.
+    from construct.adapter import HorizonView, PorcelainWorldReads
+    from construct.arc.executor import ENTRY_MARGIN, SOURCE_STEP
+    from construct.provider import _SILENT_DEFAULTS, StubProvider as _Stub
+    h = SOURCE_STEP + ENTRY_MARGIN
+
+    def StubProvider(responses):  # noqa: N802 — the mint path's destination bind answers "new"
+        return _Stub(responses, silent_defaults={
+            **_SILENT_DEFAULTS, "dst": ("verdict", {"verdict": "new", "match": ""}),
+            "ndg": ("directive", {"thread": "", "directive": ""}),
+            "npt": ("acts", {"acts": False, "action": "", "speaks": False, "intent": "",
+                             "line_hint": ""})})
+    world.ingest_structured([
+        {"entity": "place:keepruins", "attribute": "kind", "value": "ruin",
+         "valid_from": 3.0 * SOURCE_STEP},
+        {"entity": "place:keepruins", "attribute": "name", "value": "the Keep Ruins",
+         "valid_from": 3.0 * SOURCE_STEP},
+    ])
+    arc = make_arc()
+    seed_arc(world, arc)
+    world._extractions.extend([{"items": []}, {"items": []}])
+    before = world.porcelain.locate(PLAYER, as_of=h)
+    prov = StubProvider([{"kind": "action", "claims_are": "act",
+                          "moves_to": "the Keep Ruins", "requires": [], "needs_test": False,
+                          "uncertain_of": "", "commits": False, "commitment": ""},
+                         {"prose": "You set off, but no road you know leads there."}])
+    r = run_turn(HorizonView(world, h), arc, prov, "I go to the Keep Ruins.", turn=2,
+                 scope=[PLAYER, "place:study"], horizon=h)
+    assert r.prose
+    assert world.porcelain.locate(PLAYER, as_of=h) == before
+    head = PorcelainWorldReads(world)
+    assert not head.has_entity("place:keepruins_1")
+    assert not head.has_entity("place:keep_ruins")             # the stand-in the mint path made
+    assert not any(f["value"] == "place:keepruins"
+                   for f in world.porcelain.facts("canon", entity=PLAYER, attribute="in"))
