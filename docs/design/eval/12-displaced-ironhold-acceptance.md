@@ -294,6 +294,53 @@ Turns 9, 11 and 12 moved "to the gate table". The movement step resolved each to
 
 The identity route works: two builds in a row passed. Chapter 1 concludes. What fails is the move itself: an object target with no location swallows the escape. That is the next fix (movement), together with the object-continuity flicker, which now shows in both attempts.
 
+## Run 10 — FAIL (criterion 5 only): the player escaped into a grown place; chapter 2 then denied what its own opening described
+
+Under Kabe's "Ok on 1 test" (2026-10-13), on main `7e855e8` (with the movement fix MOVE-TO-UNPLACED-OBJECT) and pattern-buffer `9e0620f`, Codex subscription only, timing log on. Output is archived at `/media/k/Blank/construct-scratch/run10`.
+
+**The first attempt stopped at build, by design** (archived as `run10a`, 273 s in): `person:holt_2 ~ person:signe_holt`.
+- In the story, "Rivermaster Holt" is "Signe Holt, Rivermaster of the Torne". Extraction split her into `person:holt` and `person:signe_holt`.
+- The cast step then moved its own conception of her to `person:holt_2`, and the identity stop refused the split.
+- This is the third build in a row with a `_2` cast remap since R49, and the motivating failure for SEEDING-REGISTRY-FIRST r4 and pattern-buffer's BUILD-LIBRARY-V1.
+
+**The retry built in 424 s** and played 14 chapter-1 turns and 6 chapter-2 turns, exiting 0.
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Chapter 1 concludes | **PASS**, at turn 14 |
+| 2 | Chapter 1 ends in a place grown in play | **PASS**: `place:streetlamp_smoke`, minted when the player climbed out of the Last Office window ("keeping low below the streetlamp's line") |
+| 3 | Chapter 2 opens where chapter 1 ended | **PASS**: `place:streetlamp_smoke` both, "on the narrow pavement ... under the old streetlamp" |
+| 4 | No ENGINE ERROR or empty prose | **PASS** |
+| 5 | No critic WHERE breaker | **FAIL**: chapter 2's opening put the player "outside the ice cutter shed ... its double doors barred with a frost-whitened hasp", with "a clean northbound pass and a sealed packet" in their coat. The next reply: "there is no shed in this patch of pavement, and no hasp under your gloved fingers". Then "no pass" (critic ch2 t1–t5) |
+
+### Why criterion 5 failed (traced in the mechanics log)
+
+1. **The chapter-2 opening invented scene things and inventory that canon doesn't hold.**
+   - `refer` found `obj:shed_hasp` (the opening settle extracted it), but not in the scene.
+   - The narrator's briefing had no shed or hasp, and its EXCLUSIVE carrying list had no pass.
+   - So the narrator denied them, and the classifier refused the pass ("never been established in this world's canon").
+   - This is the old ghost-hook family: an opening stages props in prose only. Here the settle created the entities but did not place them in the opening's scene or in the player's possession.
+2. **The player frame kept the player "in cell 12".** The briefing's YOU block read `you · in · cell 12` after the escape. At turn 14 the move grant to "the streetlamp smoke" wrote its rows but "did not take" and fell back to extraction. Canon then got the player into the new place, but the player's own frame never did.
+
+### Next fixes (not built)
+
+- **The continuation opening's settle anchors what the opening stages.** Objects described as present go `in` the opening scene; things "in your coat" are `held_by` the player. Or the opening is grounded strictly in canon. This needs a spec.
+- **Trace "move grant did not take".** Find why the protagonist chain check failed after the rows were written, and make the player frame follow every committed move.
+- **A place-naming quirk:** the classifier's `moves_to` ("the streetlamp smoke") became the place id. It is harmless in prose, but the registry and naming work should improve it.
+
+### First per-turn timing (20 turns)
+
+- Turn wall time: 20–177 s.
+- Calls inside a turn ran serially (×1.0 parallel).
+- The settle after each turn took a further 33–64 s.
+- Calls by step:
+  - **extraction:** 64 calls, 1337 s, mean 21 s;
+  - **the engine's lifetime classifier:** 109 calls, 566 s, mean 5.2 s. This is a literal categorization (CONSTITUTIVE, DISPOSITIONAL or STATE) and the clearest case for the fastest model, batched;
+  - **narration:** 23 calls, 464 s, mean 20 s;
+  - **the classify cohort:** 20 calls, 163 s;
+  - **NPC turns:** 27 calls, 109 s.
+- Full tables: `run10/timing-report.md`.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
