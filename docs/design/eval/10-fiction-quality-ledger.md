@@ -278,7 +278,7 @@ Disposition: twin-container binding, NPC positions in the briefing, and a chapte
 
 Felt off:
 - the chapter ended on a broken link, not an escape: the player was still shackled in a lane inside the prison;
-- chapter 2 opened on a river escape that never happened, "enough mornings" that never passed, and the chain whole again;
+- chapter 2 opened on a river escape that never happened, "enough mornings" passed (the doorway moved the clock 277 minutes) with the player still standing in the lane, and the chain whole again;
 - the opening placed the body's discovery on the quay boards, and the next reply moved it to the record room;
 - "Jory" and "Pike" for one man within a few lines.
 
