@@ -248,6 +248,19 @@ through the pipeline as the next headline spec. Secondary finding: turn
 latency 400-450s on the fresh generated world (vs ~120s bodycase) — needs
 decomposition; noted against the delta-extraction park's tripwire.
 
+## 2026-10-14 — R20 run 11 (Ironhold, displaced conclusion; 30 chapter-1 turns)
+
+**Grade: C.** The first eight turns were among the best this world has played. Hobb's fear ("I have children, Wale. Two. South bank"), Wale's "correction, not mercy", and the name Dane landing "like a dropped cup" made a real web of guilt and duty, and the player earned the live test at the grille by persuasion.
+
+Then the world stopped holding its own objects. A pin "drops free onto the wet stone", and next turn "there is no loose pin there". A key-ring "is yours", and next turn there are no keys. The straw came and went. The prose stayed handsome while it un-said itself, and that is the failure: fifteen turns of a puzzle whose pieces the world kept taking back. No escape could land, so the chapter never ended.
+
+Felt off:
+- each denial read as the world calling the player a liar about what it had just shown them;
+- the ward's people vanished once the player was alone at the grille, so the social web (the story's best half) went silent for 20 turns;
+- the false denial wording, "never been established in this world's canon", leaked engine voice into the fiction.
+
+Disposition: narrated objects must land somewhere (eval/12 run 11, next fixes).
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from

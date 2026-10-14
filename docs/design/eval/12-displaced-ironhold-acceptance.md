@@ -353,7 +353,44 @@ The monitor authorised this run for Kabe (note n96b11a): one run, after the cont
 - The real fix is SEEDING-LIBRARY-WIRING r2.1 (cr GREEN; it waits on pattern-buffer's BUILD-LIBRARY-V1 merge). There, the author's manifest declares each person, and same-named entries are held apart by that declaration.
 - The build also logged five `valid_to_before_valid_from` skipped edges, all reported by the engine's ingest.
 
-As with run 10a, the retry runs under the same single-run approval.
+As with run 10a, the retry ran under the same single-run approval.
+
+## Run 11 — FAIL (criteria 1–3 and 5): chapter 1 never concluded; narrated objects vanished from canon
+
+**The retry built in 469 s** and played 30 chapter-1 turns. The probe then halted with 15 critic filings, so there was no chapter-2 leg. Output is archived at `/media/k/Blank/construct-scratch/run11` (world included).
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Chapter 1 concludes | **FAIL**: still active at turn 30 (act I) |
+| 2 | Chapter 1 ends in a place grown in play | **not reached** |
+| 3 | Chapter 2 opens where chapter 1 ended | **not reached** |
+| 4 | No ENGINE ERROR or empty prose | **PASS** |
+| 5 | No critic WHERE breaker | **FAIL**: 15 continuity filings (t9–t30), every one the same family |
+
+### Why it failed (traced in the world, read after the run)
+
+From turn 9 on, the narrator described an object, and the next turn's classifier refused it as "not a thing you are known to have — it has never been established in this world's canon". The player spent the chapter re-trying with things the world kept un-saying, so no beat landed. Three causes, none from tonight's merges:
+
+1. **A narrated drop got no destination.** "The lower pin drops free onto the wet stone below the bell-pull" settled as `obj:lower_pin` with `part_of obj:bell_pull_plate`, `fastening_anything = False` and no `in` row. It was in canon, but nowhere. The scene listed only what is `in` the place, so the next turn's take was refused (t17), and the critic filed it at t18–t22.
+2. **A narrated hand-over got both ends.** "The key-ring is yours" settled as two `in` rows at one valid time, written consecutively by one extraction: `in obj:belt` and `in person:tomas_venn`. The engine serves the key `conflicted`, so the next turn treated the keys as not held (t29–t30). Before CONTAINMENT-DURABILITY, one of the two would have been served instead (CONSTITUTIVE outranks STATE), and the belt row could have won, so this would have been wrong either way.
+3. **A twin id for one thing.** The cell's straw from the build, `obj:straw`, has no location. The player's `obj:straw_scrap` (named "scrap of straw") is correctly `in person:tomas_venn`. "The straw" in the player's turn-9 line bound to the location-less twin, and was refused (t9–t12). Turn 18's carrying list still showed "scrap of straw".
+
+Also seen:
+- The player's place at the grille was minted as the id `closed` (`closed · description · c-wing inner grille`), and the plate later read `held_by closed`. A state word was minted as a place id, from extraction.
+- Some build-time `role` and `former_residence` rows were skipped as `valid_to_before_valid_from`, and three `obj` self-containment edges at the opening were refused by the engine's tree invariant. Both reported by the engine's ingest.
+
+### What did work
+
+- **The identity stop held its line on the first attempt** (run 11a, above).
+- **Placements by rule cut the in-turn classifier load in half.** In-turn "Classify the lifetime" calls fell from 3.5 to 1.8 a turn (run 10: 69 calls, 247 s over 20 turns; run 11: 54 calls, 192 s over 30 turns). Mean turn wall time fell from 78 s to 60 s, though that mean is flattered by several short refused turns. Settle calls held at about 1.5 a turn (45 calls, 357 s).
+- **No containment flicker from a host placement.** Every refused object above came from the narrator settle's extraction, the residual PLACEMENTS-BY-RULE named.
+
+### Next fixes (not built; each needs a spec)
+
+- **A narrator-settled object is somewhere.** An object the settle mints or changes with no live `in`/`held_by` falls back to the scene it was narrated in, written by rule. That is first-mention permanence applied to placement. A part detached from its whole is the same case.
+- **One end per transfer.** When one settle extraction yields two live `in` rows for one subject at one valid time, the host keeps the one the prose's outcome names (the destination). It needs an engine or extraction-shape decision with pattern-buffer first: the conflict is the engine's honest read.
+- **"Known to have" reads the scene and canon, not only possession.** The refusal wording was false (the pin was established), and a take of a thing lying in the scene is a move, not a claim. The classify cohort's existence check should see the scene's objects, and the twin straw shows refer binding to a location-less twin over a held one.
+
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
