@@ -170,3 +170,174 @@ class PorcelainWorldReads:
             )
             for r in rows
         ]
+
+
+# ---- READS AT THE PLAY HORIZON (docs/design/READS-AT-PLAY-HORIZON.md r6) -------------------
+
+def play_horizon(opening_as_of: float | None, next_source_as_of: float | None,
+                 turns: int) -> float | None:
+    """The play horizon after `turns` turns: `opening_as_of + turns`, capped strictly below
+    the next source coordinate (Cx 253 §1), or None for a legacy world (head reads). The one
+    rule `Session._horizon` and `continue_episode` share, so the two can't drift."""
+    if opening_as_of is None:
+        return None
+    h = float(opening_as_of) + float(turns)
+    if next_source_as_of is not None:
+        h = min(h, float(next_source_as_of) - 1.0)
+    return h
+
+
+#: Porcelain valid-time reads: every public method whose (pinned) signature takes `as_of`.
+#: Through a HorizonView their `as_of` is set to the horizon when absent or None, and
+#: clamped to it when later.
+PORCELAIN_VALID_TIME_READS = frozenset({
+    "aggregate", "ask", "composition", "confidence", "contents", "correlation_conflicts",
+    "correlations", "entities", "facts", "features", "fidelity_audit", "frame_diff",
+    "in_transit", "locate", "neighborhood", "path", "refer", "route", "salience",
+    "snapshot", "state", "state_union", "where", "who_knows",
+})
+#: `events` takes no `as_of`: its `until` is capped at the horizon instead.
+PORCELAIN_EVENT_READS = frozenset({"events"})
+#: Writes, and the asserted-axis / identity reads that have no valid-time coordinate.
+PORCELAIN_PASSTHROUGH = frozenset({
+    "abort_build", "adjudicate_deferred", "axis_heads", "begin_build", "build",
+    "canonical_attribute", "closure", "commit_set", "confirm", "continue_frame",
+    "correlate", "distinct_between", "extract", "identity_conflicts", "ingest",
+    "ingest_structured", "merge", "merge_gate", "proposals", "reconcile", "reject",
+    "resolve", "retract", "retype", "seal_build", "typing_conflicts",
+})
+#: The World members a HorizonView exposes; every other World attribute is denied.
+WORLD_EXPOSED = frozenset({"porcelain", "refer", "close", "head"})
+
+_DENIED = ("not available through the horizon view; read via view.porcelain, "
+           "or view.head for an id-collision check")
+
+
+def _bind_as_of(fn: Any, horizon: float, args: tuple, kwargs: dict) -> tuple[tuple, dict]:
+    """Return (args, kwargs) with `as_of` set to the horizon when absent/None, clamped to it
+    when later. Handles `as_of` passed positionally."""
+    import inspect
+    try:
+        sig = inspect.signature(fn)
+        if "as_of" not in sig.parameters:
+            raise TypeError("no named as_of parameter")
+        bound = sig.bind_partial(*args, **kwargs)
+    except (TypeError, ValueError):
+        kwargs = dict(kwargs)
+        cur = kwargs.get("as_of")
+        kwargs["as_of"] = horizon if cur is None else min(float(cur), horizon)
+        return args, kwargs
+    cur = bound.arguments.get("as_of")
+    new = horizon if cur is None else min(float(cur), horizon)
+    if cur is not None and new != cur:
+        logger.debug("horizon view: as_of %s clamped to %s", cur, new)
+    bound.arguments["as_of"] = new
+    return bound.args, bound.kwargs
+
+
+class _HorizonPorcelain:
+    """The porcelain proxy of a HorizonView. Deny by default: a public method in none of the
+    three classes raises AttributeError, so an engine bump can't slip a head read through."""
+
+    def __init__(self, porcelain: Any, horizon: Any) -> None:
+        self._p = porcelain
+        self._h = horizon          # zero-arg callable → float, re-evaluated on every read
+
+    def __getattr__(self, name: str) -> Any:
+        target = getattr(self._p, name)
+        if name in PORCELAIN_VALID_TIME_READS:
+            def read(*args: Any, **kwargs: Any) -> Any:
+                args, kwargs = _bind_as_of(target, self._h(), args, kwargs)
+                return target(*args, **kwargs)
+            return read
+        if name in PORCELAIN_EVENT_READS:
+            def events(*args: Any, **kwargs: Any) -> Any:
+                import inspect
+                bound = inspect.signature(target).bind_partial(*args, **kwargs)
+                h = self._h()
+                cur = bound.arguments.get("until")
+                bound.arguments["until"] = h if cur is None else min(float(cur), h)
+                return target(*bound.args, **bound.kwargs)
+            return events
+        if name in PORCELAIN_PASSTHROUGH or name.startswith("_"):
+            return target
+        raise AttributeError(f"porcelain.{name}: {_DENIED}")
+
+
+class HorizonView:
+    """A play-time view of a World that reads at the play horizon by construction.
+
+    `HorizonView(world, horizon)` returns the RAW world when `horizon` is None, or a
+    callable whose one construction-time probe returns None (a legacy world: byte-identical
+    behaviour). Otherwise it keeps the callable (a float is wrapped as a constant) and calls
+    it afresh on every mediated read, so a Session's horizon advances with its turns. The
+    callable must read through `view.head`, never the view.
+
+    Exposes exactly `porcelain` (the proxy), `refer` (a valid-time read), `close` and
+    `head` (the raw world: id-collision checks only). Every other World member is denied."""
+
+    def __new__(cls, world: Any, horizon: Any = None) -> Any:
+        if isinstance(world, HorizonView):
+            world = world.head
+        if horizon is None:
+            return world
+        if callable(horizon) and horizon() is None:   # the legacy probe, never cached
+            return world
+        return super().__new__(cls)
+
+    def __init__(self, world: Any, horizon: Any = None) -> None:
+        if isinstance(world, HorizonView):
+            world = world.head
+        fn = horizon if callable(horizon) else (lambda h=float(horizon): h)
+        object.__setattr__(self, "head", world)
+        object.__setattr__(self, "_h", fn)
+        object.__setattr__(self, "porcelain", _HorizonPorcelain(world.porcelain, fn))
+
+    def horizon(self) -> float:
+        """The horizon now (re-evaluated)."""
+        return self._h()
+
+    def refer(self, *args: Any, **kwargs: Any) -> Any:
+        target = self.head.refer
+        args, kwargs = _bind_as_of(target, self._h(), args, kwargs)
+        return target(*args, **kwargs)
+
+    def close(self) -> Any:
+        return self.head.close()
+
+    def __getattr__(self, name: str) -> Any:   # only reached for names not defined above
+        raise AttributeError(f"world.{name}: {_DENIED}")
+
+
+def raw_world(world: Any) -> Any:
+    """The raw World under a HorizonView (or the world itself). For id-collision checks
+    and the horizon computation only."""
+    return world.head if isinstance(world, HorizonView) else world
+
+
+class IdentityUnavailable(RuntimeError):
+    """The identity rule could not establish head-and-horizon presence. Callers DECLINE the
+    write (no reuse, no mint): an unknown check is never read as "not future"."""
+
+
+def is_future_only(world: Any, entity: str) -> bool:
+    """THE IDENTITY RULE (READS-AT-PLAY-HORIZON): an id that exists at the timeline head but
+    not at the view's horizon belongs to the hidden story's future. A play-time write must
+    neither reuse it nor write onto it. Always False on a raw (legacy) world. Raises
+    `IdentityUnavailable` when presence can't be read — fail CLOSED (cr code review)."""
+    if not isinstance(world, HorizonView) or not entity:
+        return False
+    try:
+        return (PorcelainWorldReads(world.head).has_entity(entity)
+                and not PorcelainWorldReads(world).has_entity(entity))
+    except Exception as exc:  # noqa: BLE001 — unknown is not "not future": decline
+        raise IdentityUnavailable(f"presence of {entity} unreadable: {exc!r}") from exc
+
+
+def next_free_id(world: Any, entity: str) -> str:
+    """The next `<id>_<n>` free at the timeline HEAD (global id-collision avoidance)."""
+    head = PorcelainWorldReads(raw_world(world))
+    n = 1
+    while head.has_entity(f"{entity}_{n}"):
+        n += 1
+    return f"{entity}_{n}"

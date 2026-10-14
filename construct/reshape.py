@@ -27,6 +27,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from construct.adapter import is_future_only, next_free_id
 from construct.arc.executor import turn_time
 from construct.text import slugify_per_char
 
@@ -142,19 +143,35 @@ def plan_from_proposal(proposal: dict, *, tier: str, action_event: str = "",
     )
 
 
-def _canonical_id(world: Any, eid: str) -> str:
+def _canonical_id(world: Any, eid: str, mapping: dict | None = None) -> str:
     """Resolve a (possibly bare/loose) entity id to the world's CANONICAL known id via
     `world.refer` (Cx 226), so a reshape can't scatter one individual's state across
     coreferent ids (`kestle` vs `person:thomas_kestle`). Fail-soft: an unresolvable id
     (a genuinely new entity) is kept as-is."""
     if not eid:
         return eid
+    if mapping is not None and eid in mapping:
+        return mapping[eid]
     try:
         res = world.refer(eid, frame="canon")
-        if getattr(res, "status", None) == "resolved" and getattr(res, "entity_id", None):
-            return res.entity_id
     except Exception:
         logger.debug("reshape canonicalize: refer(%r) failed; keeping as-is", eid)
+        res = None
+    # refer's tier-1 name lookup bypasses as_of (Cx 257), so a resolution onto an id that
+    # exists only past the play horizon is refused here — the presence guard. An unreadable
+    # check RAISES (IdentityUnavailable): apply_reshape then declines before any write.
+    if (getattr(res, "status", None) == "resolved" and getattr(res, "entity_id", None)
+            and not is_future_only(world, res.entity_id)):
+        return res.entity_id
+    # THE IDENTITY RULE (READS-AT-PLAY-HORIZON T6): a "genuinely new" id kept as-is must not
+    # be one the hidden story introduces later — it takes the next free suffix, one mapping
+    # per plan, so the reshape neither resolves to nor writes onto the future entity.
+    if ":" in eid and is_future_only(world, eid):
+        fresh = next_free_id(world, eid)
+        logger.info("reshape: %s exists only past the play horizon; using %s", eid, fresh)
+        if mapping is not None:
+            mapping[eid] = fresh
+        return fresh
     return eid
 
 
@@ -165,20 +182,21 @@ def canonicalize_plan(world: Any, plan: ReshapePlan) -> ReshapePlan:
     that names an existing entity is canonicalized too, so a reshape can't scatter a
     reference onto an alias. `_canonical_id` is fail-soft — a literal value (`alive`,
     `fading`) that resolves to no entity is left exactly as-is."""
+    m: dict = {}   # one future-only → fresh-id mapping for the whole plan
     for rows in (plan.state_rows, plan.restage_rows, plan.consequence_rows):
         for r in rows:
             if r.get("entity"):
-                r["entity"] = _canonical_id(world, r["entity"])
+                r["entity"] = _canonical_id(world, r["entity"], m)
             if r.get("value"):
-                r["value"] = _canonical_id(world, str(r["value"]))
+                r["value"] = _canonical_id(world, str(r["value"]), m)
     for fr in plan.frame_rows:
         if fr.get("entity"):
-            fr["entity"] = _canonical_id(world, fr["entity"])
+            fr["entity"] = _canonical_id(world, fr["entity"], m)
         if fr.get("value"):
-            fr["value"] = _canonical_id(world, str(fr["value"]))
+            fr["value"] = _canonical_id(world, str(fr["value"]), m)
         frame = fr.get("frame", "")
         if frame.startswith("knows:"):
-            fr["frame"] = "knows:" + _canonical_id(world, frame[len("knows:"):])
+            fr["frame"] = "knows:" + _canonical_id(world, frame[len("knows:"):], m)
     return plan
 
 

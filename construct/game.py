@@ -20,7 +20,7 @@ from typing import Any, NamedTuple
 from patternbuffer import World
 
 from construct import hostcontrol, timing
-from construct.adapter import PorcelainWorldReads
+from construct.adapter import PorcelainWorldReads, is_future_only
 from construct.arc import io as arc_io
 from construct.arc.build import (  # arc construction lives in the arc layer; re-exported
     ARC_SCHEMA,                       # here so every importer / test patch of `game.X` holds
@@ -3105,6 +3105,13 @@ def _plan_hook_cast(world: Any, reads: Any, proposal: dict, door_place: str | No
             hid = str((hc or {}).get("id") or "").strip()
             if not hid.startswith("person:") or not stage_place:
                 continue
+            if is_future_only(world, hid):
+                # THE IDENTITY RULE (G8): an id the hidden story introduces only later is
+                # never staged — no rows land on a future entity. The author never saw
+                # future ids, so this is a coincidental collision.
+                logger.warning("hook-cast staging: %s exists only past the play horizon; "
+                               "not staged", hid)
+                continue
             if not reads.has_entity(hid):
                 rows.append({"entity": hid, "attribute": "kind", "value": "person",
                              "timeless": True})
@@ -3174,8 +3181,17 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
 
     _epoch_tok = None
     try:
-        reads = PorcelainWorldReads(world)
         meta = ScenarioMeta.load(name)
+        # READS AT THE PLAY HORIZON (G1-G8, C5): the next chapter is authored from the world
+        # AS THE PLAYER LEFT IT — every read, however deep in a helper, goes through a view
+        # bound to the horizon the last turn played at. A head read handed run 10's chapter-2
+        # author the hidden story's ending (place and props). Writes are unchanged; a legacy
+        # world (no opening_as_of) gets the raw world.
+        from construct.adapter import HorizonView, play_horizon
+        _h = play_horizon(meta.get("opening_as_of"), meta.get("next_source_as_of"),
+                          next_turn_number(world))
+        world = HorizonView(world, _h)
+        reads = PorcelainWorldReads(world)
         # The episode's write origin (Cx 253 §4): for a HORIZON world the origin STAYS at
         # `opening_as_of` — the new chapter's arc rows + turns advance the play horizon within
         # the reserved band (turn_time(turn) = opening_as_of + turn supersedes prior); raising

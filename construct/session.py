@@ -31,7 +31,9 @@ from construct.scenario_meta import (
     InputAuthority, PlaythroughState, ScenarioMeta, ScenarioMode,
 )
 from construct import timing
-from construct.adapter import PorcelainWorldReads, state_value, state_values
+from construct.adapter import (
+    HorizonView, PorcelainWorldReads, play_horizon, raw_world, state_value, state_values,
+)
 from construct.text import (
     human_name, humanize_id, humanize_id_last, humanize_typed_id, id_local,
 )
@@ -112,7 +114,13 @@ class Session:
         if self._opening_as_of is not None and self.entry_as_of is None:
             # The establishing/situation snapshots read as-of the opening coordinate.
             self.entry_as_of = float(self._opening_as_of)
+        # READS AT THE PLAY HORIZON (r6): play code holds a horizon-bound VIEW of the world,
+        # so every read through it — however deep in a helper — is at the play horizon unless
+        # it explicitly asks `.head` (id-collision checks only). A legacy world (no
+        # `opening_as_of`, assigned once above) gets the raw world: byte-identical.
         self._world = world
+        self._world = HorizonView(
+            world, self._horizon if self._opening_as_of is not None else None)
         self._arc = arc
         # The rest of the arc portfolio (LIVING-WORLD-GENERATOR P1): side arcs
         # tick and conclude alongside the main arc but never end the scenario.
@@ -315,11 +323,9 @@ class Session:
         enter by turn-count arithmetic. None for legacy/single-timeframe worlds (head reads)."""
         if self._opening_as_of is None:
             return None
-        n = next_turn_number(self._world) if turn is None else turn
-        h = float(self._opening_as_of) + float(n)
-        if self._next_source_as_of is not None:
-            h = min(h, float(self._next_source_as_of) - 1.0)
-        return h
+        # The turn count reads the RAW world: through the view it would recurse.
+        n = next_turn_number(raw_world(self._world)) if turn is None else turn
+        return play_horizon(self._opening_as_of, self._next_source_as_of, n)
 
     def location(self) -> str | None:
         """Current scene id (deterministic; no model call)."""

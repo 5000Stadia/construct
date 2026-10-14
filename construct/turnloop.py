@@ -34,7 +34,9 @@ from construct.resolve import (
     _NARRATION_MINT_KINDS, _NARRATION_STUB_KINDS, _PLACE_LIKE_KINDS,
     ResolutionOutcome,
 )
-from construct.adapter import PorcelainWorldReads, frame_facts
+from construct.adapter import (
+    PorcelainWorldReads, frame_facts, is_future_only, next_free_id, raw_world,
+)
 from construct.gauge import (
     apply_gauge_terminals, gauge_coloring, gauge_pass,
 )
@@ -469,6 +471,21 @@ _GROWTH_SEAM = ("(the road ahead wouldn't take shape this turn — the "
                 "changed; try that again.)")
 
 
+def _growth_exists(world: Any, unavailable: type = RuntimeError):
+    """Growth's id-allocation existence authority. THE IDENTITY RULE (READS-AT-PLAY-HORIZON
+    T5): allocation is id-collision avoidance, so it reads the HEAD — a grown place never
+    takes an id the hidden story introduces later. An unreadable authority raises
+    `unavailable` (growth's `_IdentityUnavailable`: it declines, never guesses)."""
+    head_reads = PorcelainWorldReads(raw_world(world))
+
+    def _exists(eid: str) -> bool:
+        try:
+            return bool(head_reads.has_entity(eid))
+        except Exception as exc:  # the existence authority IS an identity
+            raise unavailable(str(exc)) from exc  # authority
+    return _exists
+
+
 def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
                     provider: Provider, trace: TurnTrace, *,
                     moves_to: str, player_input: str, kind: str,
@@ -652,11 +669,7 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
     # staged dismissal commits after activation, so fold the intent in.
     companions = [c for c in companions if c not in set(dismissed or ())]
 
-    def _exists(eid: str) -> bool:
-        try:
-            return bool(live_reads.has_entity(eid))
-        except Exception as exc:  # the existence authority IS an identity
-            raise _IdentityUnavailable(str(exc)) from exc  # authority
+    _exists = _growth_exists(world, _IdentityUnavailable)
 
     try:
         chunk, why = growth_mod.assemble_chunk(
@@ -2091,7 +2104,9 @@ def _mint_held_object(world: Any, protagonist: str, description: str,
                                  "their", "its", "some"}:
         words.pop(0)
     slug = slugify_per_char("_".join(words)) or "thing"
-    reads = PorcelainWorldReads(world)
+    # THE IDENTITY RULE (READS-AT-PLAY-HORIZON H1): id-collision avoidance reads the HEAD —
+    # a fresh mint never takes an id the hidden story introduces later.
+    reads = PorcelainWorldReads(raw_world(world))
     hint = (hint or "").strip()
     item_id = hint if (hint.startswith("obj:") and not reads.has_entity(hint)) else f"obj:{slug}"
     n = 1
@@ -2108,7 +2123,8 @@ def _mint_held_object(world: Any, protagonist: str, description: str,
         for r in rows:
             r.setdefault("valid_from", at)
     world.porcelain.ingest_structured(rows)
-    # VERIFY the grant actually made it at-hand; never claim a failed/conflicted write.
+    # VERIFY the grant actually made it at-hand; never claim a failed/conflicted write. Read
+    # through the play view (T3): at the horizon, never the source future's head.
     if protagonist not in (PorcelainWorldReads(world).location_chain(item_id) or []):
         logger.warning("mint of %r did not take (%s)", description, item_id)
         return None
@@ -2426,8 +2442,22 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
         # deictic/directional ("go back", "go inside") — not a named place; let the narrator
         # handle it against the real geography rather than mint `place:back` / `place:inside`.
         return None, None
-    reads = PorcelainWorldReads(world)
+    # READS AT THE PLAY HORIZON (T2): reuse / existence read the HORIZON; an id that exists
+    # only past it (the hidden story's future) is never reused nor written onto — the mint
+    # takes the next free suffix (the identity rule).
+    reads = PorcelainWorldReads(world, horizon=as_of)
     place_id = f"place:{slug}"
+    try:
+        if not reads.has_entity(place_id) and (
+                is_future_only(world, place_id)
+                or (as_of is not None
+                    and PorcelainWorldReads(raw_world(world)).has_entity(place_id))):
+            place_id = next_free_id(world, place_id)
+    except Exception:  # noqa: BLE001 — IdentityUnavailable or an unreadable presence read
+        # the identity rule can't be established: DECLINE the mint (nothing written);
+        # the narrator handles the move against the real geography
+        logger.warning("move grant to %r declined: identity unavailable", moves_to)
+        return None, None
     # PASSABILITY ON THE GRANT PATH (Cx 387 hard constraint): the mint must not teleport
     # through a blocked route. The checkable target is the CONTAINER (it exists in canon)
     # or an existing reused place; a genuinely fresh top-level mint has no route data and
@@ -2460,6 +2490,15 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
         _tslug = slugify(_tail_phrase)
         if _tslug and _tslug not in _DEICTIC_DEST:
             container = f"place:{_tslug}"
+            try:
+                if not reads.has_entity(container) and (
+                        is_future_only(world, container)
+                        or (as_of is not None
+                            and PorcelainWorldReads(raw_world(world)).has_entity(container))):
+                    container = next_free_id(world, container)
+            except Exception:  # noqa: BLE001 — identity unestablished: decline, write nothing
+                logger.warning("move grant to %r declined: identity unavailable", moves_to)
+                return None, None
             if not reads.has_entity(container):
                 rows += [{"entity": container, "attribute": "kind",
                           "value": _tail_kind, "timeless": True},
@@ -2477,7 +2516,9 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
     rows += [{"entity": e, "attribute": "in", "value": place_id, "value_type": "entity",
               "valid_from": at} for e in carry]
     world.porcelain.ingest_structured(rows)
-    chain = PorcelainWorldReads(world).location_chain(protagonist) or []
+    # VERIFY at the play horizon (T1): the head is the source story's ending, so a head read
+    # reported every improv mint as not taken (R20 run 10).
+    chain = PorcelainWorldReads(world, horizon=as_of).location_chain(protagonist) or []
     if not chain or chain[0] != place_id:
         logger.warning("move grant to %r did not take (%s)", moves_to, place_id)
         # WORLD-GROWTH: a did-not-take already WROTE rows — an engine-trouble
