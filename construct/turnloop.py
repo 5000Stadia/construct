@@ -4062,8 +4062,9 @@ def _walkaway_state(world: Any, p: Any, live_reads: Any, arc: Arc, goal: str) ->
         since = _episode_since(live_reads)
         raw = live_reads.state("session:walkaway", "record", frame=SESSION)
         rec = json.loads(raw) if isinstance(raw, str) and raw.strip() else None
-        if rec is not None and rec.get("episode_since") != since:
-            rec = None                                   # another episode's record
+        if rec is not None and (rec.get("episode_since") != since
+                                or rec.get("arc_id") != arc.arc_id):
+            rec = None   # another episode's, or another main arc's (a same-episode replan)
         clocked = state_value(p, ELAPSED_ENTITY, ELAPSED_ATTR) is not None
         minutes = float(read_clock(world).minutes) if clocked else None
         standing = bool(rec) and rec.get("status") == "asked"
