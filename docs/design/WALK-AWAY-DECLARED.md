@@ -1,6 +1,13 @@
 # The walk-away as a declared decision (R40)
 
-**Status:** spec r1, 2026-10-13, for cr review. Not built. It replaces CHAPTER-BRIDGE-B1 change 1, which was never built.
+**Status:** spec r2, 2026-10-13, for cr review. Not built. It replaces CHAPTER-BRIDGE-B1 change 1, which was never built.
+
+**r2 (cr RED on r1):** the event detector is the wrong carrier.
+- `clock_pass` (turnloop.py:5714) runs before it (6248-6285), so a confirmation couldn't fire the refusal clock the same turn.
+- It runs only on successful `action` turns, so an `exit`, an answerable `question` (4594-4611) or a denied pure-mode declaration (4631-4645) returns before it.
+- r1's record had no durable schema.
+
+r2 carries both signals on **classify** instead. Classify already runs on every turn, before every early return and before `clock_pass`, so it adds no model call. A single typed session record holds the lifecycle.
 **Source:**
 - IR-16 ("abandonment is never inferred; it requires a stated or clarified decision"), IR-21/22 (the limits on asking) and IR-15 (unaware is computed), from Kabe's intent ruleset (`INTENT-RULESET.md`).
 - Kabe's note n54b973: "A player thinking to go ask Reginald one last question before the final showdown shouldn't accidentally be seen as abandonment."
@@ -15,29 +22,38 @@
 
 ## The rule
 
-**1. Only a thread the player knows can be walked away from** (IR-15). R40 applies to the MAIN arc only:
-- the player was given its aim (the opening and `goal_statement`);
-- a side arc the player may never have heard of keeps lapsing on its own clocks, as today, and is never "abandoned".
+**1. Only a thread the player knows can be walked away from** (IR-15). R40 applies to the MAIN arc only: the player was given its aim (the opening and `goal_statement`). A side arc the player may never have heard of keeps lapsing on its own clocks, as today.
 
-**2. A detection opens a question, never an ending.** While the main arc's refusal clock is armed and no walk-away question stands:
-- **The candidate:** the detector gets one more candidate, `{kind: "walkaway:main", what: "the player DECLARES they are giving up <the main aim> for good: walking away from it, not just going somewhere or doing something else first"}`.
-- **What a positive does:** it writes `session:walkaway` · `asked` = `{turn, minutes}`, and nothing else.
-- **What it never does:** fire the refusal clock, or write any canon.
+**2. Two classify fields, read on every turn.** CLASSIFY_SCHEMA gains:
+- `declares_giving_up` (boolean): "true ONLY when the player DECLARES their character is giving up {aim} for good: walking away from it. Going somewhere, doing something else first, resting, or asking one more question is NOT giving up." The aim (the scenario's `goal_statement`, else the main arc's tension label) is put into the classify prompt **only while the walk-away is eligible** (rule 4).
+- `confirms_walkaway` (boolean): set only while a question stands. The prompt gets a note: "A QUESTION IS STANDING: whether the player is truly giving up {aim}. true ONLY for an explicit yes. A no, a deflection, another action, a question or silence is false."
 
-**3. The question is asked in the story, once, with the stakes plain.** On the turn of the detection, the narrator's briefing carries:
+Missing counts as false.
+
+**3. The transition runs right after classify,** before every early return (`exit`, `question`, the pure-mode declaration denial) and before `clock_pass`. It's one deterministic step, `_walkaway_transition`, over the record in rule 4:
+- **A question stands** (`status == asked`, in this episode):
+  - `confirms_walkaway` true: write `event:abandoned_main_<turn>`, with `kind` = the main refusal clock's kind (`event:abandoned`), `agent` = the protagonist, `caused_by` = the turn's action anchor, in canon at `turn_time(turn)`. Set the record to `confirmed`. Because this lands **before** `clock_pass`, the refusal clock fires **this** turn, exactly once (it's `status=fired` afterwards, as for any non-repeat clock).
+  - **Anything else, on whatever path** (no, deflection, a question, a denied declaration, `exit`, a failed action): set the record to `declined`, with `declined_minutes` = now. This is the literal reading (IR-22).
+- **No question stands, the walk-away is eligible, and `declares_giving_up` is true:** set the record to `asked`, with `asked_turn` and `asked_minutes`. That turn's briefing carries the question directive (rule 5). Nothing else is written; it's never an ending.
+- **Otherwise:** nothing.
+
+**4. One typed session record, horizon-read, episode-scoped.** `session:walkaway` · `record` is a JSON literal, written latest-wins at `turn_time(turn)` in the session frame and read through the session's horizon view:
+- **Fields:** `{status: "asked"|"declined"|"confirmed", arc_id, asked_turn, asked_minutes, declined_minutes, episode_since}`. `episode_since` is `_episode_since(reads)` (turnloop.py:3983) at write time; None for a first chapter.
+- **A record from another episode is no record:** its `episode_since` differs from the current `_episode_since`. A continued chapter starts clean, and an old question or decline can neither be confirmed nor suppress.
+- **Time** is `time:elapsed.elapsed_minutes` (`read_clock(world).minutes`), the diegetic clock, never a display time.
+- **Eligible means all of these:**
+  - the main arc's refusal clock is armed;
+  - no record in this episode, or the record is `declined` **and** `minutes_now - declined_minutes >= 1440` (offered again at exactly 1,440; not at 1,439);
+  - and the record isn't `confirmed`.
+- **A world without a diegetic clock** (`minutes_now` None): a declined record suppresses for the rest of the episode. That fails closed: never re-ask without a clock.
+
+**5. The question is asked in the story, once, with the stakes plain.** On the `asked` turn, the briefing carries:
 
 > THE PLAYER MAY BE WALKING AWAY from {aim}. Make what they would leave behind concrete and immediate, and let a present character, or the scene itself if no one is there, ask plainly whether they are truly done with it. Never decide for them, and never block them.
 
-- **The form is fixed and medium-tempo:** an in-world conversational beat. The ruleset's tempo-selected form (I8) is deferred to R46, with a written reason: one fixed form adds no model call.
+The form is a fixed, medium-tempo in-world beat. Tempo-selected forms come with R46.
 
-**4. Only an explicit yes ends it.** On the turn after a question stands:
-- **The candidate:** the detector gets `{kind: "walkaway_confirmed:main", what: "the player answers YES, explicitly: they are giving up <aim> for good"}`, and the `walkaway:main` candidate is withheld.
-- **On a yes:** it writes `event:abandoned_main_<turn>` with `kind` = the main refusal clock's kind (`event:abandoned`), plus `agent` and `caused_by` rows. `clock_pass` then fires the refusal clock as designed, and B1 records `abandoned`.
-- **On anything else** (a no, a deflection, silence, another action, or "one more question for Reginald"): it's the literal reading (IR-22). The question is cleared (`asked` → `answered_no` at that turn), and play goes on.
-
-**5. Never ask twice about the same thread in one stretch.** After a `no`, the walk-away candidate for the main arc is withheld until **one full story day** (1,440 diegetic minutes) has passed. It's measured on the story clock, since turns are free. That's the ruleset's "at most one clarification per thread per stretch of story time".
-
-**6. Nothing else infers abandonment:** no movement, distance, idle time, or turn count. The refusal clock stays guarded against counter atoms, as today.
+**6. Nothing else infers abandonment:** no movement, distance, idle time or turn count. `_walkaway_transition`'s confirm branch is the **sole** writer of `event:abandoned*`. The refusal clock's counter guard stays.
 
 ## Not in scope
 
@@ -48,23 +64,18 @@
 
 ## Tests
 
-1. **Detection asks, never ends:**
-   - **Setup:** a stub detector reports `walkaway:main` on turn 5.
-   - `session:walkaway` is set, with no `event:abandoned*` row, and the refusal clock hasn't fired.
-   - The turn-5 briefing carries the walk-away question directive.
-2. **An explicit yes ends it:**
-   - **Setup:** a stub detector reports `walkaway_confirmed:main` on turn 6.
-   - `event:abandoned_main_6` is written with kind `event:abandoned`.
-   - The refusal clock fires, and the receipt's `outcome_category` is `abandoned`.
-3. **Reginald (anything but yes):** on turn 6 the player asks Reginald one last question (no confirm detected). Then:
-   - there's no abandonment;
-   - the question is cleared;
-   - on turn 7 the confirm candidate is gone and the walk-away candidate is withheld.
-4. **Not twice in a stretch:**
-   - **Setup:** after a no at story minute m.
-   - A walk-away candidate isn't offered before m + 1,440.
-   - After it, it is offered again.
-5. **Main arc only:** a side arc's refusal clock never gets a walk-away candidate.
-6. **No inference from movement:** 30 turns of travel far from the case, with no declaration detected, give no `session:walkaway` and no abandonment.
-7. **The guard stands:** a counter-based refusal clock is still suppressed (the existing test).
-8. **The full suite.**
+1. **Declaring asks, never ends:** `declares_giving_up` on turn 5 makes the record `asked` (`asked_turn` 5, `asked_minutes` m). There's no `event:abandoned*`, and the refusal clock hasn't fired. The turn-5 briefing carries the question.
+2. **An explicit yes ends it, the same turn:** `confirms_walkaway` on turn 6 writes `event:abandoned_main_6` with kind `event:abandoned`. The refusal clock fires **on turn 6, exactly once**: one firing event, one `refusal_conclusion` effect. The receipt's `outcome_category` is `abandoned`.
+3. **Every other next submission declines,** each with `declined_minutes` set and no abandonment:
+   - (a) asking Reginald one last question as an action;
+   - (b) an answerable `question` that returns early;
+   - (c) a pure-mode declaration that's denied;
+   - (d) `exit`;
+   - (e) an action whose resolution fails.
+4. **The suppression boundary:** declined at minute m. At m + 1439 there's no `declares_giving_up` prompt text and no `asked` transition. At m + 1440 it's eligible again.
+5. **Episode reset:** a record `asked` (or `declined`) in chapter 1, then `continue_episode`. In chapter 2 the record is ignored: the question can't be confirmed, and there's no suppression.
+6. **No clock:** in a world without `time:elapsed`, a decline suppresses for the rest of the episode.
+7. **Main arc only:** a side arc never gets the walk-away prompt text or a record.
+8. **No inference from movement:** 30 turns of travel with `declares_giving_up` false give no record and no abandonment.
+9. **Sole writer:** a grep-style test finds no other code path writing an `event:abandoned` kind. The counter-refusal guard still holds (the existing test).
+10. **The full suite.**
