@@ -23,7 +23,7 @@ Nothing says what the authored event is, where it happens or with what. The beat
    - for `event_occurs`, one plain sentence naming the act and what makes it this act: the place, the object, the people, in the story's own names ("Hobb drops the lower chain, the river boom at the lower chain tower, during the fog-bell blind window, and the barge carrying the protagonist passes");
    - for `player_learns`, the empty string.
    It is `required` in the JSON schema (strict mode needs every property), with `""` allowed.
-2. **The beat.** `Beat` gains `what: str = ""`. `_beat_rows` writes a timeless plot row `(beat, "what", text)` only when the text is non-empty, so a beat without it is byte-shaped as today. Both loaders (`arc_from_frame` and `beat_from_reads`) read it back, with a missing row as `""`. It lives in the plot frame like every other beat row: never canon, never in the narrator's prompt.
+2. **The beat.** `Beat` gains `what: str = ""`. `_beat_rows` writes a timeless plot row `(beat, "what", text)` only when the text is non-empty, so a beat without it is byte-shaped as today. Both loaders (`arc_from_frame` and `beat_from_reads`) read it back, with a missing row as `""`. It lives in the plot frame like every other beat row: never canon, never in the narrator's prompt. The arc cache (`arc_to_cache`/`arc_from_cache`) carries it as an optional key, absent when empty, and a drift repair's replacement beat keeps it, since the replacement keeps the dead beat's own condition.
 3. **The detector's candidates.** `_fire_event_occurs` sends `what = beat.what` when non-empty, else today's de-slugged kind. A world built before this change keeps working as it does.
 4. **The place.** `_fire_event_occurs` takes the scene's name as the briefing resolves it (the PLACE-NAME-ANCHOR name, from the player frame), and `detect_events` shows it: "THE PLAYER IS AT: <name>". With no name, the line is left out.
 5. **The prompt rule** in `detect_events`, added to the strictness paragraph: "An event happens only when the action is the act described: with the things, the people and at the place the description names. The same word for a different thing (another chain, another door, another key) is not the event. If the description names a place and the player is somewhere else, it did not happen unless the description says it can be done from afar."
@@ -54,3 +54,16 @@ Nothing says what the authored event is, where it happens or with what. The beat
 8. **Fail-open:** a detector that raises fires nothing, and the turn completes (as today).
 9. **The run 13 case, measured, not asserted:** replay turn 9's detector call on the subscription with the run 13 candidate, given (a) today's inputs and (b) the authored sentence plus the scene. Report both answers. A model's answer is not a unit test.
 10. **The full suite.**
+
+## Measured (test 9, 2026-10-14, Codex subscription, cheap tier, 3 repeats each)
+
+Turn 9's action and its three pending candidates (`escape_completed_without_condemning_another_prisoner`, `fog_bell_window_taken_at_lower_chain`, `hearth_debt_called_without_open_betrayal`), resolved `complete_success`:
+
+| Variant | Fired `fog_bell_window_taken_at_lower_chain` |
+|---|---|
+| (a) today's prompt: de-slugged kinds, no scene | 3 of 3 |
+| (b) de-slugged kinds, plus the scene ("dark runoff lane") and the new rule | 3 of 3 |
+| (c) authored meanings, plus the scene and the rule | 0 of 3 |
+| positive control: (c)'s inputs with a genuine boom-window escape in the laundry barge | 3 of 3 fired |
+
+The authored meaning is what does the work. The scene and the rule alone don't fix a world built before this change (b). The meanings in this replay were written by hand from the source story, and in play the arc author writes them. Script and output: `scratchpad/replay` (not tracked).
