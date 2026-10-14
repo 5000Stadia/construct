@@ -1,6 +1,11 @@
 # Hedge versus condition: a deferred conclusion is a pending decision (R38)
 
-**Status:** spec r1, 2026-10-13, for cr review. Not built.
+**Status:** spec r2, 2026-10-13, for cr review. Not built.
+
+**r2 (cr RED on r1):**
+- the raw/effective split per consumer, confirmed and stated;
+- a safe fallback when the condition text is missing;
+- an ordered clear rule: the pending decision clears only when an effective commitment actually lands or bounces, never when it is held by the clarification gate.
 **Source:** ruleset slice I1 / IR-18 (Kabe's intent ruleset, adopted 2026-10-13; `INTENT-RULESET.md`), and the verified F3 defect.
 
 ## The facts
@@ -30,9 +35,14 @@
 **2. The host gate** (intent.py, where `commits` is parsed):
 - `Intent.commits` (the effective flag) is true only when the model's `commits` is true **and** `commit_condition` is `none` or `hedge`. An unknown or missing value counts as `none`, so today's behaviour holds for any old or stub response.
 - `Intent.conclusory` keeps the model's raw flag for the one place that needs it: the pure-mode declaration exemption (turnloop.py:4631). A conditioned accusation phrased as a declaration is still not denied as fact-by-fiat.
+- **Per consumer (r2):**
+  - **Effective `commits`:** the loss result-event (6272: a deferred conclusion can never mint a loss), the stage gate (6666), the bounce (6700), the judgment and terminal path (6714) and the commitment receipt.
+  - **Raw `conclusory`:** the declaration exemption at 4631, and nothing else.
+  - **Immutable raw value:** the raw value is never mutated. The effective local keeps its existing stage-gate mutation (`commits = False` on a clarification beat).
 
 **3. A conditioned commitment becomes a pending decision.** On a turn where the model said `commits` with a precondition or conditional:
 - the turn writes `session:pending_decision` · `record`, a JSON literal `{commitment, condition, turn}`, at `turn_time(turn)`. The latest wins; there is one pending decision at a time.
+- **Missing condition text (r2).** A valid `precondition`/`conditional` can arrive with `commit_precondition` missing, blank or non-string. The commitment stays suppressed (treating it as `none` would recreate the defect). `condition` is then stored as the deterministic generic `"they have settled what they wanted to check first"`. `commitment` falls back to the player's own input, trimmed to 200 characters, when the model's `commitment` is blank. So the record and the briefing line never render an empty clause.
 - **Nothing else happens:** no stage gate, no bounce, no judgment, no receipt, no loss event.
 
 **4. The briefing carries it, so the world can bring it back.** While a pending decision stands (written at or after the episode start), the narrator's briefing carries:
@@ -41,7 +51,13 @@
 
 That is the ruleset's "a resolved precondition surfaces the decision, never fires it". The surfacing is the narrator's in-world invitation, with no extra call.
 
-**5. It clears** when a later turn's effective commitment goes through the gates (lands or bounces), or when a newer pending decision replaces it. A new chapter's briefing ignores one written before its episode start (`_episode_since`).
+**5. It clears, by one ordered write rule (r2).**
+- **When it clears:** after the commitment gates have run on a turn, if an effective commitment **landed** (`commitment_grade` set) or **bounced** (`commitment_bounced`), the turn writes a tombstone: `session:pending_decision` · `record` = `""` at `turn_time(turn)`. The briefing treats an empty record as none.
+- **When it doesn't clear:**
+  - an effective commitment **held by the clarification gate** (the stage gate's beat: `commits` set False there) neither lands nor bounces, so it does **not** clear;
+  - a turn with no effective commitment doesn't either;
+  - a newer conditioned commitment replaces the record (latest wins).
+- **A new chapter:** its briefing ignores a record written before its episode start (`_episode_since`).
 
 ## Not in scope
 
@@ -57,4 +73,10 @@ That is the ruleset's "a resolved precondition surfaces the decision, never fire
 5. **Pure-mode declaration:** "It was Ellis — but first I'll check the clock", classified as a declaration with a precondition, isn't denied as fact-by-fiat, and becomes a pending decision.
 6. **The hedge is unchanged:** "I think it was Ellis" (hedge) commits exactly as today (the existing hedged-commitment tests pass unchanged).
 7. **Episode scope:** a pending decision from before the episode start isn't in a new chapter's briefing.
+7b. **(r2) Missing condition text:** `commit_condition=precondition` with `commit_precondition` absent (and in another case `""`, and in another `42`). The commitment stays suppressed, and the record and briefing carry the generic condition, never "once ". A blank `commitment` falls back to the trimmed player input.
+7c. **(r2) Clear on bounce, clear on land, retain on clarification:**
+   - **Bounce:** pending then a plain commit that bounces on coverage: the tombstone is written, and the next briefing has no PENDING DECISION.
+   - **Land:** the same with a commit that lands.
+   - **Clarification:** a plain commit held by the stage gate's clarification beat leaves the record in place, and the next briefing still carries it.
+7d. **(r2) The raw/effective split:** a conditioned commitment mints no loss result-event at a failure tier (6272).
 8. **The full suite.**
