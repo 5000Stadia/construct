@@ -1,8 +1,11 @@
 # The engine classifier at effort "none"
 
-**Status:** spec r3, 2026-10-13, for cr review. Not built.
+**Status:** spec r4, 2026-10-13, for cr review. Building on `feat/classify-effort`.
 - r2 (cr RED on r1): acceptance is row-level and comes before any user play; the knob ships defaulting to `low`.
-- r3 (cr RED on r2): the movable set takes its containment part from the audited world's own semantics, and fails closed. It replaces TURN-CLASSIFY-ONCE r1 (c718141), which is parked: cr RED, and see "Why not batching" below.
+- r3 (cr RED on r2): the movable set takes its containment part from the audited world's own semantics, and fails closed.
+- **r4 (found while building, two facts that change the gate):**
+  1. **The `low` baseline already fails r3's gate.** Run 10's played world, classified at today's `low`, holds **39** movable-set rows CONSTITUTIVE (`--world` mode, no model calls), out of 466 play-time CONSTITUTIVE rows. Many are correct: `obj:iron_barred_door in place:cell_12` and `obj:slit_window in place:cell_12` are fixtures. Some look doubtful: `obj:split_seal in obj:execution_page`. The engine **sends object containment to the model on purpose**, as a fixture-vs-movable judgement (patternbuffer classify.py `_guardrails`: `place:` containment is CONSTITUTIVE by rule; held/worn/carried are STATE; an object `in` "falls to the model"). So "no movable row CONSTITUTIVE" can't be the bar: a fixture `in` its room *should* be CONSTITUTIVE.
+  2. **r1–r3's corpus excluded `in` rows,** so the most important judgement was never measured. A third corpus, centred on object `in` rows, is being captured and replayed before any flip. It replaces TURN-CLASSIFY-ONCE r1 (c718141), which is parked: cr RED, and see "Why not batching" below.
 **Source:** R20 run 10's timing log (eval/12), and two measurements on run 10's played world, archived at `/media/k/Blank/construct-scratch/effort-probe/`.
 
 ## The facts
@@ -63,7 +66,9 @@ cr's point (RED on r1): an aggregate verdict mix can hide a wrong row behind an 
    - The 10 batched prompts (51 rows) and 45 per-row prompts captured from run 10's world are replayed at `low` and at `none`, with every (row, verdict) pair recorded.
    - The corpus holds play text, so it stays untracked at `/media/k/Blank/construct-scratch/effort-probe/`.
    - The replay script lands as `scripts/classify_effort_audit.py`. It takes a corpus path; no corpus is committed.
-   - **Pass:** no row whose attribute is in the movable set gets `CONSTITUTIVE` at `none`.
+   - **Pass (r4, comparative):** no movable-set row is CONSTITUTIVE at `none` that was not CONSTITUTIVE at `low`. Those "none-alone" rows are the failures.
+   - **Review:** rows CONSTITUTIVE at both efforts are listed and hand-audited (a fixture, or a shared error that this change doesn't introduce).
+   - **The corpus must include object `in` rows,** the engine's fixture-vs-movable judgement (r4). The third corpus is centred on them.
    - **The movable set (r3)** is the union of two parts:
      - **The audited world's own containment family,** read from that world: `world.semantics.containment_family()`. These are the engine's built-ins plus every attribute declared `relation_family=containment` (patternbuffer semantics.py:340-363). A handwritten list would miss a declared containment attribute such as `stowed_at`.
      - **Construct's conservative extras:** `at`, `near`, `position`, `formerly_in`, `held*`, `carried*`, `state`, `condition`, `status`.
@@ -74,7 +79,9 @@ cr's point (RED on r1): an aggregate verdict mix can hide a wrong row behind an 
 2. **A disposable-world turn trace.**
    - The next R20 probe run sets `HOLODECK_CODEX_CLASSIFY_EFFORT=none`. It needs Kabe's or the monitor's yes, as every run does. Its world is a probe world, never a user's.
    - Afterwards, `scripts/classify_effort_audit.py --world <played world>` lists **every** row written during play that was classified `CONSTITUTIVE`, with its entity, attribute, value, turn and confidence. Each one is audited by hand in the eval note.
-   - **Pass:** no movable-set row is `CONSTITUTIVE`, and every other `CONSTITUTIVE` row is defensible on its own terms.
+   - **Pass (r4):** every movable-set CONSTITUTIVE row is hand-audited as a fixture (it doesn't move in this world). A portable object made permanent fails.
+   - **The baseline:** the same audit of run 10's world (at `low`) is the comparison, at 39 rows of which most are fixtures. The probe world at `none` must not show a higher share of portable objects made permanent.
+   - The script exits 1 whenever the review list is non-empty. In world mode that means "audit these by hand", not an automatic verdict.
    - **Read path:** the world's per-row durability, through a porcelain read if the pinned engine exposes one. Otherwise through a read-only query of the engine's classification sidecar, documented in the script as a dev-tool coupling to the engine's file layout, never used by shipped code.
 3. **Only then** a one-line commit flips the default to `none`, citing both reports.
 4. **After the flip,** each later R20 run keeps the same row-level `CONSTITUTIVE` listing in its eval note. The aggregate mix is supplementary only.
