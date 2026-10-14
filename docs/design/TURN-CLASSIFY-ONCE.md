@@ -1,6 +1,6 @@
 # Classify a turn's new facts once, not per ingest
 
-**Status:** spec r1, 2026-10-13, for cr review. Not built.
+**Status:** PARKED 2026-10-14. An audit of `run_turn` found eight same-turn reads that depend on model-judged object/person `in` rows; no seal point avoids them. Replaced by PLACEMENTS-BY-RULE.md (construct's own placements written by rule, no model call). Kept as the record of r1 and cr's review.
 **Source:** R20 run 10's timing log (eval/12): the engine's lifetime classifier ("Classify the lifetime") made **109 calls in 20 turns, 566 s in all** (mean 5.2 s), all serial within each turn. Kabe (2026-10-13): literal categorization "can be handled by literally the fastest model in probably a process that can mass group work in a single turn batch". pattern-buffer's guidance: m151ce5.
 
 ## The facts
