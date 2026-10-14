@@ -452,3 +452,58 @@ def test_session_horizon_advances_turn_by_turn(tmp_path, monkeypatch):
         assert frozen.horizon() == min(first)            # the frozen view did not advance
     finally:
         s.close()
+
+
+# ------------------------------------- fail closed when presence is unreadable (cr code review)
+
+def _presence_raises(monkeypatch, entity):
+    real = PorcelainWorldReads.has_entity
+
+    def has_entity(self, e):
+        if e == entity:
+            raise RuntimeError("store unreadable")
+        return real(self, e)
+    monkeypatch.setattr(PorcelainWorldReads, "has_entity", has_entity)
+
+
+def _canon_count(w):
+    return len(w.porcelain.facts("canon"))
+
+
+def test_reshape_declines_when_presence_is_unreadable(hworld, monkeypatch):
+    """refer resolves 'Later Person' to the future-only id; the presence check raises; the
+    reshape must neither return that id nor write anything."""
+    from construct import cohorts, reshape
+    v = HorizonView(hworld, H)
+    plan = ReshapePlan(slug="x", state_rows=[
+        {"entity": "obj:note", "attribute": "about", "value": "Later Person"}])
+    _presence_raises(monkeypatch, "person:later")
+    with pytest.raises(adapter.IdentityUnavailable):
+        canonicalize_plan(v, plan)
+    monkeypatch.setattr(cohorts, "propose_reshape", lambda *a, **k: {"is_reshape": True})
+    monkeypatch.setattr(reshape, "plan_from_proposal", lambda *a, **k: ReshapePlan(
+        slug="x", state_rows=[{"entity": "obj:note", "attribute": "about",
+                               "value": "Later Person"}]))
+    before = _canon_count(hworld)
+    assert reshape.apply_reshape(v, None, action="a", scene="s", canon="c",
+                                 tier="complete_success", turn=3, enabled=True) is None
+    assert _canon_count(hworld) == before
+
+
+def test_grant_declines_when_presence_is_unreadable(hworld, monkeypatch):
+    at = OPENING + 6
+    _presence_raises(monkeypatch, "place:far_hut")
+    before = _canon_count(hworld)
+    got, seg = _grant_moved_place(HorizonView(hworld, at), PROT, "the far hut", at=at,
+                                  as_of=at)
+    assert (got, seg) == (None, None)
+    assert _canon_count(hworld) == before
+
+
+def test_hook_staging_declines_when_presence_is_unreadable(hworld, monkeypatch):
+    v = HorizonView(hworld, H)
+    _presence_raises(monkeypatch, "person:later")
+    rows, ids = game._plan_hook_cast(
+        v, PorcelainWorldReads(v), {"hook_cast": [{"id": "person:later", "name": "L"}]},
+        None, PROT, at=H)
+    assert rows == [] and ids == []

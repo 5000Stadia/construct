@@ -2447,10 +2447,17 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
     # takes the next free suffix (the identity rule).
     reads = PorcelainWorldReads(world, horizon=as_of)
     place_id = f"place:{slug}"
-    if not reads.has_entity(place_id) and (
-            is_future_only(world, place_id)
-            or (as_of is not None and PorcelainWorldReads(raw_world(world)).has_entity(place_id))):
-        place_id = next_free_id(world, place_id)
+    try:
+        if not reads.has_entity(place_id) and (
+                is_future_only(world, place_id)
+                or (as_of is not None
+                    and PorcelainWorldReads(raw_world(world)).has_entity(place_id))):
+            place_id = next_free_id(world, place_id)
+    except Exception:  # noqa: BLE001 — IdentityUnavailable or an unreadable presence read
+        # the identity rule can't be established: DECLINE the mint (nothing written);
+        # the narrator handles the move against the real geography
+        logger.warning("move grant to %r declined: identity unavailable", moves_to)
+        return None, None
     # PASSABILITY ON THE GRANT PATH (Cx 387 hard constraint): the mint must not teleport
     # through a blocked route. The checkable target is the CONTAINER (it exists in canon)
     # or an existing reused place; a genuinely fresh top-level mint has no route data and
@@ -2483,11 +2490,15 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
         _tslug = slugify(_tail_phrase)
         if _tslug and _tslug not in _DEICTIC_DEST:
             container = f"place:{_tslug}"
-            if not reads.has_entity(container) and (
-                    is_future_only(world, container)
-                    or (as_of is not None
-                        and PorcelainWorldReads(raw_world(world)).has_entity(container))):
-                container = next_free_id(world, container)
+            try:
+                if not reads.has_entity(container) and (
+                        is_future_only(world, container)
+                        or (as_of is not None
+                            and PorcelainWorldReads(raw_world(world)).has_entity(container))):
+                    container = next_free_id(world, container)
+            except Exception:  # noqa: BLE001 — identity unestablished: decline, write nothing
+                logger.warning("move grant to %r declined: identity unavailable", moves_to)
+                return None, None
             if not reads.has_entity(container):
                 rows += [{"entity": container, "attribute": "kind",
                           "value": _tail_kind, "timeless": True},

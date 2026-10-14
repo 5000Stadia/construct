@@ -154,13 +154,15 @@ def _canonical_id(world: Any, eid: str, mapping: dict | None = None) -> str:
         return mapping[eid]
     try:
         res = world.refer(eid, frame="canon")
-        # refer's tier-1 name lookup bypasses as_of (Cx 257), so a resolution onto an id
-        # that exists only past the play horizon is refused here — the presence guard.
-        if (getattr(res, "status", None) == "resolved" and getattr(res, "entity_id", None)
-                and not is_future_only(world, res.entity_id)):
-            return res.entity_id
     except Exception:
         logger.debug("reshape canonicalize: refer(%r) failed; keeping as-is", eid)
+        res = None
+    # refer's tier-1 name lookup bypasses as_of (Cx 257), so a resolution onto an id that
+    # exists only past the play horizon is refused here — the presence guard. An unreadable
+    # check RAISES (IdentityUnavailable): apply_reshape then declines before any write.
+    if (getattr(res, "status", None) == "resolved" and getattr(res, "entity_id", None)
+            and not is_future_only(world, res.entity_id)):
+        return res.entity_id
     # THE IDENTITY RULE (READS-AT-PLAY-HORIZON T6): a "genuinely new" id kept as-is must not
     # be one the hidden story introduces later — it takes the next free suffix, one mapping
     # per plan, so the reshape neither resolves to nor writes onto the future entity.

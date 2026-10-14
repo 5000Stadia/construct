@@ -315,18 +315,23 @@ def raw_world(world: Any) -> Any:
     return world.head if isinstance(world, HorizonView) else world
 
 
+class IdentityUnavailable(RuntimeError):
+    """The identity rule could not establish head-and-horizon presence. Callers DECLINE the
+    write (no reuse, no mint): an unknown check is never read as "not future"."""
+
+
 def is_future_only(world: Any, entity: str) -> bool:
     """THE IDENTITY RULE (READS-AT-PLAY-HORIZON): an id that exists at the timeline head but
     not at the view's horizon belongs to the hidden story's future. A play-time write must
-    neither reuse it nor write onto it. Always False on a raw (legacy) world."""
+    neither reuse it nor write onto it. Always False on a raw (legacy) world. Raises
+    `IdentityUnavailable` when presence can't be read — fail CLOSED (cr code review)."""
     if not isinstance(world, HorizonView) or not entity:
         return False
     try:
         return (PorcelainWorldReads(world.head).has_entity(entity)
                 and not PorcelainWorldReads(world).has_entity(entity))
-    except Exception:  # noqa: BLE001 — an unreadable check never blocks; it never reuses
-        logger.warning("future-only check failed for %s", entity, exc_info=True)
-        return False
+    except Exception as exc:  # noqa: BLE001 — unknown is not "not future": decline
+        raise IdentityUnavailable(f"presence of {entity} unreadable: {exc!r}") from exc
 
 
 def next_free_id(world: Any, entity: str) -> str:
