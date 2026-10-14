@@ -520,7 +520,8 @@ def _stage_ensure_located_people(world: Any, known_ids: list, play_as: str,
             _anchor_place = _places[0]
             world.porcelain.ingest_structured([
                 {"entity": _anchor_person, "attribute": "in",
-                 "value": _anchor_place, "value_type": "entity"}])
+                 "value": _anchor_place, "value_type": "entity"}],
+                classify="rules")  # PLACEMENTS-BY-RULE: a host placement is movable state
             located_people = [_anchor_person]
             logger.warning("no located people at arc authoring — staged %s at %s "
                            "so the protagonist guard has ground (bare-world fix)",
@@ -623,7 +624,8 @@ def _stage_ground_play_as_figure(world: Any, arc: Arc, known_ids: list, play_as:
             if _ground:
                 world.porcelain.ingest_structured([
                     {"entity": arc.protagonist, "attribute": "in",
-                     "value": _ground, "value_type": "entity"}])
+                     "value": _ground, "value_type": "entity"}],
+                    classify="rules")  # PLACEMENTS-BY-RULE
                 located_people = list(located_people) + [arc.protagonist]
                 logger.warning(
                     "protagonist %s matched play_as but was unplaced — staged "
@@ -1429,7 +1431,7 @@ def _stage_cast_in_place(world: Any, arc: Arc, cast_nodes: tuple,
                 for _it in _loc_items:
                     if _it.get("attribute") == "in":
                         _it["valid_from"] = turn_time(0)
-                world.porcelain.ingest_structured(_loc_items)
+                world.porcelain.ingest_structured(_loc_items, classify="rules")  # PLACEMENTS-BY-RULE
                 logger.info("staged %d cast location fact(s) at scene %s (entry epoch %.1f)",
                             len(_loc_items), _scene_place, turn_time(0))
             # HYBRID holders (obj:/place: the player EXAMINES — Discovery, Cx 109): admit them
