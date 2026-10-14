@@ -1297,6 +1297,7 @@ class TurnTrace:
     cast_move_drops: list = field(default_factory=list)  # #80: (person, destination, reason) stagecraft-gate/engine-skip drops this turn
     landed: list = field(default_factory=list)  # NARRATED-OBJECTS-LAND: obj ids the settle placed in the scene by rule this turn
     restated_origin: list = field(default_factory=list)  # RESTATED-ORIGIN: (entity, value) restatements dropped before ingest
+    place_named: str = ""  # PLACE-NAME-ANCHOR: the scene whose name a receipt-confirmed write gave the player frame
     reshape: str = ""  # WORLD-CHANGING AGENCY: the narrator directive for a canon reshape committed this turn (flag-gated)
     replanned: str = ""  # the new main arc id if a reshape re-aimed the arc mid-story (flag-gated)
     reshape_entities: list = field(default_factory=list)  # visible committed reshape entity ids (carried into next-turn scope)
@@ -4652,6 +4653,45 @@ def _land_narrated_objects(p: Any, arc: Arc, promote: list[dict],
         return []
 
 
+def _name_the_scene(p: Any, arc: Arc, scene: str | None, *, player_frame: str, turn: int,
+                    horizon: float | None, live_reads: Any, trace: TurnTrace) -> None:
+    """PLACE-NAME-ANCHOR r2 (R20 runs 10-12: the briefing's location anchor ran name-free,
+    because the player frame never held the scene's name). The player knows the name of the
+    place they stand in. In order:
+    - concealment first, failing closed (a protected or unreadable name: no write);
+    - the frame's own name read at the horizon (known/conflicted: no write);
+    - the canon name at the horizon (`known` literal only);
+    - one `classify="rules"` write at turn_time;
+    - `trace.place_named` only on a receipt-confirmed row.
+    Only the scene's own name, never a destination's or a neighbour's."""
+    if not scene:
+        return
+    try:
+        if (scene, "name") in arc_protected_keys(arc, live_reads):
+            return
+    except Exception:  # noqa: BLE001 — protection unreadable: never treated as empty
+        trace.dropped_cohorts.append("place_name (protection unreadable)")
+        return
+    try:
+        if p.state(scene, "name", frame=player_frame, as_of=horizon).get("status") in (
+                "known", "conflicted"):
+            return
+        st = p.state(scene, "name", as_of=horizon)
+        if (st.get("status") != "known" or st["fact"].get("value_type") != "literal"
+                or not isinstance(st["fact"].get("value"), str)):
+            return              # a `known` LITERAL only: never mirror an entity id as a name
+        row = {"entity": scene, "attribute": "name", "value": st["fact"]["value"],
+               "valid_from": turn_time(turn)}
+        receipt = _receipt_rows(p.ingest_structured([row], frame=player_frame,
+                                                    classify="rules"))
+    except Exception as exc:  # noqa: BLE001 — the anchor stays name-free; the turn goes on
+        logger.info("place name for %s not mirrored: %s", scene, exc)
+        return
+    confirmed, _ = confirmed_batch([row], receipt, cap=1)
+    if confirmed:
+        trace.place_named = scene
+
+
 def settle_opening(world: Any, arc: Arc, prose: str, *, turn: int,
                    scope: list[str] | None = None,
                    horizon: float | None = None) -> TurnTrace:
@@ -4666,6 +4706,16 @@ def settle_opening(world: Any, arc: Arc, prose: str, *, turn: int,
     stamped at its time. Fail-open: the opening is already shown, so any failure is logged
     and noted on the returned in-memory trace, and play proceeds as before."""
     trace = TurnTrace(turn=turn)
+    # PLACE-NAME-ANCHOR r2: the opening scene is named first, even before a blank-prose
+    # return (turn 1's own mirror is the fallback).
+    try:
+        _p0 = _FailOpenIngest(world.porcelain, trace)
+        _chain0 = _p0.locate(arc.protagonist, as_of=horizon)
+        _name_the_scene(_p0, arc, _chain0[0] if _chain0 else None,
+                        player_frame=_player_frame(arc), turn=turn, horizon=horizon,
+                        live_reads=PorcelainWorldReads(world, horizon=horizon), trace=trace)
+    except Exception as exc:  # noqa: BLE001 — the opening is already shown
+        logger.info("opening place name skipped: %s", exc)
     if not (prose or "").strip():
         return trace
     try:
@@ -6634,6 +6684,9 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         except Exception as exc:  # governance must never sink the turn
             trace.dropped_cohorts.append(f"weave_pick ({exc})")
 
+    # PLACE-NAME-ANCHOR r2: after movement, before the player-frame snapshot.
+    _name_the_scene(p, arc, scene, player_frame=player_frame, turn=turn, horizon=_h,
+                    live_reads=live_reads, trace=trace)
     player_snap = _snap_or_empty(p, snap_scope, frame=player_frame, as_of=_h)
     # EVENT-OCCURS-FIRING (Cx 115): resolve the action outcome NOW (before beat_pass) so an authored
     # `event_occurs` act-beat can fire on a SUCCESSFUL act and beat_pass achieves it THIS turn. The

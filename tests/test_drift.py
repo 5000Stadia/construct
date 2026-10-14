@@ -3506,14 +3506,17 @@ def test_walkability_atleast_and_not_composites(world):
     assert ok2 and carriers2 == {"person:clerk"}
 
 
-def test_briefing_location_anchor_is_player_frame_scoped(world):
+def test_briefing_location_anchor_is_player_frame_scoped(world, monkeypatch):
     # Task #10 + cr's concealment catch: the anchor pins WHERE with the
-    # presence-block force, and its LABEL is player-frame truth only —
-    # a canon-only name the player never learned goes name-free, never
-    # into the briefing.
+    # presence-block force, and its LABEL is player-frame truth only.
+    # PLACE-NAME-ANCHOR r2: the player now learns the name of the place they
+    # stand in, so a CONCEALED name (arc-protected) is what stays out.
+    from construct import turnloop
+    monkeypatch.setattr(turnloop, "arc_protected_keys",
+                        lambda arc, reads=None: {(SCENE, "name")})
     arc = make_arc()
     seed_arc(world, arc)
-    # NEGATIVE: a distinctive name known to canon ONLY
+    # NEGATIVE: a distinctive, protected name known to canon ONLY
     world.porcelain.ingest_structured([
         {"entity": SCENE, "attribute": "kind", "value": "place",
          "timeless": True},
@@ -3528,7 +3531,11 @@ def test_briefing_location_anchor_is_player_frame_scoped(world):
     ])
     r = run_turn(world, arc, provider, "I look around.", turn=2,
                  generate=False)
-    assert "Vermilion Vault" not in r.trace.briefing      # no concealment leak
+    # no concealment leak through the anchor or the player frame (a protected key may still
+    # ride the FORESHADOW block, which holds the hidden answer for the narrator by design)
+    assert "YOU ARE AT: the Vermilion Vault" not in r.trace.briefing
+    assert world.porcelain.state(SCENE, "name", frame=f"knows:{PLAYER}")["status"] == "unknown"
+    assert r.trace.place_named == ""
     assert "YOU ARE AT the place you now stand in." in r.trace.briefing
     assert "never re-place this scene" in r.trace.briefing
     # POSITIVE: the player LEARNS the name → the anchor names it
@@ -3545,3 +3552,24 @@ def test_briefing_location_anchor_is_player_frame_scoped(world):
     r2 = run_turn(world, arc, provider2, "I look again.", turn=3,
                   generate=False)
     assert "YOU ARE AT: the Vermilion Vault." in r2.trace.briefing
+
+
+def test_briefing_location_anchor_names_an_unprotected_scene(world):
+    # PLACE-NAME-ANCHOR r2: standing in a place, the player knows its name; the
+    # canon name reaches the player frame by rule, and the anchor carries it.
+    arc = make_arc()
+    seed_arc(world, arc)
+    world.porcelain.ingest_structured([
+        {"entity": SCENE, "attribute": "kind", "value": "place", "timeless": True},
+        {"entity": SCENE, "attribute": "name", "value": "the Vermilion Vault",
+         "timeless": True},
+    ])
+    world._extractions.extend([{"items": []}, {"items": []}])
+    provider = StubProvider([
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
+         "uncertain_of": ""},
+        {"prose": "The room holds its quiet."},
+    ])
+    r = run_turn(world, arc, provider, "I look around.", turn=2, generate=False)
+    assert "YOU ARE AT: the Vermilion Vault." in r.trace.briefing
+    assert r.trace.place_named == SCENE
