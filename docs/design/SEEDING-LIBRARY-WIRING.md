@@ -1,6 +1,8 @@
 # Wiring the build library: construct's side of registry-first seeding
 
-**Status:** spec r2.1, cr GREEN. **Built** on engine pin e3101a4 (BUILD-LIBRARY-V1 r1.8.3, `identity_time='gate'` the default), 2026-10-14; at cr for code review.
+**Status:** spec **r2.2**, for cr review.
+- r2.1 (cr GREEN) is built and merged on engine pin e3101a4 (BUILD-LIBRARY-V1 r1.8.3, `identity_time='gate'` the default).
+- r2.2 moves the pin to pattern-buffer `c4a8eba` (BUILD-LIBRARY r1.9.1) and replaces rules 1 and 5 and test 7 below. Not yet built.
 
 **Build notes (where the build refines the text):**
 - **The title chunk is folded into chapter 1** (`seeding.text_by_chapter`). `_chunk_chapters` puts a generated story's `# Title` line in a chunk of its own. Numbered as written, the story's first chapter would be chapter 2, stamped at 2 × SOURCE_STEP, above `opening_as_of`. With gate-stamped identity, the whole chapter-1 cast would then be invisible at the opening. Today's per-chunk path has the same offset, which rule 4's "chapter 1 keeps the band below `opening_as_of`" rules out for the library path.
@@ -16,23 +18,9 @@
 - pattern-buffer's BUILD-LIBRARY-V1 r1.7: merged at 6073bfe, docs at 958691d, pbr GREEN. Construct was GREEN on its spec.
 - The library surface was mapped read-only on 2026-10-14. Moving from engine 9e0620f changes no porcelain API (`git diff` touches only the new `patternbuffer/build/` package).
 
-## Amendment r2.2: adopting BUILD-LIBRARY r1.9.1 (pin pattern-buffer c4a8eba; spec for cr review, not built)
+## r2.2 in brief (BUILD-LIBRARY r1.9.1)
 
-**Why now.** R20 run 13's first build (archived as `run13a`) stopped at Stage 1. Three of its six chunks were refused for "handles: declared but not used", and chunk 0 again on its retry. Run 12 had one such refusal and passed on retry. Under r1.9.1 the library drops an unused declared handle with a typed receipt instead of refusing the chunk.
-
-**The pin.** pattern-buffer `c4a8eba`. Its engine source is identical to `30c5ede` (BUILD-SPEED-V1). It carries BUILD-LIBRARY r1.9.1, BEATS-V1 r1.1 and RECIPE-VOCAB-V1, all merged and pbr GREEN. ONE-LOCATION-V1 is **not** in it: that code lives on pattern-buffer's `feat/one-location` branch, waiting on Kabe's metered check. Main's suite is run against `c4a8eba` before the pin.
-
-**The changes:**
-1. **One retry owner.** `extract(..., retries=1)`: the library re-asks a chunk whose returned answer refused it. Construct re-runs a chunk itself **only** when `len(result.attempts) == 1 and result.attempts[0].raw is None`, meaning exactly one call, and it raised. pattern-buffer's precise test, m8d16d6: an error text such as "model call failed" can also follow the library's own retry. So no chunk is ever retried twice. A chunk still in error after that stops the build with its first cause, as today.
-2. **Dropped handles are logged, not stopped on.** A dropped handle is one no accepted line used, so it carries no fact. Nothing about a manifest entry is lost, so there is nothing for a load-bearing stop to protect. Construct logs every `DroppedHandle` (chunk, kind, name, candidates) at INFO and counts them in the Stage 1 line ("…N dropped handle(s)"). The "load-bearing pick" stop discussed with pattern-buffer is not adopted, for this reason.
-3. **Nothing else changes.** The extraction prompt is byte-identical (r1.9.1). `vocabulary` is not passed; RECIPE adoption waits on g8f1157 and a metered check.
-
-**Tests:**
-- a chunk that refuses once and is accepted on the library's retry builds, with two attempts and no construct re-run;
-- a chunk whose single call raised is re-run once by construct;
-- a chunk refused, retried by the library, and refused again is not re-run by construct (two attempts), and the build stops with its cause;
-- an answer that declares an unused handle builds, with the dropped handle logged and counted;
-- the full suite on `c4a8eba`.
+R20 run 13's first build (`run13a`) stopped at Stage 1. Three of its six chunks were refused for "handles: declared but not used", and chunk 0 again on retry. Under r1.9.1 the library drops an unused handle with a receipt instead. The pin, the retry schedule and the dropped-handle rule now live in rules 1 and 5 and test 7 below. The load-bearing-pick stop discussed with pattern-buffer is not adopted, because a dropped handle carries no fact.
 
 ## What changes, in one paragraph
 
@@ -47,7 +35,7 @@ So identity is decided once, by code.
 
 ## The rules
 
-**1. The engine pin moves to pattern-buffer 958691d** (or a later commit, if CONTAINMENT-DURABILITY-V1 has merged by build time; the build note names the exact pin). `engine.pin` and the `.venv` install move together. The full suite is run before any wiring.
+**1. The engine pin (r2.2):** pattern-buffer `c4a8eba` (BUILD-LIBRARY r1.9.1, with BEATS-V1 and RECIPE-VOCAB-V1; its source is identical to `30c5ede`). It has no ONE-LOCATION-V1 code, which sits on pattern-buffer's unmerged branch pending Kabe's metered check. r2.1 was built on `e3101a4`. `engine.pin` and the `.venv` install move together, and the full suite is run against the new pin before it moves.
 
 **2. `author_story` returns the manifest.**
 - Its schema gains `manifest`, in the library's JSON shape (`Manifest.from_dict`):
@@ -84,7 +72,11 @@ So identity is decided once, by code.
 
 **5. Extraction, then commit, inside the existing build session.**
 - `extract(chunks, registry, model, workers=8)`, with `model = engine_tier_dispatch(provider)`. The library's pinned heads route by prefix: `EXTRACT_HEAD` ("Extract world-state facts (build library, chunk)") already matches `_CHEAP_ENGINE_PREFIXES`. `CATEGORY_HEAD` ("Name the beings, places and things") is added to them, since category passes are literal sorting, so fast tier (r4 §6).
-- **Chunk errors:** the library doesn't retry, and `commit` refuses the whole build if any chunk has `error`. Construct re-runs `extract` on the errored chunks once. If any still has an error, the build stops with the first cause, exactly as today's "every chunk failed" stop does (the build never ships a world with a chapter silently missing).
+- **Chunk errors (r2.2): at most two model calls per chunk, ever.**
+  - **Construct's call:** `extract(chunks, registry, model, workers=8, retries=1)`. The library asks a chunk whose **returned answer** refused it once more, so its `attempts` holds two entries.
+  - **Construct's own re-run:** a chunk whose only call **raised** (`len(result.attempts) == 1 and result.attempts[0].raw is None`) is re-run once with `extract([chunk], ..., retries=0)`. With `retries=0`, a refusing answer on the re-run is final, with no third call (cr r2.2 P1). Nothing else is re-run, because a chunk with two attempts has had its retry.
+  - **The stop:** a chunk still in error afterwards stops the build with its first cause, before any commit. The build never ships a world with a chapter silently missing; `commit` refuses an errored chunk in any case.
+- **Dropped handles (r2.2):** each `ChunkResult.dropped_handles` entry (kind, name, candidates) is logged at INFO and counted in the Stage 1 line. A dropped handle carries no fact (no accepted line used it), so it is never a build stop.
 - **Commit:** `commit(world, registry, results, time_of=…, ingest_kwargs={"classify": "defer", "cursor_authoritative": True})`, inside the existing `begin_build` session. Durability is classified at the seal, as today.
 
 **6. Stage 2 is skipped in library mode** (r4 §5, made concrete). Its passes would undo the design: `reconcile`, `adjudicate_deferred`, `typing_conflicts` retypes and the cross-namespace homonym `reject`. For example, the homonym pass would write `distinct_from` between `mention:rex_1` and `person:rex`, so their later evidenced join could never land. The library already:
@@ -132,7 +124,13 @@ The skip is logged as `Stage 2 · identity decided by the manifest (library)`.
    - at the head, all of them are present (the negative control);
    - this test gates the library pin.
 6. **The time mapping:** chapter-1 facts sit below `opening_as_of`; chapter-2 facts sit at or above `next_source_as_of`. A two-chunk chapter (split at a reveal) gets distinct, increasing times.
-7. **Chunk errors:** one chunk errors once and is retried successfully, so the build completes. One that errors twice stops the build with its cause, and nothing is committed.
+7. **Chunk errors (r2.2), as call schedules:**
+   - refuse, then accept: two calls, both by the library; the build completes; no construct re-run;
+   - raise, then accept: two calls, the second construct's re-run; the build completes;
+   - raise, then refuse: exactly two calls (the re-run has `retries=0`), no third call; the build stops and nothing is committed;
+   - refuse, then refuse: two calls, both by the library; no construct re-run; the build stops and nothing is committed;
+   - raise, then raise: two calls; the build stops.
+7b. **Dropped handles (r2.2):** an answer that declares an unused handle builds, and the dropped handle is logged and counted.
 8. **Stage 2 skipped, Stage 3 kept:**
    - in library mode, no `reconcile` / `adjudicate_deferred` / `retype` / homonym `reject` call is made (spy), and the provisional id has no `distinct_from`;
    - `_stage_declare_policy` runs, and its `traversal:` rows exist.
