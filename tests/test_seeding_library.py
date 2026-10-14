@@ -476,7 +476,7 @@ def test_the_cast_note_lists_beings_with_names_type_and_role(tmp_path):
 
 # ------------------------------------------- the play path on a library-built world (cr)
 
-def _play(tmp_path, horizon):
+def _play(tmp_path, horizon, extra_scope=()):
     """A library-built world, then one real turn at `horizon` through a HorizonView, as
     Session plays it. The player stands at Low Crossing from below the opening."""
     from construct.turnloop import run_turn as _run
@@ -488,6 +488,20 @@ def _play(tmp_path, horizon):
         {"entity": PLAYER, "attribute": "kind", "value": "person", "timeless": True},
         {"entity": PLAYER, "attribute": "in", "value": crossing, "value_type": "entity",
          "valid_from": SOURCE_STEP + 1}], frame="canon", classify="rules")
+    # The player's frame holds every canon fact about the cast and places, each at its own
+    # canon time (standing in for the build's knowledge seeding, which this harness skips):
+    # the SCENE block reads that frame, so what reaches the narrator is decided by the
+    # horizon alone.
+    known = []
+    for f in w.porcelain.facts("canon"):
+        if (str(f["entity"]).startswith(("person:", "place:")) and f["entity"] != PLAYER
+                and f["attribute"] in ("kind", "name", "in", "posture", "role", "species")):
+            row = {"entity": f["entity"], "attribute": f["attribute"], "value": f["value"],
+                   "value_type": f.get("value_type") or "literal"}
+            vf = (f.get("valid") or [None])[0]
+            row.update({"valid_from": vf} if vf is not None else {"timeless": True})
+            known.append(row)
+    w.porcelain.ingest_structured(known, frame=f"knows:{PLAYER}", classify="rules")
     arc = make_arc()
     seed_arc(w, arc)
     prov = StubProvider([{"kind": "action", "claims_are": "act", "moves_to": "",
@@ -495,41 +509,50 @@ def _play(tmp_path, horizon):
                           "commits": False, "commitment": ""},
                          {"prose": "The river runs grey past the crossing."}])
     r = _run(HorizonView(w, horizon), arc, prov, "I look around the crossing.", turn=1,
-             scope=[PLAYER, crossing], horizon=horizon)
+             scope=[PLAYER, crossing, *extra_scope], horizon=horizon)
     if getattr(r, "settle", None) is not None:
         r.settle()
     narrate = [c[0] for c in prov.calls if "THE SCENE RIGHT NOW" in c[0]]
     return w, entries, (narrate[-1] if narrate else r.trace.briefing)
 
 
+def _block(brief: str, head: str) -> str:
+    """One briefing block: from its heading to the next blank line."""
+    return brief.split(head, 1)[1].split("\n\n", 1)[0]
+
+
+CAST = ("person:rex", "person:rex_2")
+
+
 def test_a_played_opening_scene_shows_rex_the_dog_and_his_fact(tmp_path):
-    # Rex the man and Rex the dog both stand at the crossing at the opening: the played
-    # turn's PRESENT CHARACTERS lists two, and the turn's horizon reads give the dog's fact.
-    w, entries, brief = _play(tmp_path, OPENING + 1)
+    # the production briefing at the opening: the SCENE block carries the dog's fact, and
+    # PRESENT CHARACTERS lists both Rexes (man and dog) at the crossing
+    w, entries, brief = _play(tmp_path, OPENING + 1, extra_scope=CAST)
     try:
-        present = brief.split("PRESENT CHARACTERS", 1)[1].split("\n\n", 1)[0]
-        assert present.count("Rex: present") == 2
-        view = HorizonView(w, OPENING + 1)
-        assert PorcelainWorldReads(view).state("person:rex_2", "posture") == "sleeping"
-        assert "person:rex_2" in game._canon_entity_ids(view)
+        scene = _block(brief, "THE SCENE RIGHT NOW")
+        assert "sleeping" in scene and "Rex" in scene
+        assert _block(brief, "PRESENT CHARACTERS").count("Rex: present") == 2
     finally:
         w.close()
 
 
 def test_a_played_opening_reads_nothing_from_chapter_three(tmp_path):
-    w, entries, brief = _play(tmp_path, OPENING + 1)
+    late = ("person:duke_orrin", "person:mara_venn")
+    w, entries, brief = _play(tmp_path, OPENING + 1, extra_scope=CAST + late)
     try:
-        for late in ("Duke Orrin", "Orrin", "stranger", "masked rower", "Mara Venn"):
-            assert late not in brief, late
+        for name in ("Duke Orrin", "Orrin", "stranger", "masked rower", "Mara Venn"):
+            assert name not in brief, name
     finally:
         w.close()
 
 
 def test_the_same_turn_at_a_late_horizon_does_read_chapter_three(tmp_path):
-    # the negative control: past chapter 3's coordinates, the same play path sees them
-    w, entries, brief = _play(tmp_path, 5 * SOURCE_STEP)
+    # the negative control: past chapter 3's coordinates, the same play path's SCENE block
+    # and PRESENT CHARACTERS show what the opening hid
+    late = ("person:duke_orrin", "person:mara_venn")
+    w, entries, brief = _play(tmp_path, 5 * SOURCE_STEP, extra_scope=CAST + late)
     try:
-        scene = brief.split("THE SCENE RIGHT NOW", 1)[1]
-        assert "Mara Venn" in scene or "stranger" in scene
+        assert "Mara Venn" in _block(brief, "PRESENT CHARACTERS")
+        assert "Mara Venn" in _block(brief, "THE SCENE RIGHT NOW")
     finally:
         w.close()
