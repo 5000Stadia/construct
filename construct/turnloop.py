@@ -1296,6 +1296,7 @@ class TurnTrace:
     cast_moves: list = field(default_factory=list)  # #80: (kind, person, destination) licensed narrator moves committed this turn
     cast_move_drops: list = field(default_factory=list)  # #80: (person, destination, reason) stagecraft-gate/engine-skip drops this turn
     landed: list = field(default_factory=list)  # NARRATED-OBJECTS-LAND: obj ids the settle placed in the scene by rule this turn
+    restated_origin: list = field(default_factory=list)  # RESTATED-ORIGIN: (entity, value) restatements dropped before ingest
     reshape: str = ""  # WORLD-CHANGING AGENCY: the narrator directive for a canon reshape committed this turn (flag-gated)
     replanned: str = ""  # the new main arc id if a reshape re-aimed the arc mid-story (flag-gated)
     reshape_entities: list = field(default_factory=list)  # visible committed reshape entity ids (carried into next-turn scope)
@@ -1453,7 +1454,13 @@ _HELD_RELOCATING_ATTRS = _CONTAINMENT_SYNONYMS | {"held_by", "worn_by", "carried
 #: (Bodycase teleport, founder 2026-07-14: the ch1 walk to Liddell's warehouse promoted
 #: `in` at 0.0, so the ch1→ch2 doorway read a stale briefing-room location.) These
 #: attributes are stamped with `turn_time(turn)` when promoted; see the settle path.
-_TEMPORAL_PROMOTE_ATTRS = frozenset({"in"})
+#: RESTATED-ORIGIN r2: the holding forms are positional state too, stamped with `in` and kept
+#: as written (STATE by the engine's guardrail, no model call); an unstamped `held_by` landed at
+#: the ingest default and could lose the fold to an older, properly-timed `in`.
+_TEMPORAL_PROMOTE_ATTRS = frozenset({"in", "held_by", "worn_by", "carried_by"})
+
+#: The containment family RESTATED-ORIGIN groups (after `_canonicalize_containment`).
+_CONTAINMENT_FAMILY = frozenset({"in", "held_by", "worn_by", "carried_by"})
 
 
 def _stamp_temporal_state(rows: list, turn: int) -> list:
@@ -1494,6 +1501,44 @@ def _terminal_run(sentence: str) -> str:
     "...". Any "?" in it makes the sentence a question (cr RED on 15cda1f: "?!")."""
     core = sentence.rstrip(" \t\n\"'”’»)]")
     return core[len(core.rstrip(".!?")):]
+
+
+def _drop_restated_origins(p: Any, rows: list, *, as_of: float | None
+                           ) -> tuple[list, list[tuple[str, Any]]]:
+    """RESTATED-ORIGIN r2 (R20 run 11's key-ring: "grabbing for the key-ring at his belt" was
+    extracted as `in obj:belt` AND `in person:player`, one batch, one valid time, served
+    `conflicted`). Over one batch, stamped: group the containment-family rows by
+    (entity, valid_from); read each entity's container before the batch (`state(e, "in")` at
+    `as_of`, `known` only); drop a row only when its group is exactly {a restatement of that
+    container, one move}. Two new places, an unknown or conflicted container, or a lone
+    restatement stay as written (the engine's honest conflict). Only containment rows are
+    ever dropped. Returns (kept, [(entity, dropped value)]); an unreadable container keeps all."""
+    groups: dict[tuple[str, Any], list[int]] = {}
+    for i, r in enumerate(rows):
+        if isinstance(r, dict) and r.get("attribute") in _CONTAINMENT_FAMILY and r.get("entity"):
+            groups.setdefault((str(r["entity"]), r.get("valid_from")), []).append(i)
+    drop: set[int] = set()
+    current: dict[str, Any] = {}
+    for (entity, _vf), idx in groups.items():
+        if len(idx) != 2:
+            continue
+        if entity not in current:
+            try:
+                st = p.state(entity, "in", as_of=as_of)
+                current[entity] = st["fact"]["value"] if st.get("status") == "known" else None
+            except Exception:  # noqa: BLE001 — unreadable: keep the batch as written
+                current[entity] = None
+        here = current[entity]
+        if here is None:
+            continue
+        same = [i for i in idx if rows[i].get("value") == here]
+        moved = [i for i in idx if rows[i].get("value") != here]
+        if len(same) == 1 and len(moved) == 1:
+            drop.add(same[0])
+    dropped = [(str(rows[i]["entity"]), rows[i].get("value")) for i in sorted(drop)]
+    if dropped:
+        logger.info("restated origins dropped: %s", dropped)
+    return [r for i, r in enumerate(rows) if i not in drop], dropped
 
 
 def _canonicalize_containment(rows: list[dict]) -> list[dict]:
@@ -4418,6 +4463,11 @@ def _settle_prose_facts(p: Any, world: Any, arc: Arc, prose: str, *, scene: str 
                     cast_moves(_cast_candidates)
                 else:  # the opening: its prose stages the cast, it does not move them
                     logger.info("opening settle: %d cast move(s) not applied", len(_cast_candidates))
+            # RESTATED-ORIGIN r2: stamp the containment family (idempotent with promote's
+            # stamp) and drop a restated origin before staging.
+            _resolved, _restated = _drop_restated_origins(
+                p, _stamp_temporal_state(list(_resolved), turn), as_of=horizon)
+            trace.restated_origin.extend(_restated)
             staged = _receipt_rows(p.ingest_structured(
                 _resolved, frame=_PROPOSED, classify="defer"))
     except Exception as exc:  # noqa: BLE001
@@ -5081,6 +5131,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # growth-deferred stage and the direct commit; the movement lane (2b) still wins
                 # on a later assertion when it fires. Timeless traits untouched.
                 _resolved = _stamp_temporal_state(list(_resolved), turn)
+                # RESTATED-ORIGIN r2: one end per move — drop a row that only restates
+                # the container the same batch moves the thing out of.
+                _resolved, _restated = _drop_restated_origins(p, _resolved, as_of=_h)
+                trace.restated_origin.extend(_restated)
                 # Capture candidates BEFORE ingest for the value-side hydration join (§A, Cx 525):
                 # receipt_rows below carries entity/attribute only; _player_delta_candidates
                 # preserves values so confirmed_batch() can satisfy the value-side spine-touch check.
