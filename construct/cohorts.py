@@ -2146,8 +2146,15 @@ GEN_ARC_SCHEMA = {
                                               "AVAILABLE IDS; event_occurs: an event kind"},
                     "attribute": {"type": "string", "description": "player_learns only"},
                     "value": {"type": "string", "description": "player_learns only"},
+                    "what": {"type": "string",
+                             "description": "event_occurs: ONE plain sentence of what the act "
+                             "is and what makes it THIS act: where, with what, with whom, in the "
+                             "story's own names (e.g. 'Hobb drops the lower chain, the river "
+                             "boom at the lower chain tower, and the barge carrying the "
+                             "protagonist passes'); player_learns: empty"},
                 },
-                "required": ["id", "phase", "weight", "kind", "entity", "attribute", "value"],
+                "required": ["id", "phase", "weight", "kind", "entity", "attribute", "value",
+                             "what"],
             },
         },
         "hook": {"type": "string",
@@ -2974,19 +2981,28 @@ DETECT_EVENTS_SCHEMA = {
 
 
 def detect_events(provider: Provider, action: str, outcome: str,
-                  candidates: list[dict]) -> dict:
+                  candidates: list[dict], scene_name: str = "") -> dict:
     """Did any AUTHORED act-beat event happen in the player's RESOLVED action this turn? Returns
     {occurred: [kinds]} chosen ONLY from `candidates` (anti-fabrication — EVENT-OCCURS-FIRING,
     Cx 115). `candidates` is [{"kind","what"}] (the authored event kind + a plain description of
     the act it represents). `outcome` is the resolved tier (the act succeeded). Cheap tier; default
-    EMPTY when unsure — a beat must not fire on a near-miss or a thing the player merely intended."""
+    EMPTY when unsure — a beat must not fire on a near-miss or a thing the player merely intended.
+    EVENT-DETECT-GROUNDING: `what` is the beat's authored meaning when it has one, and
+    `scene_name` (the place as the player knows it) is shown when non-empty."""
     listing = "\n".join(f"- {c['kind']} :: {c['what']}" for c in candidates) or "- (none)"
+    where = f"THE PLAYER IS AT: {scene_name}\n\n" if (scene_name or "").strip() else ""
     return complete_sync(provider,
         "In an interactive story, decide which (if any) of these AUTHORED story events just "
         "HAPPENED as a result of the player's action this turn. Choose ONLY from the listed kinds "
         "(use the EXACT kind string); choose NONE if the player merely talked about, approached, or "
         "attempted-without-completing the act. Be strict — an event happens only when the player "
-        "actually DID the thing it describes and it took effect.\n\n"
+        "actually DID the thing it describes and it took effect. An event happens only when the "
+        "action is the act described: with the things, the people and at the place the "
+        "description names. The same word for a different thing (another chain, another door, "
+        "another key) is not the event. If the description names a place and the player is "
+        "somewhere else, it did not happen unless the description says it can be done from "
+        "afar.\n\n"
+        f"{where}"
         f"THE PLAYER'S ACTION (resolved outcome: {outcome}): {action}\n\n"
         f"CANDIDATE EVENTS (kind :: what the act is):\n{listing}\n\n"
         "Return the kinds that genuinely occurred (usually zero or one).",

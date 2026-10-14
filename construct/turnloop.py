@@ -3823,7 +3823,8 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     from construct.arc.grammar import Beat as _Beat
     replacement = _Beat(new_id, beat.phase, beat.weight,
                         achievable_via=beat.achievable_via,
-                        unreachable_if=_trigger)
+                        unreachable_if=_trigger,
+                        what=beat.what)   # EVENT-DETECT-GROUNDING: same event, same meaning
     from construct.arc.lint import lint_post_repair
     findings = lint_post_repair([replacement], live_reads)
     if findings:
@@ -4003,15 +4004,21 @@ def _conclusion_effect(reads: Any, arc: Arc, cost_disposition: str,
 
 def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Provider,
                        action: str, tier: str, turn: int, trace: "TurnTrace",
-                       protagonist: str, only_kinds: set | None = None) -> list[str]:
+                       protagonist: str, only_kinds: set | None = None,
+                       scene_name: str = "") -> list[str]:
     """EVENT-OCCURS-FIRING (EVENT-OCCURS-FIRING.md, Cx 115): fire any authored `event_occurs`
     act-beat whose act just HAPPENED in the player's RESOLVED action, so `beat_pass` achieves it
     this turn (the fix for the arc-stall: nothing else writes arbitrary-kind canon events). Gathers
     PENDING `Occurred`-kind candidates across the arcs (main + side), asks the CONSTRAINED detector
     which occurred, and mints the canon event(s) + an action-event anchor (`caused_by`). Fail-open;
-    skipped (no cohort call) when there are no pending event_occurs kinds. Returns the fired kinds."""
+    skipped (no cohort call) when there are no pending event_occurs kinds. Returns the fired kinds.
+
+    EVENT-DETECT-GROUNDING (R20 run 13: a wrist chain fired the river boom's event): each
+    candidate carries its beat's authored meaning (`Beat.what`; the de-slugged kind for a beat
+    without one), and the detector is shown the scene's player-frame name (`scene_name`)."""
     from construct.arc.conditions import Occurred
     cands: dict[str, str] = {}  # kind -> beat_id; PENDING beats only, deduped by kind
+    whats: dict[str, str] = {}  # kind -> the first candidate beat's authored meaning
     for arc in arcs:
         for beat in getattr(arc, "beats", ()):
             cond = beat.achievable_via
@@ -4027,12 +4034,15 @@ def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Pro
                 continue  # restricted pass (failure-tier result-event minting — see caller)
             if str(cond.kind).startswith(_RESERVED_ABANDON) or cond.kind in RESERVED_KINDS:
                 continue  # R40 / R42: reserved kinds are never generic detector kinds
-            cands.setdefault(cond.kind, beat.beat_id)
+            if cond.kind not in cands:
+                cands[cond.kind] = beat.beat_id
+                whats[cond.kind] = (getattr(beat, "what", "") or "").strip()
     if not cands:
         return []
-    candidates = [{"kind": k, "what": k.replace("_", " ")} for k in cands]
+    candidates = [{"kind": k, "what": whats.get(k) or k.replace("_", " ")} for k in cands]
     try:
-        out = cohorts.detect_events(provider, action, tier, candidates)
+        out = cohorts.detect_events(provider, action, tier, candidates,
+                                    scene_name=scene_name)
         trace.cohort_calls.append("detect_events:cheap")
     except Exception as exc:  # never sink the turn on the detector
         trace.dropped_cohorts.append(f"detect_events ({exc})")
@@ -4651,6 +4661,22 @@ def _land_narrated_objects(p: Any, arc: Arc, promote: list[dict],
     except Exception as exc:  # noqa: BLE001 — post-render bookkeeping never sinks a turn
         logger.warning("narrated objects: landing skipped: %s", exc)
         return []
+
+
+def _frame_place_name(p: Any, scene: str | None, player_frame: str,
+                      horizon: float | None) -> str:
+    """EVENT-DETECT-GROUNDING: the scene's name as the player knows it (the PLACE-NAME-ANCHOR
+    name), read from the player frame at the horizon; "" when unnamed or unreadable."""
+    if not scene:
+        return ""
+    try:
+        st = p.state(scene, "name", frame=player_frame, as_of=horizon)
+    except Exception:  # noqa: BLE001 — no name is shown; the detector runs as before
+        return ""
+    if st.get("status") != "known":
+        return ""
+    value = (st.get("fact") or {}).get("value")
+    return value.strip() if isinstance(value, str) else ""
 
 
 def _name_the_scene(p: Any, arc: Arc, scene: str | None, *, player_frame: str, turn: int,
@@ -6708,7 +6734,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             _live_arcs = [arc] + [sa for sa in side_arcs
                                   if stored_lifecycle(live_reads, sa) not in LIFECYCLE_TERMINALS]
             _fire_event_occurs(world, p, live_reads, _live_arcs, provider,
-                               player_input, _resolved_tier, turn, trace, arc.protagonist)
+                               player_input, _resolved_tier, turn, trace, arc.protagonist,
+                               scene_name=_frame_place_name(p, scene, player_frame, _h))
         elif (_resolved_tier in ("failure_opportunity", "terrible_failure")
               and result_events and result_events.get("loss")
               and (commits or current_phase(live_reads, arc)
@@ -6724,7 +6751,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # real Contest arc in the #33 pass; dormant until an arc declares result_events.
             _fire_event_occurs(world, p, live_reads, [arc], provider,
                                player_input, _resolved_tier, turn, trace, arc.protagonist,
-                               only_kinds=set(result_events.get("loss") or ()))
+                               only_kinds=set(result_events.get("loss") or ()),
+                               scene_name=_frame_place_name(p, scene, player_frame, _h))
     # ---- #95 DEATH GATE (DEATH-TESTAMENT.md, Cx 422) -----------------------------------
     # Death is an EFFECT, never a draw or a whim: staged mortal peril (the player SAW the
     # stakes and persisted) + a real drawn test + the deck's terrible_failure + the

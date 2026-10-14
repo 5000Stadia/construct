@@ -215,7 +215,15 @@ def _beat_rows(beat: Beat, arc_id: str) -> list[dict]:
     if beat.correlates is not None:
         rows.append({"entity": beat.beat_id, "attribute": "correlates",
                      "value": json.dumps(list(beat.correlates)), "timeless": True})
+    if beat.what:
+        rows.append({"entity": beat.beat_id, "attribute": "what", "value": beat.what,
+                     "value_type": "literal", "timeless": True})
     return rows
+
+
+def _beat_what(value) -> str:
+    """EVENT-DETECT-GROUNDING: a beat's stored meaning; a missing or non-text row is ""."""
+    return value if isinstance(value, str) else ""
 
 
 def beat_to_items(beat: Beat, arc_id: str, frame: str = "plot:main") -> list[dict]:
@@ -265,6 +273,7 @@ def beat_from_reads(reads, beat_id: str, frame: str = "plot:main",
             unreachable_if=(expr_from_obj(json.loads(unreachable))
                             if unreachable else None),
             correlates=tuple(json.loads(correlates)) if correlates else None,
+            what=_beat_what(get("what")),
         )
     except (TypeError, ValueError, KeyError):
         return None
@@ -481,6 +490,7 @@ def arc_from_frame(reads, arc_id: str = "arc:main", frame: str = "plot:main") ->
             achievable_via=expr_from_obj(json.loads(achievable)),
             unreachable_if=expr_from_obj(json.loads(unreachable)) if unreachable else None,
             correlates=tuple(json.loads(correlates)) if correlates else None,
+            what=_beat_what(get(bid, "what")),
         ))
     clock_ids = json.loads(get(arc_id, "clock_index") or "[]")
     # The refusal clock is ALWAYS appended last (arc_to_items/index_items), so
@@ -591,6 +601,7 @@ def arc_to_cache(arc: Arc) -> dict:
             "achievable_via": expr_to_obj(b.achievable_via),
             "unreachable_if": expr_to_obj(b.unreachable_if) if b.unreachable_if else None,
             "correlates": list(b.correlates) if b.correlates else None,
+            **({"what": b.what} if b.what else {}),   # EVENT-DETECT-GROUNDING; absent = ""
         } for b in arc.beats],
         "clocks": [_clock_to_cache(c) for c in arc.clocks],
         "refusal_clock": _clock_to_cache(arc.refusal_clock),
@@ -647,6 +658,7 @@ def arc_from_cache(d: dict) -> Arc:
             achievable_via=expr_from_obj(b["achievable_via"]),
             unreachable_if=expr_from_obj(b["unreachable_if"]) if b.get("unreachable_if") else None,
             correlates=tuple(b["correlates"]) if b.get("correlates") else None,
+            what=_beat_what(b.get("what")),
         ) for b in d["beats"]),
         clocks=tuple(_clock_from_cache(c) for c in d["clocks"]),
         refusal_clock=_clock_from_cache(d["refusal_clock"]),

@@ -85,8 +85,15 @@ ARC_SCHEMA = {
                                   "description": "player_learns only: the attribute"},
                     "value": {"type": "string",
                               "description": "player_learns only: the value"},
+                    "what": {"type": "string",
+                             "description": "event_occurs: ONE plain sentence of what the act "
+                             "is and what makes it THIS act: where, with what, with whom, in the "
+                             "story's own names (e.g. 'Hobb drops the lower chain, the river "
+                             "boom at the lower chain tower, and the barge carrying the "
+                             "protagonist passes'); player_learns: empty"},
                 },
-                "required": ["id", "phase", "weight", "kind", "entity", "attribute", "value"],
+                "required": ["id", "phase", "weight", "kind", "entity", "attribute", "value",
+                             "what"],
             },
         },
     },
@@ -195,6 +202,8 @@ def _build_arc(proposal: dict, arc_id: str = "arc:main") -> Arc:
             phase=Phase(b["phase"]),
             weight=Weight(b["weight"]),
             achievable_via=_beat_expr(b, player_frame),
+            what=(str(b.get("what") or "").strip()
+                  if b.get("kind") == "event_occurs" else ""),
         ))
     climax = [b.beat_id for b in beats if b.phase in (Phase.CLIMAX, Phase.CRISIS)] \
         or [beats[-1].beat_id]

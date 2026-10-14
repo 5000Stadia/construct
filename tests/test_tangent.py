@@ -238,7 +238,7 @@ def _proposal(**over):
          "tension": ["person:you", "drive:belonging", "drive:duty"],
          "beats": [{"id": "beat:first_catch", "phase": "rising",
                     "weight": "required", "kind": "event_occurs",
-                    "entity": "first_catch", "attribute": "", "value": ""}],
+                    "entity": "first_catch", "attribute": "", "value": "", "what": ""}],
          "hook": "Sefa tosses you the bow line as the tide turns.",
          "title": "The Gullwing's Own"}
     p.update(over)
@@ -276,7 +276,7 @@ def test_build_tangent_arc_forces_protagonist_and_lints(tmp_path):
         bad, problems = build_tangent_arc(
             _proposal(beats=[{"id": "beat:x", "phase": "nonsense",
                               "weight": "required", "kind": "event_occurs",
-                              "entity": "x", "attribute": "", "value": ""}]),
+                              "entity": "x", "attribute": "", "value": "", "what": ""}]),
             protagonist="person:you", arc_id="arc:tangent_9", reads=reads)
         assert bad is None and problems
         # a lint-blocked proposal (ungrounded referent) returns problems
@@ -306,7 +306,7 @@ def _seed_portfolio(w, reads):
         _proposal(beats=[{"id": "beat:old_thread", "phase": "rising",
                           "weight": "required", "kind": "event_occurs",
                           "entity": "old_thread", "attribute": "",
-                          "value": ""}]),
+                          "value": "", "what": ""}]),
         protagonist="person:you", arc_id="arc:main_case", reads=reads)
     assert problems == []
     w.porcelain.ingest_structured(
@@ -508,10 +508,10 @@ def test_build_tangent_arc_ids_and_reload(tmp_path):
         dup = _proposal(beats=[
             {"id": "beat:a-b", "phase": "rising", "weight": "required",
              "kind": "event_occurs", "entity": "x", "attribute": "",
-             "value": ""},
+             "value": "", "what": ""},
             {"id": "beat:a_b", "phase": "crisis", "weight": "required",
              "kind": "event_occurs", "entity": "y", "attribute": "",
-             "value": ""}])
+             "value": "", "what": ""}])
         bad, problems = build_tangent_arc(dup, protagonist="person:you",
                                           arc_id="arc:tangent_9",
                                           reads=reads)

@@ -152,6 +152,10 @@ class Beat:
     #: turn — WITHOUT merging. Before the beat they read separate (mystery holds);
     #: after, the explicit correlated/union read links them. None = ordinary beat.
     correlates: tuple[str, str] | None = None
+    #: EVENT-DETECT-GROUNDING: an `event_occurs` beat's authored meaning, one plain sentence
+    #: (the act, where, with what and whom), for the event detector only. Plot frame; never
+    #: the narrator's. "" = none (a `player_learns` beat, or a world built before it).
+    what: str = ""
 
 
 @dataclass(frozen=True)

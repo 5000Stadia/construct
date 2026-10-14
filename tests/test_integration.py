@@ -4456,7 +4456,7 @@ def test_build_arc_lowers_time_deadline_proposal():
         "protagonist": "person:p", "delta_type": "drive_inverted",
         "tension": ["person:p", "drive:haste", "drive:care"],
         "beats": [{"id": "beat:ready", "phase": "climax", "weight": "required",
-                   "kind": "event_occurs", "entity": "feast_served", "attribute": "", "value": ""}],
+                   "kind": "event_occurs", "entity": "feast_served", "attribute": "", "value": "", "what": ""}],
         "failure_when": {"kind": "time_deadline", "deadline_minutes": 60},
     }
     arc = _build_arc(proposal)
@@ -5444,7 +5444,7 @@ class TestWorldReshape:
              "tension": [PLAYER, "drive:doubt", "drive:resolve"],
              "beats": [{"id": "beat:confront_attacker", "phase": "climax",
                         "weight": "required", "kind": "event_occurs",
-                        "entity": "attacker_named", "attribute": "", "value": ""}],
+                        "entity": "attacker_named", "attribute": "", "value": "", "what": ""}],
              "hook": "Now: who tried to kill him?"},                                # author_replan (gen)
             {"prose": "He breathes. The question changes: who wanted him dead?"},    # narrate
         ])
