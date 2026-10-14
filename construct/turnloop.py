@@ -4677,8 +4677,9 @@ def _name_the_scene(p: Any, arc: Arc, scene: str | None, *, player_frame: str, t
                 "known", "conflicted"):
             return
         st = p.state(scene, "name", as_of=horizon)
-        if st.get("status") != "known" or not isinstance(st["fact"].get("value"), str):
-            return
+        if (st.get("status") != "known" or st["fact"].get("value_type") != "literal"
+                or not isinstance(st["fact"].get("value"), str)):
+            return              # a `known` LITERAL only: never mirror an entity id as a name
         row = {"entity": scene, "attribute": "name", "value": st["fact"]["value"],
                "valid_from": turn_time(turn)}
         receipt = _receipt_rows(p.ingest_structured([row], frame=player_frame,

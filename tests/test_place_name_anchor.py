@@ -94,6 +94,19 @@ def test_a_concealed_name_is_never_mirrored(world, monkeypatch):
     assert "YOU ARE AT the place you now stand in." in prompt
 
 
+def test_an_entity_valued_name_is_never_mirrored(world):
+    # cr on 61f16d6: a `known` name whose value is an entity id is not a name to speak
+    world.porcelain.ingest_structured([
+        {"entity": "person:keeper", "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": SCENE, "attribute": "name", "value": "person:keeper",
+         "value_type": "entity"}], frame="canon", classify="rules")
+    st = world.porcelain.state(SCENE, "name")
+    assert st["status"] == "known" and st["fact"]["value_type"] == "entity"
+    r, prompt = _turn(world)
+    assert r.trace.place_named == "" and _frame_name(world) is None
+    assert "YOU ARE AT the place you now stand in." in prompt
+
+
 # ---------------------------------------------------------------- horizons (4, 8)
 
 def test_a_canon_name_past_the_horizon_is_not_mirrored(world):
