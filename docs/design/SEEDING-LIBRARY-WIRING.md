@@ -1,6 +1,11 @@
 # Wiring the build library: construct's side of registry-first seeding
 
-**Status:** spec r1, 2026-10-14, for cr review. Not built.
+**Status:** spec r2, 2026-10-14, for cr review. Not built. **Blocked on a library change** (rule 4b).
+
+**r2 (cr RED on r1):**
+- P1: the library's `commit()` writes every manifest identity row (shape, name, alias, role, persona names) **timeless**, before the facts. So a late entry, or a persona's true name, is canon-visible at the opening, and r1's opening-horizon test couldn't pass. r2 makes gate-stamped identity a precondition, asked of pattern-buffer (colony m3310d2, 2026-10-14), not a construct-side filter.
+- P2: Stage 3, the traversal policy, is kept explicitly.
+- The `mention:` exception is pinned to the exact code path.
 **Source:**
 - The settled design, SEEDING-REGISTRY-FIRST.md r4: Kabe's gate g2fd391 answered; two consult rounds.
 - pattern-buffer's BUILD-LIBRARY-V1 r1.7: merged at 6073bfe, docs at 958691d, pbr GREEN. Construct was GREEN on its spec.
@@ -40,6 +45,12 @@ So identity is decided once, by code.
 - **`time_of(i) = chunk.chapter × SOURCE_STEP + k`**, where k is the chunk's index within its chapter (0, 1, …). So chapter 1 keeps the band below `opening_as_of` (`SOURCE_STEP + ENTRY_MARGIN`), and the play horizon contract (READS-AT-PLAY-HORIZON, `horizon_metadata`) holds unchanged.
 - A persona's `correlate` lands at its reveal chunk's time, so it's invisible at any earlier horizon.
 
+**4b. Identities are stamped at their gates: a library precondition (r2).**
+- Every entry's identity rows (shape, `name`, `alias`, `role`) must carry `valid_from = time_of(the chunk holding the entry's gate sentence)`, and every persona's name rows the time of its own gate, not timeless.
+- Then a chapter-3 entry is future-only at the opening, exactly as a future source entity is today. It's absent from `entities(canon, as_of=h)`, from every HorizonView roster, and from construct's identity rule (`is_future_only`).
+- **This is pattern-buffer's change** (asked in m3310d2). **The wiring doesn't build until the pinned library provides it.**
+- **The fallback, if pattern-buffer keeps identities timeless:** a construct presentation filter from `Registry.entries()` gates, applied to every roster, digest, scene and cast path. cr judges it fragile, so it would need its own spec and review; it isn't adopted here.
+
 **5. Extraction, then commit, inside the existing build session.**
 - `extract(chunks, registry, model, workers=8)`, with `model = engine_tier_dispatch(provider)`. The library's pinned heads route by prefix: `EXTRACT_HEAD` ("Extract world-state facts (build library, chunk)") already matches `_CHEAP_ENGINE_PREFIXES`. `CATEGORY_HEAD` ("Name the beings, places and things") is added to them, since category passes are literal sorting, so fast tier (r4 §6).
 - **Chunk errors:** the library doesn't retry, and `commit` refuses the whole build if any chunk has `error`. Construct re-runs `extract` on the errored chunks once. If any still has an error, the build stops with the first cause, exactly as today's "every chunk failed" stop does (the build never ships a world with a chapter silently missing).
@@ -53,12 +64,17 @@ So identity is decided once, by code.
 
 The skip is logged as `Stage 2 · identity decided by the manifest (library)`.
 
+**Stage 3 still runs (r2).** `_stage_declare_policy` (the `traversal:<kind>` rules that `route()` reads) is not part of identity, and is kept unchanged in library mode. Only `_stage_reconcile_identity` is skipped.
+
 **7. The author's entries are held apart by code.** After commit, every pair of manifest entries that share a normalised name and aren't already rejected as namesakes gets `reject(a, b)` (a `distinct_from`): the man and the dog called Rex become `person:rex` and `person:rex_2`, types `person` and `dog`. This is P1, the manifest as sole authority on the cast, applied mechanically. **It never touches a `mention:` id or an escape.**
 
 **8. Provisional ids stay out of play and out of the build stops.**
 - **Rosters:** every enumeration without a namespace prefix excludes `mention:` ids: `_canon_entity_ids`, the world digest, scope and staging candidates. Prefix enumerations (`person:`, `place:`) already exclude them.
 - **Proposals stay open in r1.** The library's `maybe_same_as` proposals (a pick, or an escape colliding with a manifest name) are logged with their evidence and left open. Their facts stay on the provisional id, invisible to play. An evidenced confirm step (the merge gate, on the fast tier) is a later item, sized by what acceptance measures.
-- **The identity confirm stage** (R34, `_stage_confirm_identity`) doesn't count a proposal whose source is a `mention:` id as an open pair touching the protagonist or a required holder. Its facts are quarantined on the provisional id, so leaving it open is safe, and a build stop there would only punish the author's honest ambiguity.
+- **The identity confirm stage** (R34, `_stage_confirm_identity`). Its stops come from `_identity_stops`, which examines open `frame_owner` proposals and **live name-collision pairs** (it doesn't read `maybe_same_as` proposals at all). A provisional `mention:` id that carries the same name as a manifest entry would therefore surface as a live name-collision pair.
+  - **The exact change:** `_identity_stops` (and `_role_kind_pairs`) skip any pair with a `mention:` id on either side.
+  - Its facts are quarantined on the provisional id, so the pair is safe to leave open.
+  - Nothing else changes: frame-owner proposals and manifest-to-manifest collisions stop exactly as today.
 
 **9. The cast author sees the registry** (r4 §5): `_stage_author_cast`'s known-id list gains each manifest entry's names, type and role, so it reuses "Hester Rook, sergeant" rather than minting a twin.
 
@@ -78,10 +94,17 @@ The skip is logged as `Stage 2 · identity decided by the manifest (library)`.
    - a second bad manifest falls back to `category_passes` (stub), logged.
 3. **Rex** (r4's planted trap): the man and the dog stay two entities after commit. They're held apart (`distinct_from`), and both reach `_known_people`, the world digest, the arc inputs and a played scene, with the dog's facts.
 4. **Two Brecks:** an ambiguous "Breck" mention the stub extractor resolves to one Breck lands its facts on `mention:breck_1`, with a `maybe_same_as` proposal. No fact lands on either Breck. The roster excludes the mention id. The identity confirm stage doesn't stop the build.
-5. **A late reveal:** "the stranger" revealed as the duke in chapter 3. The `correlate` is dated at the reveal chunk's `time_of`, and at the opening horizon neither the link nor the duke's name reaches a read (a GRADE-LEAKS-style check over the opening's reads).
+5. **A late reveal and a late entry** (once the library stamps at gates, rule 4b):
+   - "the stranger", revealed as the duke in chapter 3, and an entry first appearing in chapter 3;
+   - **a direct opening-horizon read oracle:** at `opening_as_of`, `entities(canon, as_of=h)`, `_canon_entity_ids` through a HorizonView, the world digest and a played scene's reads contain neither the chapter-3 entry nor the duke's name nor the link;
+   - at the head, all three are present (the negative control);
+   - this test gates the library pin.
 6. **The time mapping:** chapter-1 facts sit below `opening_as_of`; chapter-2 facts sit at or above `next_source_as_of`. A two-chunk chapter (split at a reveal) gets distinct, increasing times.
 7. **Chunk errors:** one chunk errors once and is retried successfully, so the build completes. One that errors twice stops the build with its cause, and nothing is committed.
-8. **Stage 2 skipped:** in library mode, no `reconcile` / `adjudicate_deferred` / `retype` / homonym `reject` call is made (spy), and the provisional id has no `distinct_from`.
+8. **Stage 2 skipped, Stage 3 kept:**
+   - in library mode, no `reconcile` / `adjudicate_deferred` / `retype` / homonym `reject` call is made (spy), and the provisional id has no `distinct_from`;
+   - `_stage_declare_policy` runs, and its `traversal:` rows exist.
+8b. **The confirm-stage exception:** a `mention:breck_1` that shares the name "Breck" with the hero gives no `_identity_stops` entry. A manifest-to-manifest same-name pair touching the hero, not held apart, still stops.
 9. **The switch:** with `CONSTRUCT_BUILD_LIBRARY=0`, the build takes today's path exactly (the existing build tests pass with the variable set).
 10. **The full suite** on the new pin, before and after the wiring.
 
