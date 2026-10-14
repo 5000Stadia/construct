@@ -1337,7 +1337,7 @@ def test_person_my_production_seam_run_turn(tmp_path):
             if prompt.startswith("Extract world-state"):
                 return {"items": []}
             if task_of(prompt) == "cls":
-                return {"kind": "action", "moves_to": "", "requires": []}
+                return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
             if task_of(prompt) == "ndg":
                 return {"thread": "", "directive": ""}
             if task_of(prompt) == "nar":
@@ -1752,7 +1752,7 @@ class _TurnProvider(StubProvider):
         if prompt.startswith("Resolve an unestablished aspect"):
             return {"items": [{"value": "A lamplit office."}]}
         if task_of(prompt) == "cls":
-            return {"kind": "action", "moves_to": "", "requires": []}
+            return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
         if task_of(prompt) == "ndg":
             return {"thread": "", "directive": ""}
         if task_of(prompt) == "nar":
@@ -1875,7 +1875,7 @@ def test_ambient_seed_write_once_and_fires_integration(tmp_path):
             if prompt.startswith("Resolve an unestablished aspect"):
                 return {"items": [{"value": "A lamplit office."}]}
             if task_of(prompt) == "cls":
-                return {"kind": "action", "moves_to": "", "requires": []}
+                return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
             if task_of(prompt) == "ndg":
                 return {"thread": "", "directive": ""}
             if task_of(prompt) == "nar":
@@ -2614,7 +2614,7 @@ def test_player_batch_spine_touch_wakes_opportunistic(tmp_path):
             if prompt.startswith("Resolve an unestablished aspect"):
                 return {"items": [{"value": "The office is quiet."}]}
             if task_of(prompt) == "cls":
-                return {"kind": "action", "moves_to": "", "requires": []}
+                return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
             if task_of(prompt) == "ndg":
                 return {"thread": "", "directive": ""}
             if task_of(prompt) == "nar":
@@ -2705,7 +2705,7 @@ def test_ambient_wins_when_narrator_batch_present_but_quiet(tmp_path):
             if prompt.startswith("Resolve an unestablished aspect"):
                 return {"items": [{"value": "The office is quiet."}]}
             if task_of(prompt) == "cls":
-                return {"kind": "action", "moves_to": "", "requires": []}
+                return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
             if task_of(prompt) == "ndg":
                 return {"thread": "", "directive": ""}
             if task_of(prompt) == "nar":

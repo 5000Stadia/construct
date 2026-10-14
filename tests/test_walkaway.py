@@ -18,7 +18,7 @@ from tests.test_integration import (  # noqa: F401
 )
 
 SCOPE = [PLAYER, "place:study"]
-_BASE = {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+_BASE = {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": ""}
 GOAL = "find who falsified the ledger"
 

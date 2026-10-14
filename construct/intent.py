@@ -56,6 +56,9 @@ class TurnIntent:
     moved_with: tuple[str, ...] = ()     # opaque ids, action only, never a dismissed one
     joins: tuple[str, ...] = ()          # opaque ids, action only, never a dismissed one (#82)
     asserts_or_reveals: bool = True      # fails OPEN (TURN-LATENCY A-lite)
+    #: UTTERANCE-NOT-FACT (R42 r3): act | speech | mixed | unknown. Missing/invalid → unknown,
+    #: which FAILS CLOSED: no factual extraction of the player's line at all.
+    claims_are: str = "unknown"
     uses_knowledge: bool = False         # action only (Cx 247)
     asks_self: bool = False
     recalls: bool = False                # #97
@@ -107,6 +110,9 @@ class TurnIntent:
             joins=tuple(t for t in (verdict.get("joins") or []) if t not in dismissed)
             if action else (),
             asserts_or_reveals=bool(verdict.get("asserts_or_reveals", True)),
+            claims_are=(verdict.get("claims_are")
+                        if verdict.get("claims_are") in ("act", "speech", "mixed")
+                        else "unknown"),
             uses_knowledge=bool(verdict.get("uses_protagonist_knowledge")) and action,
             asks_self=bool(verdict.get("asks_self")),
             recalls=bool(verdict.get("recalls")),

@@ -3941,8 +3941,8 @@ def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Pro
                 continue  # already achieved/closed → no candidate, no duplicate event
             if only_kinds is not None and cond.kind not in only_kinds:
                 continue  # restricted pass (failure-tier result-event minting — see caller)
-            if str(cond.kind).startswith(_RESERVED_ABANDON):
-                continue  # R40 r3: the walk-away transition is the SOLE abandonment writer
+            if str(cond.kind).startswith(_RESERVED_ABANDON) or cond.kind in RESERVED_KINDS:
+                continue  # R40 / R42: reserved kinds are never generic detector kinds
             cands.setdefault(cond.kind, beat.beat_id)
     if not cands:
         return []
@@ -4119,6 +4119,35 @@ def _walkaway_transition(p: Any, intent: Any, wa: dict | None, turn: int,
     except Exception:  # noqa: BLE001
         logger.warning("walk-away transition skipped", exc_info=True)
     return False, ""
+
+
+#: UTTERANCE-NOT-FACT (R42): the speech act's reserved event kind — never an authored kind,
+#: never a detector candidate, so speech can neither collide with nor satisfy an Occurred beat.
+SPEECH_KIND = "player_speech"
+RESERVED_KINDS = frozenset({SPEECH_KIND})
+
+
+def _write_speech_event(p: Any, protagonist: str, turn: int, player_input: str,
+                        claims_are: str, spans: list[str], addressed: list[str],
+                        trace: "TurnTrace") -> None:
+    """One `event:said_<turn>` when the line includes speech: speech, or quoted spans found
+    (mixed / unknown). Patients = the deterministic addressed set. Fail-open."""
+    if not (claims_are == "speech" or spans):
+        return
+    content = (" / ".join(spans) if spans else player_input).strip()[:300]
+    at = turn_time(turn)
+    eid = f"event:said_{turn}"
+    rows = [{"entity": eid, "attribute": "kind", "value": SPEECH_KIND, "valid_from": at},
+            {"entity": eid, "attribute": "agent", "value": protagonist,
+             "value_type": "entity", "valid_from": at},
+            {"entity": eid, "attribute": "content", "value": content,
+             "value_type": "literal", "valid_from": at}]
+    rows += [{"entity": eid, "attribute": "patient", "value": a, "value_type": "entity",
+              "valid_from": at} for a in addressed]
+    try:
+        p.ingest_structured(rows)
+    except Exception as exc:  # noqa: BLE001 — the record of speech never sinks a turn
+        trace.dropped_cohorts.append(f"speech_event ({exc})")
 
 
 def _episode_since(reads: Any) -> float | None:
@@ -4875,7 +4904,18 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     _deferred_conclusion = (intent.conclusory and intent.commit_condition in _DEFER)
     if asserts_or_reveals and _deferred_conclusion:
         trace.dropped_cohorts.append("player_ingest (deferred conclusion: a pending decision)")
-    if asserts_or_reveals and not _deferred_conclusion:
+    # UTTERANCE-NOT-FACT (R42 r3, IR-5): what the character SAYS never becomes canon by being
+    # said. speech / unknown (fail closed) → no factual extraction; mixed → the spoken spans are
+    # stripped first; act → today's path. The spans feed the speech event below.
+    from construct.speech import strip_speech as _strip_speech
+    _speech_rest, _speech_spans = _strip_speech(player_input)
+    _claims_are = intent.claims_are
+    _speech_blocks = asserts_or_reveals and not _deferred_conclusion and (
+        _claims_are in ("speech", "unknown")
+        or (_claims_are == "mixed" and not _speech_rest.strip()))
+    if _speech_blocks:
+        trace.dropped_cohorts.append(f"player_ingest ({_claims_are}: an utterance, not a fact)")
+    if asserts_or_reveals and not _deferred_conclusion and not _speech_blocks:
         try:
             with _phase(trace, "player_ingest"):
                 # ENTITY AUTHORITY (Cx 304): READ-ONLY extract → RESOLVE → structured ingest, so the
@@ -4891,7 +4931,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 # deixis binds to them; person:you/person:i can never mint.
                 # QUESTIONS ASSERT NOTHING (R20 run 7): only the line's statements and
                 # actions are extracted; a question-only line extracts nothing.
-                _declared = _declarative_part(player_input)
+                _declared = _declarative_part(
+                    _speech_rest if _claims_are == "mixed" else player_input)
                 if _declared != player_input.strip():
                     trace.dropped_cohorts.append("player_ingest (questions not extracted)")
                 _raw = (p.extract(_declared, scene=pre_scene, extract="lean",
@@ -4947,7 +4988,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             logger.warning("player-input extraction failed; continuing: %s", exc)
             trace.dropped_cohorts.append(f"player_ingest ({exc})")
             receipt_rows = []
-    else:
+    elif not asserts_or_reveals:
         trace.dropped_cohorts.append("player_ingest (skipped: no asserts/reveals)")
 
     # 2a-ii. PLAYER-DRIVEN DISMISSALS (Cx 363/365, ghost-cast incident): the player plainly sent
@@ -6108,6 +6149,10 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if (_only_one_addr or _anpc == _voc_holder
                     or _names_entity(_anpc, _low_addr, name=_aname, role=_arole)):
                 _addressed_this_turn.add(_anpc)
+    # UTTERANCE-NOT-FACT (R42 r3): the speech act itself, written AFTER the addressed set is
+    # known — a fact that something was SAID, never that it is true (reserved kind).
+    _write_speech_event(p, arc.protagonist, turn, player_input, _claims_are, _speech_spans,
+                        sorted(_addressed_this_turn), trace)
 
     # ---- INTERVIEW DELIVERY (STORY-SHAPES §8) ----------------------------
     # Questioning a present cast member surfaces its authorized clues into the player

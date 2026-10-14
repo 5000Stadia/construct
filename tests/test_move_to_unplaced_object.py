@@ -53,7 +53,7 @@ def _where(world, entity):
 # ---- the field is tri-state end to end ------------------------------------------------
 
 def test_within_scene_is_tri_state():
-    base = {"kind": "action", "moves_to": "the table"}
+    base = {"kind": "action", "claims_are": "act", "moves_to": "the table"}
     assert TurnIntent.from_verdict(dict(base), "x").within_scene is None
     assert TurnIntent.from_verdict(dict(base, within_scene=True), "x").within_scene is True
     assert TurnIntent.from_verdict(dict(base, within_scene=False), "x").within_scene is False

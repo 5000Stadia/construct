@@ -106,7 +106,7 @@ class _MemStub(StubProvider):
             self.mem_calls += 1
             return {"memory": f"COMPACTED-MEMORY-{self.mem_calls}"}
         if t == "cls":
-            return {"kind": "action", "moves_to": "", "requires": []}
+            return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
         if t == "ndg":
             return {"thread": "", "directive": ""}
         if t == "nar":

@@ -571,7 +571,7 @@ class _StubTurnProvider(StubProvider):
         if prompt.startswith("Resolve an unestablished aspect"):
             return {"items": [{"value": "A lamplit study."}]}
         if task_of(prompt) == "cls":
-            return {"kind": "action", "moves_to": "", "requires": []}
+            return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": []}
         if task_of(prompt) == "ndg":
             return {"thread": "", "directive": ""}
         if task_of(prompt) == "nar":

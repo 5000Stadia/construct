@@ -27,7 +27,7 @@ GOLDEN = Path(__file__).parent / "golden" / "briefing"
 REGEN = os.environ.get("CONSTRUCT_REGEN_BRIEFING_GOLDEN") == "1"
 
 _SCOPE = ["fact:secret", "person:rival", PLAYER, "place:study"]
-_ACTION = {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+_ACTION = {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
            "uncertain_of": ""}
 _QUESTION = dict(_ACTION, kind="question")
 

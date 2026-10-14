@@ -273,7 +273,7 @@ class TestSettleDeferral:
             {"entity": "obj:lamp", "attribute": "kind", "value": "object"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "A lamp sits on the desk, newly noticed."},
         ])
@@ -328,7 +328,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
 
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},                       # classify
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},                       # classify
             {"prose": "The ledger tells you everything: the rival did it."},
         ])
 
@@ -370,7 +370,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You take in the cold study."},
         ])
         result = run_turn(world, arc, provider, "I look around.", turn=1)
@@ -388,7 +388,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "Quiet."},
         ])
         result = run_turn(world, arc, provider, "I wait.", turn=1)
@@ -412,7 +412,7 @@ class TestFullTurn:
             {"entity": "obj:candle", "attribute": "kind", "value": "object", "frame": "canon"},  # new → promote
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You study the desk; a candle gutters in the draft."},
         ])
         # scope holds only KNOWN entities; obj:candle is new — the gate picks it
@@ -448,7 +448,7 @@ class TestFullTurn:
         ]})
         world._extractions.append({"items": []})                        # narrator prose
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "You step through into the empty hall."},
         ])
@@ -487,7 +487,7 @@ class TestFullTurn:
              "frame": "canon"}]})
         world._extractions.append({"items": []})                    # narrator prose
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "You slip through into the empty hall."},
         ])
@@ -517,7 +517,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "drops": "opener"},
             {"prose": "You set the opener on the desk."},
         ])
@@ -542,7 +542,7 @@ class TestFullTurn:
             {"entity": "obj:pencil", "attribute": "in", "value": "obj:table"}]})
         world._extractions.append({"items": []})                       # narrator prose
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "drops": "pencil",
              "asserts_or_reveals": True},
             {"prose": "You set the pencil down on a table."},
@@ -568,7 +568,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "drops": "the pencil"},
             {"prose": "You lay the pencil on the counter."},
         ])
@@ -594,7 +594,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "drops": "opener"},
             {"prose": "You set the opener on the desk."},
         ])
@@ -619,7 +619,7 @@ class TestFullTurn:
             {"entity": "obj:opener", "attribute": "in", "value": "person:you", "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You turn the opener over in your hand."},
         ])
@@ -640,7 +640,7 @@ class TestFullTurn:
             {"entity": "obj:teacup", "attribute": "in", "value": "place:/coffee_house", "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You step into the warm coffee house."},
         ])
@@ -665,7 +665,7 @@ class TestFullTurn:
             {"entity": PLAYER, "attribute": "in", "value": "obj:street", "value_type": "entity"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You stand in the wet street."},
         ])
@@ -687,7 +687,7 @@ class TestFullTurn:
         ]})
         world._extractions.append({"items": []})                       # narrator prose
         provider = StubProvider([
-            {"kind": "declaration", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "declaration", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "asserts_or_reveals": True},
             {"prose": "The room regards your outburst warily."},
         ])
@@ -714,7 +714,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You consider the room."},
         ])
@@ -744,7 +744,7 @@ class TestFullTurn:
                                  {"entity": "obj:token", "attribute": "name", "value": "token"},
                                  {"entity": "obj:token", "attribute": "in", "value": PLAYER}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You glance over the desk, the pencil still in your hand."},
         ])
@@ -771,7 +771,7 @@ class TestFullTurn:
              "value_type": "entity", "frame": "canon"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The rival's eyes go to the hymn slip in your hand."},
         ])
@@ -800,7 +800,7 @@ class TestFullTurn:
             {"entity": "obj:lamp", "attribute": "kind", "value": "object", "frame": "canon"},      # ordinary → promote
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You sense a motive; a lamp sputters in the corner."},
         ])
         result = run_turn(world, arc, provider, "I press her on why.", turn=1,
@@ -825,7 +825,7 @@ class TestFullTurn:
             {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival", "frame": "canon"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "It dawns on you: the rival is plainly behind it."},
         ])
         result = run_turn(world, arc, provider, "I muse aloud about who did it.", turn=1,
@@ -853,7 +853,7 @@ class TestFullTurn:
             {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival", "frame": "canon"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You lay out the case against the rival you already know is guilty."},
         ])
         result = run_turn(world, arc, provider, "I confront the rival.", turn=1,
@@ -918,7 +918,7 @@ class TestFullTurn:
 
         world.porcelain.ingest = boom
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You read the worn ledger by lamplight."},
         ])
         result = run_turn(world, arc, provider, "I read the ledger.", turn=1)
@@ -939,7 +939,7 @@ class TestFullTurn:
             {"entity": "obj:lamp", "attribute": "kind", "value": "object", "frame": "canon"},  # ordinary
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You study the desk by lamplight."},
         ])
         result = run_turn(world, arc, provider, "I study the desk.", turn=1,
@@ -962,7 +962,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "takes": "the brass spoon"},
             {"prose": "You lift the brass spoon and tuck it away."},
         ])
@@ -985,7 +985,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "declaration", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "declaration", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "names the rival as the killer"},
             {"grade": "vindicated", "rationale": "matches the culprit"},
             {"prose": "You name the rival; the room stills."},
@@ -1010,7 +1010,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
             {"grade": "vindicated", "rationale": "matches the culprit"},   # judge_commitment
             {"prose": "You name the rival; the room stills."},
@@ -1034,7 +1034,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the clerk"},
             {"grade": "wrong", "rationale": "the clerk is not the culprit"},
             {"prose": "You name the clerk; the order is signed."},
@@ -1070,7 +1070,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([                       # NO judge stub — pillar grade is effect-derived
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
             {"prose": "You name the rival; the truth lands."},
         ])
@@ -1098,7 +1098,7 @@ class TestFullTurn:
         # NOTE: the genuine fact is NOT in the player frame → coverage incomplete (unfilled).
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([                       # NO judge_commitment stub — bounce skips it
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
             {"prose": "You point at the rival — but you have not shown how."},
         ])
@@ -1131,7 +1131,7 @@ class TestFullTurn:
             frame=PLAYER_FRAME)  # coverage now complete + sound
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([                       # NO judge stub — effect-derived grade
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
             {"prose": "You name the rival; it holds."},
         ])
@@ -1158,7 +1158,7 @@ class TestFullTurn:
             frame=PLAYER_FRAME)
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([                       # NO judge stub
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "names the killer"},
             {"prose": "You lay out the case; the rival is named."},
         ])
@@ -1190,7 +1190,7 @@ class TestFullTurn:
             frame=PLAYER_FRAME)
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([                       # NO judge stub — effect-derived
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the clerk"},
             {"prose": "You name the clerk; the order is signed — but it will not hold."},
         ])
@@ -1222,7 +1222,7 @@ class TestFullTurn:
         cast = {"person:rival": CastNode("person:rival", "suspect", "the rival", is_culprit=True)}
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the clerk"},
             {"prose": "You name the clerk; the real one slips away."},
         ])
@@ -1257,7 +1257,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([                       # NO judge stub — effect-derived grade
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "plays along as the Duke"},
             {"prose": "The king roars with laughter; the pig is knighted."},
         ])
@@ -1299,7 +1299,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([                       # NO judge stub — effect-derived grade
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "goes the distance"},
             {"prose": "The bell rings; you are still standing."},
         ])
@@ -1329,7 +1329,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "deflect",
              "line_hint": ""},                                   # present witness: npc_turn (folded)
@@ -1369,7 +1369,7 @@ class TestFullTurn:
         cast = self._witness_two_clues(world)
         world._extractions.append({"items": []}); world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "asks_targets": ["ask_1"]},   # ask_1 = the secret (2nd clue)
             {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
             {"prose": "Pressed on who is behind it, the witness names the rival."},
@@ -1390,7 +1390,7 @@ class TestFullTurn:
         cast = self._witness_two_clues(world)
         world._extractions.append({"items": []}); world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},                               # no asks_targets at all
             {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
             {"prose": "The witness offers what they will."},
@@ -1414,7 +1414,7 @@ class TestFullTurn:
                  coverage_effect="genuine", reveal_condition="pressure"),))}
         world._extractions.append({"items": []}); world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "asks_targets": ["ask_0"]},    # targets the pressure clue...
             {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
             {"prose": "You exchange pleasantries with the witness."},
@@ -1444,7 +1444,7 @@ class TestFullTurn:
                  coverage_effect="genuine", reveal_condition="none")))}
         world._extractions.append({"items": []}); world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "asks_targets": ["ask_0"]},    # targets the ALREADY-LEARNED clue
             {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
             {"prose": "The witness goes on."},
@@ -1474,7 +1474,7 @@ class TestFullTurn:
                  coverage_effect="genuine", reveal_condition="none")))}
         world._extractions.append({"items": []}); world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the pantry", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "the pantry", "requires": [], "needs_test": False,
              "uncertain_of": "", "asks_targets": ["ask_1"]},    # would WANT the secret...
             {"acts": False, "action": "", "speaks": True, "intent": "deflect", "line_hint": ""},
             {"prose": "You find the witness in the pantry; they say their piece."},
@@ -1577,7 +1577,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})       # player input
         world._extractions.append({"items": []})       # post-render
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "takes": "a mug"},
             {"ordinary_equipment": True, "item_id": "obj:mug",
              "reason": "an ordinary mug plainly present"},                  # equipment_check(take)
@@ -1604,7 +1604,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})       # player input
         world._extractions.append({"items": []})       # post-render
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "takes": "the plain pencil"},
             {"prose": "You pick up the plain pencil from the desk."},   # NB no equipment_check stub:
         ])                                                              # binding must not reach the minter
@@ -1632,7 +1632,7 @@ class TestFullTurn:
         world.ingest_structured(rows)
         world._extractions.append({"items": []})       # post-render
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "takes": "the ash-rake", "takes_more": ["the poker", "the slate"],
              "asserts_or_reveals": False},
@@ -1664,7 +1664,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})       # player input
         world._extractions.append({"items": []})       # post-render
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "takes": "the pencil"},
             {"prose": "You reach toward the pencils on the desk."},
         ])
@@ -1689,7 +1689,7 @@ class TestFullTurn:
         ]})
         world._extractions.append({"items": []})                       # post-render
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "asserts_or_reveals": True},
             {"prose": "You look down the wet street."},
         ])
@@ -1707,7 +1707,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "", "takes": "the iron vault key"},
             {"ordinary_equipment": False, "item_id": "", "reason": "load-bearing artifact"},
             {"prose": "There is no such key here to take."},
@@ -1759,7 +1759,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You look about the study, the lantern warm in your hand."},
         ])
@@ -1789,14 +1789,14 @@ class TestFullTurn:
         for _ in range(4):
             world._extractions.append({"items": []})
         prov = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You take in your study, the lamp low."},
         ])
         run_turn(world, arc, prov, "I look around.", turn=1, scope=[PLAYER, "place:study"])
         assert "GROUNDING RUNWAY" in _narrate_prompt(prov)
         prov2 = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The study again."},
         ])
@@ -1812,7 +1812,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the bell yard office", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the bell yard office", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"verdict": "new", "match": ""},        # Cx 354 A: semantic bind fires, says new → mint
             {"prose": "You climb the steep stair to the office."},
@@ -1860,7 +1860,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the table", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "the table", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "answer the question",
              "line_hint": ""},                                          # witness npc_turn (she's PRESENT)
@@ -1892,7 +1892,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the table", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "the table", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "answer", "line_hint": ""},  # witness
             {"prose": "You go to the table; Maud is here."},
@@ -1989,7 +1989,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the Liddell warehouse, to the foreman's office",
+            {"kind": "action", "claims_are": "act", "moves_to": "the Liddell warehouse, to the foreman's office",
              "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
              "commitment": "", "npcs_dismissed": [], "moved_with": [], "joins": []},
             # Liddell is colocated via the containment chain → his npc_turn fires
@@ -2025,7 +2025,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the Liddell warehouse, to the foreman's office",
+            {"kind": "action", "claims_are": "act", "moves_to": "the Liddell warehouse, to the foreman's office",
              "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
              "commitment": "", "npcs_dismissed": [], "moved_with": [], "joins": []},
             {"prose": "The river gate is chained fast."},
@@ -2240,7 +2240,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The study is quiet."},
         ])
@@ -2252,7 +2252,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider2 = StubProvider([
-            {"kind": "action", "moves_to": "the market", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "the market", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Maud is at her barrow by the weigh-house."},
@@ -2300,7 +2300,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the scene of the crime", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"verdict": "existing", "match": "place:bluegate_yard"},   # the dst bind
             {"prose": "You step out into the rain toward Bluegate Yard."},
@@ -2324,7 +2324,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the scene of the crime", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"verdict": "existing", "match": "place:bluegate_yard"},
             {"prose": "You head out to Bluegate Yard."},
@@ -2429,7 +2429,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True,
              "commitment": "I accuse the butler to his face"},
             {"grade": "wrong", "rationale": "the butler is innocent; the rival did it"},
@@ -2462,7 +2462,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "the rival did it"},
             {"specified": False, "missing": ["audience"],
              "clarification": "Say it to whom? The study is empty."},
@@ -2480,7 +2480,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider2 = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "I accuse the rival to his face"},
             {"specified": False, "missing": ["audience"], "clarification": "should not be used"},
             {"prose": "The accusation hangs in the air."},
@@ -2498,7 +2498,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "the rival did it"},
             {"specified": False, "missing": ["audience"], "clarification": "Say it to whom?"},
             {"prose": "Your words find no one."},
@@ -2516,7 +2516,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "the rival did it"},
             {"specified": False, "missing": ["audience"], "clarification": "Say it to whom?"},
             {"prose": "Your words find no one."},
@@ -2544,7 +2544,7 @@ class TestFullTurn:
 
         monkeypatch.setattr(world.porcelain, "ingest_structured", _boom)
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "Julian goes pale as the accusation lands."},
         ])
@@ -2569,7 +2569,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "where Reed is", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "where Reed is", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "You find Reed in the study."},
@@ -2603,7 +2603,7 @@ class TestFullTurn:
                   "person:maud", "person:nell", "person:reed"]
         # classify: roster is npc_0=maud, npc_1=nell, npc_2=reed (sorted scope order)
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the scene of the crime", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": ["npc_0", "npc_1"], "moved_with": ["npc_2"]},
             {"verdict": "existing", "match": "place:bluegate_yard"},
@@ -2622,7 +2622,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider2 = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Reed crouches by the stain."},
@@ -2644,7 +2644,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": ["npc_0"], "moved_with": []},
             {"prose": "Maud gathers her shawl and goes."},
@@ -2656,7 +2656,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider2 = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The room is quieter now."},
         ])
@@ -2685,7 +2685,7 @@ class TestFullTurn:
             "status": "blocked", "via": "obj:door1",
             "evidence": [{"entity": "obj:door1", "attribute": "state", "value": "shut"}]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the scene of the crime", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": ["npc_0"]},
             {"verdict": "existing", "match": "place:bluegate_yard"},
@@ -2727,7 +2727,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Tin Ear slides the ledger across the counter."},
@@ -2787,7 +2787,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
             {"prose": "Nestor looks up from the alcove."},
@@ -2814,7 +2814,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": [], "joins": ["npc_0"]},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -2828,7 +2828,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider2 = StubProvider([
-            {"kind": "action", "moves_to": "the yard", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "the yard", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": [], "joins": []},
             # "the yard" token-matches place:bluegate_yard deterministically — no referee stub
@@ -2850,7 +2850,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider3 = StubProvider([
-            {"kind": "action", "moves_to": "the study", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "the study", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": [], "joins": []},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -2873,7 +2873,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": [], "joins": ["npc_0"]},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -2883,7 +2883,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider2 = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": ["npc_0"], "moved_with": [], "joins": []},
             {"prose": "Reed touches his hat and goes."},
@@ -2897,7 +2897,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider3 = StubProvider([
-            {"kind": "action", "moves_to": "the yard", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "the yard", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": [], "joins": []},
             {"prose": "You go out to the yard alone."},
@@ -2919,7 +2919,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": [], "joins": ["npc_0"]},
             {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -2933,7 +2933,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider2 = StubProvider([
-            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the scene of the crime", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": "",
              "npcs_dismissed": [], "moved_with": [], "joins": []},
             {"verdict": "existing", "match": "place:bluegate_yard"},
@@ -2964,7 +2964,7 @@ class TestFullTurn:
                     "evidence": [{"entity": "obj:door1", "attribute": "state", "value": "shut"}]}
         monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: dict(_blocked))
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the scene of the crime", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the scene of the crime", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"verdict": "existing", "match": "place:bluegate_yard"},
             {"prose": "The door will not give."},
@@ -2994,7 +2994,7 @@ class TestFullTurn:
                     "evidence": [{"entity": "obj:door1", "attribute": "state", "value": "shut"}]}
         monkeypatch.setattr(tl, "_route_obstruction", lambda *a, **k: dict(_blocked))
         provider = StubProvider([
-            {"kind": "action", "moves_to": "my own office", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "my own office", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The door will not give."},
         ])
@@ -3017,7 +3017,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the old mill on the hill", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the old mill on the hill", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"verdict": "new", "match": ""},
             {"prose": "You climb to the old mill."},
@@ -3035,7 +3035,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The room holds quiet around you."},
         ])
@@ -3053,7 +3053,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The room holds quiet around you."},
         ])
@@ -3075,7 +3075,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "back", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "back", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You turn back the way you came."},
         ])
@@ -3098,7 +3098,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "office", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "office", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "Which office did you mean?"},
         ])
@@ -3145,7 +3145,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the rival's lair", "requires": [],
+            {"kind": "action", "claims_are": "act", "moves_to": "the rival's lair", "requires": [],
              "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You cannot simply find your way there."},
         ])
@@ -3167,7 +3167,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "deflect",
              "line_hint": "wary"},                               # the single folded call
@@ -3196,7 +3196,7 @@ class TestFullTurn:
         ])
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "warn you",
              "line_hint": ""},                                   # person:silent (1st in scope order)
@@ -3228,7 +3228,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "You open the bag; a vial slot sits conspicuously empty."},
         ])
@@ -3263,7 +3263,7 @@ class TestFullTurn:
                  reveal_condition="scrutiny"),))}
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "Your eyes pass over the table and the bag upon it."},
         ])
@@ -3298,7 +3298,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "tell",
              "line_hint": ""},                                   # witness npc_turn (folded)
@@ -3335,7 +3335,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "wait",
              "line_hint": ""},                                   # witness npc_turn (folded)
@@ -3386,7 +3386,7 @@ class TestFullTurn:
         world._extractions.append({"items": [                          # narrator tries to voice it
             {"entity": "fact:motive", "attribute": "is", "value": "debt"}]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"acts": False, "action": "", "speaks": True, "intent": "wait",
              "line_hint": ""},                                   # npc_turn (folded)
@@ -3420,7 +3420,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
             {"prose": "You blurt an accusation; nothing locks — you've barely arrived."},
         ])
@@ -3442,7 +3442,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You scan the shelves."},
         ])
         result = run_turn(world, arc, provider, "I look over the records.", turn=1)
@@ -3468,7 +3468,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You take in the study."},
         ])
         result = run_turn(world, arc, provider, "I look around.", turn=1)
@@ -3494,7 +3494,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You press on."},
         ])
         result = run_turn(world, arc, provider, "I keep digging.", turn=5,
@@ -3524,7 +3524,7 @@ class TestFullTurn:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
             {"prose": "You look about the study."},
         ])
         run_turn(world, arc, provider, "I look around.", turn=1)
@@ -3540,8 +3540,8 @@ class TestFullTurn:
         # Each turn: classify → narrate. Diegetic time is now DETERMINISTIC for ordinary turns
         # (TURN-LATENCY Lever C) — "look around" needs no estimate_elapsed model call.
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around."},
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around again."},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around."},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You look around again."},
         ])
         r1 = run_turn(world, arc, provider, "I look around.", turn=1)
         r2 = run_turn(world, arc, provider, "I look around once more.", turn=2)
@@ -3558,7 +3558,7 @@ class TestFullTurn:
             {"entity": "obj:rampway", "attribute": "kind", "value": "ramp"},
         ]})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You take the rampway down."},
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""}, {"prose": "You take the rampway down."},
         ])
         result = run_turn(world, arc, provider, "I walk down the rampway.", turn=1)
         assert result.trace.concealment_audit == "clean"
@@ -4119,7 +4119,7 @@ def test_narrate_conditional_blocks_gate():
 
 
 def _solo_classify(**over):
-    base = {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+    base = {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
             "uncertain_of": "", "uses_protagonist_knowledge": False}
     base.update(over)
     return base
@@ -4175,7 +4175,7 @@ def test_conditional_player_ingest_skips_extraction_when_no_assert(world):
     seed_arc(world, arc)
     world._extractions.append({"items": []})  # ONLY the post-render extraction is consumed
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "asserts_or_reveals": False},
         {"prose": "You take in the quiet room."},
     ])
@@ -4184,7 +4184,7 @@ def test_conditional_player_ingest_skips_extraction_when_no_assert(world):
     # default-TRUE keeps extraction when the field is absent (old stubs / uncertainty)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider2 = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You pry the panel loose."},
     ])
     r2 = run_turn(world, arc, provider2, "I pry the loose panel open.", turn=2)
@@ -4199,7 +4199,7 @@ def test_play_style_directive_in_briefing(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You look."},
     ])
     run_turn(world, arc, provider, "I look around.", turn=1,
@@ -4215,7 +4215,7 @@ def test_style_overlay_in_briefing(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You look."},
     ])
     run_turn(world, arc, provider, "I look around.", turn=1,
@@ -4238,7 +4238,7 @@ def test_terminal_epilogue_does_not_rebind_cast_param(world, monkeypatch):
         {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You name the rival; the meter's truth is out."},
     ])
     result = run_turn(world, arc, provider, "I name the culprit.", turn=2,
@@ -4259,7 +4259,7 @@ def test_terminal_epilogue_names_cast_and_reveals(world):
         {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You name the rival; the meter's truth is out."},
     ])
     result = run_turn(world, arc, provider, "I name the culprit.", turn=1,
@@ -4313,7 +4313,7 @@ def test_commitment_owned_climax_is_ready_not_terminal(world):
         frame=PLAYER_FRAME)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},   # NOT a reckoning
         {"prose": "You lay the evidence out on the table; the room reads what it means."}])
     r = run_turn(world, arc, provider, "I lay out all the evidence on the table.", turn=3,
@@ -4326,7 +4326,7 @@ def test_commitment_owned_climax_is_ready_not_terminal(world):
     # now the player RECKONS → the commitment owns the curtain → terminal
     world._extractions.extend([{"items": []}, {"items": []}])
     provider2 = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
         {"grade": "vindicated", "rationale": "the evidence matches"},   # judge_commitment
         {"prose": "You name the rival; the truth lands and the case closes."}])
@@ -4349,7 +4349,7 @@ def test_classifier_is_told_when_the_decisive_moment_is_within_reach(world):
     def _turn(n):
         world._extractions.extend([{"items": []}, {"items": []}])
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": "", "commits": False, "commitment": ""},
             {"prose": "The boat waits at the quay."}])
         run_turn(world, arc, provider, "I step down into the boat.", turn=n,
@@ -4385,7 +4385,7 @@ def test_no_deadline_ready_arc_never_force_concludes(world):
             if prompt.startswith("Classify the lifetime"):
                 return {"durability": "STATE", "confidence": 0.9}
             if task_of(prompt) == "cls":
-                return {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+                return {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
                         "uncertain_of": "", "commits": False, "commitment": ""}
             if task_of(prompt) == "nar":
                 return {"prose": "You turn the pieces over once more, in no hurry."}
@@ -4439,7 +4439,7 @@ def test_decisive_loss_event_concludes_without_commitment(world):
           "valid_from": turn_time(2)}])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},   # NOT a commitment
         {"prose": "Too late — the shot has already been fired."}])
     r = run_turn(world, arc, provider, "I step out into the corridor for air.", turn=2,
@@ -4500,7 +4500,7 @@ def test_authored_time_deadline_concludes_lost(world):
           "value_type": "literal"}])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "The hour has come and gone; it is too late now."}])
     r = run_turn(world, arc, provider, "I keep fussing with the table settings.", turn=4,
@@ -4524,7 +4524,7 @@ def test_epilogue_prose_mints_no_canon_aliases(world):
     world._extractions.append({"items": [                          # post-render epilogue extraction
         {"entity": "person:rival", "attribute": "alias", "value": "with his name cleared", "frame": "canon"}]})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": True, "commitment": "accuses the rival"},
         {"grade": "vindicated", "rationale": "the evidence matches"},
         {"prose": "You name the rival; they are taken out into the rain with their name cleared."}])
@@ -4569,7 +4569,7 @@ def test_world_event_owned_still_terminates_on_world_condition(world):
         {"entity": "fact:secret", "attribute": "culprit", "value": "person:rival"}]})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "The world tips into its ending."}])
     r = run_turn(world, arc, provider, "I trip the final mechanism.", turn=2,
                  scenario_mode="win_loss", terminal_owner="world_event")  # the default
@@ -4595,7 +4595,7 @@ def test_movement_relocates_player(world):
     world._extractions.append({"items": []})   # player-action extraction
     world._extractions.append({"items": []})   # post-render extraction
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the flat", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "the flat", "requires": [], "needs_test": False, "uncertain_of": ""},
         # F12 (present-but-unseen): the rival LIVES in the flat — arriving there, he is
         # honestly present now (colocated ⇒ discovered), so his npc_turn fires.
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -4619,7 +4619,7 @@ def test_movement_to_a_person_redirects_to_their_place(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "parker", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "parker", "requires": [], "needs_test": False, "uncertain_of": ""},
         # F12: Parker is honestly present at his own pantry when you arrive — npc_turn fires
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "You go find Parker in the pantry."},
@@ -4670,7 +4670,7 @@ def test_make_it_real_reroutes_a_pursued_thread_to_an_unfilled_pillar(world):
              coverage_effect="genuine", reveal_condition="scrutiny"),))}
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": "",
          "examines_target": "the damp ring on the sideboard"},          # un-authored pursuit
         {"lane": "genuine", "pillar_id": "pillar:means",                 # adapt_decision
@@ -4706,7 +4706,7 @@ def test_make_it_real_skips_a_generic_look_around(world):
              coverage_effect="genuine", reveal_condition="scrutiny"),))}
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([                                            # NO examines_target
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": "", "examines_target": ""},
         {"prose": "The study is quiet; shelves, a cold hearth, the desk by the window."},
     ])
@@ -4736,7 +4736,7 @@ def test_make_it_real_skips_the_authored_holder(world):
              coverage_effect="genuine", reveal_condition="scrutiny"),))}
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([                                # examines the AUTHORED bag
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": "",
          "examines_target": "the doctor's bag"},
         {"prose": "You open the bag; a vial slot sits conspicuously empty."},
@@ -4816,7 +4816,7 @@ def test_movement_to_undiscovered_offscene_target_is_blocked(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the cottage", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "the cottage", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You don't yet know where to find the cottage."},
     ])
     result = run_turn(world, arc, provider, "I go to the cottage.", turn=1, cast=cast,
@@ -4829,7 +4829,7 @@ def test_movement_to_undiscovered_offscene_target_is_blocked(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider_p = StubProvider([
-        {"kind": "action", "moves_to": "bell", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "bell", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You don't yet know where Bell is."},
     ])
     res_p = run_turn(world, arc, provider_p, "I go to Bell.", turn=2, cast=cast,
@@ -4844,7 +4844,7 @@ def test_movement_to_undiscovered_offscene_target_is_blocked(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider2 = StubProvider([
-        {"kind": "action", "moves_to": "the cottage", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "the cottage", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         # the move lands → Bell (at place:cottage) becomes present, so npc cohorts run:
         {"acts": False, "action": "", "speaks": True, "intent": "wait",
@@ -4862,7 +4862,7 @@ def test_adjudication_denies_phantom_key(world):
     arc = make_arc()
     seed_arc(world, arc)
     provider = StubProvider([
-        {"kind": "action", "moves_to": "",
+        {"kind": "action", "claims_are": "act", "moves_to": "",
          "requires": ["the iron vault key"], "needs_test": False, "uncertain_of": ""},          # classify
         {"ordinary_equipment": False, "item_id": "", "reason": "a specific load-bearing key"},  # equipment_check
         {"prose": "Your pocket holds no such key; the vault stays shut."},
@@ -4889,7 +4889,7 @@ def test_adjudication_grants_ordinary_role_equipment(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": ["my medical bag"],
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": ["my medical bag"],
          "needs_test": False, "uncertain_of": ""},                                              # classify
         {"ordinary_equipment": True, "item_id": "obj:medical_bag",
          "reason": "ordinary physician's equipment"},                                           # equipment_check
@@ -4913,7 +4913,7 @@ def test_adjudication_allows_held_item(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": ["the brass key"], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": ["the brass key"], "needs_test": False, "uncertain_of": ""},
         {"prose": "You turn the brass key; the lock gives."},
     ])
     result = run_turn(world, arc, provider, "I unlock the chest with the brass key.",
@@ -4935,7 +4935,7 @@ def test_equipment_grant_never_reuses_an_existing_object_id(world):
     world._extractions.append({"items": []})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": ["my medical bag"],
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": ["my medical bag"],
          "needs_test": False, "uncertain_of": ""},                                   # classify
         {"ordinary_equipment": True, "item_id": "obj:murder_weapon",  # malicious/colliding id
          "reason": "ordinary bag"},                                                  # equipment_check
@@ -5018,7 +5018,7 @@ def _drive_winning_turn(world, scenario_mode):
     ]})
     world._extractions.append({"items": []})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False, "uncertain_of": ""},
         {"prose": "You name the rival; the meter's truth is out and the settlement breathes."},
     ])
     return run_turn(world, arc, provider, "I examine the ledger.", turn=1,
@@ -5191,7 +5191,7 @@ def test_place_holder_self_edge_is_present_and_delivers_on_examine(world):
     assert world.porcelain.locate("place:cisterns")  # non-empty chain → present
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": "", "examines_target": "the cisterns"},
         {"prose": "You crouch to the resonant water tanks and read the law-songs cut into them."},
     ])
@@ -5219,7 +5219,7 @@ def test_event_occurs_beat_fires_and_achieves_on_success(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"occurred": ["deed_done"]},                       # detect_events
         {"prose": "You abandon the cargo; the party stays on the cord."},
@@ -5275,7 +5275,7 @@ def test_result_event_loss_not_minted_before_result_moment(world, monkeypatch):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([                       # NO detect_events stub — the gate must block it
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True,
          "uncertain_of": "risky", "commits": False, "commitment": ""},
         {"prose": "You swing early and miss; the bout is far from decided."}])
     result = run_turn(world, arc, provider, "I throw an early jab.", turn=2,
@@ -5295,7 +5295,7 @@ def test_event_occurs_no_fire_on_failure_tier(world, monkeypatch):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([                              # NO detect_events stub — must not be called
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True,
          "uncertain_of": "the slope may give", "commits": False, "commitment": ""},
         {"prose": "You reach to cut the ore loose, but the footing slides out from under you."},
     ])
@@ -5313,7 +5313,7 @@ def test_event_occurs_no_fire_when_detector_says_none(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"occurred": []},                                  # detector: nothing happened
         {"prose": "You consider cutting the ore loose, but don't."},
@@ -5331,7 +5331,7 @@ def test_event_occurs_no_detector_call_without_candidates(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([                              # NO detect_events stub
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You look around."},
     ])
@@ -5350,7 +5350,7 @@ def test_event_occurs_already_achieved_offers_no_candidate(world):
           "valid_from": turn_time(1)}], frame="plot:main")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([                              # NO detect_events stub (no candidates)
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You act."},
     ])
@@ -5393,7 +5393,7 @@ class TestWorldReshape:
             {"entity": "fact:secret", "attribute": "culprit", "value": "person:newculprit"}]})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
              "uncertain_of": "whether the truth itself can be rewritten"},          # classify
             {"is_reshape": True, "slug": "culprit_rewritten",
              "target": {"entity": "fact:secret", "attribute": "culprit",
@@ -5433,7 +5433,7 @@ class TestWorldReshape:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
              "uncertain_of": "whether the victim can be brought back"},             # classify
             {"is_reshape": True, "slug": "victim_revived",
              "target": {"entity": "person:rival", "attribute": "alive", "value": "true"},
@@ -5471,7 +5471,7 @@ class TestWorldReshape:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True,
              "reshape_attempt": True,
              "uncertain_of": "whether the truth can be rewritten"},               # classify
             {"prose": "You strain against the truth, but it is what it is."},      # narrate
@@ -5492,7 +5492,7 @@ class TestWorldReshape:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True, "reshape_attempt": True,
              "uncertain_of": "whether the truth can be rewritten"},               # classify
             {"is_reshape": True, "slug": "culprit_rewritten",
              "target": {"entity": "fact:secret", "attribute": "culprit",
@@ -5517,7 +5517,7 @@ class TestWorldReshape:
 # ---------------------------------------------------------------------------
 
 _MORTAL_CLASSIFY = {
-    "kind": "action", "moves_to": "", "requires": [], "needs_test": True,
+    "kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": True,
     "uncertain_of": "the drop from the parapet would kill",
     "mortal_risk": True, "commits": False, "commitment": "",
 }
@@ -5675,7 +5675,7 @@ def test_peril_clears_on_non_risk_turn_then_restages(world, monkeypatch):
     world._extractions.extend([{"items": []}, {"items": []},
                                {"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "mortal_risk": False, "commits": False, "commitment": ""},
         {"prose": "You step back from the edge and breathe."},
         dict(_MORTAL_CLASSIFY),
@@ -5730,7 +5730,7 @@ def test_vocative_to_absent_title_holder_suppresses_fallback_delivery(world):
     cast = _chief_and_witness(world, chief_at="place:office")   # chief NOT in the study
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "The word hangs in the room; the chief is not here to catch it."},
@@ -5753,7 +5753,7 @@ def test_vocative_to_present_title_holder_binds_and_delivers(world):
     cast = _chief_and_witness(world, chief_at="place:study")    # chief IS here
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"acts": False, "action": "", "speaks": True, "intent": "answer plainly",
          "line_hint": ""},
@@ -5777,7 +5777,7 @@ def test_mid_sentence_title_word_is_never_an_address(world):
     cast = _chief_and_witness(world, chief_at="place:office")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"acts": False, "action": "", "speaks": True, "intent": "reassure",
          "line_hint": ""},
@@ -5811,7 +5811,7 @@ def _named_sack_turn(world, sack_rows_player_frame):
         ], frame=PLAYER_FRAME, classify="rules")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "The witness glances toward the office door."},
@@ -5832,7 +5832,7 @@ def test_a_question_in_the_players_line_is_never_extracted(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You set the cup down."},
     ])
@@ -5850,7 +5850,7 @@ def test_an_emphatic_question_is_never_extracted(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You wait."},
     ])
@@ -5865,7 +5865,7 @@ def test_a_question_only_line_extracts_nothing_from_the_player(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "Nobody answers."},
     ])
@@ -5893,7 +5893,7 @@ def test_a_question_about_a_remote_place_gets_the_place_line(world):
     ], frame=PLAYER_FRAME, classify="rules")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "The witness shrugs toward the hall."},
@@ -5951,7 +5951,7 @@ def test_narrated_named_venue_commits_stub_and_second_mention_binds(world):
          "value": "a low coach-yard inn smelling of tallow"},
     ]})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "Before the Hall, you kept a room at The Hart and Bell, above the "
                   "coach yard."},
@@ -5973,7 +5973,7 @@ def test_narrated_named_venue_commits_stub_and_second_mention_binds(world):
         {"entity": "place:the_hart_and_bell", "attribute": "kind", "value": "inn"},
     ]})
     provider2 = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "The Hart and Bell keeps early hours; the ostlers would remember you."},
     ])
@@ -6044,7 +6044,7 @@ def test_vocative_leadin_forms_absent_holder_still_suppresses(world):
     cast = _chief_and_witness(world, chief_at="place:office")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
         {"prose": "The call goes unanswered; the chief is elsewhere tonight."},
@@ -6065,7 +6065,7 @@ def test_vocative_leadin_forms_present_holder_binds(world):
     cast = _chief_and_witness(world, chief_at="place:study")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"acts": False, "action": "", "speaks": True, "intent": "answer", "line_hint": ""},
         {"acts": False, "action": "", "speaks": False, "intent": "", "line_hint": ""},
@@ -6102,7 +6102,7 @@ def test_frame_only_named_entity_never_enters_the_canon_bind_path(world):
          "value": "a low coach-yard inn smelling of tallow"},
     ]})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "Talk turns to The Hart and Bell, down in the village."},
     ])
@@ -6125,7 +6125,7 @@ def test_frame_only_named_entity_never_enters_the_canon_bind_path(world):
 # ---------------------------------------------------------------------------
 
 def _mem_classify(**kw):
-    base = {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+    base = {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
             "uncertain_of": "", "commits": False, "commitment": ""}
     base.update(kw)
     return base
@@ -6360,7 +6360,7 @@ def test_settle_reconstructs_name_evidence_when_extractor_omits_names(world):
         {"entity": "place:coach_yard", "attribute": "kind", "value": "coach_yard"},
     ]})
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "Before the Hall, you had a room at The Hart and Bell, above the "
                   "coach yard."},
@@ -6395,7 +6395,7 @@ def test_move_synonym_for_current_room_binds_no_twin(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the drawing room", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the drawing room", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"verdict": "existing", "match": "place:parlor"},      # the dst bind sees HOME
         {"prose": "You are already in the parlor; the fire has not moved."},
@@ -6427,7 +6427,7 @@ def test_move_ambiguous_destination_asks_never_mints(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the basement", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the basement", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"verdict": "ambiguous", "match": ""},
         {"prose": "“Which cellar do you mean, sir — north or south?”"},
@@ -6449,7 +6449,7 @@ def test_narrator_briefed_places_keep_their_names(world):
     seed_arc(world, arc)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "The study sits quiet around you."},
     ])
@@ -6491,7 +6491,7 @@ def test_unknown_distance_move_prices_by_model_with_hygienic_ids(world):
     _hall_world(world)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the consulting room in the village",
+        {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},                     # the dst bind: genuinely new
@@ -6528,7 +6528,7 @@ def test_sibling_rooms_are_provably_near_bucket_kept(world):
          "value_type": "entity"}])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the study", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the study", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You cross the passage into the study."},
     ])
@@ -6555,7 +6555,7 @@ def test_ambiguous_locative_container_asks_never_mints(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the smithy in the village", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the smithy in the village", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"verdict": "new", "match": ""},
         {"prose": "“Which village, sir — north or south?”"},
@@ -6583,7 +6583,7 @@ def test_same_place_synonym_charges_no_move_time(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the drawing room", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the drawing room", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"verdict": "existing", "match": "place:parlor"},
         {"prose": "You are already in the parlor."},
@@ -6604,7 +6604,7 @@ def test_move_exact_current_room_name_is_a_time_noop(world):
         {"entity": "place:study", "attribute": "name", "value": "the study"}])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the study", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the study", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You are already in the study."},
     ])
@@ -6634,7 +6634,7 @@ def test_take_synonym_binds_scoped_scene_object(world):
                                "confidence": 0.9, "signals": ["synonym"]})
     world._extractions.append({"items": []})                   # post-render extract
     provider = StubProvider([
-        {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+        {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
          "uncertain_of": "", "commits": False, "commitment": "",
          "takes": "the blade"},
         {"prose": "You take up the boning knife."},
@@ -6676,7 +6676,7 @@ def test_wrapper_world_cross_site_move_is_distance_unknown(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the forge", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the forge", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You walk down to the forge in the village."},
         {"advance_minutes": 40, "jump_to_phase": "", "jump_days": 0,
@@ -6705,7 +6705,7 @@ def test_ambiguous_container_by_name_kind_evidence_asks(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the smithy in the village", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the smithy in the village", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"verdict": "new", "match": ""},
         {"prose": "“Which village, sir — north or south?”"},
@@ -6732,7 +6732,7 @@ def test_unique_container_binds_by_name_kind_evidence(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the smithy in the village", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the smithy in the village", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         # no dst-bind stub: the unique container match takes the COMPOUND path
         # (straight to the nesting grant), never the semantic-bind cohort
@@ -6770,7 +6770,7 @@ def test_direct_clear_route_proves_nearness(world):
     ])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the gatehouse", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the gatehouse", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You cross to the gatehouse."},
     ])
@@ -6805,7 +6805,7 @@ def test_journey_deliberation_holds_move_once_then_proceeds_on_cache(world):
     world._extractions.extend([{"items": []}, {"items": []},
                                {"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the consulting room in the village",
+        {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},                      # dst bind: genuinely new
@@ -6813,7 +6813,7 @@ def test_journey_deliberation_holds_move_once_then_proceeds_on_cache(world):
          "reason": "a long night ride"},                      # the PRE-COMMIT estimate
         {"prose": "You pause at the door, weighing the road against the hour."},
         # ---- turn B: the player insists ----
-        {"kind": "action", "moves_to": "the consulting room in the village",
+        {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},
@@ -6844,7 +6844,7 @@ def test_journey_within_budget_commits_without_deliberation(world):
     _hall_world(world)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the consulting room in the village",
+        {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},
@@ -6869,7 +6869,7 @@ def test_no_deadline_means_no_deliberation(world):
     _hall_world(world)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the consulting room in the village",
+        {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},
@@ -6896,7 +6896,7 @@ def test_near_move_under_deadline_never_deliberates(world):
          "value_type": "entity"}])
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the study", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the study", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You cross the passage into the study."},
     ])
@@ -6938,7 +6938,7 @@ def test_open_door_route_is_near_no_deliberation(world):
     _door_between(world, "place:parlor", "place:annex", state="open")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the annex", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the annex", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You step through the open door into the annex."},
     ])
@@ -6967,7 +6967,7 @@ def test_blocked_route_never_renders_as_deliberation(world):
     _door_between(world, "place:parlor", "place:annex", state="shut")
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the annex", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the annex", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "The door will not give."},
     ])
@@ -7068,7 +7068,7 @@ def test_route_price_settle_backstop_retries_failed_precommit_store(world):
     world.porcelain.ingest_structured = _flaky_ingest
     try:
         provider = StubProvider([
-            {"kind": "action", "moves_to": "the consulting room in the village",
+            {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
              "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
              "commitment": ""},
             {"verdict": "new", "match": ""},
@@ -7099,7 +7099,7 @@ def test_route_price_never_stored_from_jump_estimate(world):
     _hall_world(world)
     world._extractions.extend([{"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the consulting room in the village",
+        {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},
@@ -7125,7 +7125,7 @@ def test_route_price_reused_across_turns_and_directions(world):
     world._extractions.extend([{"items": []}, {"items": []},
                                {"items": []}, {"items": []}])
     provider = StubProvider([
-        {"kind": "action", "moves_to": "the consulting room in the village",
+        {"kind": "action", "claims_are": "act", "moves_to": "the consulting room in the village",
          "requires": [], "needs_test": False, "uncertain_of": "", "commits": False,
          "commitment": ""},
         {"verdict": "new", "match": ""},                      # dst bind: genuinely new
@@ -7133,7 +7133,7 @@ def test_route_price_reused_across_turns_and_directions(world):
         {"advance_minutes": 75, "jump_to_phase": "", "jump_days": 0,
          "reason": "a night walk to the village"},            # the FIRST pricing
         # ---- the return trip: deliberately NO estimate stub ----
-        {"kind": "action", "moves_to": "the parlor", "requires": [],
+        {"kind": "action", "claims_are": "act", "moves_to": "the parlor", "requires": [],
          "needs_test": False, "uncertain_of": "", "commits": False, "commitment": ""},
         {"prose": "You walk the lane back up to the hall."},
     ])
@@ -7192,7 +7192,7 @@ class TestWorldLaws:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "The study holds its breath."},
         ])
@@ -7215,7 +7215,7 @@ class TestWorldLaws:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "Fog against the glass."},
         ])
@@ -7236,7 +7236,7 @@ class TestWorldLaws:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "You weigh the debt."},
         ])
@@ -7251,7 +7251,7 @@ class TestWorldLaws:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "Quiet."},
         ])
@@ -7269,7 +7269,7 @@ class TestWorldLaws:
         world._extractions.append({"items": []})
         world._extractions.append({"items": []})
         provider = StubProvider([
-            {"kind": "action", "moves_to": "", "requires": [], "needs_test": False,
+            {"kind": "action", "claims_are": "act", "moves_to": "", "requires": [], "needs_test": False,
              "uncertain_of": ""},
             {"prose": "The world stays stubbornly real."},
         ])
