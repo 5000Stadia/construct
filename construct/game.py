@@ -3169,6 +3169,60 @@ def _plan_hook_cast(world: Any, reads: Any, proposal: dict, door_place: str | No
     return kept, hook_ids
 
 
+_CATEGORY_PHRASE = {
+    "right": "the player solved it rightly",
+    "wrong": "the player closed it on the WRONG answer (or lost) — its fallout is live",
+    "abandoned": "the player WALKED AWAY from it — what they left behind did not wait",
+    "elsewhere": "the player went ELSEWHERE, after their own aim — the old thread ran on "
+                 "without them",
+}
+
+
+def _receipt_category(world: Any, prior_outcome: str | None) -> str:
+    """The latest outcome receipt's `outcome_category` (B1 change 2); a legacy receipt
+    without it derives one from grade / outcome_shape / the binary."""
+    from construct.adapter import frame_facts
+    from construct.arc.executor import SESSION
+    try:
+        rows = [r for r in frame_facts(world, SESSION)
+                if str(r.entity).startswith("event:arc_outcome_")]
+        if not rows:
+            return ""
+        latest = max({str(r.entity) for r in rows},
+                     key=lambda e: int(e.rsplit("_", 1)[-1])
+                     if e.rsplit("_", 1)[-1].isdigit() else -1)
+        attrs = {r.attribute: r.value for r in rows if str(r.entity) == latest}
+    except Exception:  # noqa: BLE001
+        return ""
+    if attrs.get("outcome_category"):
+        return str(attrs["outcome_category"])
+    if attrs.get("grade") == "wrong" or attrs.get("outcome_shape") in (
+            "failure", "quiet_failure") or prior_outcome == "lost":
+        return "wrong"
+    return "right" if prior_outcome == "won" else ""
+
+
+def _episode_base_cast(reads: Any, meta: Any) -> tuple:
+    """The cast play currently uses: this slot's episode cast (a later chapter's) when
+    present, else the scenario meta cast — the base the next episode cast builds on."""
+    from construct.arc.executor import SESSION
+    from construct.cast import cast_from_proposal
+    blob = None
+    try:
+        raw = reads.state("session:episode", "cast", frame=SESSION)
+        blob = json.loads(raw) if isinstance(raw, str) and raw else None
+    except Exception:  # noqa: BLE001
+        blob = None
+    blob = blob or meta.get("cast")
+    if not blob:
+        return ()
+    try:
+        return tuple(cast_from_proposal(blob)[0])
+    except Exception:  # noqa: BLE001
+        logger.warning("episode base cast unreadable; starting from none", exc_info=True)
+        return ()
+
+
 @timing.build_entry
 def continue_episode(name: str, provider: Provider, player_id: str | None = None,
                      on_stage=None) -> dict:
@@ -3234,6 +3288,9 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         from construct.turnloop import terminal_outcome
         prior_title = meta.get("title", "")
         prior_outcome = terminal_outcome(reads)   # 'won'/'lost' of the just-ended episode
+        # THE CHAPTER BRIDGE (B1 change 2): how the last chapter ended, in one word, from the
+        # latest outcome receipt (legacy receipts without the row derive it from grade/shape).
+        _category = _receipt_category(world, prior_outcome)
         # #95 PERMANENCE (Cx 422): the story ended at the protagonist's death — there is
         # no next chapter, for anyone. Refused BEFORE any generator or prompt work.
         if prior_outcome == "died":
@@ -3352,8 +3409,12 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
             + (("\nPERSONAL THREADS TO HONOR (the player's own commitments — carry each "
                 "forward visibly or consciously pay it off; never drop one as optional "
                 "flavor):\n" + "\n".join(
-                    f"- {t.get('thread')} [{t.get('status', 'open')}]" for t in _personal))
+                    f"- [{i}] {t.get('thread')} [{t.get('status', 'open')}]"
+                    for i, t in enumerate(_personal)))
                if _personal else "")
+            + (f"\nHOW THE LAST CHAPTER ENDED: {_CATEGORY_PHRASE.get(_category, _category)}. "
+               "This chapter must ANSWER that — any shape, but a real consequence."
+               if _category else "")
             + (("\nGROWN TERRITORY (the world the PLAYER built by walking — "
                 "these regions are as real as the authored map, and the next "
                 "chapter should live in and honor them where the story "
@@ -3368,13 +3429,22 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         new_arc = None
         proposal: dict = {}
         _build_note = ""
+        # The doorway is proposal-independent: planned before the loop so each attempt's hook
+        # cast and episode cast are judged against the place the chapter really opens.
+        _door = _plan_episode_doorway(world, prior_protagonist)
+        _door_place = _door.place
+        _hc_rows: list = []
+        _hook_ids: list = []
+        _ep_cast: tuple = ()
+        _base_cast = _episode_base_cast(reads, meta)
+        from construct import bridge as _bridge
         for _attempt in range(3):
             proposal = cohorts.generate_arc(
                 provider, trigger=trigger + _build_note,
                 fuel=fuel, available_ids=known_ids, style=meta.get("style", ""),
                 present_characters=", ".join(_known_people(world))
                 or "(carry the established cast)",
-                protagonist=prior_protagonist or "")
+                protagonist=prior_protagonist or "", chapter=True)
             try:
                 # HARD INVARIANT (Cx 138): the next chapter is the SAME protagonist's — the
                 # generator's prompt is pinned, but enforce it deterministically too
@@ -3384,7 +3454,6 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                 if prior_protagonist:
                     proposal["protagonist"] = prior_protagonist
                 new_arc = _build_arc(proposal, arc_id=new_id)
-                break
             except Exception as exc:  # noqa: BLE001
                 logger.warning("continuation arc proposal could not be built "
                                "(attempt %d): %r", _attempt + 1, exc)
@@ -3392,6 +3461,24 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                 _build_note = (f"\nPRIOR ATTEMPT COULD NOT BE BUILT ({exc!r}): emit at least "
                                f"one beat, and every beat's phase/weight must be one of the "
                                f"schema's enum values.")
+                continue
+            # THE CHAPTER BRIDGE (B1 changes 3-5): the deterministic accountings. A miss is a
+            # failed attempt with the reasons as the retry note — nothing is written yet.
+            _hc_rows, _hook_ids = _plan_hook_cast(world, reads, proposal, _door_place,
+                                                  prior_protagonist, at=turn_time(turn))
+            _ep_cast, _cast_problems = _bridge.build_episode_cast(
+                proposal, new_arc, _base_cast, reads, door_place=_door_place,
+                hook_ids=list(_hook_ids), protagonist=prior_protagonist or "")
+            _problems = (_bridge.check_threads(proposal, len(_personal), new_arc)
+                         + _bridge.check_response(proposal, reads, new_arc, _category)
+                         + _cast_problems)
+            if not _problems:
+                break
+            logger.warning("continuation proposal sent back (attempt %d): %s",
+                           _attempt + 1, _problems)
+            new_arc = None
+            _build_note = ("\nTHE LAST PROPOSAL WAS SENT BACK — fix each:\n"
+                           + "\n".join(f"- {x}" for x in _problems))
         if new_arc is None:
             raise RuntimeError("the next chapter's arc could not be built after 3 attempts")
         if prior_protagonist and new_arc.protagonist != prior_protagonist:
@@ -3482,23 +3569,13 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
         # jump to the next calendar phase (the "by morning…" seam), so the new chapter never
         # opens in the same minute; (ii) PLACE: the chapter opens WHERE THE STORY ENDED (no
         # relocation row); (iii) ITEMS: nothing added. Each read leg fails open, loudly.
-        _door = _plan_episode_doorway(world, prior_protagonist)
-        _door_place = _door.place
-        # HOOK-CAST STAGING (#90, Cx 387): the hook's on-stage people become canon presence at
-        # the doorway place before the opening renders (see _plan_hook_cast).
-        _hc_rows, _hook_ids = _plan_hook_cast(world, reads, proposal, _door_place,
-                                              prior_protagonist, at=turn_time(turn))
+        # The doorway (planned before the generation loop) and HOOK-CAST STAGING (#90, Cx 387:
+        # the hook's on-stage people become canon presence at the doorway place before the
+        # opening renders) were planned per attempt above; the accepted attempt's stand.
         # STORY SOUNDNESS (R35, advisory): the new chapter's arc, at the chapter horizon, with
-        # the cast play will actually use (the scenario meta cast, as Session loads it) and the
-        # hook cast it will stage.
-        _cont_cast: tuple = ()
-        try:
-            if meta.get("cast"):
-                from construct.cast import cast_from_proposal
-                _cont_cast = tuple(cast_from_proposal(meta.get("cast"))[0])
-        except Exception:  # noqa: BLE001 — a bad cast blob only empties the report's cast
-            logger.warning("soundness: scenario cast unreadable", exc_info=True)
-        _report_soundness(world, new_arc, _cont_cast, _h, "continuation",
+        # the cast play will actually use — the episode cast B1 just built (else the base
+        # cast) — and the hook cast it will stage.
+        _report_soundness(world, new_arc, _ep_cast or _base_cast, _h, "continuation",
                           kind="continuation", goal=meta.get("goal_statement", ""),
                           hook_ids=_hook_ids)
         # DURABLE PER-PLAYER episode epoch (Cx 138 #2): persist the raised epoch into THIS slot's
@@ -3553,6 +3630,26 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                               "valid_from": turn_time(turn)})
         if _callback_item:
             _epi_rows.append(_callback_item)
+        # THE EPISODE CAST (B1 change 5): persisted on this slot (Session prefers it over the
+        # scenario meta cast, as it does the episode scope); each holder's clue facts seeded
+        # into its knows: frame. EVERY row carries the chapter's boundary stamp, so a horizon
+        # Session sees them (B1 r2).
+        _seed_ops: list = []
+        if _ep_cast:
+            _epi_rows.append({"entity": "session:episode", "attribute": "cast",
+                              "value": json.dumps(_bridge.cast_blob(_ep_cast)),
+                              "value_type": "literal", "valid_from": turn_time(turn)})
+            from construct.cast import cast_seed_plan
+            for _frame, _items in cast_seed_plan(_ep_cast):
+                if _frame == f"knows:{prior_protagonist}":
+                    continue   # never pre-seed the player with the answers
+                _seed_ops += arc_io.assert_ops(
+                    [{**i, "valid_from": turn_time(turn)} for i in _items], _frame)
+        _closed = _bridge.closed_threads(proposal, _personal)
+        if _closed and _settled_item is not None:
+            _rec = json.loads(_settled_item["value"])
+            _rec["settled"] = list(_rec.get("settled", [])) + _closed
+            _settled_item = {**_settled_item, "value": json.dumps(_rec)[:4000]}
 
         # ---- COMMIT: ONE atomic commit_set, all or none (B5 / arc audit F3). It spans plot:main
         # (the arc + manifest), session:main (the records, the boundary, the episode rows) and
@@ -3576,6 +3673,7 @@ def continue_episode(name: str, provider: Provider, player_id: str | None = None
                                   "value": "episode_start", "valid_from": turn_time(turn)}],
                                 SESSION)
             + arc_io.assert_ops(_door.time_rows + _hc_rows, "canon")
+            + _seed_ops
             + arc_io.assert_ops(_epi_rows, SESSION))
         arc_io.commit_ops(world, _ops, what="continuation")
         if _hc_rows:

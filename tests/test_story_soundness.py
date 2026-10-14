@@ -282,40 +282,43 @@ def test_10_fresh_build_reports_and_still_builds(tmp_path, caplog):
         world.close()
 
 
-def test_11_continuation_reports_with_the_play_cast(tmp_path, monkeypatch, caplog):
+def test_11_continuation_reports_with_the_play_cast(tmp_path, monkeypatch):
+    """After B1 (CHAPTER-BRIDGE-B1 change 5) an undeliverable chapter-2 beat is sent back
+    before commit, so the continuation report runs over the EPISODE cast play will use: the
+    chapter-1 base plus the new clue holders."""
     import json
-    import logging
-    from construct import game, reshape
+    from construct import game
     from tests.test_reads_at_horizon import _make_horizon_slot
-    from tests.test_reads_at_horizon import PROT as HPROT
+    from tests.test_reads_at_horizon import PROT as HPROT, STEP
+    import tests.test_reads_at_horizon as HR
     from tests.test_world_polish import _ContProvider
-    caplog.set_level(logging.INFO, logger="construct.arc.soundness")
-    monkeypatch.setattr(reshape, "reshape_enabled", lambda: False)
+    real = HR._rows
+    monkeypatch.setattr(HR, "_rows", lambda: real() + [
+        {"entity": "person:witness", "attribute": "kind", "value": "person",
+         "timeless": True},
+        {"entity": "person:witness", "attribute": "in", "value": "place:cell",
+         "value_type": "entity", "valid_from": STEP}])
     name = _make_horizon_slot(tmp_path, monkeypatch)
-    mpath = tmp_path / "worlds" / f"{name}.meta.json"
-    meta = json.loads(mpath.read_text())
-    meta["cast"] = {"cast": [{"id": "person:witness", "presence": "at_scene",
-                              "location": "place:street",
-                              "clues": [{"clue_id": "clue:c", "pillar_id": "pillar:p",
-                                         "fact": {"entity": "fact:carried",
-                                                  "attribute": "is", "value": "known"}}]}]}
-    mpath.write_text(json.dumps(meta))
+    seen = {}
+    real_report = game._report_soundness
+
+    def spy(world, arc, cast, h, where, **kw):
+        seen["cast"] = {n.node_id: n for n in cast}
+        return real_report(world, arc, cast, h, where, **kw)
+    monkeypatch.setattr(game, "_report_soundness", spy)
     proposal = {
         "protagonist": HPROT, "delta_type": "desire_at_cost",
         "tension": [HPROT, "drive:duty", "drive:fear"], "title": "Second",
         "hook": "A stranger waits under the lamp.",
         "beats": [{"id": "beat:carried", "phase": "rising", "weight": "required",
                    "kind": "player_learns", "entity": "fact:carried", "attribute": "is",
-                   "value": "known"},
-                  {"id": "beat:uncarried", "phase": "climax", "weight": "required",
-                   "kind": "player_learns", "entity": "fact:loose", "attribute": "is",
-                   "value": "new"}]}
+                   "value": "known"}],
+        "clues": [{"beat_id": "beat:carried", "holder": "person:witness",
+                   "reveal_condition": "none"}],
+        "thread_disposition": [{"index": 0, "disposition": "closed", "how": "settled"}]}
     game.continue_episode(name, _ContProvider([proposal]), player_id="u1")
-    lines = [r.getMessage() for r in caplog.records
-             if "soundness [continuation]" in r.getMessage()]
-    assert any("S1" in m and "uncarried" in m for m in lines), lines
-    assert not any("beat:carried" in m and " S1 " in f" {m} " for m in lines)
-
+    node = seen["cast"]["person:witness"]
+    assert ("fact:carried", "is", "known") in {c.surface_fact for c in node.holds_clues}
 
 def test_7b_s7_calibration_rules(w):
     """Calibration: S7 is skipped for a continuation (chapter 1's clues), and a clue that

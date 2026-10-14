@@ -2076,6 +2076,68 @@ GEN_ARC_SCHEMA = {
 }
 
 
+#: THE CHAPTER BRIDGE (B1, CHAPTER-BRIDGE-B1.md r3): a CHAPTER CONTINUATION's arc schema —
+#: the side-thread shape plus three accountings the host checks deterministically.
+CONT_ARC_SCHEMA = {
+    **GEN_ARC_SCHEMA,
+    "properties": {
+        **GEN_ARC_SCHEMA["properties"],
+        "thread_disposition": {
+            "type": "array",
+            "description": "ONE entry per numbered PERSONAL THREAD: carried (a beat, the "
+                           "hook or the hook cast takes it up) or closed (consciously paid "
+                           "off now); empty when there are no threads",
+            "items": {"type": "object", "properties": {
+                "index": {"type": "integer"},
+                "disposition": {"type": "string", "enum": ["carried", "closed"]},
+                "how": {"type": "string",
+                        "description": "carried: the beat/hook/person that takes it up "
+                                       "(name an id); closed: how it is settled"},
+            }, "required": ["index", "disposition", "how"]},
+        },
+        "responds_to_outcome": {
+            "type": "object",
+            "description": "how this chapter ANSWERS the way the last one ended — any "
+                           "shape (quiet, delayed, offstage), but a real consequence",
+            "properties": {
+                "how": {"type": "string"},
+                "ids": {"type": "array", "items": {"type": "string"},
+                        "description": "entity ids (from AVAILABLE IDS or your hook_cast) "
+                                       "that carry the answer; at least one must appear "
+                                       "in your beats or hook_cast"},
+            },
+            "required": ["how", "ids"],
+        },
+        "clues": {
+            "type": "array",
+            "description": "one per player_learns beat: WHO can tell the player that fact",
+            "items": {"type": "object", "properties": {
+                "beat_id": {"type": "string"},
+                "holder": {"type": "string",
+                           "description": "a person:* from AVAILABLE IDS or your "
+                                          "hook_cast who knows it"},
+                "reveal_condition": {"type": "string", "enum": ["none", "pressure"],
+                                     "description": "none: they tell when asked; "
+                                                    "pressure: only when pressed"},
+            }, "required": ["beat_id", "holder", "reveal_condition"]},
+        },
+    },
+    "required": GEN_ARC_SCHEMA["required"] + ["thread_disposition", "responds_to_outcome",
+                                               "clues"],
+}
+
+_CONT_ACCOUNTING = (
+    "\nCHAPTER ACCOUNTING (the host checks each; an incomplete answer is sent back):\n"
+    "- `thread_disposition`: one entry for EVERY numbered personal thread — `carried` "
+    "(name the beat, hook or person that takes it up) or `closed` (how it is settled now).\n"
+    "- `responds_to_outcome`: how this chapter answers the way the last one ended, with the "
+    "ids that carry it (at least one must appear in your beats or hook_cast). Any shape — "
+    "quiet, delayed, offstage — but a real consequence, never a reset.\n"
+    "- `clues`: for EVERY player_learns beat, the person who can tell the player that fact "
+    "(an existing person or your hook_cast), and whether they tell when asked (`none`) or "
+    "only when pressed (`pressure`).\n")
+
+
 TANGENT_CONFIRM_SCHEMA = {
     "type": "object",
     "properties": {
@@ -2148,7 +2210,8 @@ def author_tangent_arc(provider: Provider, *, aim: str, protagonist: str,
 
 def generate_arc(provider: Provider, *, trigger: str, fuel: str,
                  available_ids: list[str], style: str,
-                 present_characters: str, protagonist: str = "") -> dict:
+                 present_characters: str, protagonist: str = "",
+                 chapter: bool = False) -> dict:
     """The opportunistic DM (LIVING-WORLD-GENERATOR P2): from the world's standing
     tensions — a dead arc's fallout, an NPC's unaddressed drive, what the player
     just changed — propose ONE fresh side thread as a small arc (the same shape
@@ -2199,8 +2262,10 @@ def generate_arc(provider: Provider, *, trigger: str, fuel: str,
         f"WORLD VOICE: {style or '(neutral)'}\n"
         f"PRESENT CHARACTERS (their drives are the richest fuel):\n{present_characters}\n\n"
         f"AVAILABLE IDS (use these exact strings):\n{available_ids}\n\n"
-        f"FUEL (the standing tension to build from):\n{fuel}",
-        GEN_ARC_SCHEMA, tier="main", deliberate=True, task="gen")
+        f"FUEL (the standing tension to build from):\n{fuel}"
+        + (_CONT_ACCOUNTING if chapter else ""),
+        CONT_ARC_SCHEMA if chapter else GEN_ARC_SCHEMA,
+        tier="main", deliberate=True, task="gen")
 
 
 COMPACT_MEMORY_SCHEMA = {

@@ -57,6 +57,9 @@ _PROPOSAL = {
     "hook": "A stranger waits on the stair.", "title": "The Weight of Brass",
     "hook_cast": [{"id": NEW_HOOK, "name": "Wren Shaw", "role": "frightened witness"},
                   {"id": OLD_HOOK, "name": "Ada Finch", "role": "an old friend"}],
+    "thread_disposition": [{"index": 0, "disposition": "closed", "how": "the brother is cleared offstage"}],
+    "responds_to_outcome": {"how": "the witness the last case spared comes looking",
+                            "ids": [NEW_HOOK]},
 }
 
 

@@ -210,7 +210,17 @@ class Session:
         # The populated cast (STORY-SHAPES §8), rebuilt once from the seal for interview
         # delivery (node_id → CastNode). Absent → a pillar-less world (legacy path).
         self._cast: dict = {}
-        _castblob = meta.get("cast")
+        # THE EPISODE CAST (CHAPTER-BRIDGE-B1 change 5): a later chapter's cast persisted on
+        # THIS slot (holders re-derived at the chapter horizon, plus the new clue holders) is
+        # preferred over the shared scenario meta's chapter-1 cast — as the episode scope is.
+        _castblob = None
+        try:
+            _raw = PorcelainWorldReads(self._world).state("session:episode", "cast",
+                                                          frame="session:main")
+            _castblob = json.loads(_raw) if isinstance(_raw, str) and _raw else None
+        except Exception:  # noqa: BLE001 — an unreadable episode cast falls back to meta
+            _castblob = None
+        _castblob = _castblob or meta.get("cast")
         if _castblob:
             try:
                 from construct.cast import cast_from_proposal
