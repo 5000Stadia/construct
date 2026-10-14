@@ -146,6 +146,18 @@ CLASSIFY_SCHEMA = {
         "commitment": {"type": "string",
                        "description": "if commits, ONE clause stating WHAT they commit "
                        "to ('accuses Cray of falsifying the reserve'); empty otherwise"},
+        "commit_condition": {"type": "string",
+                             "enum": ["none", "hedge", "precondition", "conditional"],
+                             "description": "if commits: none (plain: 'It was Ellis. Arrest "
+                             "him.'), hedge (tone only: 'I think it was Ellis'), precondition "
+                             "(they will commit AFTER doing something first: '…but first I'll "
+                             "ask Quincy about the clock'), conditional (commit IF something "
+                             "proves true: 'if Quincy confirms the clock, it's Ellis'); "
+                             "none when not committing"},
+        "commit_precondition": {"type": "string",
+                                "description": "for precondition/conditional: the condition "
+                                "as ONE short clause ('Quincy confirms the clock'); empty "
+                                "otherwise"},
         "takes": {"type": "string",
                   "description": "the object the player PICKS UP / takes into their "
                   "possession this turn (lifts, grabs, pockets, tucks under their arm), "
@@ -2724,7 +2736,11 @@ def classify(provider: Provider, player_input: str, actor: str = "",
         f"naming STILL counts ('I think it was X', 'it must be X', 'probably X', 'I'll say "
         f"X did it') — reaching for the answer IS the commitment; the hedge is tone, and the "
         f"story will respond (and push back if it is not yet proven). Put who/what they commit "
-        f"to in `commitment`. Routine investigation and ordinary actions are NOT commitments; "
+        f"to in `commitment`. But a conclusion the player DEFERS ('but first…', 'once I've…', "
+        f"'if X confirms…, then…') is not a commitment yet: still set `commits` and "
+        f"`commitment`, and set `commit_condition` to precondition or conditional with the "
+        f"condition in `commit_precondition` (a plain or hedged naming: none / hedge). "
+        f"Routine investigation and ordinary actions are NOT commitments; "
         f"a move that merely WONDERS or ASKS ('could it be X?', 'what does this mean?') is a "
         f"question, never a commitment.\n"
         f"Additionally: set `takes` to the object the player PICKS UP or takes into "

@@ -3980,6 +3980,59 @@ def _fire_event_occurs(world: Any, p: Any, reads: Any, arcs: list, provider: Pro
     return fired
 
 
+#: HEDGE-VS-CONDITION r2: the condition when the model gave none usable — never an empty clause.
+_GENERIC_CONDITION = "they have settled what they wanted to check first"
+
+
+def _render_pending(rec: dict) -> str:
+    return (f"PENDING DECISION: the player means to {rec.get('commitment', '')} once "
+            f"{rec.get('condition') or _GENERIC_CONDITION}. Never decide it for them. When the "
+            f"condition is settled in the fiction, a present character may invite them to "
+            f"say it.")
+
+
+def _pending_decision_pass(p: Any, live_reads: Any, intent: Any, commitment: str,
+                           commitment_grade: str, commitment_bounced: bool,
+                           turn: int) -> str:
+    """HEDGE-VS-CONDITION (R38 r2, IR-18): the deferred-conclusion lifecycle, one ordered rule.
+
+    - A conclusion the player DEFERRED (raw conclusory + precondition/conditional) writes the
+      pending decision (latest wins) — no gate, bounce, judgment or receipt ran for it.
+    - An effective commitment that LANDED (`commitment_grade`) or BOUNCED writes a tombstone.
+      One held by the clarification gate neither lands nor bounces: the record is retained.
+    - Otherwise the standing record (this episode only) is read back for the briefing.
+    Returns the briefing line, or "". Fail-open: bookkeeping never sinks a turn."""
+    from construct.intent import DEFERRING_CONDITIONS
+    try:
+        at = turn_time(turn)
+        if (intent.conclusory and intent.commit_condition in DEFERRING_CONDITIONS
+                and terminal_outcome(live_reads) is None):
+            rec = {"commitment": (commitment or "").strip()[:200],
+                   "condition": (intent.commit_precondition or "").strip()
+                   or _GENERIC_CONDITION,
+                   "turn": turn, "at": at}
+            p.ingest_structured([{"entity": "session:pending_decision", "attribute": "record",
+                                  "value": json.dumps(rec), "value_type": "literal",
+                                  "valid_from": at}], frame=SESSION, classify="rules")
+            return _render_pending(rec)
+        if commitment_grade or commitment_bounced:
+            p.ingest_structured([{"entity": "session:pending_decision", "attribute": "record",
+                                  "value": "", "value_type": "literal", "valid_from": at}],
+                                frame=SESSION, classify="rules")
+            return ""
+        raw = live_reads.state("session:pending_decision", "record", frame=SESSION)
+        if not isinstance(raw, str) or not raw.strip():
+            return ""
+        rec = json.loads(raw)
+        since = _episode_since(live_reads)
+        if since is not None and float(rec.get("at", 0.0)) < since:
+            return ""                  # written in an earlier chapter
+        return _render_pending(rec)
+    except Exception:  # noqa: BLE001
+        logger.warning("pending-decision pass skipped", exc_info=True)
+        return ""
+
+
 def _episode_since(reads: Any) -> float | None:
     """The valid-time of the latest EPISODE boundary, or None for a first/only episode.
     Written by `game.continue_episode` when a concluded story continues into the next
@@ -4628,7 +4681,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # a stray 'ooc' verdict (legacy stub) falls through to the in-world action path.
         kind = "action"
 
-    if kind == "declaration" and mode == "pure" and not commits and not declares_memory:
+    if kind == "declaration" and mode == "pure" and not intent.conclusory and not declares_memory:
         # A declaration that tries to AUTHOR a new world-fact by fiat is denied in canon-strict
         # mode. But a CONCLUSORY COMMITMENT (commits=True) read as a declaration ("It was Julian —
         # he killed his uncle") is NOT fact-authoring — it's the player naming their conclusion,
@@ -6755,6 +6808,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
     trace.commitment_grade = commitment_grade
     trace.commitment_bounced = commitment_bounced
     trace.commitment_clarified = commitment_clarified
+    pending_decision = _pending_decision_pass(p, live_reads, intent, commitment,
+                                              commitment_grade, commitment_bounced, turn)
 
     main_life = arc_lifecycle(live_reads, arc)
     trace.lifecycle = main_life
@@ -7208,6 +7263,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         named_elsewhere=[(lbl, pl, e.startswith("place:")) for e, lbl, pl in _named_elsewhere],
         commitment=commitment,
         commitment_clarified=commitment_clarified,
+        pending_decision=pending_decision,
         commitment_bounced=commitment_bounced,
         commitment_grade=commitment_grade,
         discovered=discovered,
