@@ -258,7 +258,7 @@ def _witness(p: _Producers, expr: Any) -> tuple[str, ...]:
 def analyse(arc: Arc, cast: tuple | list, protagonist: str, reads: Any, *,
             horizon: float | None = None, world: Any = None, kind: str = "fresh",
             reshape: bool | None = None, side_arcs: Iterable[Arc] = (),
-            goal_statement: str = "") -> SoundnessReport:
+            goal_statement: str = "", hook_ids: Iterable[str] = ()) -> SoundnessReport:
     """The R35 pass over one arc. `kind` is "fresh" or "continuation" (S4 vs S9)."""
     from construct.reshape import reshape_enabled
     if reshape is None:
@@ -308,7 +308,7 @@ def analyse(arc: Arc, cast: tuple | list, protagonist: str, reads: Any, *,
         rep.findings.append(SoundnessFinding("S10", "failure_when",
                                              "the chapter can't be lost (noted, not wrong)"))
     rep.findings += _dead_holders(arc, cast, protagonist, reads)
-    rep.findings += _future_only(arc, cast, world, kind)
+    rep.findings += _future_only(arc, cast, world, kind, hook_ids)
     rep.findings += _orphan_clues(arc, cast, kind)
     rep.findings += _unplaced_cast(cast, reads, ordinary)
     rep.findings += _improv_places(arc, protagonist, ordinary)
@@ -345,15 +345,17 @@ def _dead_holders(arc: Arc, cast: tuple, prot: str, reads: Any) -> list:
     return out
 
 
-def _future_only(arc: Arc, cast: tuple, world: Any, kind: str) -> list:
-    """S4 (continuation) / S9 (fresh): referents and clue holders future-only at the horizon."""
+def _future_only(arc: Arc, cast: tuple, world: Any, kind: str,
+                 hook_ids: Iterable[str] = ()) -> list:
+    """S4 (continuation) / S9 (fresh): beat referents, EVERY cast member (clue-less staged
+    presences included — cr code review) and hook-cast ids, future-only at the horizon."""
     if world is None:
         return []
     from construct.adapter import IdentityUnavailable, is_future_only
     from construct.arc.lint import _entity_referents
     ids = {e for b in arc.beats for a in atoms_of(b.achievable_via)
            for e in _entity_referents(a)}
-    ids |= {n.node_id for n in cast if n.holds_clues}
+    ids |= {n.node_id for n in cast} | {str(i) for i in hook_ids}
     out = []
     for e in sorted(i for i in ids if i and ":" in i):
         try:

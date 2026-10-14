@@ -326,3 +326,16 @@ def test_7b_s7_calibration_rules(w):
     naming = (_clue("clue:n", ("person:x", "seen_at", "place:far")),
               CastNode("person:x", presence="nearby", location="place:far"))
     assert "S7" not in _codes(_run(w, arc, naming))
+
+
+def test_6b_clueless_cast_and_hook_ids_are_checked(w):
+    """cr code review: a future-only cast member with no clues, or a future-only hook-cast
+    id, is S4 at a continuation and S9 at a fresh build."""
+    arc = _arc([_req("beat:ok", Occurred("door_opened"))])
+    cast = (CastNode("person:future", holds_clues=()),)
+    assert "S4" in _codes(_run(w, arc, cast, kind="continuation"), "person:future")
+    assert "S9" in _codes(_run(w, arc, cast, kind="fresh"), "person:future")
+    v = HorizonView(w, H)
+    rep = analyse(arc, (), PROT, PorcelainWorldReads(v), horizon=H, world=v,
+                  kind="continuation", reshape=False, hook_ids=("person:future",))
+    assert "S4" in _codes(rep, "person:future")
