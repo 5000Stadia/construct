@@ -477,7 +477,8 @@ Canon at chapter 1's end has `obj:chain condition broken, whole false` (t9 and t
 ### Next fixes (not built; each needs a spec)
 
 - **Ground the event detector.** Give it each candidate's authored meaning (its places, objects and participants, from the arc and the source story), and have it fire only when the action happens with those. The wrong chain at the wrong place must not fire. This is the most important fix from this run: a false climax ends a chapter and the next chapter is built on it.
-- **The continuation opening must read the end state from canon**, not the arc's intended ending: where the player is (already right), the condition of what they carry, and how much time passed. Kabe's ch2-doorway ruling ("honor implied elapsed time") covers a time skip the fiction implies, not one the author invents.
+- **The continuation opening must read the end state from canon**, not the arc's intended ending: where the player is (already right), and the condition of what they carry. The opening's directive (`_continuation_intro`) gives the place but nothing of what the player carries, so the chain came back whole.
+- **The doorway's time jump.** "Enough mornings have passed" is not the author's invention: `_plan_episode_doorway` always jumps the clock to the next calendar phase (the "by morning" seam, #88 S4), and the directive says "after time has passed". With the player mid-escape in a lane, a fixed jump at the same place is incoherent. Kabe's ch2-doorway ruling is "honor implied elapsed time" (a cryosleep of 50 years wakes 50 years later). That reads as: the jump should be the time the ending implies, which may be none. A spec should follow that ruling; it is not built.
 
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
