@@ -435,6 +435,50 @@ The monitor authorised this run for Kabe (note n4f4a40). It tests the night's th
 - **NPC staging drift (t4).** Turn 2's "the scullery threshold" was ruled in-scene (underdetermined, no target; g855759 keeps it so), so canon kept the player in the counting room while the prose walked into the passage. A related finding: **the briefing's location anchor ran name-free on almost every turn** of runs 10–12 ("YOU ARE AT the place you now stand in"). It names the scene only from the player frame, and the player frame held no scene name (run 12: 865 rows, zero place names). PLACE-NAME-ANCHOR (spec r1, at cr) gives the player the name of the place they stand in. Each present NPC's in-scene position in PRESENT CHARACTERS is a further option.
 - **Chapter-length floor for a continuation arc:** a chapter-2 arc should not reach climax-ready within its first turns. This is a pacing question for R36/R37 (the chapter bridge), and it needs Kabe's view on chapter length.
 
+## Run 13 — the five criteria pass as written, but R20 is not closed: chapter 1's climax event fired on the wrong chain
+
+The monitor authorised this run for Kabe (note n75d6ca). It tests PLACE-NAME-ANCHOR on its own (pattern-buffer's one-location fix stays out until Kabe's paid check). The first attempt stopped at build on unused-handle chunk refusals and is archived as `run13a`. That led to adopting BUILD-LIBRARY r1.9.1. The retry ran on main `e3a459f` with pattern-buffer `c4a8eba`, Codex subscription only, timing log on. Output is archived at `/media/k/Blank/construct-scratch/run13` (world, manifest and critic notes included).
+
+**The build: 335 s**, all 7 chunks extracted with no refusal and no construct re-run (run 12: 410 s, one refusal). Stage 1 took 30 s of wall time (run 12: 59 s).
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Chapter 1 concludes | **PASS on the letter**, at turn 9; the conclusion was a misfire (below) |
+| 2 | Chapter 1 ends in a place grown in play | **PASS**: `place:dark_runoff_lane`, minted at t7–t8; absent from the built world (0 rows) |
+| 3 | Chapter 2 opens where chapter 1 ended | **PASS**: `place:dark_runoff_lane` both |
+| 4 | No ENGINE ERROR or empty prose | **PASS**. One turn (t7) shipped its prose but skipped its world commit after a schema re-ask failed |
+| 5 | No critic WHERE breaker | **PASS**: no note reports a teleport or snap-back of the player's place. The three chapter-seam notes are about time and the chain's condition (below) |
+
+### PLACE-NAME-ANCHOR worked
+
+The anchor named the scene on **15 of 15 turns** ("YOU ARE AT: North Quay." on t1–t7, "YOU ARE AT: dark runoff lane." from t8 on). Runs 10–12 had 0/17, 7/23 (all the mis-minted "closed") and 0/15. On t8 the player stepped into a lane minted in play, and that same turn's briefing already named it. No WHERE note was filed in 15 turns, where run 12 had one at t4. That fits the fix but doesn't prove it: one run, a different story.
+
+### Why R20 is not closed: the climax event fired on the wrong chain
+
+The chapter's required climax beat is `beat:pay_the_rivers_timetable`, achieved when the event `fog_bell_window_taken_at_lower_chain` occurs. In the authored story, the **lower chain** is the river boom at the lower chain tower: during the fog-bell watch it is "blind for twelve minutes", Hobb drops it, and the laundry barge gets away (`ironhold_20.md`, "The Lower Chain"). At t9 the player ground his **wrist chain** against a drain-lip in the lane while the fog bell struck, and broke one link. The event detector (`_fire_event_occurs`, `turnloop.py:4004`) fired the kind, the beat was achieved (`justified_by {"turn": 9}`), and chapter 1 concluded with the player still shackled in a lane inside Ironhold.
+
+The detector is given each candidate only as its kind with underscores turned to spaces ("fog bell window taken at lower chain"). It has nothing about what the authored event is, where it happens or who is involved, so a fog bell and a chain in the same action were enough.
+
+### The chapter seam broke on time and the chain (critic ch2 t1–t3, one finding filed three times)
+
+Canon at chapter 1's end has `obj:chain condition broken, whole false` (t9 and t10). Chapter 2's opening reads: "The black river bought you time, not freedom. Enough mornings have passed since the water kept the rope from having you … the chain between your cuffs dragging cold weight at your knees". That is a river escape that never happened in play, days that canon didn't pass (chapter 2's turns follow t9 directly), and a chain whole again. The continuation author wrote the chapter-1 ending the arc *meant*, which the misfired beat told it had happened. Later chapter-2 turns follow canon: the boy sees "the jagged half-link hanging near your left shackle".
+
+### The other critic notes (5 in all)
+
+- **t2:** the opening has Sore look "to the wet boards where Mara says she found him", and Mara then says "Not here … I found Pike at the record room threshold". The opening's prose put a past event in the wrong place. The player's own place never moved.
+- **t8:** the critic read "Jory" and "Pike" as two people. They are one man, Jory Pike; Sore says "Jory's papers" and the next lines say "Pike". The critic misread the names, but switching between a first and a last name within a few lines is unclear.
+
+### Also seen
+
+- **Chapter 2 did not end early:** its arc was still active after 6 turns. Run 12's chapter 2 won at its second turn.
+- **A twin:** the wrist chain is both `obj:chain` and `obj:tomas_reed_chains` (t9). Nothing contradicted them in play.
+- **Timing:** mean turn wall time was 111 s over 15 turns (run 12: 112 s). The world-state extraction call was the slowest step in most chapter-1 turns (45–78 s on t2–t7).
+
+### Next fixes (not built; each needs a spec)
+
+- **Ground the event detector.** Give it each candidate's authored meaning (its places, objects and participants, from the arc and the source story), and have it fire only when the action happens with those. The wrong chain at the wrong place must not fire. This is the most important fix from this run: a false climax ends a chapter and the next chapter is built on it.
+- **The continuation opening must read the end state from canon**, not the arc's intended ending: where the player is (already right), the condition of what they carry, and how much time passed. Kabe's ch2-doorway ruling ("honor implied elapsed time") covers a time skip the fiction implies, not one the author invents.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |

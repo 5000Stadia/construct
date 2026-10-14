@@ -272,6 +272,18 @@ Felt off:
 
 Disposition: twin-container binding, NPC positions in the briefing, and a chapter-length floor (eval/12 run 12, next fixes).
 
+## 2026-10-14 — R20 run 13 (Ironhold; 9 + 6 turns)
+
+**Grade: B−.** Chapter 1 is a tight scene on a rain-swept quay: a body under a tarred sheet, three records that must agree by dawn, and a chaplain who will not seal the death-page ("My mark is contradicted before seal. I say so here, before officer and witness."). The clenched scrap in the dead man's hand is a good reveal. The escape attempt has weight: the chain snags on a drain-lip, a link wears bright, then breaks under the fog bell. Chapter 2's errand boy, with his burned wrist and a lantern he's afraid to be seen holding, is a strong new figure.
+
+Felt off:
+- the chapter ended on a broken link, not an escape: the player was still shackled in a lane inside the prison;
+- chapter 2 opened on a river escape that never happened, "enough mornings" that never passed, and the chain whole again;
+- the opening placed the body's discovery on the quay boards, and the next reply moved it to the record room;
+- "Jory" and "Pike" for one man within a few lines.
+
+Disposition: ground the event detector, and build the continuation opening from canon's end state (eval/12 run 13, next fixes).
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from
