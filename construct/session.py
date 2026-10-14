@@ -1133,6 +1133,7 @@ class Session:
                               commitment_kind=self._commitment_kind,
                               cost_disposition=self._cost_disposition,
                               result_events=self._result_events,
+                              goal=str(self._meta.get("goal_statement") or ""),
                               terminal_owner=self._terminal_owner,
                               suspense=self._suspense,
                               cast=self._cast or None,

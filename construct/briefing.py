@@ -153,6 +153,8 @@ class BriefingInputs:
 
     #: HEDGE-VS-CONDITION (R38): the player's standing deferred conclusion, rendered; "" = none.
     pending_decision: str = ""
+    #: WALK-AWAY-DECLARED (R40): the in-world question, on the turn it is opened; "" = none.
+    walkaway_question: str = ""
 
 
 def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
@@ -479,6 +481,9 @@ def build_briefing(inp: BriefingInputs, trace: TurnTrace) -> list[str]:
         briefing_parts.append(
             "\nTHE DECISIVE MOVE NEEDS ITS STAGE (render this as ONE in-world beat, then stop): "
             + commitment_clarified)
+    if inp.walkaway_question:
+        # R40 (IR-16): a declared walk-away opens ONE in-world question; never an ending.
+        briefing_parts.append("\n" + inp.walkaway_question)
     if inp.pending_decision:
         # HEDGE-VS-CONDITION (R38, IR-18): a conclusion the player DEFERRED is a pending
         # decision — never fired by the host; the world may invite it back once settled.
