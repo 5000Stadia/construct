@@ -67,3 +67,5 @@ Turn 9's action and its three pending candidates (`escape_completed_without_cond
 | positive control: (c)'s inputs with a genuine boom-window escape in the laundry barge | 3 of 3 fired |
 
 The authored meaning is what does the work. The scene and the rule alone don't fix a world built before this change (b). The meanings in this replay were written by hand from the source story, and in play the arc author writes them. Script and output: `scratchpad/replay` (not tracked).
+
+**On gpt-6-astra (2026-10-14, after the subscription stopped accepting gpt-5.5; same inputs, 3 repeats each):** (a) 0 of 3, (b) 0 of 3, (c) 0 of 3; the positive control fired 3 of 3. Astra doesn't make this misfire even without the fix, so a run on astra can't show that the fix worked. Run 14 was not started (the monitor's note na0fa63).
