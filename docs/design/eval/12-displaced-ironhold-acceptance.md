@@ -341,6 +341,18 @@ Under Kabe's "Ok on 1 test" (2026-10-13), on main `7e855e8` (with the movement f
   - **NPC turns:** 27 calls, 109 s.
 - Full tables: `run10/timing-report.md`.
 
+## Run 11 — first attempt stopped at build (archived as `run11a`); retry under way
+
+The monitor authorised this run for Kabe (note n96b11a): one run, after the containment pin, to test everything merged since run 10. It ran on main `ef5febe` with pattern-buffer `42d0c23` (CONTAINMENT-DURABILITY-V1), Codex subscription only, timing log on. Before the pin, main's suite passed on the new engine: 1,828 passed, 1 skipped.
+
+**The first attempt stopped at the identity stop, about 6 minutes in:** `person:seal_press_keeper_1 ~ person:seal_press_keeper_2`.
+- Both carried the name "one of two seal-press keepers", and the engine declined the pair as `not_name_like`.
+- The story plainly makes them two people: "two seal-press keepers behind him", and later "One seal-press keeper followed; the other froze."
+- The adjudication stage takes only `alias_not_specific` pairs, so it never asked. This was a false stop. The fix is IDENTITY-CONFIRM amendment r7 (with cr): a `not_name_like` pair is held apart on two `different` answers from the merge gate, and is never merged without source backing.
+- The build also logged five `valid_to_before_valid_from` skipped edges, all reported by the engine's ingest.
+
+As with run 10a, the retry runs under the same single-run approval.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
