@@ -1,6 +1,11 @@
 # Wiring the build library: construct's side of registry-first seeding
 
-**Status:** spec r2, 2026-10-14, for cr review. Not built. **Blocked on a library change** (rule 4b).
+**Status:** spec r2.1, cr GREEN. **Built** on engine pin e3101a4 (BUILD-LIBRARY-V1 r1.8.3, `identity_time='gate'` the default), 2026-10-14; at cr for code review.
+
+**Build notes (where the build refines the text):**
+- **The title chunk is folded into chapter 1** (`seeding.text_by_chapter`). `_chunk_chapters` puts a generated story's `# Title` line in a chunk of its own. Numbered as written, the story's first chapter would be chapter 2, stamped at 2 × SOURCE_STEP, above `opening_as_of`. With gate-stamped identity, the whole chapter-1 cast would then be invisible at the opening. Today's per-chunk path has the same offset, which rule 4's "chapter 1 keeps the band below `opening_as_of`" rules out for the library path.
+- **Rule 7's `reject` lives in the build module** (`game._hold_manifest_namesakes_apart`). `construct/seeding.py` only lists the pairs (`same_named_entry_pairs`), because R34 P1 keeps identity verbs in `construct/game.py` (test_identity_play_guard).
+- **The code lives in `construct/seeding.py`.** `game.create_scenario_from_ingest` branches on the switch, and the existing build tests run with `CONSTRUCT_BUILD_LIBRARY=0` (an autouse fixture in tests/conftest.py).
 
 **r2 (cr RED on r1):**
 - P1: the library's `commit()` writes every manifest identity row (shape, name, alias, role, persona names) **timeless**, before the facts. So a late entry, or a persona's true name, is canon-visible at the opening, and r1's opening-horizon test couldn't pass. r2 makes gate-stamped identity a precondition, asked of pattern-buffer (colony m3310d2, 2026-10-14), not a construct-side filter.

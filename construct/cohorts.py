@@ -10,6 +10,7 @@ the action+intent decision is light, and the turn loop uses `npc_turn`.)
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Callable
 
@@ -362,6 +363,46 @@ INTERVIEW_SCHEMA = {
 }
 
 
+#: The story's cast list in pattern-buffer's build-library shape (SEEDING-LIBRARY-WIRING r2.1
+#: rule 2): one identity per entry, anchored by a verbatim sentence. Namesakes travel as
+#: objects here; `seeding.manifest_from_author` converts them to the library's lists.
+MANIFEST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "entries": {"type": "array", "items": {"type": "object", "properties": {
+            "key": {"type": "string", "description": "a short unique slug for this entry"},
+            "type": {"type": "string", "enum": ["person", "animal", "creature", "place",
+                                                "object", "group", "event"],
+                     "description": "what it IS; a role ('condemned man') is never a type"},
+            "names": {"type": "array", "items": {"type": "string"},
+                      "description": "the canonical name first, then every other name the "
+                                     "prose uses for it"},
+            "anchor_quote": {"type": "string",
+                             "description": "ONE whole sentence copied verbatim from the "
+                                            "prose, where it first appears"},
+            "role": {"type": "string", "description": "its role or office, if any"},
+            "species": {"type": "string", "description": "animals and creatures only"},
+            "personas": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "intro_quote": {"type": "string",
+                                "description": "the verbatim sentence introducing the guise"},
+                "reveal_quote": {"type": "string",
+                                 "description": "the verbatim sentence revealing who it is"},
+            }, "required": ["name", "intro_quote", "reveal_quote"]},
+                "description": "hidden identities this entry goes by"},
+        }, "required": ["key", "type", "names", "anchor_quote"]}},
+        "namesakes": {"type": "array", "items": {"type": "object", "properties": {
+            "a": {"type": "string", "description": "an entry key"},
+            "b": {"type": "string", "description": "another entry key"},
+            "anchor_quote": {"type": "string",
+                             "description": "a verbatim sentence showing they differ"},
+        }, "required": ["a", "b", "anchor_quote"]},
+            "description": "pairs of entries a reader could confuse because they share a "
+                           "name, but that are different beings or things"},
+    },
+    "required": ["entries", "namesakes"],
+}
+
 STORY_AUTHOR_SCHEMA = {
     "type": "object",
     "properties": {
@@ -370,9 +411,23 @@ STORY_AUTHOR_SCHEMA = {
                   "description": "the complete short work as Markdown: a `# "
                   "Title` line, then 4-8 chapters each headed `## <chapter "
                   "title>`. Real narrative prose, not an outline."},
+        "manifest": MANIFEST_SCHEMA,
     },
-    "required": ["title", "prose"],
+    "required": ["title", "prose", "manifest"],
 }
+
+#: The closing-credits instruction (SEEDING-REGISTRY-FIRST r4 §1: the registry describes the
+#: story; it never directs it), shared by the author and the repair call.
+_MANIFEST_CREDITS = (
+    "THE MANIFEST — after the prose is finished, list its cast, places and things like "
+    "closing credits (it describes the story; never write the story to fit it). One entry per "
+    "distinct being, place or thing that matters: `type` is what it IS (person, animal, "
+    "creature, place, object, group, event); a role ('condemned man', 'warden') goes in "
+    "`role`, never in `type`. `names` leads with its canonical name, then every other name "
+    "the prose uses for it. `anchor_quote` is ONE whole sentence copied character for "
+    "character from the prose where it first appears. A hidden identity is a `persona` with "
+    "its own name and the verbatim sentences that introduce and reveal it. Two entries a "
+    "reader could confuse because they share a name go in `namesakes`.")
 
 #: The populated cast (STORY-SHAPES §8): pillars (the causes) + a cast whose members hold
 #: the clues that fill them. Host-side control data — the `fact` triples seed `knows:<npc>`;
@@ -492,7 +547,7 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
                 protagonist: str, people: list[str], feedback: str = "",
                 signature_directive: str = "",
                 beat_targets: list[dict] | None = None,
-                laws_directive: str = "") -> dict:
+                laws_directive: str = "", cast_note: str = "") -> dict:
     """Author the populated cast (STORY-SHAPES §8): the pillars (causes) + the people who
     hold the clues that fill them. Returns the raw proposal; the caller parses it
     (`cast.cast_from_proposal`), VALIDATES solvability (`cast.is_solvable`), and derives the
@@ -557,6 +612,8 @@ def author_cast(provider: Provider, digest: str, theme: str, shape_label: str,
         f"PROTAGONIST (the player — never a cast member): {protagonist}\n"
         f"PEOPLE ALREADY IN CANON (use these ids; do not invent new people): "
         f"{', '.join(people) or '(none — you may name a few)'}\n"
+        + (f"WHO THEY ARE (the story's own cast list; reuse these, never mint a twin):\n"
+           f"{cast_note}\n" if cast_note else "") +
         f"WORLD DIGEST:\n{digest}\n\n"
         "MAKE EACH CARD JUICY (the heart of it — these are the narrator's dramatic beats; "
         "they must be so RICH and enticing the storyteller reaches for them instead of "
@@ -1636,8 +1693,22 @@ def author_story(provider: Provider, seed: str = "", win_direction: str = "",
            f"characters pay their costs; the texture appears in speech and "
            f"custom. Never contradict a law, and never merely name-drop one — "
            f"embody it." if laws_directive else "")
-        + premise + aim + as_who,
+        + premise + aim + as_who + "\n\n" + _MANIFEST_CREDITS,
         STORY_AUTHOR_SCHEMA, tier="main", deliberate=True, task="sty")
+
+
+def repair_manifest(provider: Provider, prose: str, manifest: dict, problems: list) -> dict:
+    """SEEDING-LIBRARY-WIRING rule 3: ONE repair of an invalid manifest, given the prose, the
+    manifest and the library's full problem list. Main tier. Returns the corrected manifest
+    (same schema); the caller validates it again and falls back to the category passes."""
+    listed = "\n".join(f"- {p.get('where')}: {p.get('code')} ({p.get('detail')})"
+                        for p in problems or [])
+    return complete_sync(provider,
+        "You are correcting a story's manifest so code can check it against the prose.\n\n"
+        + _MANIFEST_CREDITS + "\n\nPROBLEMS FOUND (fix every one; keep everything else):\n"
+        + listed + "\n\nTHE MANIFEST:\n" + json.dumps(manifest, indent=1)
+        + "\n\nTHE PROSE:\n" + prose,
+        MANIFEST_SCHEMA, tier="main", task="mfr")
 
 
 AUTHOR_LAWS_SCHEMA = {
