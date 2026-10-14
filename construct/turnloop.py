@@ -2122,7 +2122,7 @@ def _mint_held_object(world: Any, protagonist: str, description: str,
     if at is not None:
         for r in rows:
             r.setdefault("valid_from", at)
-    world.porcelain.ingest_structured(rows)
+    world.porcelain.ingest_structured(rows, classify="rules")  # PLACEMENTS-BY-RULE
     # VERIFY the grant actually made it at-hand; never claim a failed/conflicted write. Read
     # through the play view (T3): at the horizon, never the source future's head.
     if protagonist not in (PorcelainWorldReads(world).location_chain(item_id) or []):
@@ -2515,7 +2515,7 @@ def _grant_moved_place(world: Any, protagonist: str, moves_to: str, *, at: float
     # objects whose place is this destination ride the same batch (MOVE-TO-UNPLACED-OBJECT)
     rows += [{"entity": e, "attribute": "in", "value": place_id, "value_type": "entity",
               "valid_from": at} for e in carry]
-    world.porcelain.ingest_structured(rows)
+    world.porcelain.ingest_structured(rows, classify="rules")  # PLACEMENTS-BY-RULE
     # VERIFY at the play horizon (T1): the head is the source story's ending, so a head read
     # reported every improv mint as not taken (R20 run 10).
     chain = PorcelainWorldReads(world, horizon=as_of).location_chain(protagonist) or []
@@ -5018,7 +5018,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if _growth_signal:
                 _growth_staged.append(("dismissals", _drows))
             else:
-                p.ingest_structured(_drows, classify="batch")
+                p.ingest_structured(_drows, classify="rules")  # PLACEMENTS-BY-RULE
                 trace.npcs_departed = list(dismissed_ids)
                 logger.info("player dismissed %s from %s (departed_scene events)",
                             dismissed_ids, _entry_scene)
@@ -5136,7 +5136,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 "entity": arc.protagonist, "attribute": "in", "value": dest_id,
                 "value_type": "entity", "valid_from": turn_time(turn),
             }] + [{"entity": e, "attribute": "in", "value": dest_id, "value_type": "entity",
-                   "valid_from": turn_time(turn)} for e in carry], classify="batch")
+                   "valid_from": turn_time(turn)} for e in carry], classify="rules")
             trace.movement_status = (_as_movement_status(_seg.get("status")) if _seg
                                      else MovementStatus.CLEAR)
             if _seg:
@@ -5259,7 +5259,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 if pre_scene:
                     p.ingest_structured([{"entity": _obj, "attribute": "in", "value": pre_scene,
                                           "value_type": "entity",
-                                          "valid_from": turn_time(turn)}], classify="batch")
+                                          "valid_from": turn_time(turn)}], classify="rules")
                 logger.info("unlocated %r is within the scene — placed in %s", _obj, pre_scene)
             elif within_scene is False:
                 # 3b. unlocated, and somewhere else: the destination path below (bind, then
@@ -5629,8 +5629,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             if _lbl == "player_input":
                 receipt_rows = _receipt_rows(
                     p.ingest_structured(_rows, classify="batch"))
-            else:
-                receipt = p.ingest_structured(_rows, classify="batch")
+            else:   # the staged dismissals: host-decided (PLACEMENTS-BY-RULE)
+                receipt = p.ingest_structured(_rows, classify="rules")
                 confirmed, _ = confirmed_batch(_rows, _receipt_rows(receipt),
                                                cap=len(_rows))
                 if len(confirmed) == len(_rows):
@@ -5718,7 +5718,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([
                     {"entity": _cid, "attribute": "in", "value": _new_scene,
                      "value_type": "entity", "valid_from": turn_time(turn)}
-                    for _cid in moved_with_ids], classify="batch")
+                    for _cid in moved_with_ids], classify="rules")
                 trace.npcs_moved_with = list(moved_with_ids)
                 logger.info("companions moved with player: %s -> %s",
                             moved_with_ids, _new_scene)
@@ -5738,7 +5738,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             p.ingest_structured([
                 {"entity": _cid, "attribute": "accompanying", "value": arc.protagonist,
                  "value_type": "entity", "valid_from": turn_time(turn)}
-                for _cid in _new_companions], classify="batch")
+                for _cid in _new_companions], classify="rules")
             trace.npcs_joined = list(_new_companions)
             logger.info("companionship committed: %s accompanying %s",
                         _new_companions, arc.protagonist)
@@ -5773,7 +5773,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                 p.ingest_structured([{
                     "entity": otarget, "attribute": "in", "value": arc.protagonist,
                     "value_type": "entity", "valid_from": turn_time(turn),
-                }], classify="batch")
+                }], classify="rules")
                 _took.append(otarget)
                 logger.info("player took: %s -> held by %s", otarget, arc.protagonist)
             elif takes and not _take_touches_secret(takes, arc, live_reads):
@@ -5791,7 +5791,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     p.ingest_structured([{
                         "entity": _bound, "attribute": "in", "value": arc.protagonist,
                         "value_type": "entity", "valid_from": turn_time(turn),
-                    }], classify="batch")
+                    }], classify="rules")
                     _took.append(_bound)
                     logger.info("player took (bound present object): %s -> held by %s",
                                 _bound, arc.protagonist)
@@ -5849,7 +5849,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             p.ingest_structured([{
                 "entity": dtarget, "attribute": "in", "value": pre_scene,
                 "value_type": "entity", "valid_from": turn_time(turn) + 0.5,
-            }], classify="batch")
+            }], classify="rules")
             trace.dropped = dtarget
             logger.info("player set down: %s -> %s (left in place)", dtarget, pre_scene)
 
