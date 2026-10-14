@@ -143,8 +143,17 @@ class Repairs:
         return self.answer
 
 
-def _build(tmp_path, manifest=MANIFEST, extractor=None, repair=None, monkeypatch=None):
-    w = game._world(tmp_path / "s.world", "s", model=None)
+def _play_model():
+    """The world's engine model in play: the rule classifier, and empty extractions."""
+    from patternbuffer.testing import StubModel
+    rule = rule_classifier_fallback()
+    return StubModel(fallback=lambda prompt, schema: rule(prompt, schema)
+                     if prompt.startswith("Classify the lifetime") else {"items": []})
+
+
+def _build(tmp_path, manifest=MANIFEST, extractor=None, repair=None, monkeypatch=None,
+           model=None):
+    w = game._world(tmp_path / "s.world", "s", model=model)
     w.porcelain.begin_build()
     stages: list[str] = []
     registry = seeding.ingest_library(
@@ -461,5 +470,66 @@ def test_the_cast_note_lists_beings_with_names_type_and_role(tmp_path):
         assert "person:rex: Rex; Rex Hall (person; ferryman)" in note
         assert "person:rex_2: Rex (animal, dog)" in note
         assert "place:" not in note
+    finally:
+        w.close()
+
+
+# ------------------------------------------- the play path on a library-built world (cr)
+
+def _play(tmp_path, horizon):
+    """A library-built world, then one real turn at `horizon` through a HorizonView, as
+    Session plays it. The player stands at Low Crossing from below the opening."""
+    from construct.turnloop import run_turn as _run
+    from tests.test_integration import PLAYER, make_arc, seed_arc
+    from tests.test_placements_by_rule import StubProvider
+    w, entries, _ = _build(tmp_path, model=_play_model())
+    crossing = _ids(entries, "crossing")
+    w.porcelain.ingest_structured([
+        {"entity": PLAYER, "attribute": "kind", "value": "person", "timeless": True},
+        {"entity": PLAYER, "attribute": "in", "value": crossing, "value_type": "entity",
+         "valid_from": SOURCE_STEP + 1}], frame="canon", classify="rules")
+    arc = make_arc()
+    seed_arc(w, arc)
+    prov = StubProvider([{"kind": "action", "claims_are": "act", "moves_to": "",
+                          "requires": [], "needs_test": False, "uncertain_of": "",
+                          "commits": False, "commitment": ""},
+                         {"prose": "The river runs grey past the crossing."}])
+    r = _run(HorizonView(w, horizon), arc, prov, "I look around the crossing.", turn=1,
+             scope=[PLAYER, crossing], horizon=horizon)
+    if getattr(r, "settle", None) is not None:
+        r.settle()
+    narrate = [c[0] for c in prov.calls if "THE SCENE RIGHT NOW" in c[0]]
+    return w, entries, (narrate[-1] if narrate else r.trace.briefing)
+
+
+def test_a_played_opening_scene_shows_rex_the_dog_and_his_fact(tmp_path):
+    # Rex the man and Rex the dog both stand at the crossing at the opening: the played
+    # turn's PRESENT CHARACTERS lists two, and the turn's horizon reads give the dog's fact.
+    w, entries, brief = _play(tmp_path, OPENING + 1)
+    try:
+        present = brief.split("PRESENT CHARACTERS", 1)[1].split("\n\n", 1)[0]
+        assert present.count("Rex: present") == 2
+        view = HorizonView(w, OPENING + 1)
+        assert PorcelainWorldReads(view).state("person:rex_2", "posture") == "sleeping"
+        assert "person:rex_2" in game._canon_entity_ids(view)
+    finally:
+        w.close()
+
+
+def test_a_played_opening_reads_nothing_from_chapter_three(tmp_path):
+    w, entries, brief = _play(tmp_path, OPENING + 1)
+    try:
+        for late in ("Duke Orrin", "Orrin", "stranger", "masked rower", "Mara Venn"):
+            assert late not in brief, late
+    finally:
+        w.close()
+
+
+def test_the_same_turn_at_a_late_horizon_does_read_chapter_three(tmp_path):
+    # the negative control: past chapter 3's coordinates, the same play path sees them
+    w, entries, brief = _play(tmp_path, 5 * SOURCE_STEP)
+    try:
+        scene = brief.split("THE SCENE RIGHT NOW", 1)[1]
+        assert "Mara Venn" in scene or "stranger" in scene
     finally:
         w.close()
