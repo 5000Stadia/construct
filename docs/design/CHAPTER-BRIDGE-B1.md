@@ -1,6 +1,12 @@
 # The chapter bridge, B1: chapter 2 answers what the player did (R36)
 
-**Status:** spec r1, 2026-10-13, for cr review. Not built. It builds on READS-AT-PLAY-HORIZON (merged 17d90eb), and reads R35's report where it lands.
+**Status:** spec r2, 2026-10-13, for cr review. Not built.
+
+**r2 (cr RED on r1):**
+- each arc's walk-away gets its own event entity;
+- a pending walk-away has a bounded confirmation window and clearing rules;
+- every episode-cast and seeded-clue row carries the chapter's turn time, so the horizon view sees it;
+- the delivery check covers every `InFrame` beat on the protagonist, optional ones included. It builds on READS-AT-PLAY-HORIZON (merged 17d90eb), and reads R35's report where it lands.
 **Source:**
 - Kabe's plan item B, approved 2026-10-13 ("Sounds good on A and B"), from his Picard-noir example: the outcome (right, wrong, abandoned, elsewhere) causally drives the next chapter.
 - The founder's refusal directive, 2026-06-23 (memory: player-avoidance-and-refusal-conclusion).
@@ -50,8 +56,18 @@ A hollow or wrong landing also writes a concrete canon consequence (COMMITMENT-A
 - **Before the confirm,** the world shows the cost while the player is still free to turn back:
   - the narrator's briefing carries "the player is walking away from X; let what they're leaving behind be felt, without stopping them";
   - the next pacing nudge leans toward the pillars (memory: player avoidance, move 1).
-- **The confirm.** A later detection of the same walk-away, on a turn at least `ABANDON_CONFIRM_GAP` turns after the pending (default 2: Kabe's gate below), commits the event. The event row is `event:abandoned_<turn>` with `kind` set to the refusal clock's kind (so the existing `Occurred` and `clock_pass` fire it unchanged), with `agent` and `caused_by` rows as for any detected event.
-- **Turning back** (any achieved beat of that arc, or a detected re-engagement) clears the pending.
+- **The pending is per arc:** `session:abandon_pending_<arc slug>`, holding the turn of the first detection.
+- **The confirm.** A second positive detection of the same arc's walk-away commits the event, if it falls in the confirmation window: at least `ABANDON_CONFIRM_GAP` turns after the pending (default 2: Kabe's gate below) and at most `ABANDON_WINDOW` turns after it (default 6).
+  - **The event entity** is unique per arc and turn: `event:abandoned_<arc slug>_<turn>` (the main arc's slug is `main`).
+  - **Its `kind`** stays the refusal clock's existing kind (`event:abandoned` for main, `event:abandoned_<slug>` for a side arc), so `Occurred` and `clock_pass` fire it unchanged.
+  - It gets `agent` and `caused_by` rows, as any detected event does.
+  - Main and a side arc detected in one action write two entities, and each fires only its own clock.
+- **What clears a pending:** any of the following clears it, and a later detection then starts a **new** pending rather than confirming:
+  - the window passing with no second detection (the pending's age is past `ABANDON_WINDOW`);
+  - any beat of that arc achieved;
+  - a detected re-engagement. While a pending stands, the detector also gets the candidate `{kind: re_engages:<arc>, what: "the player turns back toward <goal>"}`, and a positive detection of it is a clearing, not an event.
+
+  So two unrelated leavings far apart never combine into an ending, and an ending always takes two positive detections inside one window.
 - **What follows is unchanged:** the refusal clock's effect writes `refusal_conclusion`, and the conclusion path runs as designed.
 
 ### 2. One outcome category on the receipt
@@ -84,14 +100,15 @@ A hollow or wrong landing also writes a concrete canon consequence (COMMITMENT-A
 
 ### 5. Chapter-2 clues get deliverers
 
-- **The schema** gains `clues: [{beat_id, holder, reveal_condition}]`, one per new `InFrame(knows:<protagonist>, e, a, v)` beat. The holder is a person at the horizon or a hook-cast id; `reveal_condition` is one of the live conditions (`LIVE_REVEAL_CONDITIONS`).
+- **The schema** gains `clues: [{beat_id, holder, reveal_condition}]`, one per new `InFrame(knows:<protagonist>, e, a, v)` beat, **required or optional**. The holder is a person at the horizon or a hook-cast id; `reveal_condition` is one of the live conditions (`LIVE_REVEAL_CONDITIONS`).
 - **Code builds the episode cast:**
   - the chapter-1 cast nodes, plus new or extended nodes holding these clues;
-  - it validates with `validate_beat_delivery` over the new arc's `InFrame` beats against **that** cast;
-  - an undeliverable beat is a failed attempt, naming the beat.
+  - it checks delivery for **every** `InFrame` beat on the protagonist's frame, required **and** optional: an exact-match clue, with a live reveal condition, on a holder that is physically reachable (`_reachable_nodes`) and able to act at the horizon. `validate_beat_delivery` (today: required beats only) gains an `include_optional` flag for this.
+  - an undeliverable beat of either weight is a failed attempt, naming the beat. An optional beat nobody can deliver is dead content, so it's the same policy.
 - **The data lifecycle** is defined, as cr asked on R35:
-  - **Persisted,** in the continuation's single atomic commit, as the slot's `session:episode` · `cast` literal (JSON, like the episode scope, Cx 191), stamped at the chapter's turn time.
+  - **Persisted,** in the continuation's single atomic commit (`commit_set` already spans the plot, session, canon and `knows:` frames), as the slot's `session:episode` · `cast` literal (JSON, like the episode scope, Cx 191).
   - **Seeded:** the clue rows go into each holder's `knows:` frame, in the same atomic set, by `cast_seed_plan`, never the protagonist's frame.
+  - **Timestamps (r2):** every episode-cast literal and every seeded `knows:<holder>` item gets `valid_from = turn_time(turn)`, the chapter's boundary stamp that the other continuation rows already carry. `cast_seed_plan` emits untimed items today; untimed, they would land outside the play band's view, so a reopened horizon Session would never see them.
   - **Read:** Session prefers the slot's episode cast over the scenario `meta["cast"]`, exactly as it already prefers the slot's episode scope. Legacy and first-chapter slots have none, and keep today's behaviour.
 - **R35's continuation report** then reads this cast too.
 
@@ -107,21 +124,29 @@ A hollow or wrong landing also writes a concrete canon consequence (COMMITMENT-A
 - **Shorter:** 1 turn. More responsive, more risk of ending on a misread.
 - **Longer:** 3+ turns, or "3 detections". Harder to walk away, closer to "never stonewall".
 
+The confirmation window (`ABANDON_WINDOW`, default 6 turns) is mine to tune. It only stops two unrelated leavings, far apart, from combining into an ending.
+
 ## Tests
 
 1. **Walk-away, pending then confirm:**
-   - a stub detector reports the refusal kind on turn 5. That writes `abandon_pending` only, with no event, and the briefing carries the walk-away directive;
+   - a stub detector reports the main refusal kind on turn 5. That writes `abandon_pending_main` only, with no event, and the briefing carries the walk-away directive;
    - on turn 6 it's still pending (the gap is 2);
-   - on turn 7 a second detection commits `event:abandoned_7` with kind `event:abandoned`, and `clock_pass` then fires the refusal clock.
-   - **Turn-back:** a beat achieved on turn 6 clears the pending, so turn 7's detection starts over.
-2. **No false end:** a single detection never fires the refusal clock, whatever the turn count (the founder's "turns never close stories" guard stays intact).
+   - on turn 7 a second detection commits `event:abandoned_main_7` with kind `event:abandoned`, and `clock_pass` then fires the main refusal clock.
+   - **Turn-back:** a beat achieved on turn 6 clears the pending, so turn 7's detection starts a new pending.
+   - **Re-engagement:** a positive `re_engages:main` on turn 6 clears it the same way.
+2. **No false end:**
+   - a single detection never fires the refusal clock, whatever the turn count (the founder's "turns never close stories" guard stays intact);
+   - **(r2) stale pending:** a detection on turn 5, nothing for 10 turns (past `ABANDON_WINDOW`), then one detection on turn 16. Turn 16 starts a new pending, and there's no abandonment event.
+2b. **(r2) Two arcs, one action:** main and a live side arc are both pending, and are both re-detected on the same confirming turn. Two distinct entities, `event:abandoned_main_<t>` and `event:abandoned_<side>_<t>`, are written, with kinds `event:abandoned` and `event:abandoned_<side>`. Each refusal clock fires once; no other clock fires.
 3. **Outcome categories:** four receipt fixtures, one each: the refusal end gives `abandoned`; a tangent-adopted main gives `elsewhere`; a terminal location in a grown region outside the scope gives `elsewhere`; grade wrong gives `wrong`; won gives `right`. The order of precedence is tested (refusal beats elsewhere).
 4. **Thread accounting:** three threads, with the proposal disposing of two, is a retry whose note names index 2; complete is accepted; the closed threads land in the settled record.
 5. **Response check:** a proposal without `responds_to_outcome`, or with only ids absent at the horizon, retries; a grounded one is accepted.
-6. **Chapter-2 clue delivery:**
+6. **Chapter-2 clue delivery, on a horizon world** (r2):
    - a proposal whose new `InFrame` beat has no `clues` entry retries;
-   - with a holder present at the horizon, the episode cast is committed atomically, the holder's `knows:` frame holds the fact, and the protagonist's frame doesn't;
-   - a reopened Session loads the episode cast, and an ASK of that holder delivers the clue and achieves the beat.
+   - with a holder present at the horizon, the episode cast is committed atomically, every episode-cast and seeded `knows:` row has `valid_from = turn_time(turn)`, the holder's frame holds the fact, and the protagonist's frame doesn't;
+   - a reopened Session on that **horizon** slot (`opening_as_of` set, reading through its HorizonView) loads the episode cast, and an ASK of that holder delivers the clue and achieves the beat;
+   - **negative control:** with the seed items untimed (the old `cast_seed_plan` output), the reopened Session can't see the holder's fact.
+6b. **(r2) Optional beats:** an optional `InFrame` beat whose holder is unreachable (offscene, with no naming chain) is a failed attempt naming that beat. With a reachable holder it's accepted.
 7. **Legacy:** a slot without an episode cast plays exactly as today, and existing continuation tests pass unchanged.
 8. **The full suite.**
 
