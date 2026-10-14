@@ -1,6 +1,6 @@
 # Story soundness: can this story be finished? (R35)
 
-**Status:** spec r3, 2026-10-13, for cr review. Not built. It builds after READS-AT-PLAY-HORIZON (it reads through `HorizonView`).
+**Status:** spec r4, 2026-10-13, for cr review. Not built. It builds after READS-AT-PLAY-HORIZON (it reads through `HorizonView`).
 
 **r2 (cr RED on r1, 502d46d).** Three counterexamples to r1's "no false fatal" claim:
 1. **Reshape** (on by default, `reshape_enabled()`) writes arbitrary state, frame and consequence rows after a player action, including revival (`alive` false → true; tests/test_reshape.py:19-78). It's a write channel r1 left out.
@@ -14,6 +14,12 @@
 - **consequence rows on any tier,** including a non-landing one, and a row `{event:x, kind, signal}` makes `Occurred(signal)`.
 
 P10 now covers both, and fixtures 17 and 18 test them. What P10 can't write is the plot frame: beat status (`BeatAchieved`) and clock firings (`ClockFired`) are written only by `beat_pass` and `clock_pass`. So with reshape enabled, S1 and S2 can only arise through those.
+
+**r4 (cr RED on r3):** P10's domain is narrowed to what the reshape code can actually write:
+- **`InFrame` only on a `knows:` frame.** `reshape_canon` rejects any other frame, and `plan_from_proposal` builds `knows:` frame rows only.
+- **`Occurred` only when its window is still open.** The atom's `until` (if any) must be at or after `h`, the earliest time a reshape could write. Its `since` and its `participants` (via consequence rows' `agent`/`patient`) and `min_count` (several consequence rows) are authorable, so they don't block.
+
+Fixtures 20 and 21 pin both.
 **Source:** plan item A, approved by Kabe 2026-10-13 ("Sounds good on A and B"). The prior-art scan is archived at `/media/k/Blank/construct-scratch/r35-prior-art/`.
 
 ## What already exists (and stays)
@@ -75,7 +81,7 @@ It over-approximates (deletions are ignored), so **anything outside the fixed po
 | P7 | beat achievement | `BeatAchieved(b)` when `b.achievable_via` is produced | arc/executor.py:105-160 |
 | P8 | time | `Quantity(time:elapsed, ...)` is always produced (time advances) | clock.py `commit_elapsed` |
 | P9 | ~~refusal~~ | **dropped (r2):** no code writes `event:abandoned*`. The refusal clock is excluded from per-arc findings and reported once as a known defect (see "A defect found") | — |
-| P10 | reshape, the miracle channel | when `reshape_enabled()`: any `StateIs`, `Quantity`, `InFrame` and revival (`alive` → true) from state and frame rows on a landing; any `Located(x, y)` from restage rows on a landing; any `Occurred(kind)` from a consequence row `{event:…, kind, <kind>}` on **any** tier (r3). It never writes the plot frame, so never `BeatAchieved` or `ClockFired` directly. **Over-approximate by nature:** whether a reshape lands is an earned, cohort-judged miracle. An atom reachable only through P10 gets the finding S12, "relies on a reshape" | reshape.py `apply_reshape` / `reshape_canon` |
+| P10 | reshape, the miracle channel | when `reshape_enabled()`, **only** what the reshape code can write:<ul><li>on a landing: `StateIs` and `Quantity` (canon), revival (`alive` → true), and `InFrame(knows:<x>, …)` (`knows:` frames only; reshape_canon rejects any other frame, r4);</li><li>on a landing: `Located(x, y)` from restage rows;</li><li>on **any** tier: `Occurred(kind, participants, since, until, min_count)` from consequence rows, **only if** `until` is None or ≥ `h` (a reshape writes at the current turn or later, r4). Participants come from `agent`/`patient` rows and `min_count` from several rows.</li></ul>It never writes the plot frame (`BeatAchieved`, `ClockFired`), nor any non-`knows:` frame | **Over-approximate by nature:** whether a reshape lands is an earned, cohort-judged miracle. An atom reachable only through P10 gets the finding S12, "relies on a reshape" | reshape.py `apply_reshape` / `reshape_canon` |
 
 **Combinators:**
 - `AllOf`: all of its operands produced.
@@ -161,6 +167,8 @@ The build note reports every finding per world. **The rule for later promotion:*
 17. **(r3) A restaged-only `Located`:** a required beat `Located(person:x, place:far)`, where no ordinary producer places `person:x` there (P2 moves only the protagonist; no clock writes it). With reshape enabled it's S12, not S1 or S2; with reshape disabled it's S1.
 18. **(r3) A consequence-only `Occurred`:** a required beat `Occurred(signal)`, with no detector candidate (the beat is nested) and no clock writing it. With reshape enabled it's S12 (witness: "a reshape consequence row on any tier"); with reshape disabled it's S1.
 19. **(r3) A plot-only atom:** a required beat `BeatAchieved(beat:ghost)`, where `beat:ghost`'s own condition is unproducible even by P10 (a `ClockFired` of a clock whose `fires_when` is unproducible). It's S1 even with reshape on, since P10 never writes the plot frame.
+20. **(r4) A non-`knows:` `InFrame`:** a required beat `InFrame(session:main, x, a, v)` (or any non-`knows:` frame) unproducible by P0–P8 stays **S1 with reshape enabled**, since P10 can't write that frame.
+21. **(r4) A closed event window:** a required beat `Occurred(signal, until=<before h>)`, with no event in the window at `h`, stays **S1 with reshape enabled**, since no reshape can write into the past. The twin with `until=None` is S12.
 
 ## Not in scope
 
