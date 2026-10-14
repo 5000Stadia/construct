@@ -261,6 +261,17 @@ Felt off:
 
 Disposition: narrated objects must land somewhere (eval/12 run 11, next fixes).
 
+## 2026-10-14 — R20 run 12 (Ironhold, first library-built world; 16 + 2 turns)
+
+**Grade: B.** A careful forensic chapter. The carpenter reads chisel bites under a scullery sill, a proud peg, a turned washer, a bright crescent of metal grit, and makes a captain, a frightened tool-ledger boy and a man under suspicion answer to the marks. Rusk is the best figure yet: a guard whose anger at being out-manoeuvred is also hurt ("Not because you dragged me like a dock thief"). The escape, a feint into the laundry hold and a rope loop around the captain's boot, is earned and costs something.
+
+Felt off:
+- three turns where the hold's rope and the sack-hook were there in the prose and gone in the next reply;
+- the ledger boy and Jory snapped back to the previous room's desk in one line (t4);
+- chapter 2 ended at its second turn: one dictated warrant, and the story closed. It was a good ending, but too soon to feel like a chapter.
+
+Disposition: twin-container binding, NPC positions in the briefing, and a chapter-length floor (eval/12 run 12, next fixes).
+
 ---
 
 *Process: the grade + notes are written by the operator at probe close from

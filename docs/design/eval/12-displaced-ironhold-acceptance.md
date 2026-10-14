@@ -392,6 +392,43 @@ Also seen:
 - **"Known to have" reads the scene and canon, not only possession.** The refusal wording was false (the pin was established), and a take of a thing lying in the scene is a move, not a claim. The classify cohort's existence check should see the scene's objects, and the twin straw shows refer binding to a location-less twin over a held one.
 
 
+## Run 12 — FAIL (criterion 5 only, narrowly): first library build; the player escaped into a grown place, and chapter 2 opened there
+
+The monitor authorised this run for Kabe (note n4f4a40). It tests the night's three fixes (NARRATED-OBJECTS-LAND, RESTATED-ORIGIN, the known-but-not-yet movement guard) and the seeding library (SEEDING-LIBRARY-WIRING). It ran on main `9e6c34e` with pattern-buffer `e3101a4`, the library path on, Codex subscription only, timing log on. Output is archived at `/media/k/Blank/construct-scratch/run12` (world, manifest and critic notes included).
+
+**The build, through the library: 410 s** (run 11: 469 s; eval/13 baseline: 474 s).
+- The author's manifest validated first time: 17 identities.
+- One chunk was refused ("declared but not used: new:3, new:4"), and construct's retry succeeded. That is the case pattern-buffer's r1.9 now handles itself.
+- Stage 1 took 59 s of wall time (run 11: 85 s). Stage 2 was skipped (run 11: 17 s). No identity stop.
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Chapter 1 concludes | **PASS**, at turn 16 |
+| 2 | Chapter 1 ends in a place grown in play | **PASS**: `place:deck` (the laundry barge's deck), minted at turn 15; absent from the built world |
+| 3 | Chapter 2 opens where chapter 1 ended | **PASS**: `place:deck` both |
+| 4 | No ENGINE ERROR or empty prose | **PASS** |
+| 5 | No critic WHERE breaker | **FAIL**, narrowly: t4 reports the narration putting Jory and the tool-ledger boy back "by the works-master's desk ... by the inkstand", the previous room, while the player stood at the scullery threshold. Canon didn't move; this is NPC staging prose drift, the run-7 class |
+
+### The other critic notes (7 in all; none on the WHERE bar but t4)
+
+- **Narrated things still vanished, from three causes the run-11 fixes don't reach:**
+  - **"An oilskin packet ... slides down behind it" (t15–t16)** settled with only literal rows (kind, alias, condition, material). No entity tie means NARRATED-OBJECTS-LAND rightly leaves it unplaced, since an untied object may be absent. A later turn mentions it again.
+  - **"Rope loops" (t12)** settled `in obj:hold`, an object twin of the scene place `place:laundry_hold` (the engine skipped `place:laundry_hold same_as place:hold` as not-canon). The loops were in canon, inside the wrong "hold". This is the twin-id family, pattern-buffer's R55.
+  - **The sack-hook (t13–t14)** was never minted at all: prose offered "a wet glint on a sack-hook or a tin laundry tally", a hedge, not a thing.
+- **Chapter 2 concluded at its second turn.** The player dictated a hold-fast warrant and the chapter's arc read it as its climax (`lifecycle=won`). The probe's next four moves got "(This chapter has closed.)", and the critic filed that as a stall (ch2 t6). The probe keeps sending moves after a conclusion, so the stall is the harness's; the two-turn chapter is a real pacing finding.
+
+### What the night's fixes did
+
+- **No host-placement flicker, and no two-place object:** RESTATED-ORIGIN dropped no row (`restated_origin` stayed empty), and no `conflicted` containment appears.
+- **Chapter 1's objects held for 10 turns** before the hold's twin and the untied packet broke them. Run 11's first break came at turn 9.
+- **Timing:** in-turn lifetime classifier calls were 72 (254 s) over 18 measured turns, 4.0 a turn (run 11: 1.8). Settle calls were 30 (220 s). Mean turn wall time was 112 s (run 11: 60 s). This is a different story and a busy machine (load about 30), so it is measured, not explained. The next run's log decides whether it is the content.
+
+### Next fixes (not built; each needs a spec)
+
+- **Bind a container mention to the scene before minting a twin.** "The hold" while the player stands in `place:laundry_hold` should bind to the scene, not mint `obj:hold`. This sits on the resolver's bind-before-mint path, and pattern-buffer's R55 (play-time extraction against what exists at the horizon) is the engine half.
+- **NPC staging drift (t4):** the briefing's PRESENT CHARACTERS block could carry each present NPC's in-scene position, so the narrator doesn't reach back to the last room's furniture.
+- **Chapter-length floor for a continuation arc:** a chapter-2 arc should not reach climax-ready within its first turns. This is a pacing question for R36/R37 (the chapter bridge), and it needs Kabe's view on chapter length.
+
 ## R23 findings: where a turn's time goes now (run 1, 9 instrumented turns; no build yet)
 
 | | July (eval/11) | Tonight |
