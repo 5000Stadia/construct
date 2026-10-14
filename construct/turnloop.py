@@ -651,6 +651,14 @@ def _growth_attempt(world: Any, p: Any, arc: Arc, live_reads: Any,
             return ("ambiguous", "")
         if cands:
             return ("ambiguous", "")
+        # KNOWN BUT NOT YET (cr on cd4161f): a name the hidden story introduces later now
+        # misses at the horizon; growing a stand-in for it would fork that identity. Decline,
+        # as when refer resolved it and the exact-name read at the horizon found nothing.
+        try:
+            if _future_only_referent(world, live_reads, name, horizon=_growth_h):
+                return ("ambiguous", "")
+        except Exception as exc:
+            raise _IdentityUnavailable(str(exc)) from exc
         return ("new", "")
 
     try:
@@ -3808,6 +3816,23 @@ def _repair_beat(world: Any, p: Any, *, live_reads: Any, trace: "TurnTrace",
     return True
 
 
+def _future_only_referent(world: Any, live_reads: Any, text: str, *,
+                          horizon: float | None) -> str | None:
+    """KNOWN BUT NOT YET (cr on cd4161f). Since pattern-buffer e3101a4, refer honours as_of,
+    so a name that exists only in the hidden story's future misses at the play horizon
+    with zero candidates, the shape that otherwise reads as "improvised, mint it". This
+    re-asks at the HEAD (an identity-collision read, the head's job) and returns the id
+    when it resolves there but is absent at the horizon; else None. No horizon: None.
+    Raises when the head or presence can't be read; every caller fails closed."""
+    if horizon is None or not text:
+        return None
+    res = raw_world(world).refer(text, frame="canon")
+    eid = getattr(res, "entity_id", None)
+    if getattr(res, "status", None) == "resolved" and eid and not live_reads.has_entity(eid):
+        return str(eid)
+    return None
+
+
 def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
                requires: list[str], provider: Any = None,
                *, as_of: float | None = None, laws: str = "") -> str | None:
@@ -3825,6 +3850,17 @@ def adjudicate(world: Any, p: Any, protagonist: str, scene: str | None,
         res = world.refer(description, scope=[e for e in (protagonist, scene) if e],
                           frame="canon", as_of=as_of)  # at-hand only at the horizon (Cx 257)
         if getattr(res, "status", None) != "resolved" or not getattr(res, "entity_id", None):
+            # KNOWN BUT NOT YET (cr on cd4161f): an item that exists only past the play horizon
+            # is not at hand, and is never granted as fresh equipment. The id stays unnamed
+            # (it is the hidden story's future).
+            try:
+                _future = _future_only_referent(
+                    world, PorcelainWorldReads(world, horizon=as_of), description,
+                    horizon=as_of)
+            except Exception:  # noqa: BLE001 — unknown presence: deny, never grant
+                _future = "unreadable"
+            if _future:
+                return f"{description!r} is not at hand"
             if _grant_equipment(world, p, protagonist, description, scene, provider,
                                 laws=laws):
                 continue  # ordinary role equipment — granted, action stands
@@ -5158,7 +5194,8 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # Resolve the move destination at the play horizon (Cx 257 fresh-hunt): a HEAD refer
         # would resolve a place that only exists in the source AFTERMATH, and route()'s
         # `no_path` returns empty segments (seg is None) — so a future-only place would fall
-        # through and commit as live movement. as_of=_h confines the candidate set.
+        # through and commit as live movement. as_of=_h confines the candidate set; since
+        # pattern-buffer e3101a4 refer's name vocabulary honours as_of too.
         res = world.refer(moves_to, frame="canon", as_of=_h)
         status = getattr(res, "status", None)
         target = getattr(res, "entity_id", None)
@@ -5169,11 +5206,27 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
         # with candidates (ambiguous — resolving by slug would violate PB's reference contract).
         _orig_status = status
         _orig_candidates = tuple(getattr(res, "candidates", None) or ())
+        # KNOWN BUT NOT YET (cr on cd4161f): refer at the horizon now misses a name that
+        # exists only in the hidden story's future with ZERO candidates, the case the
+        # move-permanence grant below reads as "improvised, mint it". Re-ask at the HEAD (an
+        # identity-collision read, the head's job): a future-only resolution keeps the move
+        # resolved-then-dropped, so nothing is minted and the player doesn't travel. An
+        # unreadable answer fails closed the same way.
+        if status != "resolved" and not _orig_candidates:
+            try:
+                _future = _future_only_referent(world, live_reads, moves_to, horizon=_h)
+            except Exception as exc:  # noqa: BLE001 — unknown is not "improvised": decline
+                _future = "unreadable"
+                logger.warning("move target %r: head identity read failed (%s)", moves_to, exc)
+            if _future:
+                _orig_status = "resolved"
+                logger.info("move target %r names %s, past the play horizon; not minting",
+                            moves_to, _future)
         trace.move_debug = (f"moves_to={moves_to!r} status={_orig_status!r} "
                             f"target={target!r} cands={len(_orig_candidates)}")
-        # Horizon-presence guard (Cx 257): `refer` resolves an entity by its registered NAME
-        # even when that entity only EXISTS in the source AFTERMATH — tier-1 identity lookup
-        # bypasses the as_of candidate filter. So confirm the target is present at the play
+        # Horizon-presence guard (Cx 257): `refer` once resolved an entity by its registered
+        # NAME even when it only EXISTS in the source AFTERMATH (tier-1 lookup bypassed as_of;
+        # fixed in pattern-buffer e3101a4). Kept as defence in depth: confirm the target is present at the play
         # horizon (has_entity is horizon-bound) before treating it as a reachable destination;
         # a future-only place is not here yet. No-op for ordinary timeless geography.
         if status == "resolved" and target and not live_reads.has_entity(target):
