@@ -208,3 +208,68 @@ def test_pre_scene_object_placement_is_rules(world, monkeypatch):
     spy = _Spy(world, monkeypatch)
     _mturn(world, "I step to the table.", "the table", within=True)
     assert spy.mode("obj:table", "in", "place:study") == "rules"
+
+
+# ------------------------------------------- cr code review: the three untested branches
+
+def test_move_carries_an_unplaced_object_by_rule(world, monkeypatch):
+    """The carried-object arm of the move commit: the object rides to the destination."""
+    from tests.test_move_to_unplaced_object import _ingest, _obj, _place, _turn as _mturn
+    _ingest(world, _place("place:quay", "the quay") + _obj("obj:gate_table", "gate table"))
+    spy = _Spy(world, monkeypatch)
+    _mturn(world, "I head out to the gate table.", "gate table",
+           {"verdict": "existing", "match": "place:quay"}, within=False)
+    assert world.porcelain.locate("obj:gate_table")[0] == "place:quay"
+    assert spy.mode("obj:gate_table", "in", "place:quay") == "rules"
+    assert spy.mode(PLAYER, "in", "place:quay") == "rules"
+    assert _verdict(world, "obj:gate_table", "in") == "STATE"
+
+
+def test_nested_grant_keeps_place_containment_constitutive(world, monkeypatch):
+    """A compound grant mints the container and nests the child in it: the child place's
+    `in` container row is rules-written AND guardrail-CONSTITUTIVE."""
+    spy = _Spy(world, monkeypatch)
+    got, _ = _grant_moved_place(world, PLAYER, "the consulting room in the village",
+                                at=turn_time(3))
+    assert got == "place:consulting_room"
+    assert spy.mode(got, "in", "place:village") == "rules"
+    assert _verdict(world, got, "in") == "CONSTITUTIVE"
+    assert _verdict(world, PLAYER, "in") == "STATE"
+
+
+def test_staged_dismissal_flush_is_rules(tmp_path, monkeypatch, caplog):
+    """With the growth signal on and growth not seaming, the dismissal is STAGED and flushed
+    by the staged-mutation loop — that flush writes by rule too."""
+    from construct.provider import StubProvider as _P
+    from tests.test_growth import _classify, _wired_arc, _wired_world
+    w = _wired_world(tmp_path)
+    try:
+        w.ingest_structured([
+            {"entity": "person:reed", "attribute": "kind", "value": "person",
+             "timeless": True},
+            {"entity": "person:reed", "attribute": "name", "value": "Reed"},
+            {"entity": "person:reed", "attribute": "in", "value": "place:north_road",
+             "value_type": "entity"},
+            {"entity": "person:reed", "attribute": "accompanying", "value": "person:you",
+             "value_type": "entity"}])
+        import logging
+        spy = _Spy(w, monkeypatch)
+        import construct.turnloop as tl
+        monkeypatch.setattr(tl, "_growth_attempt", lambda *a, **k: False)  # declines: flush
+        caplog.set_level(logging.INFO, logger="construct.turnloop")
+        provider = _P([
+            _classify(moves_open=True, moves_to="", npcs_dismissed=["npc_0"]),
+            {"prose": "Reed nods and turns for home."},
+            {"prose": "Reed nods and turns for home."}])
+        r = tl.run_turn(w, _wired_arc(), provider, "Reed, go home; I'll find my own way.",
+                        turn=1)
+        modes = [m for rows, m in spy.calls for row in rows
+                 if str(row.get("entity", "")).startswith("event:departed")
+                 or (row.get("entity") == "person:reed"
+                     and row.get("attribute") == "accompanying")]
+        assert r.trace.npcs_departed == ["person:reed"]
+        assert modes and set(modes) == {"rules"}
+        assert any("deferred commit" in rec.getMessage() for rec in caplog.records), \
+            "the STAGED flush path must be the one exercised"
+    finally:
+        w.close()
