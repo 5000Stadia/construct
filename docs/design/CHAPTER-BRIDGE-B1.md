@@ -53,6 +53,8 @@ A hollow or wrong landing also writes a concrete canon consequence (COMMITMENT-A
 
 ## The changes
 
+> **Superseded (2026-10-13):** change 1 below was never built. Kabe's note n54b973 (intent, not a turn count) and his intent ruleset (IR-16: abandonment is never inferred) replace it with `WALK-AWAY-DECLARED.md` (R40). It's kept here as the reviewed record.
+
 ### 1. The walk-away becomes reachable (a pending, then a confirm)
 
 - **Detection:** `_fire_event_occurs` also collects, for each arc whose `refusal_clock` is armed and whose `fires_when` is a bare `Occurred(kind)`, the candidate `{kind, what: "the player decisively walks away from <the arc's goal statement>, abandoning it"}`. The detector stays constrained to candidates, as today.
