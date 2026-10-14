@@ -1,6 +1,11 @@
 # Utterance is not fact: what the player's character says never becomes canon by saying it (R42, first slice)
 
-**Status:** spec r2, 2026-10-13, for cr review. Not built.
+**Status:** spec r3, 2026-10-13, for cr review. Not built.
+
+**r3 (cr RED on r2):** "missing counts as mixed" was fail-closed only for quoted text. An old-shaped response for an unquoted spoken claim still extracted it. r3:
+- `claims_are` is **required** in CLASSIFY_SCHEMA, so the live model always answers it;
+- **missing or unknown means no factual extraction** (the `unknown` state, rule 1);
+- test stubs that need extraction state `act` explicitly.
 
 **r2 (cr RED on r1):**
 - It fails closed: an unknown classification strips speech.
@@ -28,11 +33,16 @@
 - `speech`: every claim is something the character SAYS: dialogue, telling, accusing, lying, answering ("'Tovan didn't steal anything.'", "I tell Quincy Ellis was at the docks");
 - `mixed`: both ("I hand Quincy the ledger and tell him Ellis cooked it").
 
-**Missing or unknown counts as `mixed` (r2: fail closed).** Spoken text is stripped by the scanner (rule 2), and what's left is extracted as today. Legacy and stub lines with no quotes extract exactly as before; a quoted lie in an old-shaped response no longer lands.
+**`claims_are` is required in the schema (r3).** A missing or unknown value can then come only from a stub or a malformed response, and it normalises to **`unknown`**:
+- no factual extraction at all (fail closed: no claim of any shape reaches canon by extraction);
+- the speech event is written only if the scanner finds a quoted span;
+- every non-factual interaction path runs as today.
+
+Test stubs that rely on player-input extraction state `"claims_are": "act"`. The build note lists each stub changed.
 
 **2. Speech is never extracted.** At the player-input extraction (turnloop.py:4717):
 - **`speech`:** no extraction at all. The trace records `player_ingest (speech: an utterance, not a fact)`.
-- **`mixed` (or missing):** spoken spans are removed before extraction by one deterministic scanner, `strip_speech(text)`. It scans left to right:
+- **`mixed`:** spoken spans are removed before extraction by one deterministic scanner, `strip_speech(text)`. It scans left to right:
   - **Openers** are `"`, `“`, `«`, `‘`, and an ASCII `'` only at a word boundary: at the start, or after whitespace or `(—–-:,;`, and followed by a non-space. So the apostrophes in `don't` and `Quincy's` never open.
   - **Each opener closes on its own partner,** and only that: `"`→`"`, `“`→`”`, `«`→`»`, `‘`→`’`, `'`→`'` followed by end, whitespace or punctuation.
   - **Nesting:** the outermost span wins. Inner quotes are part of it.
@@ -65,14 +75,18 @@ It's a fact that something was **said**, never that what was said is **true**.
 1. **A bare spoken claim:**
    - **Setup:** "'Tovan didn't steal anything,' I tell the warden." with `claims_are=speech`.
    - There's no extraction call (the stub extraction queue is untouched), and no canon row about Tovan's theft.
-   - `event:utterance_<turn>` exists, with the warden as patient and the words as content.
-2. **A lie:** "I tell Quincy, 'Ellis was at the docks that night.'" adds no canon `Ellis · in · docks`, and the utterance event holds the words.
+   - `event:said_<turn>` (kind `player_speech`) exists, with the warden as patient and the words as content.
+2. **A lie:** "I tell Quincy, 'Ellis was at the docks that night.'" adds no canon `Ellis · in · docks`, and `event:said_<turn>` holds the words.
 3. **Mixed:** "I slide the ledger to Quincy. 'Ellis cooked these numbers.'"
    - The extraction input is the line without the quoted span.
    - The ledger's movement is extracted as today.
    - Nothing about Ellis cooking numbers lands.
 4. **Act unchanged:** "I bar the door with the plank" is extracted as today.
-5. **Legacy (r2: fail closed):** a verdict without `claims_are` on an unquoted act line extracts exactly as today, and the existing player-input extraction tests pass unchanged. On a line with a quoted lie, the lie is stripped.
+5. **Unknown (r3: fail closed):** a verdict without `claims_are` makes no extraction call, for:
+   - the unquoted old-shaped spoken line `Tovan did not steal anything`;
+   - `I tell Quincy Ellis was at the docks`;
+   - an act line.
+   No canon row lands from any of them. A stub that states `act` extracts as today.
 5b. **(r2) The scanner:**
    - single-quoted dialogue (`I hand Quincy the ledger and say 'Ellis cooked the numbers.'`) is stripped;
    - apostrophes (`I take Quincy's ledger; don't move`) are kept;
