@@ -616,6 +616,9 @@ def test_continue_episode_doorway_on_played_nonhorizon_slot(tmp_path, monkeypatc
     shutil.copyfile(spath, slot_path("doorcase", "u1"))
 
     prop = dict(VALID_PROPOSAL); prop["protagonist"] = PLAYER
+    prop["thread_disposition"] = [{"index": 0, "disposition": "closed", "how": "the brother is cleared offstage"}]   # B1: the open thread, accounted for
+    prop["responds_to_outcome"] = {"how": "the shawl's witness comes to the roof",
+                                   "ids": ["person:shawl_witness"]}   # B1: answers the outcome
     # #90 (Cx 387): the hook's on-stage person must be made REAL at the doorway place
     prop["hook_cast"] = [{"id": "person:shawl_witness", "name": "Ada Finch",
                           "role": "frightened inquest witness"}]

@@ -274,7 +274,8 @@ def beat_delivery_targets(beats) -> list[dict]:
 
 
 def validate_beat_delivery(beat_targets: list[dict],
-                           cast: tuple[CastNode, ...]) -> list[str]:
+                           cast: tuple[CastNode, ...], *,
+                           include_optional: bool = False) -> list[str]:
     """BEAT-DELIVERY-COHERENCE lint (obs #3): every REQUIRED InFrame beat must have a cast
     clue that surfaces its EXACT fact, live-reachable AND held by a physically reachable
     member — otherwise the rising-tension beat can never fire (the arc skips its ladder and
@@ -288,8 +289,8 @@ def validate_beat_delivery(beat_targets: list[dict],
     reachable = _reachable_nodes(cast)
     problems: list[str] = []
     for tgt in beat_targets:
-        if not tgt.get("required"):
-            continue
+        if not tgt.get("required") and not include_optional:
+            continue   # CHAPTER-BRIDGE-B1 r2: a chapter-2 build checks every InFrame beat
         want = (str(tgt["entity"]), str(tgt["attribute"]), str(tgt["value"]))
         ok = any(tuple(str(x) for x in c.surface_fact) == want
                  and _live_reachable(c) and node.node_id in reachable

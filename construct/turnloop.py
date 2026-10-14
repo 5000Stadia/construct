@@ -6849,6 +6849,7 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
             # ENGINE TRUTH at conclusion — the continuation doorway opens
             # the next chapter THERE (a displaced ending stays displaced;
             # the old snap-to-opening was the Ironhold defect).
+            _tloc = None
             try:
                 _tloc = (p.locate(arc.protagonist, as_of=_h) or [None])[0]
                 if _tloc:
@@ -6868,6 +6869,19 @@ def run_turn(world: Any, arc: Arc, provider: Provider, player_input: str,
                     {"entity": _rcpt, "attribute": "basis",
                      "value": conc.get("basis", ""), "valid_from": turn_time(turn)},
                 ]
+            # THE CHAPTER BRIDGE (B1 change 2): how the chapter ended, in one word, so the
+            # next chapter can answer it. Fail-open: a read hiccup omits the row.
+            try:
+                from construct.bridge import outcome_category
+                _cat = outcome_category(
+                    live_reads, arc, refusal_fired=_refusal_fired(live_reads, arc),
+                    outcome=outcome, grade=commitment_grade or "",
+                    outcome_shape=(conc or {}).get("outcome", ""),
+                    terminal_location=_tloc)
+                _shape_rows.append({"entity": _rcpt, "attribute": "outcome_category",
+                                    "value": _cat, "valid_from": turn_time(turn)})
+            except Exception:  # noqa: BLE001
+                logger.warning("outcome category skipped", exc_info=True)
             p.ingest_structured(_shape_rows, frame=SESSION, classify="rules")
             set_lifecycle(world, arc, main_life, turn)
         # COMMITMENT-AS-EFFECT slice 3 (Cx 105 #5): a HOLLOW/unjust main landing writes a CONCRETE
