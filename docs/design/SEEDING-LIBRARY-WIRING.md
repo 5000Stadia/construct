@@ -75,7 +75,7 @@ So identity is decided once, by code.
 - **Chunk errors (r2.2): at most two model calls per chunk, ever.**
   - **Construct's call:** `extract(chunks, registry, model, workers=8, retries=1)`. The library asks a chunk whose **returned answer** refused it once more, so its `attempts` holds two entries.
   - **Construct's own re-run:** a chunk whose only call **raised** (`len(result.attempts) == 1 and result.attempts[0].raw is None`) is re-run once with `extract([chunk], ..., retries=0)`. With `retries=0`, a refusing answer on the re-run is final, with no third call (cr r2.2 P1). Nothing else is re-run, because a chunk with two attempts has had its retry.
-  - **The stop:** a chunk still in error afterwards stops the build with its first cause, before any commit. The build never ships a world with a chapter silently missing; `commit` refuses an errored chunk in any case.
+  - **The stop:** a chunk still in error afterwards stops the build before any commit. The stop reports its **first cause**, defined as the error of that chunk's **initial failing attempt**: `attempts[0].error` of the first `extract` call's result, not that result's final `error`, which may be the library's retry. It is kept across construct's re-run (cr r2.2). For raise then refuse, the cause is the original exception; for refuse then refuse, the first refusal; for raise then raise, the first exception. The build never ships a world with a chapter silently missing; `commit` refuses an errored chunk in any case.
 - **Dropped handles (r2.2):** each `ChunkResult.dropped_handles` entry (kind, name, candidates) is logged at INFO and counted in the Stage 1 line. A dropped handle carries no fact (no accepted line used it), so it is never a build stop.
 - **Commit:** `commit(world, registry, results, time_of=…, ingest_kwargs={"classify": "defer", "cursor_authoritative": True})`, inside the existing `begin_build` session. Durability is classified at the seal, as today.
 
@@ -127,9 +127,10 @@ The skip is logged as `Stage 2 · identity decided by the manifest (library)`.
 7. **Chunk errors (r2.2), as call schedules:**
    - refuse, then accept: two calls, both by the library; the build completes; no construct re-run;
    - raise, then accept: two calls, the second construct's re-run; the build completes;
-   - raise, then refuse: exactly two calls (the re-run has `retries=0`), no third call; the build stops and nothing is committed;
-   - refuse, then refuse: two calls, both by the library; no construct re-run; the build stops and nothing is committed;
-   - raise, then raise: two calls; the build stops.
+   - raise, then refuse: exactly two calls (the re-run has `retries=0`), no third call; the build stops, nothing is committed, and the surfaced cause is the original exception;
+   - refuse, then refuse: two calls, both by the library; no construct re-run; the build stops, nothing is committed, and the surfaced cause is the FIRST refusal;
+   - raise, then raise: two calls; the build stops, nothing is committed, and the surfaced cause is the FIRST exception.
+   - Each raise and each refusal in these schedules carries a distinct message, so the oracle can tell which attempt is surfaced.
 7b. **Dropped handles (r2.2):** an answer that declares an unused handle builds, and the dropped handle is logged and counted.
 8. **Stage 2 skipped, Stage 3 kept:**
    - in library mode, no `reconcile` / `adjudicate_deferred` / `retype` / homonym `reject` call is made (spy), and the provisional id has no `distinct_from`;
