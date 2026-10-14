@@ -270,3 +270,19 @@ def test_the_transition_is_the_sole_abandonment_writer():
             if re.search(r'["\']event:abandoned_main_', line):
                 writers.append(f"{f}:{i}")
     assert len(writers) == 1 and "turnloop.py" in writers[0], writers
+
+
+def test_a_replanned_main_arc_starts_clean(world):
+    """cr code review: a question asked about the PRIOR main arc can neither stand nor be
+    confirmed after a same-episode replan swaps the main arc."""
+    import dataclasses
+    old = make_arc()
+    seed_arc(world, old)
+    p = world.porcelain
+    wa = _walkaway_state(world, p, PorcelainWorldReads(world), old, GOAL)
+    _walkaway_transition(p, _intent(declares_giving_up=True), wa, 2, old)       # asked, old
+    new = dataclasses.replace(old, arc_id="arc:replanned")
+    wa2 = _walkaway_state(world, p, PorcelainWorldReads(world), new, GOAL)
+    assert wa2["standing"] is False and wa2["eligible"] is True                 # stale prompt gone
+    confirmed, _line = _walkaway_transition(p, _intent(confirms_walkaway=True), wa2, 3, new)
+    assert confirmed is False and not _abandon_events(world)
